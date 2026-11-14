@@ -246,16 +246,6 @@ private fun NowPlaying(
         )
     }
 
-    // Composition may survive screen-off. Poll only while the page is visible and playing.
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var at by remember(state.mediaId) { mutableLongStateOf(position()) }
-    var dragged by remember(state.mediaId) { mutableStateOf<Float?>(null) }
-    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            do { at = position(); if (state.isPlaying) delay(250) } while (state.isPlaying)
-        }
-    }
-
     Surface(color = cs.surfaceContainerLow, modifier = Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
@@ -277,21 +267,7 @@ private fun NowPlaying(
                 style = MaterialTheme.typography.labelLarge, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(16.dp))
-            val duration = state.durationMs.coerceAtLeast(1)
-            Slider(
-                value = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f),
-                onValueChange = { dragged = it },
-                onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null },
-                enabled = state.durationMs > 0,
-                modifier = Modifier.semantics {
-                    contentDescription = "Position"
-                    stateDescription = "${clock(at)} of ${clock(state.durationMs)}"
-                },
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-                Text(clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-            }
+            PlaybackProgress(state, position, onSeek)
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp).semantics { contentDescription = "Previous" }) {
@@ -310,6 +286,38 @@ private fun NowPlaying(
             }
             state.sleepTimerError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.error, textAlign = TextAlign.Center) }
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit) {
+    // Keep the frequent position updates out of artwork, metadata and controls. Composition may
+    // survive screen-off, so the poller also follows lifecycle rather than only visibility.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var at by remember(state.mediaId) { mutableLongStateOf(position()) }
+    var dragged by remember(state.mediaId) { mutableStateOf<Float?>(null) }
+    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            do { at = position(); if (state.isPlaying) delay(250) } while (state.isPlaying)
+        }
+    }
+    val duration = state.durationMs.coerceAtLeast(1)
+    val cs = MaterialTheme.colorScheme
+    Column {
+        Slider(
+            value = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f),
+            onValueChange = { dragged = it },
+            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null },
+            enabled = state.durationMs > 0,
+            modifier = Modifier.semantics {
+                contentDescription = "Position"
+                stateDescription = "${clock(at)} of ${clock(state.durationMs)}"
+            },
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            Text(clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
     }
 }

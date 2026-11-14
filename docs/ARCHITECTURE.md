@@ -143,3 +143,7 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     while armed; expiry pauses the player once. The app sends a private session command and reads
     the deadline from session extras. Service destruction cancels it because playback also stops;
     it is not persisted or implemented with an alarm, worker, or periodic UI polling. `[код]`
+21. Queue metadata is prepared on Dispatchers.Default; only MediaController commands run on the
+    main thread. A newer selection or disconnected UI cancels the pending build. Progress state
+    lives in its own composable so a tick does not invalidate the artwork and player controls.
+    These avoid work on the UI thread; actual frame-time measurements still need the phone. `[код]`
