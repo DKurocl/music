@@ -10,12 +10,14 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import ua.olex.music.model.SavedSong
 import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w412dp-h915dp-xhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PersonalLibraryTest {
     @get:Rule val compose = createComposeRule()
     private val song = Track(TrackId("local:1"), "content://1", "Available song", "Artist", path = "Music/1.flac")
@@ -52,7 +54,7 @@ class PersonalLibraryTest {
         compose.onNodeWithText("Cancel").performClick()
         compose.runOnIdle { assertNull(deleted) }
         compose.onNodeWithText("Delete").performClick()
-        compose.onNodeWithText("Delete").performClick()
+        compose.onNode(hasText("Delete") and hasAnyAncestor(isDialog())).performClick()
         compose.runOnIdle { assertEquals(7L, deleted) }
     }
 }

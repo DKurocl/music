@@ -131,3 +131,12 @@ This checkpoint is source-complete but Android CI verification is still pending.
 schema must be retrieved from the genuine KSP artifact and committed, then validated in tests.
 Next: validate this block, harden queue identity/shuffle insertion, add system output switching
 and honest signal-path details. Physical playback/codec/battery gates remain unrun.
+
+Player follow-up checkpoint: paused queue/position restore, Play next that preserves shuffle,
+occurrence-key queue edits, system output picker, AudioTrack/decoder diagnostics, music-volume keys.
+Pure Kotlin tests passed again with the documented offline command. Android verification pending.
+CI 43568918162 compiled the personal-library block but failed two new UI tests: legacy graphics
+failed to idle around the text input; Delete matched both the background and dialog buttons.
+Tests now use native Robolectric rendering and scope confirmation to the dialog. No tests removed.
+The real KSP schema `core/user/schemas/ua.olex.music.user.UserDatabase/1.json` was downloaded from
+that run, and a MigrationTestHelper baseline fixture test is added. It is not a fabricated schema.

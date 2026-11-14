@@ -9,6 +9,9 @@ import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.analytics.AnalyticsListener
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
@@ -42,15 +45,43 @@ class PlaybackService : MediaLibraryService() {
     private val sleepTimer = SleepTimer()
     private var sleepJob: Job? = null
     private val historyGate = PlaybackHistoryGate()
+    private var diagnostics = AudioDiagnostics()
+    private val audioTracks = AudioTrackLifecycle()
+    private var persistence: PlaybackPersistence? = null
 
     override fun onCreate() {
         super.onCreate()
-        val builder = MediaLibrarySession.Builder(this, PlayerFactory.create(this), Callback())
+        val player = PlayerFactory.create(this)
+        val builder = MediaLibrarySession.Builder(this, player, Callback())
         // Tapping the notification opens the app.
         packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
+        persistence = PlaybackPersistence(player, PlaybackStore(filesDir), scope)
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                diagnostics = diagnostics.copy(decoder = decoderName)
+                publishDiagnostics()
+            }
+            override fun onAudioDecoderReleased(eventTime: AnalyticsListener.EventTime, decoderName: String) {
+                if (diagnostics.decoder == decoderName) { diagnostics = diagnostics.copy(decoder = null); publishDiagnostics() }
+            }
+            override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
+                audioTracks.initialized(audioTrackConfig.signature())
+                diagnostics = diagnostics.copy(encoding = AudioDiagnostics.encodingLabel(audioTrackConfig.encoding),
+                    sampleRateHz = audioTrackConfig.sampleRate.takeIf { it > 0 }, channels = Integer.bitCount(audioTrackConfig.channelConfig), offload = audioTrackConfig.offload)
+                publishDiagnostics()
+            }
+            override fun onAudioTrackReleased(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
+                // Release callbacks for an old track can arrive after its replacement was initialized.
+                audioTracks.released(audioTrackConfig.signature())
+                if (audioTracks.current == null) {
+                    diagnostics = AudioDiagnostics(decoder = diagnostics.decoder)
+                    publishDiagnostics()
+                }
+            }
+        })
         session?.player?.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 historyGate.transition()
@@ -96,6 +127,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        persistence?.close()
+        persistence = null
         scope.cancel()
         session?.run { player.release(); release() }
         session = null
@@ -125,6 +158,14 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
+    private fun publishDiagnostics() {
+        session?.let { current -> current.setSessionExtras(Bundle(current.sessionExtras).apply {
+            putBundle(AudioDiagnostics.KEY, diagnostics.toBundle())
+        }) }
+    }
+
+    private fun AudioSink.AudioTrackConfig.signature() = AudioTrackLifecycle.Configuration(encoding, sampleRate, channelConfig, offload)
+
     private inner class Callback : MediaLibrarySession.Callback {
         override fun onConnectAsync(
             session: MediaSession, controller: MediaSession.ControllerInfo,
@@ -134,7 +175,7 @@ class PlaybackService : MediaLibraryService() {
             if (controller.uid == Process.myUid()) {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                        .add(SleepTimerCommand.command).build(),
+                        .add(SleepTimerCommand.command).add(QueueCommand.command).build(),
                 )
             }
             return Futures.immediateFuture(result.build())
@@ -143,6 +184,17 @@ class PlaybackService : MediaLibraryService() {
         override fun onCustomCommand(
             session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == QueueCommand.ACTION) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                val bundles = args.getParcelableArrayList(QueueCommand.ITEMS, Bundle::class.java)
+                if (bundles.isNullOrEmpty() || bundles.size > 500) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                val items = bundles.map { MediaItem.fromBundle(it) }.map { item ->
+                    val uri = item.requestMetadata.mediaUri ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                    item.buildUpon().setUri(uri).build()
+                }
+                QueueCommand.enqueue(session.player as ExoPlayer, items, args.getBoolean(QueueCommand.NEXT))
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             if (customCommand.customAction != SleepTimerCommand.ACTION) {
                 return super.onCustomCommand(session, controller, customCommand, args)
             }

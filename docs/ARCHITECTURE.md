@@ -156,3 +156,14 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
 23. History is recorded by PlaybackService through an application-owned persistence interface.
     Core playback does not depend on Room or the app module. Stable per-occurrence queue IDs
     distinguish repeated copies; buffering and pause/resume do not create extra history starts.
+
+24. Play next runs inside PlaybackService, preserving the existing shuffle traversal while placing
+    the inserted occurrences immediately after the live current item. Queue edits resolve occurrence
+    keys against the current controller timeline, never against stale dialog indices.
+25. Playback queue and position use separate versioned AtomicFiles. A shared generation prevents an
+    old position from being applied to a replacement queue after an interrupted write. Queue metadata
+    is rewritten only when its generation changes; active playback checkpoints position every 15 s.
+    Restore is paused and unprepared. User selection wins over an asynchronous restore.
+26. Audio path diagnostics report Media3 decoder and AudioTrack initialization callbacks, not an
+    inferred mixer format or Bluetooth codec. Output routing is Android's MediaRouter2 switcher.
+    Passive callbacks observe route changes while the player is visible; no active discovery scan.
