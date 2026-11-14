@@ -108,8 +108,8 @@ backup and restore of user data (M1, new).
 
 ## M2 Design system and the real shell (`:app`)
 
-Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. Claude owns design.
-- [ ] Bring the Earbuds design system: Google Sans Flex, Material Symbols variable font (subset by
+Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. Codex continues design while Claude is unavailable (owner, 2026-11-14).
+- [~] Bring the Earbuds design system (Codex, 2026-11-14): Google Sans Flex, Material Symbols variable font (subset by
       a script as in `DKurocl/xm5` `docs/icon/symbols.py`), EmphasizedEasing, haptics vocabulary.
       Replace `AppIcons`; add a CI guard against other icon sources.
 - [ ] Navigation: Home, Library (Albums, Artists, Songs, Playlists, Folders), Search, Downloads;

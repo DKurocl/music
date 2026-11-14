@@ -3,7 +3,8 @@
 ## Active: Codex file metadata integration (2026-11-14)
 
 Branch `agent/m1-file-metadata`, based on current main `f04db66`. The owner supplied Claude's
-latest chat: Claude owns design/fonts/icons; Codex takes the explicit open M1 task wiring the
+latest chat: Claude was working on design but the owner reports its quota is exhausted. Codex now owns
+the integrated local-player delivery (12-hour travel deadline), including UI. Codex takes the open M1 task wiring the
 existing tag reader into the library. No parser duplication. Task claimed in ROADMAP.
 
 Implemented: incremental file enrichment, exact audio properties, multiple artists/genres, stored
@@ -15,8 +16,10 @@ Physical library performance and real-file coverage remain unmeasured.
 
 Owner added PixelPlayerHQ/PixelPlayer as a possible design reference and explicitly rejected
 visualizers. README and the published Home/player screenshots were reviewed; findings and
-Google-quality acceptance criteria are in DESIGN_DIRECTION.md for the design agent. No UI
-implementation or reference code/assets were copied by this metadata task.
+Google-quality acceptance criteria are in DESIGN_DIRECTION.md for the design agent. No reference code/assets were copied. The owner then assigned design to Codex while Claude is
+unavailable: Google Sans Flex from Earbuds, official Material Symbols subset/generated vectors,
+new player surface and local embedded-lyrics UI with seeking and saved timing offset.
+New UI interaction and light/dark/font2 preview tests added; validation pending.
 
 Previous player head `f1ba244` passed CI 43571427496: all tests, lint, R8 and owner signing. It is
 already in main and release music-v1018 via Claude's integration. Earlier pending-CI language below
