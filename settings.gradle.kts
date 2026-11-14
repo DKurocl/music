@@ -12,3 +12,5 @@ include(":core:model", ":core:lyrics", ":core:tags")
 include(":core:library", ":core:playback")
 include(":core:user")
 include(":app")
+
+include(":core:dsp")

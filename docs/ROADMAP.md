@@ -137,11 +137,11 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
 - [ ] Android Auto: browse tree (`onGetLibraryRoot`, `onGetChildren`, search), tested in the
       Desktop Head Unit.
 
-- [ ] Equalizer as an audio processor that keeps float samples: parametric bands, pre-amp, presets
+- [~] Equalizer (Codex, 2026-11-14, `agent/m3-equalizer`) as an audio processor that keeps float samples: parametric bands, pre-amp, presets
       per output device, AutoEq profile import (WF-1000XM5 first). Pure DSP code tested against
       reference curves. Decide after measuring whether Kotlin is fast enough or the inner loop
       moves to C++ with NEON.
-- [ ] Crossfade between tracks (off for gapless albums) and short fades on pause, resume and seek.
+- Crossfade and decorative transitions are excluded by the owner (2026-11-14). Gapless remains required.
 - [ ] Rules for outputs: resume on earbuds connect (optional), what headset buttons do, volume per output.
 
 ## M4 Lyrics (`:core:lyrics`, new `:core:lyrics-net`, `:app`)

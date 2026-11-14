@@ -195,3 +195,7 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     Lyrics poll only while visible/started and playing, update the active line at 10 Hz, stop following
     on manual drag, and subtract the saved offset when seeking. This is line highlighting; word-fill
     animation, sidecars and remote lyrics remain open.
+
+30. core:dsp is pure Kotlin for deterministic audio math and buffer processing tests. It is not
+    a second playback engine. EQ integration must preserve Media3's float path and obey partial-write
+    and flush contracts; architecture and review constraints are in LOCAL_PLAYER_REVIEW.md.
