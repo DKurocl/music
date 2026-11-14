@@ -104,6 +104,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val lyrics by model.embeddedLyrics.collectAsStateWithLifecycle()
     val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
+    var equalizerOpen by rememberSaveable { mutableStateOf(false) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
@@ -119,6 +120,7 @@ fun MusicRoot(model: LibraryViewModel) {
             TopAppBar(
                 title = { Text("Library") }, scrollBehavior = scroll,
                 actions = {
+                    TextButton(onClick = { equalizerOpen = true }) { Text("Audio") }
                     if (model.allowed) TextButton(onClick = model::refresh, enabled = !model.scanning) {
                         Text(if (model.scanning) "Scanning…" else "Rescan")
                     }
@@ -166,6 +168,7 @@ fun MusicRoot(model: LibraryViewModel) {
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
+            onEqualizer = { equalizerOpen = true },
             lyrics = lyrics, lyricOffset = lyricOffset, onLyricOffset = model::setLyricOffset,
             favourite = playing.mediaId in personal.favouriteByTrackId,
             onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
@@ -174,9 +177,12 @@ fun MusicRoot(model: LibraryViewModel) {
             onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
         )
     }
+    if (equalizerOpen) EqualizerSheet(playing.equalizer, playing.connected, playing.equalizerError,
+        onApply = model::setEqualizer, onDismiss = { equalizerOpen = false })
     actionTrack?.let { track ->
         AlertDialog(onDismissRequest = { actionTrack = null }, title = { Text(track.title) }, text = {
             Column {
+                TextButton(onClick = { equalizerOpen = true; actionTrack = null }) { Text("Equalizer") }
                 TextButton(onClick = { model.toggleFavourite(track); actionTrack = null }) {
                     Text(if (track.id.value in personal.favouriteByTrackId) "Remove from favourites" else "Add to favourites")
                 }
@@ -273,6 +279,7 @@ private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onSleepTimer: (Int) -> Unit,
+    onEqualizer: () -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
     onMore: (() -> Unit)?,
@@ -290,7 +297,7 @@ private fun NowPlaying(
     var audioPath by rememberSaveable { mutableStateOf(false) }
     var outputUnavailable by rememberSaveable { mutableStateOf(false) }
     val changeOutput: () -> Unit = { outputUnavailable = !monitor.showOutputSwitcher() }
-    if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput)
+    if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput, onEqualizer = { audioPath = false; onEqualizer() })
     if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove)
     if (timerDialog) {
         SleepTimerDialog(

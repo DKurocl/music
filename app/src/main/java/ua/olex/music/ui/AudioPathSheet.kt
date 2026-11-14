@@ -14,7 +14,7 @@ import ua.olex.music.playback.OutputRoute
 
 /** Separates observed app output from the system mixer and Bluetooth link, which are not measured here. */
 @Composable
-internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDiagnostics, onDismiss: () -> Unit, onOutput: () -> Unit) {
+internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDiagnostics, onDismiss: () -> Unit, onOutput: () -> Unit, onEqualizer: (() -> Unit)? = null) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Audio path", style = MaterialTheme.typography.headlineSmall)
@@ -27,6 +27,7 @@ internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDi
             if (route?.kind in listOf(OutputRoute.Kind.BLUETOOTH, OutputRoute.Kind.LE_AUDIO)) {
                 Text("Bluetooth codec and bitrate are not reported here. The system and connected device negotiate them.", style = MaterialTheme.typography.bodyMedium)
             }
+            onEqualizer?.let { TextButton(onClick = it) { Text("Equalizer") } }
             Button(onClick = onOutput) { Text("Change output") }
         }
     }

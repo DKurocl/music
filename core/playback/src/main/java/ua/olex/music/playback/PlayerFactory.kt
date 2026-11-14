@@ -14,8 +14,16 @@ import androidx.media3.exoplayer.ExoPlayer
  */
 @OptIn(UnstableApi::class)
 internal object PlayerFactory {
-    fun create(context: Context): ExoPlayer {
-        val renderers = DefaultRenderersFactory(context)
+    fun create(context: Context, equalizer: () -> ua.olex.music.dsp.EqualizerSettings = { ua.olex.music.dsp.EqualizerSettings() }): ExoPlayer {
+        val renderers = object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
+                androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                    .setAudioOutputProvider(EqualizerAudioOutputProvider(
+                        androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider.Builder(context).build(), equalizer,
+                    )).build()
+        }
             // Without this ExoPlayer cuts 24-bit and float PCM down to 16 bits before the mixer.
             // With it, high-resolution PCM goes out as 32-bit float, untouched; 16-bit audio is
             // not affected. (Float output skips the speed/pitch processors: a music player has none.)

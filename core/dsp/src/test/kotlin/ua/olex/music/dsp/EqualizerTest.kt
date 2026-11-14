@@ -52,6 +52,11 @@ class EqualizerTest {
             }
         }
     }
+    @Test fun sonyProfileHeadroomIsBasedOnCombinedResponseInsteadOfSummingEveryBoost() {
+        val preamp = SonyCorrection.settings.effectivePreampDb(96_000)
+        assertTrue(preamp in -8.0..-4.8)
+        assertEquals(10, SonyCorrection.settings.bands.size)
+    }
     @Test fun invalidOrNonfiniteConfigurationsAreRejected() {
         assertThrows(IllegalArgumentException::class.java) { EqualizerBand(Double.NaN, 0.0) }
         assertThrows(IllegalArgumentException::class.java) { EqualizerSettings(preampDb = Double.POSITIVE_INFINITY) }

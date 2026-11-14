@@ -199,3 +199,14 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
 30. core:dsp is pure Kotlin for deterministic audio math and buffer processing tests. It is not
     a second playback engine. EQ integration must preserve Media3's float path and obey partial-write
     and flush contracts; architecture and review constraints are in LOCAL_PLAYER_REVIEW.md.
+
+31. EQ wraps Media3 AudioOutputProvider, after format conversion/trimming, retaining negotiated PCM16
+    or float PCM and sample rate. Disabled processing forwards the original buffer; active processing
+    writes reusable direct/native buffers and accounts exactly for partial writes. Settings are
+    immutable snapshots with channel-independent double-precision biquads, combined-response headroom,
+    final output bounds and 10 ms changes between configurations. No platform session AudioEffect.
+32. EQ settings belong to the service's observed output and are persisted per route. Commands carry
+    the expected route key and are rejected on mismatch. Sony AutoEq is available only on the
+    identified WF-1000XM5 route and requires explicit selection. It uses the MIT AutoEq Rtings B&K
+    5128 profile, with source coefficients and attribution retained. Unknown output is neutral.
+    No physical response, subjective improvement or CPU/battery claim has been measured here.

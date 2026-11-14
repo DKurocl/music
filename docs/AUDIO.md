@@ -85,3 +85,22 @@ kbps/LDAC badge is shown without evidence. Physical validation remains required.
 
 [docs] https://developer.android.com/reference/android/media/MediaRouter2#showSystemOutputSwitcher()
 [docs] https://developer.android.com/reference/androidx/media3/exoplayer/analytics/AnalyticsListener
+
+## Optional EQ and Sony correction (implementation pending CI)
+
+EQ is off by default and separate for each observed output. Sony WF-1000XM5 correction uses the
+AutoEq result from Rtings B&K 5128 measurements; exact source coefficients are retained in
+scripts/assets/sony-wf1000xm5-autoeq.txt. This is a starting profile, not a personal ear measurement.
+Disable Sony's own EQ to avoid double correction. Fit, tips, ANC and firmware can alter response.
+
+The audio-output wrapper retains the sink's encoding/rate: high-resolution float is not converted
+to 16-bit to run the EQ. Standard PCM16 is processed internally in double precision and returned
+in the negotiated PCM16 format. Processing bypass forwards original samples; active settings
+reserve headroom and change over 10 ms. Buffer protocol and math are tested separately from device
+measurements. ReplayGain is still not applied. Offload remains disabled; a future offload feature
+must account for effects rather than silently bypass them.
+
+Phone acceptance: compare bypass/flat/Sony with matched listening volume; confirm output changes
+restore the correct profile; inspect audio_flinger/AudioTrack encoding with 24/96 files; test
+seek/flush, pauses/calls, gapless albums and screen-off battery. No audible-quality or battery
+improvement is claimed until those are measured.
