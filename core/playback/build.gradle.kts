@@ -21,4 +21,5 @@ dependencies {
     implementation(libs.media3.session)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(libs.coroutines.test)
 }

@@ -56,3 +56,37 @@ Do not put private filenames, notification contents or device identifiers into p
 Record pass/fail/not-run per scenario, including reproduction steps for failures. Audio bit depth
 and codec measurements follow AUDIO.md. Baseline profiles, screenshot goldens and automated
 accessibility checks remain separate M2/M9 gates.
+
+## Personal library and queue recovery
+
+1. Add an album to a new playlist, rename it, move/remove songs, then delete the playlist.
+   Favourites and music files remain intact; canceling Delete changes nothing.
+2. Save favourites, play songs, restart the app. Playlists, favourites and recent history remain.
+   Pause/resume and buffering do not duplicate a history start; repeating a track does.
+3. Move or remove a saved file and rescan. Missing entries remain visibly unavailable; a moved
+   matching recording resolves to its current file. Test with two different versions of a song.
+4. Add the same song twice to the playback queue. Move/remove one occurrence; the other remains.
+   Open a row menu, let playback advance, then act: the chosen occurrence must still be targeted.
+5. Enable shuffle, use Play next, and confirm the inserted song is actually next. Test repeat off,
+   repeat all and repeat one separately. Queued songs must not interrupt the current song.
+6. Pause and swipe away, then reopen. Queue, shuffle/repeat and position restore paused. Press Play.
+   Kill the process while playing, reopen, and check recovery to within the last 15-second checkpoint.
+   Explicitly selecting a new song during startup must override the saved queue.
+7. Remove every queue item, restart, and confirm the old queue does not return. An unavailable saved
+   URI must give a playback error; a queue checkpoint currently retains URIs, not a moved-file lookup.
+
+## Outputs and sound quality
+
+1. With WF-1000XM5 and a paired Bluetooth speaker available, use Output to switch earbuds to speaker
+   to phone speakers. Verify the route label updates even when both Bluetooth devices stay connected.
+   These are system media routes; network casting is not implemented.
+2. Disconnect the active earbuds/speaker during playback. Audio must pause rather than unexpectedly
+   continue on phone speakers. Reconnection must not start playback without the expected media command.
+3. Check physical volume keys before and during playback: they adjust media volume. Switch output
+   and confirm Android retains its own device volume policy; the app adds no volume boost.
+4. Open Audio path while playing 16/44.1 and 24/96 FLAC. Record decoder and AudioTrack encoding/rate.
+   Compare with audio_flinger and Bluetooth dumps from AUDIO.md. The AudioTrack report is not proof
+   of final mixer format, LDAC 990 kbps, audible transparency or bit-perfect output.
+5. Play a known gapless album across track boundaries with the screen off for 30 minutes on each
+   relevant output. Test incoming calls and notification interruptions. Record audible gaps or clicks,
+   route, battery loss and any thermal change. No claim of Poweramp/Symfonium parity is verified yet.

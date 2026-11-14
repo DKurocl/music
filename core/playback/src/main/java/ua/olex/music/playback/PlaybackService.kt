@@ -58,7 +58,7 @@ class PlaybackService : MediaLibraryService() {
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
-        persistence = PlaybackPersistence(player, PlaybackStore(filesDir), scope)
+        persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope)
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
                 diagnostics = diagnostics.copy(decoder = decoderName)

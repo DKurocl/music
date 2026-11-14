@@ -167,3 +167,8 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
 26. Audio path diagnostics report Media3 decoder and AudioTrack initialization callbacks, not an
     inferred mixer format or Bluetooth codec. Output routing is Android's MediaRouter2 switcher.
     Passive callbacks observe route changes while the player is visible; no active discovery scan.
+
+27. PlaybackJournal is one process-owned IO actor. Reads wait for earlier final writes from a
+    destroyed service; queued write bursts coalesce before the next read barrier. It suspends while
+    idle and starts no service, timer, platform job or wake lock. This prevents two service lifetimes
+    from racing separate AtomicFile writers. Position polling exists only while audio is playing.
