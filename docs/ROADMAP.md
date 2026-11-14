@@ -32,14 +32,14 @@ separate commits to keep merges trivial.
 - [ ] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
       mtime+size, replaces MediaStoreScanner behind LibraryRepository. Done when: 10 000 files
       rescan with no changes in under 2 s on the phone.
-- [~] Library model (Codex, 2026-11-14; owner requested broader work): albums, artists (album artist grouping), genres, folders; sort rules (disc,
+- [x] Library model (`92c4fdf`, CI 43550547422): albums, artists (album artist grouping), genres, folders; sort rules (disc,
       track; articles ignored); queries as Flows.
-- [~] Search (Codex, 2026-11-14): Room FTS over title, artist, album; prefix and diacritic-insensitive.
+- [x] Search (`92c4fdf`, CI 43550547422): Room FTS over title, artist, album; prefix and diacritic-insensitive.
 - [ ] `user.db`: playlists, favourites, play history, lyric offsets, with exported schemas and a
       migration test. Keys by SongKey + path.
 - [ ] Artwork: embedded picture or `cover.*`/`folder.*` in the folder, decoded once into a disk
       cache at 3 sizes; Coil fetcher for `track:` models.
-- [ ] Watch for file changes while the app is open (ContentObserver/FileObserver) instead of only
+- [~] Watch for file changes (Codex, 2026-11-14) while the app is open (ContentObserver/FileObserver) instead of only
       on start.
 
 ## M2 Design system and the real shell (`:app`)
@@ -50,6 +50,7 @@ separate commits to keep merges trivial.
       floating toolbar; predictive back.
 - [ ] Player page: container transform from the mini player, artwork-driven color scheme, queue
       sheet with drag to reorder, signal path sheet, sleep timer.
+      Sleep timer taken by Codex (2026-11-14); other player-page work remains open.
 - [ ] Album and artist pages; multi-select with batch actions.
 - [ ] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
 - [ ] Screenshot goldens (Robolectric, `-PminSdk=35` while it lacks API 37) for every page in

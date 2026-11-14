@@ -52,6 +52,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     var scanning by mutableStateOf(false); private set
     var scanError by mutableStateOf<String?>(null); private set
     private var scanJob: Job? = null
+    private var watchJob: Job? = null
+    private var rescanPending = false
 
     val positionMs: Long get() = player.positionMs
 
@@ -63,7 +65,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             scanError = null
             return
         }
-        if (scanning) return
+        if (scanning) {
+            rescanPending = true
+            return
+        }
+        rescanPending = false
         scanning = true
         scanError = null
         scanJob = viewModelScope.launch {
@@ -78,9 +84,21 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 scanError = "Couldn't scan your music. Your saved library is unchanged."
             } finally {
                 scanning = false
+                // File changes arriving during a scan need one more pass after its snapshot.
+                if (rescanPending && watchJob?.isActive == true) refresh()
             }
         }
     }
+
+    /** Observe only while the activity is visible, and combine a file-copy burst into one scan. */
+    fun startWatching() {
+        if (watchJob?.isActive == true) return
+        watchJob = viewModelScope.launch {
+            graph.library.changes.debounce(500).collect { refresh() }
+        }
+    }
+
+    fun stopWatching() { watchJob?.cancel(); watchJob = null }
 
     /** Connect only while a screen is visible; the service owns ongoing playback independently. */
     fun connectPlayer() = player.connect()

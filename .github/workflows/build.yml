@@ -70,6 +70,28 @@ jobs:
         if: steps.key.outputs.owner == 'true'
         run: |
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -E 'SHA-256' | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Summarize test evidence
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          cases = set()
+          executions = failures = errors = skipped = 0
+          for report in Path('.').glob('**/build/test-results/**/TEST-*.xml'):
+              suite = ET.parse(report).getroot()
+              executions += int(suite.get('tests', 0))
+              failures += int(suite.get('failures', 0))
+              errors += int(suite.get('errors', 0))
+              skipped += int(suite.get('skipped', 0))
+              for case in suite.findall('testcase'):
+                  cases.add((case.get('classname'), case.get('name')))
+          summary = f'{len(cases)} distinct test cases; {executions} executions across build variants; {failures} failures; {errors} errors; {skipped} skipped.'
+          print(summary)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write('\n' + summary + '\n\nRobolectric: API 35. APK: minSdk 37. Physical-device and visual gates are not covered by these tests.\n')
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
