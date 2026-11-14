@@ -112,3 +112,13 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     signature-protected ContentProvider (both apps are signed with the owner key).
 13. Releases: tag and title `music-v<versionCode>`, APK `music-v<versionCode>.apk`, only when the
     build was signed with the owner key. Obtainium: title filter `^music-`.
+14. The UI controller binds while the activity is started and releases its binding on stop.
+    Playback continues in the service. A pending connection owns at most the latest requested
+    queue, so tapping a song during startup is not silently lost. Position polling and output
+    monitoring follow the visible page's lifecycle, including screen-off. `[код]`
+15. Library scans replace the cache only after a complete successful read. A null MediaStore
+    cursor is an error, not an empty library. Inject the scanner and dispatcher at the repository
+    boundary for cancellation, failure and serialization tests. `[код]`
+16. Android unit tests use Robolectric 4.17 on API 35 with `-PminSdk=35`; lint and APK builds run
+    separately with the normal minSdk 37. Coroutines test uses the same version as runtime.
+    These tests are not API 37 device evidence. No runtime dependency pins were changed. `[код]`

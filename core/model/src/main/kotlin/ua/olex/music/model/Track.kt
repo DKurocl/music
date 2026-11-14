@@ -42,8 +42,12 @@ data class AudioFormat(
             append(codec.uppercase().replace("OPUS", "Opus").replace("VORBIS", "Vorbis"))
             if (lossless && sampleRateHz != null) {
                 val khz = sampleRateHz / 1000.0
-                append(' ').append(bitDepth ?: 16).append('/')
+                append(' ')
+                if (bitDepth != null) append(bitDepth).append('/')
                 append(if (khz % 1.0 == 0.0) khz.toInt().toString() else "%.1f".format(java.util.Locale.ROOT, khz))
+                if (bitDepth == null) append(" kHz")
+            } else if (lossless && bitDepth != null) {
+                append(' ').append(bitDepth).append("-bit")
             } else if (bitrateKbps != null) append(' ').append(bitrateKbps)
         }
 
