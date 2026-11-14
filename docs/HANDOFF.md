@@ -80,6 +80,9 @@ dark-mode test rejected an invalid qualifier order (`xhdpi-night`). The correcte
 `night-xhdpi`; no test was removed. The other tests passed, and the light UI renders were produced.
 The retry also enables warnings-as-errors for lint, documents actual test/build commands in
 AGENTS.md, caches branch test dependencies, and makes future release notes list unrun gates.
+Light previews from that run were inspected: songs and album actions are readable, with ordered
+track rows. The standalone browser test now supplies a Material Surface, matching the real
+Scaffold's background/content colors; this matters for a faithful dark-mode render.
 
 **Additional model verification.** Commit `f1b286d` preserves band names and live/remixed variants
 when normalizing SongKey. Pure tests pass offline: 26 tests (10 SongKey, 8 library index, 8 lyrics),
