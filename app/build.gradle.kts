@@ -29,7 +29,10 @@ android {
         unitTests.all { it.systemProperty("music.testVariant", it.name) }
     }
     // UseKtx: style only. ChromeOsAbiSupport: this APK is for one arm64 phone.
-    lint { disable += listOf("UseKtx", "ChromeOsAbiSupport") }
+    lint {
+        warningsAsErrors = true
+        disable += listOf("UseKtx", "ChromeOsAbiSupport")
+    }
 
     // Owner key from CI secrets (the same key as Earbuds and VPN). Without it the build is signed
     // with the debug identity and CI does not publish it: a release needs the owner key.
