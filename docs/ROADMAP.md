@@ -15,8 +15,9 @@ separate commits to keep merges trivial.
 - [x] `:core:playback`: PlaybackService, PlayerFactory, PlayerConnection, OutputRoute (session 1, compiled only)
 - [x] `:core:library`: Room cache, MediaStore scanner, LibraryRepository (session 1, compiled only)
 - [x] `:app`: songs list, mini player, player page with the signal path line (session 1, compiled only)
-- [ ] First run on the phone: grant access, list fills, a FLAC plays, notification and lock screen
+- [~] First run on the phone (Codex, 2026-11-14): grant access, list fills, a FLAC plays, notification and lock screen
       controls work, earbud buttons work, pulling an earbud pauses. Record results in HANDOFF.
+      Preparing failure handling and regression tests; physical-device checks remain pending.
 - [ ] Owner adds repository secrets `OWNER_KEYSTORE_B64`, `OWNER_KEYSTORE_PASSWORD`,
       `OWNER_KEY_ALIAS`, `OWNER_KEY_PASSWORD` (same key as Earbuds and VPN). Then a `main` build
       publishes `music-v<code>` and Obtainium installs it.
