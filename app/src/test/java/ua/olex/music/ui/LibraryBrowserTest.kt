@@ -1,6 +1,10 @@
 package ua.olex.music.ui
 
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.asAndroidBitmap
@@ -39,7 +43,7 @@ class LibraryBrowserTest {
         var played = emptyList<Track>()
         var start = -1
         compose.setContent {
-            AppTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { tracks, index -> played = tracks; start = index }, null, {}) }
+            BrowserTestTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { tracks, index -> played = tracks; start = index }, null, {}) }
         }
         compose.onNodeWithText("Albums").performClick()
         compose.onNodeWithText("Record").performClick()
@@ -55,7 +59,7 @@ class LibraryBrowserTest {
         var played = emptyList<Track>()
         var start = -1
         compose.setContent {
-            AppTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { tracks, index -> played = tracks; start = index }, null, {}) }
+            BrowserTestTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { tracks, index -> played = tracks; start = index }, null, {}) }
         }
         compose.onNodeWithText("Z Opening").performClick()
         capture("songs")
@@ -67,7 +71,7 @@ class LibraryBrowserTest {
 
     @Test fun staleSearchResultsCannotBePlayedUnderANewQuery() {
         compose.setContent {
-            AppTheme {
+            BrowserTestTheme {
                 LibraryBrowser(library, PaddingValues(), "new query", LibrarySearchResult("old query", listOf(opening)), {}, null, { _, _ -> error("Stale result played") }, null, {})
             }
         }
@@ -78,7 +82,7 @@ class LibraryBrowserTest {
     @Test fun searchTapQueuesOnlyTheMatches() {
         var played = emptyList<Track>()
         compose.setContent {
-            AppTheme {
+            BrowserTestTheme {
                 LibraryBrowser(library, PaddingValues(), "opening", LibrarySearchResult("opening", listOf(opening)), {}, null, { tracks, _ -> played = tracks }, null, {})
             }
         }
@@ -89,7 +93,7 @@ class LibraryBrowserTest {
     @Test fun failedSearchCanBeRetriedWithoutEditingTheQuery() {
         var retries = 0
         compose.setContent {
-            AppTheme {
+            BrowserTestTheme {
                 LibraryBrowser(library, PaddingValues(), "opening", LibrarySearchResult("opening", emptyList(), failed = true), {}, null, { _, _ -> }, null, {}, { retries++ })
             }
         }
@@ -100,7 +104,7 @@ class LibraryBrowserTest {
     @Test fun queryCanBeEnteredAndClearedWithoutChangingTheLibrary() {
         val query = mutableStateOf("")
         compose.setContent {
-            AppTheme { LibraryBrowser(library, PaddingValues(), query.value, null, { query.value = it }, null, { _, _ -> }, null, {}) }
+            BrowserTestTheme { LibraryBrowser(library, PaddingValues(), query.value, null, { query.value = it }, null, { _, _ -> }, null, {}) }
         }
         compose.onNodeWithText("Search your music").performTextInput("Singer")
         compose.onNodeWithText("Searching…").assertIsDisplayed()
@@ -115,7 +119,7 @@ class LibraryBrowserTest {
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
-                AppTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { _, _ -> played = true }, null, {}) }
+                BrowserTestTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { _, _ -> played = true }, null, {}) }
             }
         }
         compose.onNodeWithText("Albums").performClick()
@@ -131,4 +135,9 @@ class LibraryBrowserTest {
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
         File(directory, "$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
+}
+
+@Composable
+private fun BrowserTestTheme(content: @Composable () -> Unit) {
+    AppTheme { Surface(Modifier.fillMaxSize(), content = content) }
 }
