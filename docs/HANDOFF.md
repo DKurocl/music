@@ -1,149 +1,90 @@
 # Handoff
 
-The newest entry is on top. Every session adds one: what changed, what is verified and how, what is
-only on paper, what failed, what comes next.
+## Current task and branch (2026-11-14)
 
-## Session 2 (2026-11-14): browsable library, search and playback reliability
+Owner priority: a dependable local music player for Pixel 10 Pro XL (Tensor G5, Android 17),
+Sony WF-1000XM5, paired Bluetooth speakers and the phone speakers. Poweramp/Symfonium are the
+functional quality reference. Customization and cosmetic expansion are deferred. Do not claim
+sound-quality parity without physical measurements.
 
-**Changed.** Work branch `agent/m0-first-run-reliability`. Failed or cancelled scans preserve the
-library; successful empty scans remove deleted files. Scan errors and retry are visible, and
-permanently denied audio access opens app settings. A tap during controller startup retains the
-requested queue. Controller bindings, progress polling and output callbacks stop with their UI
-lifecycle. Pause handles buffering/focus suppression; Play retries an errored item or restarts an
-ended queue. The player page scrolls for small windows and large fonts. Unknown bit depth and
-M4A codecs are no longer shown as measured audio properties. `[код]`
-Review and continuation entry point: https://github.com/DKurocl/music/pull/1 (work branch above).
+Branch: `agent/m0-first-run-reliability`. Draft PR: https://github.com/DKurocl/music/pull/1
+Main is unchanged by this work. Owner signing secrets are configured; the old foundation claim
+that they are missing is superseded by successful signed CI builds. Obtainium installation has
+not been verified. Preserve the existing signing identity and version pins.
 
-**Verified M0 hardening.** CI run 43549776145 for `04bef1b` passed `gradle test -PminSdk=35`,
-`lintDebug`, `lintRelease`, `assembleDebug`, R8 `assembleRelease` and owner-signature verification.
-Regression tests cover scanner/provider failures, cancellation, concurrent scans, player commands,
-media metadata and unknown audio resolution. No physical-device or visual verification yet.
-`[код]` https://github.com/DKurocl/music/actions/runs/43549776145
+## Implemented blocks
 
-**Expanded scope requested by the owner.** Continue M1 in this branch while M0's physical-device
-gate is pending. Added pure Kotlin library grouping/sorting, Songs/Albums/Artists/Genres/Folders
-tabs, collection pages with ordered Play all queues, and cancellable prefix/diacritic-insensitive
-Room FTS search. `library.db` v2 rebuilds its cache; FTS has external content and transactional
-triggers. New tests cover grouping, ordering, safe search expressions, SQLite matching and index
-updates/rollback. Preserve this work if the next session begins before CI is complete.
+- Reliable scans, permission-denial/settings flow, error/retry UI, foreground-only file observation,
+  controller lifecycle, buffering-aware playback controls and unknown-format handling.
+- Shared library index: songs, albums, album artists, genres and folders; disc/track ordering;
+  cancellable, literal prefix and diacritic-insensitive FTS search in rebuildable library.db v2.
+- Durable user.db v1: playlist create/rename/delete, ordered add/move/remove, collection additions,
+  favourites, actual playback-start history and stored lyric offsets. UI offsets editor is not built.
+  Missing files keep their saved metadata; moved matching recordings resolve for personal collections.
+  Database updates never use destructive migrations. Genuine KSP schema is committed; migration
+  baseline and future-version refusal tests are included.
+- Queue editing by stable occurrence keys, duplicate occurrences, Play next/add to queue,
+  shuffle and repeat off/all/one. Play next updates the service's actual shuffle traversal.
+- Paused queue recovery with current position and modes. Versioned AtomicFiles use a queue generation
+  to reject a stale cursor. Queue metadata is not serialized on every position update. Active playback
+  checkpoints every 15 seconds; pause/seek/transition/teardown also checkpoint. Restore does not prepare
+  the decoder or start audio. An explicit new selection wins over asynchronous restore.
+- A process-owned IO journal orders final writes before a recreated service reads state. It coalesces
+  queued writes and suspends while idle; it has no platform job, timer, service or wake lock of its own.
+- Service-owned sleep timer, system media-output switcher, media-volume hardware keys and passive
+  route updates. Audio path reports decoder and actual configured AudioTrack encoding/rate/channels.
+  It does not infer mixer format, Bluetooth codec, LDAC bitrate or bit-perfect output.
 
-**Verified M1 browsing/search.** `92c4fdf` passed full CI run 43550547422: tests (including native
-SQLite/Room FTS matching, update/delete triggers and transaction rollback), both lints, both APK
-builds and owner signature verification. `[код]`
-https://github.com/DKurocl/music/actions/runs/43550547422
+## Verification
 
-**Verified observer and UI interaction.** `5aa0d92` passed full CI run 43564927822, including
-debounced ContentObserver registration/cancellation and Compose tests for album/song queues,
-stale search results and clearing queries. Source matching fixes in `f1b286d` are included.
-`[код]` https://github.com/DKurocl/music/actions/runs/43564927822
+Latest fully green baseline: `4560b91`, CI 43566729401. Downloaded XML reports contain 67 distinct
+cases / 67 executions, zero failures/errors. Tests, debug/release lint, APK builds, R8 and owner
+signature verification passed. Light previews and dark font-scale-2 album preview were inspected;
+these are component previews, not approved goldens or physical-device screenshots.
 
-**Baseline verified.** GitHub Actions run 43546746908 for `90ded6f` passed the existing build and
-release jobs. The owner-signing step and signature verification passed; the old note below about
-missing signing secrets is superseded. This does not prove installation through Obtainium.
-`[код]` https://github.com/DKurocl/music/actions/runs/43546746908
+Expanded player `e2b5d37`: CI 43570410356 reports 105 distinct cases, 104 passed and one failed.
+All queue recovery, lifecycle, shuffle, persistence, database schema and diagnostics cases passed.
+The remaining UI assertion queried Save before the Android dialog attached with the test clock
+paused. The test now waits for attachment while advancing frames. Full CI is being retried.
+Lint and APK build did not run after that failed test command; do not claim this head is green.
 
-**Environment.** Cloud has JDK 21, authenticated GitHub and no Android SDK/device/KVM. Use CI
-instead of claiming local Android builds. `check_versions.py --network` resolved all five checked
-pins. AGP 9.5.1 POM declares Kotlin Gradle plugin 2.2.10; the project explicitly pins Kotlin and
-Compose plugin 2.2.21. Existing baseline CI compiled this combination. No pins downgraded.
-The initial local wrapper download failed because Java did not use the inherited proxy. Mapping
-that proxy to Java's standard proxy properties fixed it, without changing network policy.
-`./gradlew :core:model:test :core:lyrics:test --no-daemon` then passed locally (Gradle 9.9.1,
-JDK 21). Android validation still runs in CI, where the SDK is available.
+Earlier checkpoints:
+- `04bef1b`: CI 43549776145 passed initial hardening, 35 regression cases.
+- `92c4fdf`: CI 43550547422 passed library/FTS work.
+- `5aa0d92`: CI 43564927822 passed observer/UI checks, 56 cases.
+- `3e2fe37`: CI 43568918162 compiled the personal-library block, then failed two UI tests.
+- `a880b59`: CI 43569872767 compiled output/queue recovery, then failed only text-input auto-idling.
+  Delete confirmation now targets its dialog. Text-input assertions now use explicit animation-clock
+  advancement and a full-width field. No failing test has been removed. Test tasks use --continue so
+  independent failures are reported together; APK build still requires the complete test command to pass.
 
-**Next.** Finish CI verification, then run the M0 checklist on the Pixel with a known FLAC and
-WF-1000XM5. Earbud wear detection, notification/lock-screen controls, API 37 behavior, screenshot
-goldens, accessibility, cold start, background measurement and baseline profiles remain unverified.
-The owner explicitly requested continuing M1 before the phone run; do not mark M0 done based on
-unit tests. Latest unverified work adds a foreground-only debounced MediaStore observer and
-Compose interaction tests for collection queues, song selection and stale search results.
-`docs/PHONE_CHECK.md` is the runnable manual checklist for the owner or next agent.
+Local pure Kotlin verification passed after shuffle-order tests were added:
 
-**Timer work in progress.** The player's sleep timer offers 5/15/30/60/90 minutes and cancellation.
-PlaybackService owns one delayed job; a private session command changes it and session extras
-restore state after controller reconnection. Pure model tests cover expiry, replacement,
-cancellation and invalid/overflowing requests. Compose tests exercise duration selection,
-cancellation and dismissal. These changes still need the next CI result and a physical playback
-check; timer state intentionally ends with the playback service rather than persisting after
-process death.
-The next CI also renders actual UI previews under `app/build/reports/ui-previews/`, including
-dark mode with font scale 2. These are review artifacts, not approved golden baselines. It adds a
-10,000-track index invariant test, keeps identity normalization lazy for normal browsing, and
-preserves radio edits and alternate mixes. Search failure now has an explicit Retry action;
-observer registration failure falls back to manual refresh instead of crashing the app.
-The final performance pass moves large-queue metadata construction off the main thread with
-cancellation on replacement/disconnect, and isolates progress recomposition from the rest of the
-player. This is source-level optimization, not a measured frame-time or battery claim.
+```sh
+GRADLE_USER_HOME=/workspace/.gradle-music ./gradlew :core:model:test :core:lyrics:test --offline --no-daemon
+```
 
-**Validation failure being corrected.** CI 43566209570 compiled the final sources, but the large-font
-dark-mode test rejected an invalid qualifier order (`xhdpi-night`). The corrected order is
-`night-xhdpi`; no test was removed. The other tests passed, and the light UI renders were produced.
-The retry also enables warnings-as-errors for lint, documents actual test/build commands in
-AGENTS.md, caches branch test dependencies, and makes future release notes list unrun gates.
-Light previews from that run were inspected: songs and album actions are readable, with ordered
-track rows. The standalone browser test now supplies a Material Surface, matching the real
-Scaffold's background/content colors; this matters for a faithful dark-mode render.
+Local environment: JDK 21, authenticated GitHub, no Android SDK/device/KVM. Gradle requires the
+permitted shell escalation for its local lock socket. CI has SDK 37 and the owner signing key.
+Never infer physical audio behavior from Robolectric API 35. Test minSdk override is only for tests;
+APKs retain minSdk 37 and arm64-v8a. No version pins were downgraded.
 
-**Additional model verification.** Commit `f1b286d` preserves band names and live/remixed variants
-when normalizing SongKey. Pure tests pass offline: 26 tests (10 SongKey, 8 library index, 8 lyrics),
-using `GRADLE_USER_HOME=/workspace/.gradle-music ./gradlew :core:model:test :core:lyrics:test
---offline --no-daemon`. The restricted shell blocks Gradle's local lock socket; the same offline
-command succeeds outside that sandbox. No SDK or license bootstrap was needed for these modules.
+## Remaining limits and next work
 
-## Session 1 (2026-11-14): foundation
-
-**Changed.** The repository was empty. It now has the Gradle project (five modules), the first
-working path from a local file to the player, the lyrics parsers, the song identity rule, CI, and
-the documents an agent needs to continue (AGENTS.md, ARCHITECTURE, AUDIO, RESEARCH, ROADMAP).
-
-**Verified** (cloud sandbox, Gradle 9.9.1, JDK 21, SDK 37.0):
-- `gradle test`: 15 unit tests pass (8 lyrics, 7 model). `[код]`
-- `gradle :app:lintDebug :app:assembleRelease`: builds; R8 release APK 3.5 MB (debug-signed, no
-  owner key in the sandbox). `[код]`
-- SDK 37 `android.jar` has no public `BluetoothA2dp.getCodecStatus` (javap). `[код]`
-- Coil 3.6.x cannot be used with the Kotlin 2.2 compiler (build error); 3.4.0 works. `[код]`
-
-**Only on paper** (compiled, never run on a device or emulator):
-- Everything Android: scanning, playback, the service, the notification, the screens. Nobody has
-  seen this app run. The first task is to run it on the phone (ROADMAP M0).
-- Float output keeping more than 16 bits end to end (AUDIO.md, to measure).
-- All of RESEARCH.md beyond the linked pages; the InnerTube, Soulseek and Apple motion artwork plans.
-- The CI workflow itself: written from the Earbuds one, first run pending.
-
-**Not done / known gaps.**
-- No owner key in this repository's secrets, so CI will build but not publish. The owner adds
-  `OWNER_KEYSTORE_B64`, `OWNER_KEYSTORE_PASSWORD`, `OWNER_KEY_ALIAS`, `OWNER_KEY_PASSWORD`.
-- No screenshot tests, no accessibility tests, no baseline profile yet (ROADMAP M2, M9).
-- The UI is a plain first shape, not the designed app.
-- "Liner" (named by the owner) was not found; Sonora was given as the closest.
-
-**Next.** ROADMAP M0 open tasks (first run on the phone), then M1 and M2 in parallel.
-
-## Active checkpoint: personal library and player block (2026-11-14)
-
-Owner priority: finish the player to a high functional standard for Pixel 10 Pro XL / Tensor G5,
-WF-1000XM5, Bluetooth speakers and phone speakers. No customization work.
-
-Previous head `4560b91`: CI 43566729401 succeeded (test, lint, APK build, owner signing).
-New block: separate user.db, transactional playlist editing, favourites, audible-start history,
-lyric-offset storage, missing-file matching, queue actions, shuffle/repeat and integration tests.
-This checkpoint is source-complete but Android CI verification is still pending. Exported Room
-schema must be retrieved from the genuine KSP artifact and committed, then validated in tests.
-Next: validate this block, harden queue identity/shuffle insertion, add system output switching
-and honest signal-path details. Physical playback/codec/battery gates remain unrun.
-
-Player follow-up checkpoint: paused queue/position restore, Play next that preserves shuffle,
-occurrence-key queue edits, system output picker, AudioTrack/decoder diagnostics, music-volume keys.
-Pure Kotlin tests passed again with the documented offline command. Android verification pending.
-CI 43568918162 compiled the personal-library block but failed two new UI tests: legacy graphics
-failed to idle around the text input; Delete matched both the background and dialog buttons.
-Tests now use native Robolectric rendering and scope confirmation to the dialog. No tests removed.
-The real KSP schema `core/user/schemas/ua.olex.music.user.UserDatabase/1.json` was downloaded from
-that run, and a MigrationTestHelper baseline fixture test is added. It is not a fabricated schema.
-
-CI 43569872767 compiled the output/queue recovery sources. One text-input UI test still failed
-Compose auto-idling; deletion confirmation now passes. The input test now advances the animation
-clock explicitly and the field fills its dialog width. Assertions remain intact. CI uses --continue
-for the test task so independent module failures are collected in the same run (the build still
-requires all tests to pass). Final lifecycle regressions cover paused restore, explicit-selection
-precedence, empty queue teardown, serialized service restarts, and diagnostics/UI output callbacks.
+1. Finish CI, fix every failure, inspect exact test XML and lint/R8/signature results, then update
+   this entry and ROADMAP with the verified head. Update PR title/body around the whole final change.
+2. Run docs/PHONE_CHECK.md on the target phone. No ADB device is connected here. Required checks include
+   24/96 output, gapless FLAC/MP3/Opus, long screen-off playback, calls/focus, XM5 buttons/wear detection,
+   Bluetooth speaker handover, phone-speaker fallback, queue restore and battery/thermal measurements.
+3. Existing float output is a configured preference, not a measured final sound path. LDAC 990 kbps,
+   offload savings, USB bit-perfect and processor-specific gains are unverified. Network casting is
+   not implemented; the output action controls system media routes.
+4. Queue recovery currently retains playable URIs. Personal collections resolve moved files, but saved
+   playback queues do not yet re-resolve changed MediaStore URIs. Missing URIs surface a playback error.
+   Queue reordering uses accessible up/down actions; drag-to-reorder is still open.
+5. Finish the real tag-reading pipeline before ReplayGain/R128. Preserve recording identity, expose
+   known file properties, test clipping prevention and album gain, and measure the actual path. Do not
+   add guessed EQ, forced Bluetooth settings, silent volume boosts or invented Tensor-specific tuning.
+6. Reviewed goldens, automated accessibility, API 37 runtime checks, cold start, baseline profiles,
+   device background inspection and Obtainium installation remain unrun gates. App data has no export
+   yet and is removed by uninstall (backup disabled). Do not claim user.db survives uninstall.
