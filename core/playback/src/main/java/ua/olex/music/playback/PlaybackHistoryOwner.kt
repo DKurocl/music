@@ -1,0 +1,8 @@
+package ua.olex.music.playback
+
+import ua.olex.music.model.Track
+
+/** Application bridge for durable history; the playback module never depends on the UI or Room. */
+interface PlaybackHistoryOwner {
+    suspend fun recordPlayback(track: Track)
+}

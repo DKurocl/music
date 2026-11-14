@@ -118,3 +118,16 @@ the documents an agent needs to continue (AGENTS.md, ARCHITECTURE, AUDIO, RESEAR
 - "Liner" (named by the owner) was not found; Sonora was given as the closest.
 
 **Next.** ROADMAP M0 open tasks (first run on the phone), then M1 and M2 in parallel.
+
+## Active checkpoint: personal library and player block (2026-11-14)
+
+Owner priority: finish the player to a high functional standard for Pixel 10 Pro XL / Tensor G5,
+WF-1000XM5, Bluetooth speakers and phone speakers. No customization work.
+
+Previous head `4560b91`: CI 43566729401 succeeded (test, lint, APK build, owner signing).
+New block: separate user.db, transactional playlist editing, favourites, audible-start history,
+lyric-offset storage, missing-file matching, queue actions, shuffle/repeat and integration tests.
+This checkpoint is source-complete but Android CI verification is still pending. Exported Room
+schema must be retrieved from the genuine KSP artifact and committed, then validated in tests.
+Next: validate this block, harden queue identity/shuffle insertion, add system output switching
+and honest signal-path details. Physical playback/codec/battery gates remain unrun.

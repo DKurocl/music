@@ -35,7 +35,7 @@ separate commits to keep merges trivial.
 - [x] Library model (`92c4fdf`, CI 43550547422): albums, artists (album artist grouping), genres, folders; sort rules (disc,
       track; articles ignored); queries as Flows.
 - [x] Search (`92c4fdf`, CI 43550547422): Room FTS over title, artist, album; prefix and diacritic-insensitive.
-- [ ] `user.db`: playlists, favourites, play history, lyric offsets, with exported schemas and a
+- [~] `user.db` (Codex, 2026-11-14, owner requested a complete personal-library block): playlists, favourites, play history, lyric offsets, with exported schemas and a
       migration test. Keys by SongKey + path.
 - [ ] Artwork: embedded picture or `cover.*`/`folder.*` in the folder, decoded once into a disk
       cache at 3 sizes; Coil fetcher for `track:` models.
@@ -51,6 +51,7 @@ separate commits to keep merges trivial.
 - [ ] Player page: container transform from the mini player, artwork-driven color scheme, queue
       sheet with drag to reorder, signal path sheet, sleep timer.
       Sleep timer taken by Codex (2026-11-14); other player-page work remains open.
+      Queue controls, shuffle and repeat taken by Codex with the personal-library block.
 - [ ] Album and artist pages; multi-select with batch actions.
 - [ ] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
 - [ ] Screenshot goldens (Robolectric, `-PminSdk=35` while it lacks API 37) for every page in

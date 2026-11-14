@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +36,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -97,6 +100,9 @@ fun MusicRoot(model: LibraryViewModel) {
     val tracks = library?.songs
     val query by model.query.collectAsStateWithLifecycle()
     val search by model.search.collectAsStateWithLifecycle()
+    val personal by model.personal.collectAsStateWithLifecycle()
+    var actionTrack by remember { mutableStateOf<Track?>(null) }
+    var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
@@ -140,13 +146,14 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
-            list.isEmpty() -> Notice(insets, "No music yet", if (model.scanning) "Looking for music…" else "Put music in the Music folder and it shows up here.", null) {}
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = query, search = search, onQueryChange = model::setQuery,
                 currentId = playing.mediaId, onPlay = model::play,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
+                personal = personal, personalActions = model.personalActions,
+                onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             )
         }
     }
@@ -157,7 +164,27 @@ fun MusicRoot(model: LibraryViewModel) {
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
+            onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
+            onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
+            onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
         )
+    }
+    actionTrack?.let { track ->
+        AlertDialog(onDismissRequest = { actionTrack = null }, title = { Text(track.title) }, text = {
+            Column {
+                TextButton(onClick = { model.toggleFavourite(track); actionTrack = null }) {
+                    Text(if (track.id.value in personal.favouriteByTrackId) "Remove from favourites" else "Add to favourites")
+                }
+                TextButton(onClick = { playlistTracks = listOf(track); actionTrack = null }) { Text("Add to playlist") }
+                TextButton(onClick = { model.enqueue(listOf(track), true); actionTrack = null }) { Text("Play next") }
+                TextButton(onClick = { model.enqueue(listOf(track), false); actionTrack = null }) { Text("Add to queue") }
+            }
+        }, confirmButton = { TextButton(onClick = { actionTrack = null }) { Text("Close") } })
+    }
+    playlistTracks?.let { PlaylistPicker(personal.playlists, it, model.personalActions) { playlistTracks = null } }
+    model.userError?.let { message ->
+        AlertDialog(onDismissRequest = model::dismissUserError, title = { Text("Couldn't save changes") }, text = { Text(message) },
+            confirmButton = { TextButton(onClick = model::dismissUserError) { Text("OK") } })
     }
     BackHandler(expanded) { expanded = false }
 }
@@ -183,7 +210,7 @@ private fun Notice(insets: PaddingValues, title: String, body: String, action: S
 }
 
 @Composable
-internal fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
+internal fun TrackRow(track: Track, current: Boolean, onMore: (() -> Unit)? = null, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     ListItem(
         headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface) },
@@ -191,7 +218,12 @@ internal fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
             Text(listOfNotNull(track.artist, track.format?.label).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         leadingContent = { Artwork(track.artworkUri, Modifier.size(48.dp), 8.dp) },
-        trailingContent = { if (current) Text("Current", style = MaterialTheme.typography.labelSmall) },
+        trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (current) Text("Current", style = MaterialTheme.typography.labelSmall)
+                if (onMore != null) TextButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) { Text("More") }
+            }
+        },
         colors = ListItemDefaults.colors(containerColor = cs.surface),
         modifier = Modifier.clickable(onClick = onClick).semantics { selected = current },
     )
@@ -232,12 +264,17 @@ private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onSleepTimer: (Int) -> Unit,
+    onShuffle: () -> Unit, onRepeat: () -> Unit,
+    onQueuePlay: (Int) -> Unit, onQueueMove: (Int, Int) -> Unit, onQueueRemove: (Int) -> Unit,
+    onMore: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
     var timerDialog by rememberSaveable { mutableStateOf(false) }
+    var queueSheet by rememberSaveable { mutableStateOf(false) }
+    if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove)
     if (timerDialog) {
         SleepTimerDialog(
             active = state.sleepDeadlineMs != null,
@@ -254,6 +291,8 @@ private fun NowPlaying(
         ) {
             Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Icon(AppIcons.Down, null) }
+                Spacer(Modifier.weight(1f))
+                if (onMore != null) TextButton(onClick = onMore) { Text("More") }
             }
             Artwork(state.artworkUri, Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), 28.dp)
             Spacer(Modifier.height(28.dp))
@@ -281,6 +320,15 @@ private fun NowPlaying(
                 }
             }
             Spacer(Modifier.height(24.dp))
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = { queueSheet = true }, label = { Text("Queue (${state.queueSize})") })
+                FilterChip(selected = state.shuffle, onClick = onShuffle, label = { Text(if (state.shuffle) "Shuffle on" else "Shuffle off") })
+                AssistChip(onClick = onRepeat, label = { Text(when (state.repeat) {
+                    ua.olex.music.playback.RepeatMode.OFF -> "Repeat off"
+                    ua.olex.music.playback.RepeatMode.ALL -> "Repeat all"
+                    ua.olex.music.playback.RepeatMode.ONE -> "Repeat one"
+                }) })
+            }
             TextButton(enabled = state.connected, onClick = { timerDialog = true }) {
                 Text(if (state.sleepDeadlineMs != null) "Sleep timer on" else "Sleep timer")
             }
