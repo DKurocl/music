@@ -21,7 +21,12 @@ visualizers. README and the published Home/player screenshots were reviewed; fin
 Google-quality acceptance criteria are in DESIGN_DIRECTION.md for the design agent. No reference code/assets were copied. The owner then assigned design to Codex while Claude is
 unavailable: Google Sans Flex from Earbuds, official Material Symbols subset/generated vectors,
 new player surface and local embedded-lyrics UI with seeking and saved timing offset.
-New UI interaction and light/dark/font2 preview tests added; validation pending.
+CI 43637566474: all 132 distinct test cases passed (132 executions, zero failures/errors).
+Player light and dark/font-scale-2 renders inspected: controls and typography are readable; the
+large-font page scrolls to its lower actions, and that action is exercised by the test. These are
+component renders with fixture data and no artwork, not approved goldens or phone screenshots.
+Lint caught an unused icon-font resource because runtime uses generated vectors. The source subset
+now lives under scripts/assets, outside APK resources; no lint suppression added. Final retry pending.
 
 Previous player head `f1ba244` passed CI 43571427496: all tests, lint, R8 and owner signing. It is
 already in main and release music-v1018 via Claude's integration. Earlier pending-CI language below
