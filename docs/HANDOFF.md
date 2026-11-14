@@ -26,6 +26,11 @@ Room FTS search. `library.db` v2 rebuilds its cache; FTS has external content an
 triggers. New tests cover grouping, ordering, safe search expressions, SQLite matching and index
 updates/rollback. Preserve this work if the next session begins before CI is complete.
 
+**Verified M1 browsing/search.** `92c4fdf` passed full CI run 43550547422: tests (including native
+SQLite/Room FTS matching, update/delete triggers and transaction rollback), both lints, both APK
+builds and owner signature verification. `[код]`
+https://github.com/DKurocl/music/actions/runs/43550547422
+
 **Baseline verified.** GitHub Actions run 43546746908 for `90ded6f` passed the existing build and
 release jobs. The owner-signing step and signature verification passed; the old note below about
 missing signing secrets is superseded. This does not prove installation through Obtainium.
@@ -35,13 +40,24 @@ missing signing secrets is superseded. This does not prove installation through 
 instead of claiming local Android builds. `check_versions.py --network` resolved all five checked
 pins. AGP 9.5.1 POM declares Kotlin Gradle plugin 2.2.10; the project explicitly pins Kotlin and
 Compose plugin 2.2.21. Existing baseline CI compiled this combination. No pins downgraded.
-The local wrapper could not download Gradle through Java's network configuration; no local test
-success is claimed. CI is the verified execution environment.
+The initial local wrapper download failed because Java did not use the inherited proxy. Mapping
+that proxy to Java's standard proxy properties fixed it, without changing network policy.
+`./gradlew :core:model:test :core:lyrics:test --no-daemon` then passed locally (Gradle 9.9.1,
+JDK 21). Android validation still runs in CI, where the SDK is available.
 
 **Next.** Finish CI verification, then run the M0 checklist on the Pixel with a known FLAC and
 WF-1000XM5. Earbud wear detection, notification/lock-screen controls, API 37 behavior, screenshot
 goldens, accessibility, cold start, background measurement and baseline profiles remain unverified.
-M1 starts after recording the first phone run; do not mark M0 done based on unit tests.
+The owner explicitly requested continuing M1 before the phone run; do not mark M0 done based on
+unit tests. Latest unverified work adds a foreground-only debounced MediaStore observer and
+Compose interaction tests for collection queues, song selection and stale search results.
+`docs/PHONE_CHECK.md` is the runnable manual checklist for the owner or next agent.
+
+**Additional model verification.** Commit `f1b286d` preserves band names and live/remixed variants
+when normalizing SongKey. Pure tests pass offline: 26 tests (10 SongKey, 8 library index, 8 lyrics),
+using `GRADLE_USER_HOME=/workspace/.gradle-music ./gradlew :core:model:test :core:lyrics:test
+--offline --no-daemon`. The restricted shell blocks Gradle's local lock socket; the same offline
+command succeeds outside that sandbox. No SDK or license bootstrap was needed for these modules.
 
 ## Session 1 (2026-11-14): foundation
 
