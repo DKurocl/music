@@ -44,8 +44,12 @@ these are component previews, not approved goldens or physical-device screenshot
 
 Expanded player `e2b5d37`: CI 43570410356 reports 105 distinct cases, 104 passed and one failed.
 All queue recovery, lifecycle, shuffle, persistence, database schema and diagnostics cases passed.
-The remaining UI assertion queried Save before the Android dialog attached with the test clock
-paused. The test now waits for attachment while advancing frames. Full CI is being retried.
+CI 43570976901 reproduced the remaining dialog failure despite explicit clock advancement.
+Root cause matches open Robolectric issue 8460: custom window-size qualifiers with text input in
+a Dialog cause a measure/layout idle loop. The interaction test now uses default window metrics
+and normal synchronization; manual clock/attachment workarounds were removed. Pixel-sized browser
+and large-font rendering tests keep their explicit qualifiers. Full CI is being retried.
+[docs] https://github.com/robolectric/robolectric/issues/8460
 Lint and APK build did not run after that failed test command; do not claim this head is green.
 
 Earlier checkpoints:
@@ -54,8 +58,8 @@ Earlier checkpoints:
 - `5aa0d92`: CI 43564927822 passed observer/UI checks, 56 cases.
 - `3e2fe37`: CI 43568918162 compiled the personal-library block, then failed two UI tests.
 - `a880b59`: CI 43569872767 compiled output/queue recovery, then failed only text-input auto-idling.
-  Delete confirmation now targets its dialog. Text-input assertions now use explicit animation-clock
-  advancement and a full-width field. No failing test has been removed. Test tasks use --continue so
+  Delete confirmation now targets its dialog. Text-input assertions use the normal clock
+  and default test window metrics (see the upstream issue above). No failing test has been removed. Test tasks use --continue so
   independent failures are reported together; APK build still requires the complete test command to pass.
 
 Local pure Kotlin verification passed after shuffle-order tests were added:

@@ -16,7 +16,9 @@ import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35], qualifiers = "w412dp-h915dp-xhdpi")
+// Custom window qualifiers freeze Dialog text input in Robolectric: robolectric/robolectric#8460.
+// Pixel-sized and large-font rendering remain covered separately in LibraryBrowserTest.
+@Config(sdk = [35])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PersonalLibraryTest {
     @get:Rule val compose = createComposeRule()
@@ -29,19 +31,10 @@ class PersonalLibraryTest {
     @Test fun playlistCreateRequiresANameAndTrimsIt() {
         var created: String? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(emptyList(), actions(create = { name, _ -> created = name }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }
-        // Keep dialog/text-input animation time deterministic during semantic assertions.
-        compose.mainClock.autoAdvance = false
         compose.onNodeWithText("New playlist").performClick()
-        // Dialog attachment uses the Android looper, independently of the Compose frame clock.
-        compose.waitUntil(5_000) {
-            compose.mainClock.advanceTimeByFrame()
-            compose.onAllNodesWithText("Save").fetchSemanticsNodes().size == 1
-        }
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNodeWithText("Playlist name").performTextInput("  Travel  ")
-        compose.mainClock.advanceTimeBy(100)
         compose.onNodeWithText("Save").performClick()
-        compose.mainClock.advanceTimeBy(500)
         compose.runOnIdle { assertEquals("Travel", created) }
     }
 
