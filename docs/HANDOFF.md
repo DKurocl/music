@@ -75,6 +75,12 @@ The final performance pass moves large-queue metadata construction off the main 
 cancellation on replacement/disconnect, and isolates progress recomposition from the rest of the
 player. This is source-level optimization, not a measured frame-time or battery claim.
 
+**Validation failure being corrected.** CI 43566209570 compiled the final sources, but the large-font
+dark-mode test rejected an invalid qualifier order (`xhdpi-night`). The corrected order is
+`night-xhdpi`; no test was removed. The other tests passed, and the light UI renders were produced.
+The retry also enables warnings-as-errors for lint, documents actual test/build commands in
+AGENTS.md, caches branch test dependencies, and makes future release notes list unrun gates.
+
 **Additional model verification.** Commit `f1b286d` preserves band names and live/remixed variants
 when normalizing SongKey. Pure tests pass offline: 26 tests (10 SongKey, 8 library index, 8 lyrics),
 using `GRADLE_USER_HOME=/workspace/.gradle-music ./gradlew :core:model:test :core:lyrics:test

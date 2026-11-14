@@ -54,6 +54,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
         with:
           gradle-version: 9.9.1
+          # GitHub scopes branch caches separately; reuse new test dependencies on this branch.
+          cache-read-only: false
       - name: Test, lint and build
         run: |
           set -o pipefail
@@ -88,6 +90,8 @@ jobs:
               for case in suite.findall('testcase'):
                   cases.add((case.get('classname'), case.get('name')))
           summary = f'{len(cases)} distinct test cases; {executions} executions across build variants; {failures} failures; {errors} errors; {skipped} skipped.'
+          if executions == 0:
+              summary = 'No test reports were produced. Test execution is not verified.'
           print(summary)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
               output.write('\n' + summary + '\n\nRobolectric: API 35. APK: minSdk 37. Physical-device and visual gates are not covered by these tests.\n')
@@ -131,4 +135,14 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: apk/*.apk
           make_latest: true
-          body: "Commit ${{ github.sha }}. Obtainium: add this repository as a GitHub source with the title filter ^music-."
+          body: |
+            Commit ${{ github.sha }}.
+
+            Verified in CI: unit tests and Robolectric API 35 interaction checks, debug/release lint,
+            R8 release build, and owner-key signature verification. APK minSdk: 37.
+
+            Not verified by this workflow: physical Pixel/earbud playback, API 37 runtime behavior,
+            reviewed screenshot goldens, automated accessibility, cold start/background measurements,
+            baseline profiles, or installation through Obtainium. See docs/PHONE_CHECK.md.
+
+            Obtainium: add this repository as a GitHub source with the title filter ^music-.

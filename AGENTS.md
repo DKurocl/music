@@ -41,9 +41,11 @@ Any agent (Claude, Codex, others) continues the same work from these files. Read
 - Build and test (JDK 17 or newer, Android SDK with `platforms;android-37.0`, Gradle 9.9.1):
 
   ```sh
-  ./gradlew test                                  # pure Kotlin modules + Android unit tests, seconds
-  ./gradlew :app:lintDebug :app:assembleRelease   # what CI runs
+  ./gradlew test -PminSdk=35                     # Robolectric API 35; pure Kotlin tests run here too
+  ./gradlew :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease
   ```
+
+  The minSdk override is for tests only. APKs are built separately with the default minSdk 37.
 
 - CI (`.github/workflows/build.yml`) runs on every push: tests, lint, release build. On `main`, with
   the owner key in the repository secrets, it publishes a release `music-v<versionCode>` that
