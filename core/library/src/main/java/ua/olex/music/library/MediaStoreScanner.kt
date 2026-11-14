@@ -23,6 +23,7 @@ internal object MediaStoreScanner {
         MediaStore.Audio.Media.MIME_TYPE, MediaStore.Audio.Media.BITRATE, MediaStore.Audio.Media.SAMPLERATE,
         MediaStore.Audio.Media.BITS_PER_SAMPLE, MediaStore.Audio.Media.RELATIVE_PATH, MediaStore.Audio.Media.DISPLAY_NAME,
         MediaStore.Audio.Media.DATE_MODIFIED, MediaStore.Audio.Media.SIZE,
+        MediaStore.Audio.Media.GENRE,
     )
     private val ALBUM_ART = MediaStore.AUTHORITY_URI.buildUpon().appendPath("external").appendPath("audio").appendPath("albumart").build()
 
@@ -63,6 +64,7 @@ internal object MediaStoreScanner {
                     modifiedAt = number(MediaStore.Audio.Media.DATE_MODIFIED) ?: 0,
                     sizeBytes = number(MediaStore.Audio.Media.SIZE) ?: 0,
                     scanId = scanId,
+                    genre = text(MediaStore.Audio.Media.GENRE),
                 )
             }
         }

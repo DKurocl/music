@@ -83,6 +83,7 @@ class LibraryRepositoryTest {
         val rows = MutableStateFlow(listOf(entity("local:old", 1)))
         var replacements = 0
         override fun observeAll() = rows
+        override fun search(expression: String) = error("Search uses SQLite integration tests")
         override suspend fun byKey(key: String) = rows.value.filter { it.songKey == key }
         override suspend fun count() = rows.value.size
         override suspend fun upsert(tracks: List<TrackEntity>) {
