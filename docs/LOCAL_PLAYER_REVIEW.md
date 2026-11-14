@@ -49,8 +49,8 @@ are excluded. Finish functional behavior before a complete UI finish pass. Wallp
 - A configuration change needs a short parameter transition, not a discontinuous state reset/click.
   This is unrelated to crossfading songs. Flush/seek clears buffered samples and filter state.
 - Compute gain headroom from the actual combined filter response and retain an explicit final output
-  bound. The initial pure DSP scaffold conservatively sums positive band gains; refine this before
-  wiring a usable Sony profile, because excessive attenuation is not acceptable daily behavior.
+  bound. The processor samples the combined response on a logarithmic grid plus band centers and adds
+  0.5 dB margin for a positive maximum. The final output bound also contains transients.
 - ReplayGain must be associated with the decoded item's samples, including prebuffered transitions.
   A listener on audible media-item changes alone can apply gain to the wrong buffered samples.
   Do not ship such an approximation. Track/album modes and clipping guard require their own tests.
@@ -76,13 +76,17 @@ are excluded. Finish functional behavior before a complete UI finish pass. Wallp
 [code] Main `9c7dd00` contains verified file-tag integration, new player surface and embedded lyrics.
 Code head `85d7748` passed CI 43638096372; earlier artifact XML contained 132 distinct passing tests.
 Player light/dark/font2 component previews were inspected; physical quality gates remain pending.
-Main release run 43638695765 is in progress at this checkpoint (expected music-v1025).
+Main release run 43638695765 succeeded and published music-v1025, signed with the owner key.
 
-[code] New core:dsp scaffolding on `agent/m3-equalizer` is not connected to audio yet. Never describe
-its presence as a working equalizer. Pure tests cover analytic frequency response, measured sine
-attenuation, channel isolation, exact bypass and finite output over several sample rates.
+[code] EQ integration on `agent/m3-equalizer` now wraps AudioOutputProvider and preserves PCM16
+or PCM_FLOAT output. Neutral bypass forwards the original buffer. Enabled processing uses reusable
+direct buffers, native byte order, independent channel state and a 10 ms configuration transition.
+Per-output service settings, route guards, persistent private preferences, a measured Sony profile
+and EQ sheet are implemented. Pure DSP tests pass; Android integration CI is pending.
 
 [docs] Media3 1.11.1 sources: DefaultAudioSink.configure, AudioOutput.write, AudioOutputProvider.
 [docs] AutoEq candidate Sony profile: results/Rtings/Bruel & Kjaer 5128 in-ear/Sony WF-1000XM5/
 Sony WF-1000XM5 ParametricEQ.txt in https://github.com/jaakkopasanen/AutoEq (MIT).
-The candidate profile was retrieved for review; no runtime profile is wired in this checkpoint.
+The source profile is retained in scripts/assets/sony-wf1000xm5-autoeq.txt; MIT attribution is shipped.
+Runtime profile uses those exact coefficients. This is measured-reference correction, not personal
+calibration. Disable Sony hardware EQ before enabling app correction to avoid double correction.

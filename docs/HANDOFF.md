@@ -12,16 +12,19 @@ ready Sony WF-1000XM5 correction and EQ. No crossfade/transitions; gapless still
 No visualizers; wallpaper palette everywhere; functionality before full UI polish. Asked to
 review the logic from the start, not just accumulate controls. See LOCAL_PLAYER_REVIEW.md.
 
-Current new work is an unconnected pure core:dsp scaffold (RBJ filters, state per channel,
-neutral bypass and bounds). Local `:core:dsp:test --offline --no-daemon` passed all 7 cases (Gradle 9.9.1, JDK 21). The
-headroom policy needs refinement from conservative summed boosts to combined response before
-Sony integration. Do not claim EQ works in the player yet.
+New EQ block implemented: AudioOutputProvider wrapper preserves PCM16/float encoding/rate and
+Media3 gapless handling. Reusable direct buffers, partial-write position accounting, exact disabled
+bypass, per-channel double-precision RBJ state, combined-response headroom and a 10 ms parameter
+transition. Per-output persistent settings and route-key command guards prevent Sony settings from
+carrying over to phone/unrelated speakers. Private same-uid session commands only. UI has flat/manual
+bands, preamp, opt-in Sony AutoEq preset and route/error labels. Sony preset source and MIT license
+retained; it is not an individual-ear calibration. 15 pure DSP tests pass locally. Android CI pending.
 
-Next: implement AudioOutputProvider delegation with buffer-contract regression tests, service-owned
-per-output settings and safe transitions, then EQ controls/preset. Standard Media3 processor chains
-are skipped on float output, so do not wire there and silently miss hi-res playback. ReplayGain
-needs decoded-item association; audible-transition listeners alone are insufficient with prebuffering.
-
+Main release 43638695765 succeeded: music-v1025 is installable through Obtainium. EQ is not yet in
+that release. Inspect the EQ CI and fix every failure, then integrate into main and delete the task
+branch. ReplayGain is not implemented: decoded-item association must handle prebuffered transitions.
+Full lifecycle/output/battery measurements remain phone gates. Never claim Poweramp/Symfonium parity
+from JVM tests. See LOCAL_PLAYER_REVIEW.md for the full flow and remaining priorities.
 
 ## Codex integrated local-player delivery (2026-11-14)
 

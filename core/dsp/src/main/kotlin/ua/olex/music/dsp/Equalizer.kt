@@ -14,11 +14,19 @@ data class EqualizerBand(val frequencyHz: Double, val gainDb: Double, val q: Dou
     }
 }
 
-/** Processing is opt-in. Headroom reserves the sum of positive gains, deliberately conservatively. */
+/** Processing is opt-in; preamp is bounded by the combined response at the actual output sample rate. */
 data class EqualizerSettings(val enabled: Boolean = false, val preampDb: Double = 0.0,
     val bands: List<EqualizerBand> = flatBands(), val profile: String = "Custom") {
     init { require(preampDb.isFinite() && preampDb in -36.0..12.0); require(bands.size <= 20) }
-    val effectivePreampDb: Double get() = min(preampDb, -bands.sumOf { max(0.0, it.gainDb) })
+    fun effectivePreampDb(sampleRateHz: Int): Double {
+        val filters = bands.filter { it.gainDb != 0.0 }.map { Biquad.of(it, sampleRateHz) }
+        if (filters.isEmpty()) return min(preampDb, 0.0)
+        val top = sampleRateHz * 0.499
+        val frequencies = (0..2048).map { 10.0 * (top / 10.0).pow(it / 2048.0) } +
+            bands.map { min(it.frequencyHz, sampleRateHz * 0.45) } + listOf(0.0, top)
+        val boost = frequencies.maxOf { frequency -> filters.sumOf { 20 * log10(it.magnitudeAt(frequency, sampleRateHz).coerceAtLeast(1e-20)) } }
+        return min(preampDb, if (boost > 0.001) -boost - 0.5 else 0.0)
+    }
     companion object {
         val frequencies = listOf(31.0, 62.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0)
         fun flatBands() = frequencies.map { EqualizerBand(it, 0.0) }
@@ -61,7 +69,7 @@ class EqualizerEngine(val settings: EqualizerSettings, sampleRateHz: Int, privat
     private val filters = settings.bands.filter { it.gainDb != 0.0 }.map { Biquad.of(it, sampleRateHz) }
     private val z1 = Array(channels) { DoubleArray(filters.size) }
     private val z2 = Array(channels) { DoubleArray(filters.size) }
-    private val gain = if (settings.enabled) 10.0.pow(settings.effectivePreampDb / 20) else 1.0
+    private val gain = if (settings.enabled) 10.0.pow(settings.effectivePreampDb(sampleRateHz) / 20) else 1.0
     init { require(channels in 1..32) }
 
     fun sample(input: Float, channel: Int): Float {

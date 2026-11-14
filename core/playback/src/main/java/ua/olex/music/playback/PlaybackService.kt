@@ -47,17 +47,27 @@ class PlaybackService : MediaLibraryService() {
     private val historyGate = PlaybackHistoryGate()
     private var diagnostics = AudioDiagnostics()
     private val audioTracks = AudioTrackLifecycle()
+    private lateinit var equalizer: EqualizerController
+    private var equalizerRoute: OutputRouteMonitor? = null
     private var persistence: PlaybackPersistence? = null
 
     override fun onCreate() {
         super.onCreate()
-        val player = PlayerFactory.create(this)
+        equalizer = EqualizerController(this) { state -> session?.let { current ->
+            current.setSessionExtras(Bundle(current.sessionExtras).apply { putBundle(EqualizerCommand.KEY, EqualizerCommand.bundle(state)) })
+        } }
+        val player = PlayerFactory.create(this) { equalizer.active }
         val builder = MediaLibrarySession.Builder(this, player, Callback())
         // Tapping the notification opens the app.
         packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
+        equalizerRoute = OutputRouteMonitor(this).also { monitor ->
+            monitor.start()
+            equalizer.routeChanged(monitor.route.value)
+            scope.launch { monitor.route.collect(equalizer::routeChanged) }
+        }
         persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope)
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
@@ -127,6 +137,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        equalizerRoute?.stop()
+        equalizerRoute = null
         persistence?.close()
         persistence = null
         scope.cancel()
@@ -175,7 +187,7 @@ class PlaybackService : MediaLibraryService() {
             if (controller.uid == Process.myUid()) {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                        .add(SleepTimerCommand.command).add(QueueCommand.command).build(),
+                        .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).build(),
                 )
             }
             return Futures.immediateFuture(result.build())
@@ -184,6 +196,15 @@ class PlaybackService : MediaLibraryService() {
         override fun onCustomCommand(
             session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == EqualizerCommand.ACTION) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                val accepted = try {
+                    val route = args.getString(EqualizerCommand.ROUTE)
+                    val settings = args.getString(EqualizerCommand.SETTINGS)
+                    route != null && settings != null && equalizer.update(route, EqualizerCodec.decode(settings))
+                } catch (_: Exception) { false }
+                return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
+            }
             if (customCommand.customAction == QueueCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 val bundles = args.getParcelableArrayList(QueueCommand.ITEMS, Bundle::class.java)

@@ -58,6 +58,8 @@ data class PlayerState(
     val repeat: RepeatMode = RepeatMode.OFF,
     val audio: AudioDiagnostics = AudioDiagnostics(),
     val queueError: String? = null,
+    val equalizer: EqualizerState = EqualizerState(),
+    val equalizerError: String? = null,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -99,7 +101,7 @@ class PlayerConnection(context: Context) {
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
                     if (this@PlayerConnection.controller === controller) {
-                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 }, audio = AudioDiagnostics.fromExtras(extras))
+                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 }, audio = AudioDiagnostics.fromExtras(extras), equalizer = EqualizerCommand.fromExtras(extras))
                     }
                 }
 
@@ -243,6 +245,20 @@ class PlayerConnection(context: Context) {
         }
     }
 
+    fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) {
+        val player = controller ?: return
+        _state.value = _state.value.copy(equalizerError = null)
+        val future = player.sendCustomCommand(EqualizerCommand.command, Bundle().apply {
+            putString(EqualizerCommand.ROUTE, routeKey); putString(EqualizerCommand.SETTINGS, EqualizerCodec.encode(settings))
+        })
+        future.addListener({
+            if (controller !== player) return@addListener
+            val accepted = try { Futures.getDone(future).resultCode == SessionResult.RESULT_SUCCESS }
+                catch (_: ExecutionException) { false } catch (_: CancellationException) { false }
+            if (!accepted) _state.value = _state.value.copy(equalizerError = "Output changed or the settings could not be saved. Reopen Equalizer and try again.")
+        }, app.mainExecutor)
+    }
+
     fun dismissQueueError() { _state.value = _state.value.copy(queueError = null) }
 
     /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
@@ -292,6 +308,8 @@ class PlayerConnection(context: Context) {
             repeat = when (player.repeatMode) { Player.REPEAT_MODE_ALL -> RepeatMode.ALL; Player.REPEAT_MODE_ONE -> RepeatMode.ONE; else -> RepeatMode.OFF },
             audio = (player as? MediaController)?.sessionExtras?.let(AudioDiagnostics::fromExtras) ?: AudioDiagnostics(),
             queueError = _state.value.queueError,
+            equalizer = (player as? MediaController)?.sessionExtras?.let(EqualizerCommand::fromExtras) ?: EqualizerState(),
+            equalizerError = _state.value.equalizerError,
         )
     }
 
