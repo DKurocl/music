@@ -1,0 +1,108 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: music-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      owner_key: ${{ steps.key.outputs.owner }}
+      version_code: ${{ steps.version.outputs.code }}
+    env:
+      OWNER_KEYSTORE_PASSWORD: ${{ secrets.OWNER_KEYSTORE_PASSWORD }}
+      OWNER_KEY_ALIAS: ${{ secrets.OWNER_KEY_ALIAS }}
+      OWNER_KEY_PASSWORD: ${{ secrets.OWNER_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Guard against an emptied source tree
+        run: |
+          for f in settings.gradle.kts app/build.gradle.kts app/src/main/AndroidManifest.xml core/playback/src/main/java/ua/olex/music/playback/PlaybackService.kt; do
+            [ -f "$f" ] || { echo "::error::$f is missing; the commit replaced the source tree"; exit 1; }
+          done
+      - name: No en or em dashes in authored files
+        run: |
+          ! grep -rIlP '[\x{2013}\x{2014}]' --include='*.kt' --include='*.kts' --include='*.md' --include='*.xml' --include='*.toml' --include='*.yml' --exclude-dir=.agents --exclude-dir=build . \
+            || { echo '::error::U+2013/U+2014 found in the files above (AGENTS.md, Rules)'; exit 1; }
+      - name: Owner signing key
+        id: key
+        env:
+          KEYSTORE_B64: ${{ secrets.OWNER_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/owner.jks"
+            echo "OWNER_KEYSTORE=$RUNNER_TEMP/owner.jks" >> "$GITHUB_ENV"
+            echo "owner=true" >> "$GITHUB_OUTPUT"
+            echo "Release is signed with the owner key."
+          else
+            echo "::notice::No OWNER_KEYSTORE_B64 secret: the APK is debug-signed and no release is published."
+          fi
+      - name: Version code
+        id: version
+        run: echo "code=$((GITHUB_RUN_NUMBER + 1000))" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Use preinstalled Android SDK
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: 9.9.1
+      - name: Test, lint and build
+        run: |
+          set -o pipefail
+          gradle test :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon 2>&1 | tee build.log || {
+            grep -E '^e: |error:|ERROR:|What went wrong' -A2 build.log | head -60 | while IFS= read -r l; do
+              [ -n "$l" ] && echo "::error::$l"
+            done
+            exit 1
+          }
+      - name: Verify the signature
+        if: steps.key.outputs.owner == 'true'
+        run: |
+          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -E 'SHA-256' | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Music-checks
+          path: |
+            **/build/reports/
+            **/build/test-results/
+            build.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Music-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Music-install
+          path: app/build/outputs/apk/release/*.apk
+  release:
+    # Every main build signed with the owner key becomes a release that Obtainium installs.
+    # A build signed with a throwaway key is never published: it could not update the installed app.
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.owner_key == 'true'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Music-install
+          path: apk
+      - name: Name the APK
+        run: mv apk/*.apk "apk/music-v${{ needs.build.outputs.version_code }}.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: music-v${{ needs.build.outputs.version_code }}
+          name: music-v${{ needs.build.outputs.version_code }}
+          target_commitish: ${{ github.sha }}
+          files: apk/*.apk
+          make_latest: true
+          body: "Commit ${{ github.sha }}. Obtainium: add this repository as a GitHub source with the title filter ^music-."
