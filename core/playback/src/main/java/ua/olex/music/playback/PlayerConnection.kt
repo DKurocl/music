@@ -60,6 +60,7 @@ data class PlayerState(
     val queueError: String? = null,
     val equalizer: EqualizerState = EqualizerState(),
     val equalizerError: String? = null,
+    val replayGain: ua.olex.music.dsp.ReplayGainSettings = ua.olex.music.dsp.ReplayGainSettings(),
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -101,7 +102,7 @@ class PlayerConnection(context: Context) {
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
                     if (this@PlayerConnection.controller === controller) {
-                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 }, audio = AudioDiagnostics.fromExtras(extras), equalizer = EqualizerCommand.fromExtras(extras))
+                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 }, audio = AudioDiagnostics.fromExtras(extras), equalizer = EqualizerCommand.fromExtras(extras), replayGain = ReplayGainCommand.fromExtras(extras))
                     }
                 }
 
@@ -259,6 +260,17 @@ class PlayerConnection(context: Context) {
         }, app.mainExecutor)
     }
 
+    fun setReplayGain(settings: ua.olex.music.dsp.ReplayGainSettings) {
+        val player = controller ?: return
+        val future = player.sendCustomCommand(ReplayGainCommand.command, Bundle().apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(settings)) })
+        future.addListener({
+            if (controller !== player) return@addListener
+            val accepted = try { Futures.getDone(future).resultCode == SessionResult.RESULT_SUCCESS }
+                catch (_: ExecutionException) { false } catch (_: CancellationException) { false }
+            _state.value = _state.value.copy(equalizerError = if (accepted) null else "Couldn't save ReplayGain settings. Try again.")
+        }, app.mainExecutor)
+    }
+
     fun dismissQueueError() { _state.value = _state.value.copy(queueError = null) }
 
     /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
@@ -310,6 +322,7 @@ class PlayerConnection(context: Context) {
             queueError = _state.value.queueError,
             equalizer = (player as? MediaController)?.sessionExtras?.let(EqualizerCommand::fromExtras) ?: EqualizerState(),
             equalizerError = _state.value.equalizerError,
+            replayGain = (player as? MediaController)?.sessionExtras?.let(ReplayGainCommand::fromExtras) ?: ua.olex.music.dsp.ReplayGainSettings(),
         )
     }
 
@@ -329,7 +342,9 @@ class PlayerConnection(context: Context) {
                         .setArtworkUri(track.artworkUri?.let(Uri::parse))
                         .setTrackNumber(track.trackNumber).setDiscNumber(track.discNumber)
                         .setDurationMs(track.durationMs.takeIf { it > 0 })
-                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, UUID.randomUUID().toString()) })
+                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, UUID.randomUUID().toString())
+                            track.metadata?.let { tags -> putString(ReplayGainCodec.TAGS, ReplayGainCodec.encodeTags(ua.olex.music.dsp.ReplayGainTags(
+                                tags.trackGainDb?.toDouble(), tags.trackPeak?.toDouble(), tags.albumGainDb?.toDouble(), tags.albumPeak?.toDouble()))) } })
                         .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                         .build(),
                 )

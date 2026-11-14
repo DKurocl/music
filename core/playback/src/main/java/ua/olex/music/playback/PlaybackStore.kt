@@ -66,6 +66,7 @@ internal class PlaybackStore(directory: File) {
 
     private fun encode(item: MediaItem) = JSONObject().apply {
         val meta = item.mediaMetadata
+        put("replayGain", meta.extras?.getString(ReplayGainCodec.TAGS))
         put("key", meta.extras?.getString(PlayerConnection.QUEUE_KEY)); put("id", item.mediaId)
         put("uri", item.requestMetadata.mediaUri?.toString() ?: item.localConfiguration?.uri?.toString())
         put("title", meta.title); put("artist", meta.artist); put("album", meta.albumTitle); put("albumArtist", meta.albumArtist)
@@ -82,7 +83,7 @@ internal class PlaybackStore(directory: File) {
                 .setArtworkUri(row.string("artwork")?.let(Uri::parse))
                 .setDurationMs(row.string("duration")?.toLong()).setTrackNumber(row.string("track")?.toInt()).setDiscNumber(row.string("disc")?.toInt())
                 .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .setExtras(Bundle().apply { putString(PlayerConnection.QUEUE_KEY, row.getString("key")); putString(PlayerConnection.PATH_KEY, row.string("path")) }).build())
+                .setExtras(Bundle().apply { putString(PlayerConnection.QUEUE_KEY, row.getString("key")); putString(PlayerConnection.PATH_KEY, row.string("path")); putString(ReplayGainCodec.TAGS, row.string("replayGain")) }).build())
             .build()
     }
 

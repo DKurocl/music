@@ -38,6 +38,21 @@ class PlaybackStoreTest {
         assertTrue(restored.shuffle)
     }
 
+    @Test fun replayGainTagsSurviveQueueCheckpointAndOldQueuesStayReadable() = runBlocking {
+        val item = PlayerConnection.mediaItem(Track(TrackId("local:gain"), "content://gain", "Gain", "Artist",
+            metadata = ua.olex.music.model.FileMetadata(trackGainDb = -6f, albumGainDb = -4f)))
+        val checkpoint = state().copy(items = listOf(item))
+        PlaybackStore(directory).write(checkpoint)
+        val restored = requireNotNull(PlaybackStore(directory).read()).items.single()
+        assertEquals(-6.0, ReplayGainCodec.tags(restored.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS)).trackGainDb)
+        val file = File(directory, "playback-queue.json")
+        val data = org.json.JSONObject(file.readText())
+        data.getJSONArray("items").getJSONObject(0).remove("replayGain")
+        file.writeText(data.toString())
+        val legacy = requireNotNull(PlaybackStore(directory).read()).items.single()
+        assertEquals(ua.olex.music.dsp.ReplayGainTags(), ReplayGainCodec.tags(legacy.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS)))
+    }
+
     @Test fun progressCheckpointDoesNotRewriteLargeQueue() = runBlocking {
         val store = PlaybackStore(directory)
         val first = state()
