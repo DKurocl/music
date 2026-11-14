@@ -8,6 +8,37 @@ Milestones M1, M2 and M4 to M8 touch different modules and can run in parallel b
 Files many tasks touch (`AppGraph`, `settings.gradle.kts`, the version catalog) change in small
 separate commits to keep merges trivial.
 
+## What "the best it can be" means here (owner, 2026-11-14)
+
+Battery, sound quality, speed and features, each pushed as far as this phone allows, and each
+proven by a number measured on the phone, not assumed. Until measured, a target is a target.
+
+| Area | Target on the Pixel 10 Pro XL | How it is measured |
+|---|---|---|
+| Battery, screen off, FLAC over LDAC | under 2 % per hour from the app's side | `dumpsys batterystats --charged ua.olex.music` after 2 h |
+| Idle | no service, wake lock, job or alarm when not playing | `dumpsys activity services`, `power`, `jobscheduler`, `alarm` |
+| Cold start to the library on screen | under 400 ms | `am start -W` (TotalTime), release build with baseline profile |
+| Rescan, nothing changed, 10 000 files | under 2 s | log line around `LibraryRepository.rescan` |
+| First scan, 10 000 files | under 60 s, list usable while it runs | same |
+| Scrolling and the lyrics page | no dropped frames at 120 Hz | `dumpsys gfxinfo ua.olex.music framestats` |
+| Sound | file rate and bit depth reach the mixer unchanged; gapless; no clipping with ReplayGain | AUDIO.md, "To measure" |
+| Track change, local file | under 100 ms to audio | log around `onMediaItemTransition` |
+
+A change that makes a number worse needs a reason in the commit. Features are tracked below against
+Poweramp and Symfonium as the reference for a local player.
+
+## Local player parity (the owner's order: this first, streaming and downloads after)
+
+What a Poweramp/Symfonium-class local player has, and where each item lives in this plan:
+tag-accurate library (M1), ReplayGain with pre-amp and clipping guard (M3), gapless verified (M3),
+equalizer with per-output presets and AutoEq headphone profiles (M3, new), crossfade and fade on
+pause/seek (M3, new), every common format incl. ALAC/APE/WavPack/DSD and cue sheets (M3, M1),
+hi-res and USB bit-perfect output (M3), synced and word-timed lyrics (M4), embedded and folder
+artwork (M1), playlists with m3u import/export and smart playlists (M1, new), ratings, play counts,
+recently added (M1), folder browsing (done), queue editing (done), sleep timer (done), resume on
+connect and headset button rules (M3, new), Android Auto (M3), widgets (M9), tag editor (M7),
+backup and restore of user data (M1, new).
+
 ## M0 Foundation
 - [x] Gradle project, version catalog, five modules, CI workflow, agent docs (session 1)
 - [x] `:core:model`: Track, TrackId, AudioFormat, SongKey with tests (session 1)
@@ -24,10 +55,22 @@ separate commits to keep merges trivial.
       Installation through Obtainium remains a physical-device check.
 
 ## M1 Library done right (`:core:library`, new `:core:tags`)
-- [ ] `:core:tags`: TagLib over JNI. Read all fields incl. multi-value artists, album artist, disc,
-      ReplayGain, MusicBrainz ids, embedded lyrics and pictures, real sample rate and bit depth.
-      Done when: a test folder of FLAC, MP3, M4A, Opus, WAV files reads back expected values on a
-      device test, and the `.so` is 16 KB aligned.
+- [x] `:core:tags` reader (Claude, 2026-11-14, branch `agent/m1-tags`): pure Kotlin, FLAC, MP3, Ogg
+      Vorbis, Opus, M4A, WAV; multi-value artists, album artist, disc, ReplayGain and R128,
+      MusicBrainz ids, lyrics, pictures as byte ranges, real sample rate and bit depth, gapless
+      delay and padding. 14 unit tests on byte fixtures.
+- [ ] Wire the reader into the scan (`:core:library`). MediaStore still lists the files; for each
+      new or changed file (mtime + size) open it (`contentResolver.openFileDescriptor(uri, "r")`,
+      `ChannelSource(FileInputStream(fd).channel)`) and take `TagReader.read`: title, all artists,
+      album artist, track/disc, year, genres, codec, rate, depth, duration, ReplayGain, cover range,
+      delay/padding. Null result: keep the MediaStore values. Store artists and genres as lists
+      (join table or separator column), gains and the cover range as columns; bump `library.db`.
+      Unchanged files are not opened again. Done when: a unit test with a fake file source shows
+      tag values winning over MediaStore values and an unchanged file not being reopened; on the
+      phone a 24/96 FLAC shows "FLAC 24/96" and two artists show as two.
+- [ ] Real-file check of the reader on the phone: a debug screen or instrumentation test that runs
+      `TagReader` over the whole library and reports files that returned null or disagree with
+      MediaStore on duration by more than 1 s. Fix every class of failure found.
 - [ ] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
       mtime+size, replaces MediaStoreScanner behind LibraryRepository. Done when: 10 000 files
       rescan with no changes in under 2 s on the phone.
@@ -40,6 +83,11 @@ separate commits to keep merges trivial.
       cache at 3 sizes; Coil fetcher for `track:` models.
 - [x] Watch for file changes (`5aa0d92`, CI 43564927822) while the app is open (ContentObserver/FileObserver) instead of only
       on start.
+
+- [ ] Playlists: m3u/m3u8 import and export; smart playlists (rules over tags, play counts, dates).
+- [ ] Ratings, play counts, recently added and recently played views.
+- [ ] Cue sheets (`.cue` beside a file and embedded CUESHEET): one file shown and played as its tracks.
+- [ ] Export and import of `user.db` (playlists, favourites, history) to a file the owner keeps.
 
 ## M2 Design system and the real shell (`:app`)
 - [ ] Bring the Earbuds design system: Google Sans Flex, Material Symbols variable font (subset by
@@ -68,6 +116,13 @@ separate commits to keep merges trivial.
 - [ ] Extension decoders for ALAC/APE/WavPack/DSD.
 - [ ] Android Auto: browse tree (`onGetLibraryRoot`, `onGetChildren`, search), tested in the
       Desktop Head Unit.
+
+- [ ] Equalizer as an audio processor that keeps float samples: parametric bands, pre-amp, presets
+      per output device, AutoEq profile import (WF-1000XM5 first). Pure DSP code tested against
+      reference curves. Decide after measuring whether Kotlin is fast enough or the inner loop
+      moves to C++ with NEON.
+- [ ] Crossfade between tracks (off for gapless albums) and short fades on pause, resume and seek.
+- [ ] Rules for outputs: resume on earbuds connect (optional), what headset buttons do, volume per output.
 
 ## M4 Lyrics (`:core:lyrics`, new `:core:lyrics-net`, `:app`)
 - [ ] KRC (Kugou), QRC and SYLT parsers with tests.

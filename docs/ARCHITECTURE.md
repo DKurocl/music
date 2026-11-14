@@ -14,7 +14,7 @@
 Planned, each its own module so agents can work side by side:
 
 ```
-:core:tags       Android lib   TagLib (JNI): read every tag, write tags, embedded pictures
+:core:tags       pure Kotlin   reads tags and audio properties from the files themselves (exists); writers (M7)
 :core:soulseek   pure Kotlin   Soulseek protocol: server and peer messages, search, transfers
 :source:youtube  pure Kotlin   YouTube Music: InnerTube for search/browse/radio, stream resolver
 :source:soundcloud pure Kotlin SoundCloud search and streams
@@ -94,9 +94,15 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
 7. The library is found by scanning files (M1), not by trusting MediaStore. "All files access"
    (`MANAGE_EXTERNAL_STORAGE`) is acceptable: a sideloaded personal app that must also write tags,
    sidecar lyrics and downloads into the owner's folder tree. `[аналіз]`
-8. Tags through TagLib over JNI (FLAC, MP3, M4A, Opus, WAV, APE, DSF in one library). Start with a
-   maintained prebuilt binding; build TagLib ourselves if it is not 16 KB page aligned or lags.
-   `[аналіз]`, check alignment with `llvm-readelf -l` before adopting.
+8. Tags are read by our own pure Kotlin reader (`:core:tags`), not TagLib over JNI. Reasons: no NDK
+   in the build, no 16 KB page question, tests in seconds from byte fixtures, and a scan reads only
+   headers (a few small reads per file; pictures stay byte ranges). It covers what the owner has and
+   what Android plays: FLAC, MP3 (ID3v2.2-2.4, ID3v1, Xing/LAME), Ogg Vorbis, Opus, M4A (AAC, ALAC),
+   WAV. Legacy text is decoded as Windows-1251 when it looks Cyrillic (old Ukrainian and Russian
+   MP3s). Not covered yet: APE, WavPack, DSF, AIFF, Ogg FLAC, pictures inside Ogg comments, ID3
+   compressed frames. A file the reader does not know falls back to MediaStore values. Tag writing
+   (M7) is added per format in the same module; if a format proves too risky to write by hand,
+   TagLib may come in for writing only. `[код]` 14 tests; real-file checks on the phone pending.
 9. Streaming: YouTube Music first (InnerTube for search, browse and radio; NewPipeExtractor for
    stream URLs, because that is the part YouTube breaks and a large community fixes within days),
    SoundCloud through the same extractor. Spotify is not a playback source: it needs Premium and

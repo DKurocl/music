@@ -7,7 +7,7 @@ dependencyResolutionManagement {
 }
 rootProject.name = "Music"
 // Pure Kotlin (JVM) modules hold everything that needs no Android: they test in seconds.
-include(":core:model", ":core:lyrics")
+include(":core:model", ":core:lyrics", ":core:tags")
 // Android libraries: one concern each, no UI.
 include(":core:library", ":core:playback")
 include(":core:user")
