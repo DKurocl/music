@@ -132,3 +132,8 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     never raw FTS syntax, and are debounced/cancelled in the ViewModel. The rebuildable version 1
     cache is dropped on upgrade; no user data is stored in it. `[код]`
     [docs] https://www.sqlite.org/fts3.html#external_content_fts4_tables
+19. Song identity drops explicit featured-artist credits, but preserves separators inside artist
+    names. Splitting on `/`, `&`, commas or `and` incorrectly merged unrelated bands. Mixed
+    annotations retain the recording variant after removing edition metadata (for example,
+    `Live, Remastered 2011` remains `Live`). Prefer a missed match to playing the wrong recording.
+    The v2 cache rescan regenerates the keys. `[код]` regression tests in `SongKeyTest`.

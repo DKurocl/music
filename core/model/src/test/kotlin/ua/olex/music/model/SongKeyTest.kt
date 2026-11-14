@@ -20,7 +20,7 @@ class SongKeyTest {
     @Test fun featuredArtistsAreDropped() {
         assertEquals(key("Daft Punk", "Get Lucky"), key("Daft Punk feat. Pharrell Williams", "Get Lucky"))
         assertEquals(key("Daft Punk", "Get Lucky"), key("Daft Punk", "Get Lucky (feat. Pharrell Williams & Nile Rodgers)"))
-        assertEquals(key("Daft Punk", "Get Lucky"), key("Daft Punk, Pharrell Williams", "Get Lucky [ft. Pharrell]"))
+        assertEquals(key("Daft Punk", "Get Lucky"), key("Daft Punk", "Get Lucky [ft. Pharrell]"))
     }
 
     @Test fun editionNotesAreDropped() {
@@ -33,6 +33,20 @@ class SongKeyTest {
         assertNotEquals(key("Nirvana", "About a Girl"), key("Nirvana", "About a Girl (Live)"))
         assertNotEquals(key("The Weeknd", "Blinding Lights"), key("The Weeknd", "Blinding Lights (Chromatics Remix)"))
         assertNotEquals(key("Radiohead", "Creep"), key("Radiohead", "Creep - Acoustic"))
+    }
+
+    @Test fun bandNameSeparatorsCannotSelectADifferentArtist() {
+        assertNotEquals(key("AC", "Song"), key("AC/DC", "Song"))
+        assertNotEquals(key("Earth", "Song"), key("Earth, Wind & Fire", "Song"))
+        assertNotEquals(key("Florence", "Song"), key("Florence and the Machine", "Song"))
+        assertNotEquals(key("Simon", "Song"), key("Simon & Garfunkel", "Song"))
+    }
+
+    @Test fun remasterNotesKeepTheRecordingVariant() {
+        assertNotEquals(key("Band", "Song"), key("Band", "Song (Live, Remastered 2011)"))
+        assertEquals(key("Band", "Song (Live)"), key("Band", "Song (Live, Remastered 2011)"))
+        assertEquals(key("Band", "Song (Acoustic)"), key("Band", "Song (Acoustic Remastered 2020)"))
+        assertEquals(key("Band", "Song (Club Remix)"), key("Band", "Song (Club Remix Remastered 2020)"))
     }
 
     @Test fun sameSongNeedsMatchingLength() {
