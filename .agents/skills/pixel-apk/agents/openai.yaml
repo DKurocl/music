@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pixel APK"
+  short_description: "Build private Pixel apps with verified release gates"
+  default_prompt: "Use $pixel-apk to build a personal one-screen Android app."

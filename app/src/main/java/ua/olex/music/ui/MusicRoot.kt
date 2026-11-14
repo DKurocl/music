@@ -1,0 +1,248 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package ua.olex.music.ui
+
+import android.Manifest
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil3.compose.AsyncImage
+import kotlinx.coroutines.delay
+import ua.olex.music.graph
+import ua.olex.music.model.Track
+import ua.olex.music.playback.OutputRoute
+import ua.olex.music.playback.PlayerState
+
+/**
+ * The first working shape of the app: the songs on the phone, a bar for what is playing, and the
+ * player page. It proves the path from a file to the earbuds; the designed app (navigation, the
+ * expressive player, lyrics) is built over it (docs/ROADMAP.md).
+ */
+@Composable
+fun MusicRoot(model: LibraryViewModel) {
+    val tracks by model.tracks.collectAsStateWithLifecycle()
+    val playing by model.playing.collectAsStateWithLifecycle()
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { model.refresh() }
+    val scroll = TopAppBarDefaults.pinnedScrollBehavior()
+    BackHandler(expanded) { expanded = false }
+
+    Scaffold(
+        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        topBar = { TopAppBar(title = { Text("Songs") }, scrollBehavior = scroll) },
+        bottomBar = { if (playing.hasTrack) MiniPlayer(playing, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next) },
+    ) { insets ->
+        val list = tracks
+        when {
+            !model.allowed -> Notice(
+                insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow",
+            ) { ask.launch(arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS)) }
+            list == null -> Unit
+            list.isEmpty() -> Notice(insets, "No music yet", if (model.scanning) "Looking for music…" else "Put music in the Music folder and it shows up here.", null) {}
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = insets) {
+                itemsIndexed(list, key = { _, track -> track.id.value }) { index, track ->
+                    TrackRow(track, current = track.id.value == playing.mediaId) { model.play(list, index) }
+                }
+            }
+        }
+    }
+
+    AnimatedVisibility(expanded && playing.hasTrack, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+        NowPlaying(
+            playing, format = tracks?.firstOrNull { it.id.value == playing.mediaId }?.format?.label,
+            position = { model.positionMs }, onClose = { expanded = false },
+            onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
+        )
+    }
+}
+
+@Composable
+private fun Notice(insets: PaddingValues, title: String, body: String, action: String?, onAction: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(insets).padding(32.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
+        Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        if (action != null) Button(onClick = onAction) { Text(action) }
+    }
+}
+
+@Composable
+private fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    ListItem(
+        headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface) },
+        supportingContent = {
+            Text(listOfNotNull(track.artist, track.format?.label).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        },
+        leadingContent = { Artwork(track.artworkUri, Modifier.size(48.dp), 8.dp) },
+        colors = ListItemDefaults.colors(containerColor = cs.surface),
+        modifier = Modifier.clickable(onClick = onClick),
+    )
+}
+
+@Composable
+private fun Artwork(uri: String?, modifier: Modifier, corner: Dp) {
+    val cs = MaterialTheme.colorScheme
+    Box(modifier.clip(RoundedCornerShape(corner)).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
+        Icon(AppIcons.Note, null, tint = cs.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.4f))
+        if (uri != null) AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    }
+}
+
+@Composable
+private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Surface(color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Open player", onClick = onOpen)) {
+        Row(
+            Modifier.navigationBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Artwork(state.artworkUri, Modifier.size(44.dp), 8.dp)
+            Column(Modifier.weight(1f)) {
+                Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(state.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            IconButton(onClick = onToggle, modifier = Modifier.semantics { contentDescription = if (state.isPlaying) "Pause" else "Play" }) {
+                Icon(if (state.isPlaying) AppIcons.Pause else AppIcons.Play, null)
+            }
+            IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.semantics { contentDescription = "Next" }) { Icon(AppIcons.Next, null) }
+        }
+    }
+}
+
+@Composable
+private fun NowPlaying(
+    state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
+    onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    val monitor = LocalContext.current.graph.output
+    DisposableEffect(monitor) { monitor.start(); onDispose { monitor.stop() } }
+    val route by monitor.route.collectAsStateWithLifecycle()
+
+    // The position is read while the page is shown, four times a second; nothing runs otherwise.
+    var at by remember { mutableLongStateOf(position()) }
+    var dragged by remember { mutableStateOf<Float?>(null) }
+    LaunchedEffect(state.isPlaying, state.mediaId) {
+        while (true) { at = position(); if (!state.isPlaying) break; delay(250) }
+    }
+
+    Surface(color = cs.surfaceContainerLow, modifier = Modifier.fillMaxSize()) {
+        Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Icon(AppIcons.Down, null) }
+            }
+            Spacer(Modifier.weight(1f))
+            Artwork(state.artworkUri, Modifier.fillMaxWidth().aspectRatio(1f), 28.dp)
+            Spacer(Modifier.height(28.dp))
+            Text(state.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(8.dp))
+            // The signal path, as far as it is known: what the file is and where it goes.
+            Text(
+                listOfNotNull(format, route?.label()).joinToString("  →  "),
+                style = MaterialTheme.typography.labelLarge, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(16.dp))
+            val duration = state.durationMs.coerceAtLeast(1)
+            Slider(
+                value = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f),
+                onValueChange = { dragged = it },
+                onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null },
+                enabled = state.durationMs > 0,
+                modifier = Modifier.semantics { contentDescription = "Position" },
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                Text(clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp).semantics { contentDescription = "Previous" }) {
+                    Icon(AppIcons.Previous, null, Modifier.size(32.dp))
+                }
+                FilledIconButton(onClick = onToggle, modifier = Modifier.size(80.dp).semantics { contentDescription = if (state.isPlaying) "Pause" else "Play" }) {
+                    Icon(if (state.isPlaying) AppIcons.Pause else AppIcons.Play, null, Modifier.size(40.dp))
+                }
+                IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.size(56.dp).semantics { contentDescription = "Next" }) {
+                    Icon(AppIcons.Next, null, Modifier.size(32.dp))
+                }
+            }
+            Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+private fun OutputRoute.label(): String = when (kind) {
+    OutputRoute.Kind.SPEAKER -> "Phone speaker"
+    OutputRoute.Kind.BLUETOOTH -> name.ifEmpty { "Bluetooth" }
+    OutputRoute.Kind.LE_AUDIO -> name.ifEmpty { "LE Audio" }
+    OutputRoute.Kind.USB -> name.ifEmpty { "USB audio" }
+    OutputRoute.Kind.WIRED -> "Headphones"
+    OutputRoute.Kind.REMOTE, OutputRoute.Kind.OTHER -> name.ifEmpty { "Other output" }
+}
+
+private fun clock(ms: Long): String {
+    val seconds = (ms / 1000).coerceAtLeast(0)
+    return "%d:%02d".format(java.util.Locale.ROOT, seconds / 60, seconds % 60)
+}
