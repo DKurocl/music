@@ -15,6 +15,7 @@ android {
 
 dependencies {
     api(project(":core:model"))
+    implementation(project(":core:tags"))
     api(libs.coroutines.core)
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)

@@ -48,11 +48,19 @@ data class TrackEntity(
     /** The scan that last saw the file; rows left behind by a scan are files that are gone. */
     val scanId: Long,
     val genre: String? = null,
+    val channels: Int? = null,
+    val artistsJson: String? = null,
+    val genresJson: String? = null,
+    val metadataJson: String? = null,
+    val tagReaderVersion: Int = 0,
 ) {
     fun toTrack() = Track(
         id = TrackId(id), uri = uri, title = title, artist = artist, album = album, albumArtist = albumArtist,
         durationMs = durationMs, trackNumber = trackNumber, discNumber = discNumber, year = year, artworkUri = artworkUri,
-        format = codec?.let { AudioFormat(it, sampleRateHz, bitDepth, bitrateKbps) }, path = path, genre = genre,
+        format = codec?.let { AudioFormat(it, sampleRateHz, bitDepth, bitrateKbps, channels) }, path = path, genre = genre,
+        artists = FileMetadataCodec.strings(artistsJson).ifEmpty { listOf(artist) },
+        genres = FileMetadataCodec.strings(genresJson).ifEmpty { listOfNotNull(genre) },
+        metadata = metadataJson?.let(FileMetadataCodec::decode),
     )
 }
 
@@ -94,7 +102,7 @@ interface TrackDao {
     }
 }
 
-@Database(entities = [TrackEntity::class, TrackSearchEntity::class], version = 2, exportSchema = false)
+@Database(entities = [TrackEntity::class, TrackSearchEntity::class], version = 3, exportSchema = false)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun tracks(): TrackDao
 

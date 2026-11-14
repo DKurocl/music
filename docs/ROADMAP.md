@@ -59,7 +59,7 @@ backup and restore of user data (M1, new).
       Vorbis, Opus, M4A, WAV; multi-value artists, album artist, disc, ReplayGain and R128,
       MusicBrainz ids, lyrics, pictures as byte ranges, real sample rate and bit depth, gapless
       delay and padding. 14 unit tests on byte fixtures.
-- [ ] Wire the reader into the scan (`:core:library`). MediaStore still lists the files; for each
+- [~] Wire the reader into the scan (Codex, 2026-11-14, `agent/m1-file-metadata`) (`:core:library`). MediaStore still lists the files; for each
       new or changed file (mtime + size) open it (`contentResolver.openFileDescriptor(uri, "r")`,
       `ChannelSource(FileInputStream(fd).channel)`) and take `TagReader.read`: title, all artists,
       album artist, track/disc, year, genres, codec, rate, depth, duration, ReplayGain, cover range,

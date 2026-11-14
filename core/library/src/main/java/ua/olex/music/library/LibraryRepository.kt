@@ -5,6 +5,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -25,10 +26,12 @@ class LibraryRepository internal constructor(
     private val scan: suspend (Long) -> List<TrackEntity>,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     val changes: Flow<Unit> = kotlinx.coroutines.flow.emptyFlow(),
+    private val enrich: suspend (List<TrackEntity>) -> List<TrackEntity> = { it },
 ) {
     constructor(context: Context, database: LibraryDatabase) : this(
         database.tracks(), { scanId -> MediaStoreScanner.scan(context.applicationContext, scanId) },
         changes = context.applicationContext.contentResolver.musicChanges(),
+        enrich = { rows -> FileTagScanner.enrich(rows, database.tracks().observeAll().first(), AndroidTagSource(context.applicationContext)::read) },
     )
 
     private val scanning = Mutex()
@@ -53,7 +56,7 @@ class LibraryRepository internal constructor(
         withContext(ioDispatcher) {
             // Two fast scans (or a wall-clock adjustment) must not retain deleted rows.
             val scanId = maxOf(System.currentTimeMillis(), lastScanId + 1).also { lastScanId = it }
-            val found = scan(scanId)
+            val found = enrich(scan(scanId))
             currentCoroutineContext().ensureActive()
             dao.replace(Origin.LOCAL.prefix, scanId, found)
             found.size
