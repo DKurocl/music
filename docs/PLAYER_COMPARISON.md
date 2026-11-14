@@ -8,8 +8,11 @@ Crossfade, visualizers and personal-data backup/export are excluded by the owner
 
 [code] Music columns below come from the current checkout, including this session's incremental
 cache change. Existing HANDOFF CI results are historical reports, not rerun evidence.
-This session executed 79 JVM tests using Kotlin 2.2.21 and JUnit 4.13.2. Android, Room-generated
-code, SQLite integration, lint and APK builds have not been validated in this instance.
+This session executed 79 JVM tests using Kotlin 2.2.21 and JUnit 4.13.2. The actual library sources, Room-generated
+DAO/database and library test sources also compiled in a standalone JVM harness against Android 17
+API classes. Five repository tests plus six overlapping delta tests passed there. SQLite execution,
+production AGP compilation, lint and APK builds remain unverified: the Robolectric native runtime
+redirect is blocked. See HANDOFF.md for exact commands and limitations.
 
 [analysis] Competitor columns describe established product capabilities as reference requirements,
 not a fresh inspection or a measured comparison of installed versions. Poweramp Player is the

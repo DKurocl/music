@@ -1,7 +1,8 @@
 # Active work: incremental cache and local-player comparison (Codex, 2026-11-15)
 
-Unmerged branch: `agent/m1-incremental-cache`. Android/Room/CI validation is blocked by network
-access to api.github.com and the absence of a local Android SDK. Do not merge or call this released.
+Unmerged branch: `agent/m1-incremental-cache`. Full CI/APK validation remains blocked by network
+access to api.github.com and the absence of a local Android SDK. SQLite runtime tests additionally
+need gcp.mirrors.maven.org for Robolectric native runtime. Do not merge or call this released.
 Owner now explicitly defers network libraries; compare local workflows only.
 
 [code] Replaced unconditional whole-library upserts with a linear snapshot delta inside the Room
@@ -15,8 +16,25 @@ tags, lyrics, DSP and ScanDelta sources with pinned Kotlin 2.2.21 and ran JUnit 
 zero failures. Compiler dependencies were downloaded over TLS from Maven Central and checked
 against its published artifact hashes. The XML parser stderr line belongs to malformed-input tests.
 The helper is outside the checkout, not a replacement for Gradle/Android gates.
-`git diff --check` passed. No Android SDK, emulator or phone tests were run. The new Room tests,
-full Gradle test, lint and APK build remain unrun, not passed.
+`git diff --check` passed. No Android SDK, emulator or phone tests were run. The SQLite execution of the new Room tests,
+full production Gradle test, lint and APK build remain unrun, not passed.
+
+Additional local validation (same source, no production-build changes): built a standalone JVM
+Robolectric harness under `/workspace/toolchains/music-room-check`, using Gradle 9.9.1 (official
+SHA-256 verified), Kotlin 2.2.21, KSP 2.3.13, Room 2.8.5 and Android 17 android-all API classes.
+Actual library/model/tag sources, generated Room DAO/database and all library test sources compiled.
+Inspected generated DAO: replace uses performInTransactionSuspending; snapshot/delete SQL generated.
+This is JVM compilation against Android API classes, not an AGP or APK build.
+
+Command from that harness directory:
+`GRADLE_USER_HOME=/workspace/.gradle-music /workspace/toolchains/gradle-9.9.1/bin/gradle test -PplainJvmChecks --no-daemon --console=plain`
+passed 11 tests (five LibraryRepositoryTest and six ScanDeltaTest), zero failures/errors/skips.
+The six delta cases overlap the earlier 79-test run; do not sum these as 90 unique cases.
+The scoped JVM configuration omits the unused native-runtime artifact only for these non-Robolectric
+tests. The full suite retains it and could not resolve it: Maven Central redirects
+nativeruntime-dist-compat 1.0.19 to gcp.mirrors.maven.org, denied by proxy. No SQLite tests ran;
+no fallback runner, disabled assertions, library downgrade or verification bypass was used.
+Added gcp.mirrors.maven.org to the existing network draft. User review/publication remains necessary.
 
 Git fetch succeeded; GitHub API and both competitor product sites return proxy access denial.
 Saved a network-only environment draft adding api.github.com, powerampapp.com,
