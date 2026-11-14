@@ -40,7 +40,7 @@ Poweramp and Symfonium as the reference for a local player.
 5. Acceptance: measure startup, scan time, 120 Hz frame times, battery and actual audio output.
    The targets above are not measured results. No Poweramp/Symfonium parity claim until these pass.
 
-Streaming, Soulseek, themes and visualizers are deferred. USB DAC output, network casting and rare
+Streaming, Soulseek and themes are deferred. Visualizers are excluded by the owner. USB DAC output, network casting and rare
 formats are lower priority until the owner has a concrete use. Bluetooth output uses Android media
 routes; it does not imply a network casting protocol. Keep minSdk 37, target 37 and arm64 only.
 
@@ -107,6 +107,8 @@ backup and restore of user data (M1, new).
 - [ ] Export and import of `user.db` (playlists, favourites, history) to a file the owner keeps.
 
 ## M2 Design system and the real shell (`:app`)
+
+Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. Claude owns design.
 - [ ] Bring the Earbuds design system: Google Sans Flex, Material Symbols variable font (subset by
       a script as in `DKurocl/xm5` `docs/icon/symbols.py`), EmphasizedEasing, haptics vocabulary.
       Replace `AppIcons`; add a CI guard against other icon sources.
