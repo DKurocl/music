@@ -45,7 +45,7 @@ data class TrackEntity(
     val songKey: String,
     val modifiedAt: Long,
     val sizeBytes: Long,
-    /** The scan that last saw the file; rows left behind by a scan are files that are gone. */
+    /** The scan that last changed this row. Unchanged files retain their previous value. */
     val scanId: Long,
     val genre: String? = null,
     val channels: Int? = null,
@@ -91,14 +91,23 @@ interface TrackDao {
     @Upsert
     suspend fun upsert(tracks: List<TrackEntity>)
 
-    @Query("DELETE FROM tracks WHERE id LIKE :prefix || ':%' AND scanId != :scanId")
-    suspend fun deleteNotSeen(prefix: String, scanId: Long): Int
+    @Query("SELECT * FROM tracks WHERE substr(id, 1, length(:prefix) + 1) = :prefix || ':'")
+    suspend fun snapshot(prefix: String): List<TrackEntity>
+
+    @Query("DELETE FROM tracks WHERE id IN (:ids)")
+    suspend fun deleteIds(ids: List<String>): Int
 
     /** Puts a finished scan in place in one step, so the list never shows a half-scanned library. */
     @Transaction
     suspend fun replace(prefix: String, scanId: Long, tracks: List<TrackEntity>) {
-        tracks.chunked(500).forEach { upsert(it) }
-        deleteNotSeen(prefix, scanId)
+        // Validate before writing: a malformed snapshot must never remove another source's rows.
+        require(tracks.all { it.id.startsWith("$prefix:") && it.scanId == scanId })
+        val delta = scanDelta(snapshot(prefix), tracks, TrackEntity::id) { old, row ->
+            old == row.copy(scanId = old.scanId)
+        }
+        // Updating only scanId would still fire Room/FTS triggers and rebuild every UI index.
+        delta.changed.chunked(500).forEach { upsert(it) }
+        delta.removed.chunked(500).forEach { deleteIds(it) }
     }
 }
 

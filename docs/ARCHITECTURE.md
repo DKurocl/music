@@ -59,8 +59,9 @@ playable URL at that same point, so a queue can hold thousands of unresolved ite
 Two databases, on purpose:
 
 - `library.db` (exists): a cache of what is on the phone. Destructive migrations; a scan rebuilds it.
-  A scan writes rows with its `scanId` and then deletes local rows with another id, in one
-  transaction, so the list never shows a half-scanned library.
+  A scan compares a complete source snapshot inside one transaction, writes changed rows and deletes
+  missing IDs in batches. Unchanged rows keep their old scanId and do not fire FTS/Room invalidations;
+  scanId records the last content change, not membership in the latest snapshot.
 - `user.db` (version 1): playlists, favourites, play history, per-track lyric offsets. Real
   migrations with exported schemas. It refers to songs by `SongKey` and path, never by MediaStore id,
   so it survives a rescan and resolves moved files. Uninstall still removes app data; backup/export is not implemented.
@@ -210,3 +211,9 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     identified WF-1000XM5 route and requires explicit selection. It uses the MIT AutoEq Rtings B&K
     5128 profile, with source coefficients and attribution retained. Unknown output is neutral.
     No physical response, subjective improvement or CPU/battery claim has been measured here.
+
+33. Library cache replacement uses a linear complete-snapshot delta inside the Room transaction.
+    Only content changes are upserted; missing IDs are deleted in batches of 500. scanId is ignored
+    for content equality and retained on unchanged rows. Prefix/scan generation and duplicate IDs
+    are validated before writes. Empty successful snapshots remove only their own source. This
+    avoids triggering FTS and rebuilding every library view merely because the app came forward.

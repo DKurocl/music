@@ -1,3 +1,34 @@
+# Active work: incremental cache and local-player comparison (Codex, 2026-11-15)
+
+Unmerged branch: `agent/m1-incremental-cache`. Android/Room/CI validation is blocked by network
+access to api.github.com and the absence of a local Android SDK. Do not merge or call this released.
+Owner now explicitly defers network libraries; compare local workflows only.
+
+[code] Replaced unconditional whole-library upserts with a linear snapshot delta inside the Room
+transaction. Unchanged rows keep scanId, so no write/FTS trigger/library invalidation is needed.
+Changed rows and removed IDs are batched at 500; cross-source/wrong-generation/duplicate snapshots
+fail before writes. Existing failure/cancellation behavior and transactional publication remain.
+Added six pure delta tests and five SQLite regression cases; updated the in-memory DAO test double.
+
+Verified this session: `python3 /workspace/toolchains/music-jvm/check.py` compiled actual model,
+tags, lyrics, DSP and ScanDelta sources with pinned Kotlin 2.2.21 and ran JUnit 4.13.2: 79 tests,
+zero failures. Compiler dependencies were downloaded over TLS from Maven Central and checked
+against its published artifact hashes. The XML parser stderr line belongs to malformed-input tests.
+The helper is outside the checkout, not a replacement for Gradle/Android gates.
+`git diff --check` passed. No Android SDK, emulator or phone tests were run. The new Room tests,
+full Gradle test, lint and APK build remain unrun, not passed.
+
+Git fetch succeeded; GitHub API and both competitor product sites return proxy access denial.
+Saved a network-only environment draft adding api.github.com, powerampapp.com,
+forum.powerampapp.com, symfonium.app, www.symfonium.app, support.symfonium.app and
+maven-central.storage-download.googleapis.com, preserving presets. Draft save is confirmed;
+publication/runtime application is not verified. No secrets requested.
+
+See PLAYER_COMPARISON.md for the complete local feature audit, limitations and ordered next steps.
+Competitor capabilities are contextual references, not current-version or phone-verified findings.
+Next: enable API access, inspect branch CI, fix any failures, then integrate only after green CI.
+Phone measurements remain required before any sound, speed, battery or overall-parity claim.
+
 # Handoff
 
 ## Active continuation: audio processing (Codex, 2026-11-14)
