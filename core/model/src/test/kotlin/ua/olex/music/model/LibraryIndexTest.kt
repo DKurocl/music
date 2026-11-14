@@ -66,6 +66,27 @@ class LibraryIndexTest {
         assertEquals(LibraryIndex.build(tracks), LibraryIndex.build(tracks.reversed()))
     }
 
+    @Test fun tenThousandTracksAppearExactlyOnceInEveryBrowseView() {
+        val tracks = (0 until 10_000).map { index ->
+            song(index.toString(), "Track $index", number = index % 10 + 1).copy(
+                albumArtist = "Artist ${index / 100}", album = "Album ${index / 10}",
+                path = "Music/Album ${index / 10}/$index.flac", genre = "Genre ${index % 5}",
+            )
+        }
+        val library = LibraryIndex.build(tracks)
+        val expectedIds = tracks.map { it.id }.toSet()
+        for (collections in listOf(library.albums, library.artists, library.genres, library.folders)) {
+            val indexed = collections.flatMap { it.tracks }.map { it.id }
+            assertEquals(10_000, indexed.size)
+            assertEquals(expectedIds, indexed.toSet())
+        }
+        assertEquals(1_000, library.albums.size)
+        assertEquals(100, library.artists.size)
+        assertEquals(1_000, library.folders.size)
+        assertEquals(5, library.genres.size)
+        assertEquals(expectedIds, library.byId.keys)
+    }
+
     @Test fun sortingDoesNotChangeWithThePhoneLocale() {
         val original = Locale.getDefault()
         try {

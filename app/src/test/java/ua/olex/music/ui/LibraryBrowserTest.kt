@@ -2,23 +2,33 @@ package ua.olex.music.ui
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performScrollTo
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [35])
+@Config(sdk = [35], qualifiers = "w412dp-h915dp-xhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LibraryBrowserTest {
     @get:Rule val compose = createComposeRule()
     private val opening = Track(TrackId("local:1"), "", "Z Opening", "Singer", album = "Record", trackNumber = 1)
@@ -33,6 +43,7 @@ class LibraryBrowserTest {
         }
         compose.onNodeWithText("Albums").performClick()
         compose.onNodeWithText("Record").performClick()
+        capture("album")
         compose.onNodeWithText("Play all").performClick()
         compose.runOnIdle {
             assertEquals(listOf(opening, finale), played)
@@ -47,6 +58,7 @@ class LibraryBrowserTest {
             AppTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { tracks, index -> played = tracks; start = index }, null, {}) }
         }
         compose.onNodeWithText("Z Opening").performClick()
+        capture("songs")
         compose.runOnIdle {
             assertEquals(listOf(finale, opening), played)
             assertEquals(1, start)
@@ -74,6 +86,17 @@ class LibraryBrowserTest {
         compose.runOnIdle { assertEquals(listOf(opening), played) }
     }
 
+    @Test fun failedSearchCanBeRetriedWithoutEditingTheQuery() {
+        var retries = 0
+        compose.setContent {
+            AppTheme {
+                LibraryBrowser(library, PaddingValues(), "opening", LibrarySearchResult("opening", emptyList(), failed = true), {}, null, { _, _ -> }, null, {}, { retries++ })
+            }
+        }
+        compose.onNodeWithText("Retry").performClick()
+        compose.runOnIdle { assertEquals(1, retries) }
+    }
+
     @Test fun queryCanBeEnteredAndClearedWithoutChangingTheLibrary() {
         val query = mutableStateOf("")
         compose.setContent {
@@ -84,5 +107,28 @@ class LibraryBrowserTest {
         compose.onNodeWithText("Clear").performClick()
         compose.onNodeWithText("Z Opening").assertIsDisplayed()
         compose.onNodeWithText("A Finale").assertIsDisplayed()
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi-night")
+    fun collectionActionsRemainReachableWithLargeTextInDarkMode() {
+        var played = false
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 2f)) {
+                AppTheme { LibraryBrowser(library, PaddingValues(), "", null, {}, null, { _, _ -> played = true }, null, {}) }
+            }
+        }
+        compose.onNodeWithText("Albums").performClick()
+        compose.onNodeWithText("Record").performClick()
+        compose.onNodeWithText("Play all").performScrollTo().assertIsDisplayed().performClick()
+        capture("album-dark-font2")
+        compose.runOnIdle { assertEquals(true, played) }
+    }
+
+    private fun capture(name: String) {
+        // These are actual test renders for human review, not approved screenshot goldens.
+        val directory = File("build/reports/ui-previews/${System.getProperty("music.testVariant", "test")}").apply { mkdirs() }
+        val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+        File(directory, "$name.png").outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
     }
 }

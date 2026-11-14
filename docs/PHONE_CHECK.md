@@ -36,6 +36,9 @@ Record the tested commit, APK versionCode, Pixel build, and WF-1000XM5 firmware 
 9. Swipe the app away while playing (continues), then while paused/ended (stops).
 10. Use font scale 2, light/dark theme and a narrow/split window. Scroll the player page and reach
     every control. Review appearance and TalkBack labels by hand.
+11. Set a 5-minute sleep timer, close the player page and turn off the screen. Music must pause
+    once at expiry. Replace a 5-minute timer with 15 minutes and verify the old deadline does not
+    pause playback. Cancel a timer, reconnect the UI, and verify the displayed active state.
 
 ## Evidence to capture
 

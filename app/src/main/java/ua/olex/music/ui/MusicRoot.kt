@@ -34,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -64,6 +65,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -141,6 +146,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 query = query, search = search, onQueryChange = model::setQuery,
                 currentId = playing.mediaId, onPlay = model::play,
                 scanError = model.scanError, onRescan = model::refresh,
+                onRetrySearch = model::retrySearch,
             )
         }
     }
@@ -150,6 +156,7 @@ fun MusicRoot(model: LibraryViewModel) {
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.label },
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
+            onSleepTimer = model::setSleepTimer,
         )
     }
     BackHandler(expanded) { expanded = false }
@@ -158,7 +165,7 @@ fun MusicRoot(model: LibraryViewModel) {
 @Composable
 internal fun ErrorNotice(message: String, onRetry: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(message, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium)
         TextButton(onClick = onRetry) { Text("Retry") }
     }
 }
@@ -184,8 +191,9 @@ internal fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
             Text(listOfNotNull(track.artist, track.format?.label).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
         leadingContent = { Artwork(track.artworkUri, Modifier.size(48.dp), 8.dp) },
+        trailingContent = { if (current) Text("Current", style = MaterialTheme.typography.labelSmall) },
         colors = ListItemDefaults.colors(containerColor = cs.surface),
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.clickable(onClick = onClick).semantics { selected = current },
     )
 }
 
@@ -223,11 +231,20 @@ private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit, onToggle: () -> U
 private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
+    onSleepTimer: (Int) -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
+    var timerDialog by rememberSaveable { mutableStateOf(false) }
+    if (timerDialog) {
+        SleepTimerDialog(
+            active = state.sleepDeadlineMs != null,
+            onDismiss = { timerDialog = false },
+            onSet = { minutes -> onSleepTimer(minutes); timerDialog = false },
+        )
+    }
 
     // Composition may survive screen-off. Poll only while the page is visible and playing.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -266,7 +283,10 @@ private fun NowPlaying(
                 onValueChange = { dragged = it },
                 onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null },
                 enabled = state.durationMs > 0,
-                modifier = Modifier.semantics { contentDescription = "Position" },
+                modifier = Modifier.semantics {
+                    contentDescription = "Position"
+                    stateDescription = "${clock(at)} of ${clock(state.durationMs)}"
+                },
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
@@ -285,8 +305,32 @@ private fun NowPlaying(
                 }
             }
             Spacer(Modifier.height(24.dp))
+            TextButton(enabled = state.connected, onClick = { timerDialog = true }) {
+                Text(if (state.sleepDeadlineMs != null) "Sleep timer on" else "Sleep timer")
+            }
+            state.sleepTimerError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.error, textAlign = TextAlign.Center) }
+            Spacer(Modifier.height(16.dp))
         }
     }
+}
+
+/** Timer choices send a single command; there is no UI countdown or background polling loop. */
+@Composable
+internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sleep timer") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Pause music after:")
+                listOf(5, 15, 30, 60, 90).forEach { minutes ->
+                    TextButton(onClick = { onSet(minutes) }, modifier = Modifier.fillMaxWidth()) { Text("$minutes minutes") }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
+        dismissButton = { if (active) TextButton(onClick = { onSet(0) }) { Text("Cancel timer") } },
+    )
 }
 
 private fun OutputRoute.label(): String = when (kind) {
