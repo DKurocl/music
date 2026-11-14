@@ -18,6 +18,14 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutionException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ua.olex.music.model.Track
 
 /** What is playing, as screens need it. Position is asked for ([PlayerConnection.positionMs]), not pushed. */
@@ -56,6 +64,8 @@ class PlayerConnection(context: Context) {
     private var controller: MediaController? = null
     private var connection: ListenableFuture<MediaController>? = null
     private var pendingPlay: Pair<List<Track>, Int>? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var queueJob: Job? = null
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = publish(player)
@@ -76,6 +86,8 @@ class PlayerConnection(context: Context) {
 
                 override fun onDisconnected(controller: MediaController) {
                     if (this@PlayerConnection.controller !== controller) return
+                    queueJob?.cancel()
+                    queueJob = null
                     this@PlayerConnection.controller = null
                     connection = null
                     pendingPlay = null
@@ -106,6 +118,8 @@ class PlayerConnection(context: Context) {
 
     /** Releases both completed and pending bindings without stopping the service's music. */
     fun disconnect() {
+        queueJob?.cancel()
+        queueJob = null
         val future = connection
         connection = null
         pendingPlay = null
@@ -133,9 +147,19 @@ class PlayerConnection(context: Context) {
             connect()
             return
         }
-        player.setMediaItems(tracks.map(::mediaItem), index, C.TIME_UNSET)
-        player.prepare()
-        player.play()
+        queueJob?.cancel()
+        val snapshot = tracks.toList()
+        queueJob = scope.launch {
+            // A large library can contain thousands of items; metadata construction must not
+            // block touch handling. Player commands themselves still belong on the main thread.
+            val items = withContext(Dispatchers.Default) {
+                snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track) }
+            }
+            if (controller !== player) return@launch
+            player.setMediaItems(items, index, C.TIME_UNSET)
+            player.prepare()
+            player.play()
+        }
     }
 
     fun toggle() { controller?.togglePlayback() }

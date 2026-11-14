@@ -71,6 +71,9 @@ dark mode with font scale 2. These are review artifacts, not approved golden bas
 10,000-track index invariant test, keeps identity normalization lazy for normal browsing, and
 preserves radio edits and alternate mixes. Search failure now has an explicit Retry action;
 observer registration failure falls back to manual refresh instead of crashing the app.
+The final performance pass moves large-queue metadata construction off the main thread with
+cancellation on replacement/disconnect, and isolates progress recomposition from the rest of the
+player. This is source-level optimization, not a measured frame-time or battery claim.
 
 **Additional model verification.** Commit `f1b286d` preserves band names and live/remixed variants
 when normalizing SongKey. Pure tests pass offline: 26 tests (10 SongKey, 8 library index, 8 lyrics),
