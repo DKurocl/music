@@ -5,6 +5,7 @@
 ```
 :core:model     pure Kotlin   Track, TrackId, AudioFormat, SongKey (one song across sources)
 :core:lyrics    pure Kotlin   Lyrics model; LRC, word-timed LRC and TTML parsers
+:core:user      Android lib   Durable playlists, favourites, history and lyric offsets
 :core:library   Android lib   Room cache of local tracks, scanner, LibraryRepository
 :core:playback  Android lib   Media3: PlaybackService, PlayerFactory, PlayerConnection, OutputRoute
 :app            Android app   Compose UI, AppGraph (manual DI), MainActivity
@@ -60,9 +61,9 @@ Two databases, on purpose:
 - `library.db` (exists): a cache of what is on the phone. Destructive migrations; a scan rebuilds it.
   A scan writes rows with its `scanId` and then deletes local rows with another id, in one
   transaction, so the list never shows a half-scanned library.
-- `user.db` (planned, M1): playlists, favourites, play history, per-track lyric offsets. Real
+- `user.db` (version 1): playlists, favourites, play history, per-track lyric offsets. Real
   migrations with exported schemas. It refers to songs by `SongKey` and path, never by MediaStore id,
-  so it survives a rescan, a reinstall and a moved file.
+  so it survives a rescan and resolves moved files. Uninstall still removes app data; backup/export is not implemented.
 
 The first scanner reads MediaStore (instant, no native code). M1 replaces it behind
 `LibraryRepository` with a file walker and TagLib, because MediaStore knows one artist per track and
@@ -147,3 +148,11 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     main thread. A newer selection or disconnected UI cancels the pending build. Progress state
     lives in its own composable so a tick does not invalidate the artwork and player controls.
     These avoid work on the UI thread; actual frame-time measurements still need the phone. `[код]`
+
+22. user.db has an exported Room schema, foreign keys and no destructive migration fallback.
+    Playlist entries have unique positions; moves/removals rewrite them in one transaction.
+    Metadata uses Upsert so refreshes cannot cascade-delete favourites/history/offsets.
+    Room testing uses the same pinned Room version as runtime. Missing files remain visible.
+23. History is recorded by PlaybackService through an application-owned persistence interface.
+    Core playback does not depend on Room or the app module. Stable per-occurrence queue IDs
+    distinguish repeated copies; buffering and pause/resume do not create extra history starts.

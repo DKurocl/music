@@ -3,6 +3,7 @@ package ua.olex.music.playback
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -46,4 +47,13 @@ class PlayerConnectionTest {
         TrackId("local:42"), "content://media/external/audio/media/42", "Song", "Artist",
         durationMs = 120_000, discNumber = 2,
     )
+
+    @Test fun repeatedSongHasDistinctQueueOccurrencesAndKeepsDurablePath() {
+        val song = track().copy(path = "Music/song.flac")
+        val first = PlayerConnection.mediaItem(song)
+        val second = PlayerConnection.mediaItem(song)
+        assertEquals(first.mediaId, second.mediaId)
+        assertNotEquals(first.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY), second.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))
+        assertEquals(song.path, first.mediaMetadata.extras?.getString(PlayerConnection.PATH_KEY))
+    }
 }

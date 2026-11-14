@@ -23,7 +23,12 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import android.util.Log
 import ua.olex.music.model.SleepTimer
+import ua.olex.music.model.PlaybackHistoryGate
+import ua.olex.music.model.Track
+import ua.olex.music.model.TrackId
 
 /**
  * Playback lives here, apart from any screen: Android keeps it alive as a media foreground
@@ -36,6 +41,7 @@ class PlaybackService : MediaLibraryService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val sleepTimer = SleepTimer()
     private var sleepJob: Job? = null
+    private val historyGate = PlaybackHistoryGate()
 
     override fun onCreate() {
         super.onCreate()
@@ -45,6 +51,38 @@ class PlaybackService : MediaLibraryService() {
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
+        session?.player?.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                historyGate.transition()
+                recordCurrentPlayback()
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback() }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) historyGate.transition()
+            }
+        })
+    }
+
+    private fun recordCurrentPlayback() {
+        val player = session?.player ?: return
+        if (!player.isPlaying) return
+        val item = player.currentMediaItem ?: return
+        val meta = item.mediaMetadata
+        val occurrence = meta.extras?.getString(PlayerConnection.QUEUE_KEY) ?: item.mediaId
+        val owner = application as? PlaybackHistoryOwner ?: return
+        if (item.mediaId.isBlank() || !historyGate.shouldRecord(occurrence, player.isPlaying)) return
+        val track = Track(
+            TrackId(item.mediaId), item.requestMetadata.mediaUri?.toString().orEmpty(),
+            meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(),
+            album = meta.albumTitle?.toString(), albumArtist = meta.albumArtist?.toString(),
+            durationMs = meta.durationMs ?: player.duration.coerceAtLeast(0),
+            path = meta.extras?.getString(PlayerConnection.PATH_KEY), artworkUri = meta.artworkUri?.toString(),
+        )
+        scope.launch {
+            try { owner.recordPlayback(track) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (error: Exception) { Log.w("MusicHistory", "Could not persist history: ${error.javaClass.simpleName}") }
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session

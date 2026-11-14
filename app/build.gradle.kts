@@ -59,6 +59,7 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:lyrics"))
     implementation(project(":core:library"))
+    implementation(project(":core:user"))
     implementation(project(":core:playback"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
