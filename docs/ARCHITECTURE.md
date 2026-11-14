@@ -71,7 +71,7 @@ no ReplayGain, lyrics, MusicBrainz ids or multi-value tags.
 
 ## UI
 
-Compose, Material 3 Expressive, wallpaper colors; artwork colors on the player page. Manual DI:
+Compose, Material 3 Expressive, wallpaper colors on every screen, including the player. Album art never changes the palette. Manual DI:
 `AppGraph` makes one of each long-lived object on first use. The design system (Google Sans Flex,
 the Material Symbols variable font, motion, haptics, splash hand-off) comes from the owner's Earbuds
 app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than invent a second one.

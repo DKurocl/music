@@ -1,11 +1,15 @@
 # Handoff
 
-## Active: Codex file metadata integration (2026-11-14)
+## Codex integrated local-player delivery (2026-11-14)
 
 Branch `agent/m1-file-metadata`, based on current main `f04db66`. The owner supplied Claude's
 latest chat: Claude was working on design but the owner reports its quota is exhausted. Codex now owns
 the integrated local-player delivery (12-hour travel deadline), including UI. Codex takes the open M1 task wiring the
 existing tag reader into the library. No parser duplication. Task claimed in ROADMAP.
+
+Latest owner steering: functionality first, then review every visible UI state for fit/finish.
+Use only wallpaper-derived system colors, including the player; never artwork-derived colors.
+This is now an explicit AGENTS rule. Existing AppTheme already uses wallpaper colors. No visualizers.
 
 Implemented: incremental file enrichment, exact audio properties, multiple artists/genres, stored
 ReplayGain/lyrics/MusicBrainz/cover range/delay/padding, cache v3. Per-file IO failure falls back
@@ -26,7 +30,8 @@ Player light and dark/font-scale-2 renders inspected: controls and typography ar
 large-font page scrolls to its lower actions, and that action is exercised by the test. These are
 component renders with fixture data and no artwork, not approved goldens or phone screenshots.
 Lint caught an unused icon-font resource because runtime uses generated vectors. The source subset
-now lives under scripts/assets, outside APK resources; no lint suppression added. Final retry pending.
+now lives under scripts/assets, outside APK resources; no lint suppression added. Final code head `85d7748` passed full CI 43638096372: tests, debug/release lint, R8 APK builds
+and owner-signature verification. Code is ready for shared main; this final entry changes only docs.
 
 Previous player head `f1ba244` passed CI 43571427496: all tests, lint, R8 and owner signing. It is
 already in main and release music-v1018 via Claude's integration. Earlier pending-CI language below
