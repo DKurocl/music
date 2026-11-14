@@ -265,7 +265,7 @@ private fun NowPlaying(
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onSleepTimer: (Int) -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
-    onQueuePlay: (Int) -> Unit, onQueueMove: (Int, Int) -> Unit, onQueueRemove: (Int) -> Unit,
+    onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
     onMore: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -274,6 +274,10 @@ private fun NowPlaying(
     val route by monitor.route.collectAsStateWithLifecycle()
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var queueSheet by rememberSaveable { mutableStateOf(false) }
+    var audioPath by rememberSaveable { mutableStateOf(false) }
+    var outputUnavailable by rememberSaveable { mutableStateOf(false) }
+    val changeOutput: () -> Unit = { outputUnavailable = !monitor.showOutputSwitcher() }
+    if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput)
     if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove)
     if (timerDialog) {
         SleepTimerDialog(
@@ -301,10 +305,9 @@ private fun NowPlaying(
             state.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.error, textAlign = TextAlign.Center) }
             Spacer(Modifier.height(8.dp))
             // The signal path, as far as it is known: what the file is and where it goes.
-            Text(
-                listOfNotNull(format, route?.label()).joinToString("  →  "),
-                style = MaterialTheme.typography.labelLarge, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            TextButton(onClick = { audioPath = true }) {
+                Text(listOfNotNull(format, route?.label()).joinToString("  →  ").ifEmpty { "Audio path" }, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             Spacer(Modifier.height(16.dp))
             PlaybackProgress(state, position, onSeek)
             Spacer(Modifier.height(12.dp))
@@ -321,6 +324,7 @@ private fun NowPlaying(
             }
             Spacer(Modifier.height(24.dp))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AssistChip(onClick = changeOutput, label = { Text("Output") })
                 AssistChip(onClick = { queueSheet = true }, label = { Text("Queue (${state.queueSize})") })
                 FilterChip(selected = state.shuffle, onClick = onShuffle, label = { Text(if (state.shuffle) "Shuffle on" else "Shuffle off") })
                 AssistChip(onClick = onRepeat, label = { Text(when (state.repeat) {
@@ -329,6 +333,7 @@ private fun NowPlaying(
                     ua.olex.music.playback.RepeatMode.ONE -> "Repeat one"
                 }) })
             }
+            if (outputUnavailable) Text("Open Android's media output controls to choose a device.", style = MaterialTheme.typography.bodyMedium)
             TextButton(enabled = state.connected, onClick = { timerDialog = true }) {
                 Text(if (state.sleepDeadlineMs != null) "Sleep timer on" else "Sleep timer")
             }

@@ -16,15 +16,15 @@ import ua.olex.music.playback.PlayerState
 
 /** Queue edits address stable occurrences, so repeated copies of the same song remain independent. */
 @Composable
-internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Int) -> Unit, onMove: (Int, Int) -> Unit, onRemove: (Int) -> Unit) {
+internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (String) -> Unit, onMove: (String, Int) -> Unit, onRemove: (String) -> Unit) {
     var editingKey by rememberSaveable { mutableStateOf<String?>(null) }
     val index = state.queue.indexOfFirst { it.key == editingKey }
     if (index >= 0) {
         AlertDialog(onDismissRequest = { editingKey = null }, title = { Text(state.queue[index].title) }, text = {
             Column {
-                TextButton(enabled = index > 0, onClick = { onMove(index, index - 1); editingKey = null }) { Text("Move up") }
-                TextButton(enabled = index < state.queue.lastIndex, onClick = { onMove(index, index + 1); editingKey = null }) { Text("Move down") }
-                TextButton(onClick = { onRemove(index); editingKey = null }) { Text("Remove from queue") }
+                TextButton(enabled = index > 0, onClick = { onMove(state.queue[index].key, -1); editingKey = null }) { Text("Move up") }
+                TextButton(enabled = index < state.queue.lastIndex, onClick = { onMove(state.queue[index].key, 1); editingKey = null }) { Text("Move down") }
+                TextButton(onClick = { onRemove(state.queue[index].key); editingKey = null }) { Text("Remove from queue") }
             }
         }, confirmButton = { TextButton(onClick = { editingKey = null }) { Text("Close") } })
     }
@@ -38,7 +38,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Int)
                     supportingContent = { Text(if (position == state.queueIndex) "Current · ${item.artist}" else item.artist) },
                     leadingContent = { Text("${position + 1}") },
                     trailingContent = { TextButton(onClick = { editingKey = item.key }) { Text("More") } },
-                    modifier = Modifier.clickable { onPlay(position) },
+                    modifier = Modifier.clickable { onPlay(item.key) },
                 )
             }
         }

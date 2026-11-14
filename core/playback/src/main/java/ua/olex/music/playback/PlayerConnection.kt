@@ -57,6 +57,7 @@ data class PlayerState(
     val queueIndex: Int = -1,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.OFF,
+    val audio: AudioDiagnostics = AudioDiagnostics(),
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -71,6 +72,7 @@ enum class RepeatMode { OFF, ALL, ONE }
  * The app's side of the player: one controller for the whole app, connected to [PlaybackService].
  * Screens read [state] and call the commands; they never touch ExoPlayer.
  */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlayerConnection(context: Context) {
     private val app = context.applicationContext
     private val _state = MutableStateFlow(PlayerState())
@@ -98,7 +100,7 @@ class PlayerConnection(context: Context) {
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
                     if (this@PlayerConnection.controller === controller) {
-                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 })
+                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 }, audio = AudioDiagnostics.fromExtras(extras))
                     }
                 }
 
@@ -197,19 +199,24 @@ class PlayerConnection(context: Context) {
             else -> Player.REPEAT_MODE_OFF
         } }
     }
-    fun playQueueItem(index: Int) {
+    fun playQueueItem(key: String) {
         controller?.let { player ->
+            val index = player.indexOfQueueKey(key)
             if (index !in 0 until player.mediaItemCount) return
             player.seekToDefaultPosition(index)
             if (player.playbackState == Player.STATE_IDLE) player.prepare()
             player.play()
         }
     }
-    fun moveQueueItem(from: Int, to: Int) {
-        controller?.let { if (from in 0 until it.mediaItemCount && to in 0 until it.mediaItemCount) it.moveMediaItem(from, to) }
+    fun moveQueueItem(key: String, delta: Int) {
+        controller?.let {
+            val from = it.indexOfQueueKey(key)
+            val to = from.toLong() + delta
+            if (from >= 0 && to in 0 until it.mediaItemCount.toLong()) it.moveMediaItem(from, to.toInt())
+        }
     }
-    fun removeQueueItem(index: Int) {
-        controller?.let { if (index in 0 until it.mediaItemCount) it.removeMediaItem(index) }
+    fun removeQueueItem(key: String) {
+        controller?.let { val index = it.indexOfQueueKey(key); if (index >= 0) it.removeMediaItem(index) }
     }
 
     /** Appends or inserts after the current item; queued additions keep their request order. */
@@ -223,10 +230,16 @@ class PlayerConnection(context: Context) {
                     snapshot.map { currentCoroutineContext().ensureActive(); mediaItem(it) }
                 }
                 if (controller !== player) return@withLock
-                val empty = player.mediaItemCount == 0
-                val index = if (next && !empty) player.currentMediaItemIndex + 1 else player.mediaItemCount
-                player.addMediaItems(index, items)
-                if (empty) { player.prepare(); player.play() }
+                val result = player.sendCustomCommand(QueueCommand.command, Bundle().apply {
+                    putParcelableArrayList(QueueCommand.ITEMS, ArrayList(items.map { it.toBundle() }))
+                    putBoolean(QueueCommand.NEXT, next)
+                })
+                result.addListener({
+                    if (controller !== player) return@addListener
+                    val success = try { Futures.getDone(result).resultCode == SessionResult.RESULT_SUCCESS }
+                        catch (_: ExecutionException) { false } catch (_: CancellationException) { false }
+                    if (!success) _state.value = _state.value.copy(error = "Couldn't add to the queue. Try again.")
+                }, app.mainExecutor)
             }
         }
     }
@@ -276,6 +289,7 @@ class PlayerConnection(context: Context) {
             queueIndex = player.currentMediaItemIndex.takeIf { player.mediaItemCount > 0 } ?: -1,
             shuffle = player.shuffleModeEnabled,
             repeat = when (player.repeatMode) { Player.REPEAT_MODE_ALL -> RepeatMode.ALL; Player.REPEAT_MODE_ONE -> RepeatMode.ONE; else -> RepeatMode.OFF },
+            audio = (player as? MediaController)?.sessionExtras?.let(AudioDiagnostics::fromExtras) ?: AudioDiagnostics(),
         )
     }
 
@@ -303,6 +317,11 @@ class PlayerConnection(context: Context) {
         }
     }
 }
+
+/** Resolve against the controller's live timeline rather than stale row positions from a dialog. */
+internal fun Player.indexOfQueueKey(key: String): Int = (0 until mediaItemCount).firstOrNull {
+    getMediaItemAt(it).mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) == key
+} ?: -1
 
 /** Pause also cancels buffering; Play retries a failed item and restarts an ended queue. */
 internal fun Player.togglePlayback() {

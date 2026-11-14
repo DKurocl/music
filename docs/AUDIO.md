@@ -6,9 +6,9 @@ unless it says so; "to measure" items are tasks in ROADMAP M3 with the command t
 ## What the hardware can do
 
 - WF-1000XM5 codecs: SBC, AAC, LDAC, LC3 (LE Audio). No aptX of any kind. `[аналіз]`
-- So the only high-quality link is LDAC (up to 990 kbps, 24-bit, up to 96 kHz). AAC is the
-  fallback (about 256 kbps, 16-bit/44.1-48 kHz). LE Audio LC3 trades quality for latency and
-  battery: not for music listening. `[аналіз]`
+- LDAC supports modes up to 990 kbps and source formats up to 24-bit/96 kHz. Actual negotiated
+  mode and radio stability must be measured. AAC and LE Audio LC3 can also carry music; codec
+  names alone do not establish audible quality. Do not force a codec or bitrate from this app. `[аналіз]`
 - Tensor G5 is not a Qualcomm chip. Everything branded Snapdragon Sound, aptX Adaptive or aptX
   Lossless does not exist on this phone and must not be designed for. `[аналіз]`
 - The earbuds only use LDAC when "Bluetooth quality: priority on sound quality" is set on them. The
@@ -70,3 +70,18 @@ a guess: an unknown part is absent, not "probably LDAC".
   lyrics page reads the player position per frame and draws; it must not recompose per frame.
 - No idle loops: a paused player, a hidden page or a dozing phone runs nothing (the position
   poller, the motion-artwork video and the lyrics clock all stop).
+
+## Implemented output controls and diagnostics
+
+[код] The Output action opens Android's system media output switcher for phone speakers, paired
+Bluetooth speakers and headphones. Hardware volume keys address the media stream. There is no
+forced SCO/communication route, automatic volume boost, or guessed device-specific EQ. Network
+casting protocols are not implemented by this action.
+
+The Audio path sheet reports decoder initialization and the app AudioTrack's actual configured
+encoding, sample rate and channel count from Media3 analytics. These are runtime callbacks, not
+proof of the system mixer's output, the Bluetooth link bitrate, or bit-perfect playback. No 990
+kbps/LDAC badge is shown without evidence. Physical validation remains required.
+
+[docs] https://developer.android.com/reference/android/media/MediaRouter2#showSystemOutputSwitcher()
+[docs] https://developer.android.com/reference/androidx/media3/exoplayer/analytics/AnalyticsListener
