@@ -179,6 +179,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
     fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(tracks, next)
+    fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) = player.setEqualizer(routeKey, settings)
     fun dismissQueueError() = player.dismissQueueError()
 
     private fun hasAccess() =
