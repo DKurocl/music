@@ -140,3 +140,10 @@ failed to idle around the text input; Delete matched both the background and dia
 Tests now use native Robolectric rendering and scope confirmation to the dialog. No tests removed.
 The real KSP schema `core/user/schemas/ua.olex.music.user.UserDatabase/1.json` was downloaded from
 that run, and a MigrationTestHelper baseline fixture test is added. It is not a fabricated schema.
+
+CI 43569872767 compiled the output/queue recovery sources. One text-input UI test still failed
+Compose auto-idling; deletion confirmation now passes. The input test now advances the animation
+clock explicitly and the field fills its dialog width. Assertions remain intact. CI uses --continue
+for the test task so independent module failures are collected in the same run (the build still
+requires all tests to pass). Final lifecycle regressions cover paused restore, explicit-selection
+precedence, empty queue teardown, serialized service restarts, and diagnostics/UI output callbacks.

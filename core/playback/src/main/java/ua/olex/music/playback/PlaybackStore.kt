@@ -8,6 +8,7 @@ import androidx.media3.common.MediaMetadata
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileNotFoundException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -45,8 +46,8 @@ internal class PlaybackStore(directory: File) {
     }
 
     suspend fun read(): PlaybackCheckpoint? = mutex.withLock {
-        if (!queue.baseFile.exists()) return@withLock null
-        val data = JSONObject(String(queue.readFully(), Charsets.UTF_8))
+        val bytes = try { queue.readFully() } catch (_: FileNotFoundException) { return@withLock null }
+        val data = JSONObject(String(bytes, Charsets.UTF_8))
         require(data.getInt("version") == 1) { "Unsupported playback state version" }
         val generation = data.getString("generation")
         val rows = data.getJSONArray("items")
@@ -56,7 +57,7 @@ internal class PlaybackStore(directory: File) {
         val order = data.getJSONArray("order").let { array -> (0 until array.length()).map(array::getInt) }
         require(order.size == items.size && order.toSet() == items.indices.toSet())
         val savedCursor = runCatching { JSONObject(String(cursor.readFully(), Charsets.UTF_8)) }.getOrNull()
-            ?.takeIf { it.optString("generation") == generation } ?: data
+            ?.takeIf { it.optString("generation") == generation && it.optInt("index", -1) in 0..items.lastIndex.coerceAtLeast(0) && it.optLong("position", -1) >= 0 } ?: data
         val repeat = data.getInt("repeat")
         require(repeat in 0..2)
         PlaybackCheckpoint(generation, items, order, data.getBoolean("shuffle"), repeat,

@@ -60,7 +60,7 @@ jobs:
         run: |
           set -o pipefail
           # Robolectric runs API 35 until it supports 37; shipped APKs keep minSdk 37.
-          { gradle test -PminSdk=35 --no-daemon &&
+          { gradle test -PminSdk=35 --continue --no-daemon &&
             gradle :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon;
           } 2>&1 | tee build.log || {
             grep -E '^e: |error:|ERROR:|What went wrong' -A2 build.log | head -60 | while IFS= read -r l; do

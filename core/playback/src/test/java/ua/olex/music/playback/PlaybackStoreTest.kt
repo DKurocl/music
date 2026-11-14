@@ -79,4 +79,16 @@ class PlaybackStoreTest {
         assertThrows(IllegalArgumentException::class.java) { runBlocking { PlaybackStore(directory).read() } }
         assertEquals("{\"version\":999}", file.readText())
     }
+
+    @Test fun recreatedServiceReadWaitsForPreviousServicesFinalWrite() = runBlocking {
+        val journal = PlaybackJournal(PlaybackStore(directory))
+        try {
+            journal.write(state())
+            journal.write(state().copy(positionMs = 99_000))
+            assertEquals(99_000L, journal.read()?.positionMs)
+            journal.write(state("new-queue").copy(positionMs = 8_000))
+            assertEquals("new-queue", journal.read()?.generation)
+            assertEquals(8_000L, journal.read()?.positionMs)
+        } finally { journal.close() }
+    }
 }

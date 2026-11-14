@@ -104,7 +104,7 @@ internal fun SavedSongItem(row: SavedSongRow, currentId: String?, onPlay: () -> 
 internal fun PlaylistNameDialog(title: String, initial: String = "", onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by rememberSaveable(initial) { mutableStateOf(initial) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
-        OutlinedTextField(name, onValueChange = { name = it }, label = { Text("Playlist name") }, singleLine = true)
+        OutlinedTextField(name, onValueChange = { name = it }, label = { Text("Playlist name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
