@@ -8,24 +8,45 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.SavedStateHandle
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import ua.olex.music.graph
 import ua.olex.music.model.Track
+import ua.olex.music.model.LibraryIndex
 import ua.olex.music.playback.PlayerState
 
 /** The library and the player, as the first screens need them. */
-class LibraryViewModel(app: Application) : AndroidViewModel(app) {
+@OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+class LibraryViewModel(app: Application, private val savedState: SavedStateHandle) : AndroidViewModel(app) {
     private val graph = app.graph
     private val player get() = graph.player
 
     /** Null until the first read from the database: the list shows nothing rather than "empty". */
-    val tracks: StateFlow<List<Track>?> = graph.library.tracks.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val playing: StateFlow<PlayerState> get() = player.state
+    val query: StateFlow<String> = savedState.getStateFlow("search", "")
+    val search: StateFlow<LibrarySearchResult?> = query
+        .debounce { if (it.isBlank()) 0 else 180 }
+        .flatMapLatest { text ->
+            if (text.isBlank()) flowOf(LibrarySearchResult(text, emptyList()))
+            else graph.library.search(text).map { LibrarySearchResult(text, it) }
+                .catch { emit(LibrarySearchResult(text, emptyList(), failed = true)) }
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    fun setQuery(text: String) { savedState["search"] = text }
 
     var allowed by mutableStateOf(hasAccess()); private set
     var scanning by mutableStateOf(false); private set
@@ -74,3 +95,6 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
     private fun hasAccess() =
         getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
 }
+
+/** Results carry their query so the screen never labels old matches as a newer search. */
+data class LibrarySearchResult(val query: String, val tracks: List<Track>, val failed: Boolean = false)

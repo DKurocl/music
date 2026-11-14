@@ -18,6 +18,8 @@ separate commits to keep merges trivial.
 - [~] First run on the phone (Codex, 2026-11-14): grant access, list fills, a FLAC plays, notification and lock screen
       controls work, earbud buttons work, pulling an earbud pauses. Record results in HANDOFF.
       Preparing failure handling and regression tests; physical-device checks remain pending.
+- [x] First-run hardening: preserve the library on failure, lifecycle-bound controller/progress,
+      buffering-aware controls, retry UI and regression tests (`04bef1b`, CI 43549776145).
 - [ ] Owner adds repository secrets `OWNER_KEYSTORE_B64`, `OWNER_KEYSTORE_PASSWORD`,
       `OWNER_KEY_ALIAS`, `OWNER_KEY_PASSWORD` (same key as Earbuds and VPN). Then a `main` build
       publishes `music-v<code>` and Obtainium installs it.
@@ -30,9 +32,9 @@ separate commits to keep merges trivial.
 - [ ] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
       mtime+size, replaces MediaStoreScanner behind LibraryRepository. Done when: 10 000 files
       rescan with no changes in under 2 s on the phone.
-- [ ] Library model: albums, artists (album artist grouping), genres, folders; sort rules (disc,
+- [~] Library model (Codex, 2026-11-14; owner requested broader work): albums, artists (album artist grouping), genres, folders; sort rules (disc,
       track; articles ignored); queries as Flows.
-- [ ] Search: Room FTS over title, artist, album; prefix and diacritic-insensitive.
+- [~] Search (Codex, 2026-11-14): Room FTS over title, artist, album; prefix and diacritic-insensitive.
 - [ ] `user.db`: playlists, favourites, play history, lyric offsets, with exported schemas and a
       migration test. Keys by SongKey + path.
 - [ ] Artwork: embedded picture or `cover.*`/`folder.*` in the folder, decoded once into a disk
