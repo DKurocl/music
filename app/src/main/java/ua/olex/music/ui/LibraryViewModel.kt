@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserRepository
@@ -63,6 +64,21 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         userError = "Couldn't open your personal library. Your saved data has not been reset."
         emit(PersonalLibraryState())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
+
+    val embeddedLyrics = combine(library, playing) { index, state ->
+        state.mediaId?.let { index?.byId?.get(ua.olex.music.model.TrackId(it))?.metadata?.lyrics }
+    }.distinctUntilChanged().map { text -> text?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ua.olex.music.lyrics.Lyrics.EMPTY)
+
+    val lyricOffset = combine(library, playing) { index, state ->
+        state.mediaId?.let { index?.byId?.get(ua.olex.music.model.TrackId(it)) }?.let(ua.olex.music.model.SavedSong::from)
+    }.distinctUntilChanged().flatMapLatest { song -> song?.let(graph.userLibrary::lyricOffset) ?: flowOf(0L) }
+        .catch { emit(0L) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
+
+    fun setLyricOffset(offsetMs: Long) {
+        val track = playing.value.mediaId?.let { library.value?.byId?.get(ua.olex.music.model.TrackId(it)) } ?: return
+        editUserData { setLyricOffset(track, offsetMs.coerceIn(-60_000, 60_000)) }
+    }
 
     var userError by mutableStateOf<String?>(null); private set
     val personalActions = PersonalLibraryActions(

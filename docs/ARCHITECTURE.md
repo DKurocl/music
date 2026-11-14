@@ -187,3 +187,11 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     unchanged. Album ownership remains by album artist; multiple tagged album artists and genres
     each get their own collection. Embedded artwork is stored as a validated byte range, never
     loaded during scanning. Gain/lyrics/gapless values are data for later consumers, not yet applied.
+
+29. Player typography reuses the owner's Google Sans Flex asset (OFL retained). Icons are generated
+    from official Material Symbols Rounded with scripts/player_symbols.py; Apache license retained.
+    PlayerPage has no controller/route bindings, enabling real UI rendering checks. Local embedded
+    lyrics parse off the UI thread and are observed by distinct text; timing offsets use user.db.
+    Lyrics poll only while visible/started and playing, update the active line at 10 Hz, stop following
+    on manual drag, and subtract the saved offset when seeking. This is line highlighting; word-fill
+    animation, sidecars and remote lyrics remain open.
