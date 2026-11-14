@@ -109,7 +109,7 @@ class LibraryBrowserTest {
         compose.onNodeWithText("A Finale").assertIsDisplayed()
     }
 
-    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi-night")
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun collectionActionsRemainReachableWithLargeTextInDarkMode() {
         var played = false
         compose.setContent {

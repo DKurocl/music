@@ -41,7 +41,7 @@ class MediaStoreScannerTest {
 
     @Test fun scanPreservesKnownTagsWithoutInventingMissingAudioProperties() {
         lateinit var cursor: MatrixCursor
-        val row = mapOf(
+        val row: Map<String, Any?> = mapOf(
             MediaStore.Audio.Media._ID to 42L,
             MediaStore.Audio.Media.DISPLAY_NAME to "Song.flac",
             MediaStore.Audio.Media.ARTIST to MediaStore.UNKNOWN_STRING,
