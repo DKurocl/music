@@ -40,6 +40,7 @@ Poweramp and Symfonium as the reference for a local player.
 5. Acceptance: measure startup, scan time, 120 Hz frame times, battery and actual audio output.
    The targets above are not measured results. No Poweramp/Symfonium parity claim until these pass.
 
+Network libraries are explicitly deferred by the owner (2026-11-15) and are not a current parity deficit.
 Streaming, Soulseek and themes are deferred. Visualizers are excluded by the owner. USB DAC output, network casting and rare
 formats are lower priority until the owner has a concrete use. Bluetooth output uses Android media
 routes; it does not imply a network casting protocol. Keep minSdk 37, target 37 and arm64 only.
@@ -89,6 +90,9 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [ ] Real-file check of the reader on the phone: a debug screen or instrumentation test that runs
       `TagReader` over the whole library and reports files that returned null or disagree with
       MediaStore on duration by more than 1 s. Fix every class of failure found.
+- [~] Incremental cache writes (Codex, 2026-11-15, `agent/m1-incremental-cache`): unchanged scans
+      must not rewrite rows/FTS or invalidate library observers; changed scans update only the delta
+      atomically. SQLite regression tests cover no-op, deletion, metadata edits and rollback.
 - [ ] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
       mtime+size, replaces MediaStoreScanner behind LibraryRepository. Done when: 10 000 files
       rescan with no changes in under 2 s on the phone.
