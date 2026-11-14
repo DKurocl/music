@@ -27,6 +27,23 @@ proven by a number measured on the phone, not assumed. Until measured, a target 
 A change that makes a number worse needs a reason in the commit. Features are tracked below against
 Poweramp and Symfonium as the reference for a local player.
 
+## Owner's current delivery order (Pixel only, Android 17+)
+
+1. Accurate library: integrate the existing tag reader, embedded/folder artwork, incremental scans
+   and chosen music roots. Preserve all credited artists and honest audio properties.
+2. Audio: album/track ReplayGain with clipping guard, verify gapless and the 24-bit path on the Pixel.
+   Add optional XM5 correction and output-specific processing only with measured behavior.
+3. Reliability: Sony media buttons/wear detection, focus/calls, Bluetooth-speaker transfers,
+   phone-speaker fallback and long screen-off sessions. Verify state recovery on the actual phone.
+4. Daily use: drag queue ordering, multiselect, playlist import/export and personal-data backup;
+   synchronized local/embedded lyrics. Design work belongs to Claude's current task.
+5. Acceptance: measure startup, scan time, 120 Hz frame times, battery and actual audio output.
+   The targets above are not measured results. No Poweramp/Symfonium parity claim until these pass.
+
+Streaming, Soulseek, themes and visualizers are deferred. USB DAC output, network casting and rare
+formats are lower priority until the owner has a concrete use. Bluetooth output uses Android media
+routes; it does not imply a network casting protocol. Keep minSdk 37, target 37 and arm64 only.
+
 ## Local player parity (the owner's order: this first, streaming and downloads after)
 
 What a Poweramp/Symfonium-class local player has, and where each item lives in this plan:
@@ -77,7 +94,7 @@ backup and restore of user data (M1, new).
 - [x] Library model (`92c4fdf`, CI 43550547422): albums, artists (album artist grouping), genres, folders; sort rules (disc,
       track; articles ignored); queries as Flows.
 - [x] Search (`92c4fdf`, CI 43550547422): Room FTS over title, artist, album; prefix and diacritic-insensitive.
-- [~] `user.db` (Codex, 2026-11-14, owner requested a complete personal-library block): playlists, favourites, play history, lyric offsets, with exported schemas and a
+- [x] `user.db` (`f1ba244`, CI 43571427496, integrated into main): playlists, favourites, play history, lyric offsets, with exported schemas and a
       migration test. Keys by SongKey + path.
 - [ ] Artwork: embedded picture or `cover.*`/`folder.*` in the folder, decoded once into a disk
       cache at 3 sizes; Coil fetcher for `track:` models.
@@ -98,7 +115,7 @@ backup and restore of user data (M1, new).
 - [~] Player page (Codex, 2026-11-14, owner prioritized functionality): container transform from the mini player, artwork-driven color scheme, queue
       sheet with drag to reorder, signal path sheet, sleep timer.
       Sleep timer verified at `4560b91`, CI 43566729401. Queue, shuffle/repeat, recovery and
-      output/diagnostics implemented at `e2b5d37`; final CI pending. Drag reordering and cosmetic
+      output/diagnostics verified at `f1ba244`, CI 43571427496. Drag reordering and cosmetic
       transforms are still open; owner deferred customization in favor of player reliability.
 - [ ] Album and artist pages; multi-select with batch actions.
 - [ ] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
