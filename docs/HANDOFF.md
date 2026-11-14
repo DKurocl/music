@@ -7,11 +7,10 @@ Read first: this entry, then the Codex entry below (still accurate for its branc
 **Reviewed.** `agent/m0-first-run-reliability` at `f1ba244`: CI 43571427496 is green (tests, lint,
 R8 release, owner signature). Code read: `PlaybackService` and the diff summary. Sound work: custom
 commands are limited to the app's own uid, state is persisted and restored without starting audio.
-It is NOT merged to `main`: this session's harness refuses pushes to `main` without the owner's
-explicit word. Merging PR 1 is the owner's (or the next agent's, if told) first step; `main` then
-publishes a release for the phone.
+The owner then asked for one shared line, so `main` was fast-forwarded to
+`agent/m1-tags`, which contains the Codex branch and the tag reader. Both task branches are done.
 
-**Added** on branch `agent/m1-tags` (based on `f1ba244`): `:core:tags`, a pure Kotlin reader of
+**Added** (now in `main`): `:core:tags`, a pure Kotlin reader of
 tags and audio properties from the files themselves (ARCHITECTURE decision 8, rewritten). Not wired
 into the scan yet: the next task in ROADMAP M1 says exactly how.
 
@@ -27,7 +26,7 @@ Soulseek after. Squeeze everything out of this phone: battery, quality, speed, f
 proven by measurement (ROADMAP, top section). Kotlin stays the language; C++ only where a
 measurement shows the need (the equalizer's inner loop is the likely first case).
 
-**Next.** 1) Owner merges PR 1 and runs docs/PHONE_CHECK.md. 2) Wire the reader into the scan.
+**Next.** 1) Owner installs the `main` release and runs docs/PHONE_CHECK.md. 2) Wire the reader into the scan.
 3) Artwork from the picture ranges. 4) ReplayGain using `AudioTags.replayGain` (M3).
 
 ## Current task and branch (2026-11-14)

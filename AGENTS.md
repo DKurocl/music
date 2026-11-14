@@ -50,9 +50,17 @@ Any agent (Claude, Codex, others) continues the same work from these files. Read
 - CI (`.github/workflows/build.yml`) runs on every push: tests, lint, release build. On `main`, with
   the owner key in the repository secrets, it publishes a release `music-v<versionCode>` that
   Obtainium installs. Without the key nothing is published.
-- Branches: work on `agent/<milestone>-<short-name>` (or the branch your harness assigns). `main`
-  must always build and pass CI. Bring work to `main` by fast-forward or a reviewed pull request when
-  CI is green. Never force-push `main`.
+- One shared line: `main`. Everything every agent does ends up there, and every agent starts from
+  it. A task branch (`agent/<milestone>-<short-name>`, or the branch your harness assigns) lives only
+  while its task is in work:
+  1. Start: fetch and branch from the newest `main`.
+  2. Work in small commits; push the branch so CI runs.
+  3. Finish: when CI is green, rebase onto the newest `main` if it moved, then fast-forward `main`
+     to the branch (or merge its pull request) and delete the branch.
+  Do not end a session with finished work outside `main`; if it cannot go in (CI red, the owner's
+  word needed), say so at the top of `docs/HANDOFF.md` with the branch name. Never build on
+  another agent's unmerged branch when `main` can be used; never force-push `main`. `main` must
+  always build and pass CI: each `main` build is released to the owner's phone.
 - Claim a task before you start: in `docs/ROADMAP.md` change `[ ]` to `[~]` and add your agent name
   and the date. When done change it to `[x]` and add the commit. One agent per task.
 - End every session by updating `docs/HANDOFF.md`: what changed, what is verified (with the command
