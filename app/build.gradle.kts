@@ -24,6 +24,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     // UseKtx: style only. ChromeOsAbiSupport: this APK is for one arm64 phone.
     lint { disable += listOf("UseKtx", "ChromeOsAbiSupport") }
 
@@ -61,4 +62,7 @@ dependencies {
     implementation(libs.coroutines.android)
     implementation(libs.coil.compose)
     testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.compose.ui.test.junit4)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

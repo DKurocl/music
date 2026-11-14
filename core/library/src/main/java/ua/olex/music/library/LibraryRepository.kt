@@ -24,9 +24,11 @@ class LibraryRepository internal constructor(
     private val dao: TrackDao,
     private val scan: suspend (Long) -> List<TrackEntity>,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    val changes: Flow<Unit> = kotlinx.coroutines.flow.emptyFlow(),
 ) {
     constructor(context: Context, database: LibraryDatabase) : this(
         database.tracks(), { scanId -> MediaStoreScanner.scan(context.applicationContext, scanId) },
+        changes = context.applicationContext.contentResolver.musicChanges(),
     )
 
     private val scanning = Mutex()
