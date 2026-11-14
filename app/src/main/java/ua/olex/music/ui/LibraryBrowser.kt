@@ -51,6 +51,7 @@ internal fun LibraryBrowser(
     onPlay: (List<Track>, Int) -> Unit,
     scanError: String?,
     onRescan: () -> Unit,
+    onRetrySearch: () -> Unit = {},
 ) {
     var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -89,7 +90,7 @@ internal fun LibraryBrowser(
                 searching -> {
                     when {
                         search == null || search.query != query -> item { BrowserMessage("Searching…") }
-                        search.failed -> item { BrowserMessage("Couldn't search your library. Try another query or rescan.") }
+                        search.failed -> item { ErrorNotice("Couldn't search your library.", onRetrySearch) }
                         search.tracks.isEmpty() -> item { BrowserMessage("No matching songs. Try a title, artist or album.") }
                         else -> {
                             item { BrowserMessage(songCount(search.tracks.size)) }

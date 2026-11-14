@@ -49,6 +49,12 @@ class SongKeyTest {
         assertEquals(key("Band", "Song (Club Remix)"), key("Band", "Song (Club Remix Remastered 2020)"))
     }
 
+    @Test fun editsAndDifferentMixesAreNotEditionNoise() {
+        for (variant in listOf("Radio Edit", "Clean", "Mono", "Stereo", "2011 Mix", "Single Version")) {
+            assertNotEquals(variant, key("Band", "Song"), key("Band", "Song ($variant)"))
+        }
+    }
+
     @Test fun sameSongNeedsMatchingLength() {
         fun track(id: String, ms: Long) = Track(TrackId(id), "", "Creep", "Radiohead", durationMs = ms)
         assertTrue(SongKey.sameSong(track("local:1", 238_000), track("yt:x", 239_500)))

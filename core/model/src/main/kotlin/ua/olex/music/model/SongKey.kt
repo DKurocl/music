@@ -33,7 +33,7 @@ value class SongKey private constructor(val value: String) {
         private val DASH_NOTE = Regex("""\s+-\s+([^-]*)$""")
         /** Edition notes: the same recording, sold again. */
         private val EDITION = Regex(
-            """\b(remaster(ed)?|mono|stereo|deluxe|bonus( track)?|explicit|clean|original( mix| version)?|album version|single version|radio edit|\d{4} (mix|version|edit)|official (audio|video|music video)|lyrics?( video)?|audio|hq|hd)\b""",
+            """\b(remaster(ed)?|deluxe|bonus( track)?|official (audio|video|music video)|lyrics?( video)?|audio|hq|hd)\b""",
             RegexOption.IGNORE_CASE,
         )
         private val YEAR = Regex("""\b(19|20)\d{2}\b""")

@@ -3,7 +3,7 @@
 The newest entry is on top. Every session adds one: what changed, what is verified and how, what is
 only on paper, what failed, what comes next.
 
-## Session 2 (2026-11-14): M0 first-run reliability
+## Session 2 (2026-11-14): browsable library, search and playback reliability
 
 **Changed.** Work branch `agent/m0-first-run-reliability`. Failed or cancelled scans preserve the
 library; successful empty scans remove deleted files. Scan errors and retry are visible, and
@@ -12,6 +12,7 @@ requested queue. Controller bindings, progress polling and output callbacks stop
 lifecycle. Pause handles buffering/focus suppression; Play retries an errored item or restarts an
 ended queue. The player page scrolls for small windows and large fonts. Unknown bit depth and
 M4A codecs are no longer shown as measured audio properties. `[код]`
+Review and continuation entry point: https://github.com/DKurocl/music/pull/1 (work branch above).
 
 **Verified M0 hardening.** CI run 43549776145 for `04bef1b` passed `gradle test -PminSdk=35`,
 `lintDebug`, `lintRelease`, `assembleDebug`, R8 `assembleRelease` and owner-signature verification.
@@ -30,6 +31,11 @@ updates/rollback. Preserve this work if the next session begins before CI is com
 SQLite/Room FTS matching, update/delete triggers and transaction rollback), both lints, both APK
 builds and owner signature verification. `[код]`
 https://github.com/DKurocl/music/actions/runs/43550547422
+
+**Verified observer and UI interaction.** `5aa0d92` passed full CI run 43564927822, including
+debounced ContentObserver registration/cancellation and Compose tests for album/song queues,
+stale search results and clearing queries. Source matching fixes in `f1b286d` are included.
+`[код]` https://github.com/DKurocl/music/actions/runs/43564927822
 
 **Baseline verified.** GitHub Actions run 43546746908 for `90ded6f` passed the existing build and
 release jobs. The owner-signing step and signature verification passed; the old note below about
@@ -52,6 +58,19 @@ The owner explicitly requested continuing M1 before the phone run; do not mark M
 unit tests. Latest unverified work adds a foreground-only debounced MediaStore observer and
 Compose interaction tests for collection queues, song selection and stale search results.
 `docs/PHONE_CHECK.md` is the runnable manual checklist for the owner or next agent.
+
+**Timer work in progress.** The player's sleep timer offers 5/15/30/60/90 minutes and cancellation.
+PlaybackService owns one delayed job; a private session command changes it and session extras
+restore state after controller reconnection. Pure model tests cover expiry, replacement,
+cancellation and invalid/overflowing requests. Compose tests exercise duration selection,
+cancellation and dismissal. These changes still need the next CI result and a physical playback
+check; timer state intentionally ends with the playback service rather than persisting after
+process death.
+The next CI also renders actual UI previews under `app/build/reports/ui-previews/`, including
+dark mode with font scale 2. These are review artifacts, not approved golden baselines. It adds a
+10,000-track index invariant test, keeps identity normalization lazy for normal browsing, and
+preserves radio edits and alternate mixes. Search failure now has an explicit Retry action;
+observer registration failure falls back to manual refresh instead of crashing the app.
 
 **Additional model verification.** Commit `f1b286d` preserves band names and live/remixed variants
 when normalizing SongKey. Pure tests pass offline: 26 tests (10 SongKey, 8 library index, 8 lyrics),

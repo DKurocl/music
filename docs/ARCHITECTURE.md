@@ -135,5 +135,11 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
 19. Song identity drops explicit featured-artist credits, but preserves separators inside artist
     names. Splitting on `/`, `&`, commas or `and` incorrectly merged unrelated bands. Mixed
     annotations retain the recording variant after removing edition metadata (for example,
-    `Live, Remastered 2011` remains `Live`). Prefer a missed match to playing the wrong recording.
+    `Live, Remastered 2011` remains `Live`). Radio edits, censored versions and mono/stereo mixes
+    are also distinct. Prefer a missed match to playing the wrong recording.
     The v2 cache rescan regenerates the keys. `[код]` regression tests in `SongKeyTest`.
+20. The sleep timer is owned by PlaybackService and uses an elapsed-realtime deadline, independent
+    of wall-clock changes and activity recreation. A single cancellable delayed job exists only
+    while armed; expiry pauses the player once. The app sends a private session command and reads
+    the deadline from session extras. Service destruction cancels it because playback also stops;
+    it is not persisted or implemented with an alarm, worker, or periodic UI polling. `[код]`

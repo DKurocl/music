@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -37,8 +40,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     val playing: StateFlow<PlayerState> get() = player.state
     val query: StateFlow<String> = savedState.getStateFlow("search", "")
+    private val searchRetry = MutableStateFlow(0)
     val search: StateFlow<LibrarySearchResult?> = query
         .debounce { if (it.isBlank()) 0 else 180 }
+        .combine(searchRetry) { text, _ -> text }
         .flatMapLatest { text ->
             if (text.isBlank()) flowOf(LibrarySearchResult(text, emptyList()))
             else graph.library.search(text).map { LibrarySearchResult(text, it) }
@@ -47,12 +52,14 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun setQuery(text: String) { savedState["search"] = text }
+    fun retrySearch() { searchRetry.update { it + 1 } }
 
     var allowed by mutableStateOf(hasAccess()); private set
     var scanning by mutableStateOf(false); private set
     var scanError by mutableStateOf<String?>(null); private set
     private var scanJob: Job? = null
     private var watchJob: Job? = null
+    private var watchingRequested = false
     private var rescanPending = false
 
     val positionMs: Long get() = player.positionMs
@@ -62,6 +69,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         allowed = hasAccess()
         if (!allowed) {
             scanJob?.cancel()
+            watchJob?.cancel()
+            watchJob = null
             scanError = null
             return
         }
@@ -72,6 +81,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         rescanPending = false
         scanning = true
         scanError = null
+        if (watchingRequested) startWatching()
         scanJob = viewModelScope.launch {
             try {
                 graph.library.rescan()
@@ -92,13 +102,16 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Observe only while the activity is visible, and combine a file-copy burst into one scan. */
     fun startWatching() {
-        if (watchJob?.isActive == true) return
+        watchingRequested = true
+        if (watchJob?.isActive == true || !hasAccess()) return
         watchJob = viewModelScope.launch {
-            graph.library.changes.debounce(500).collect { refresh() }
+            graph.library.changes.debounce(500)
+                .catch { scanError = "Automatic library updates are unavailable. Use Rescan to refresh." }
+                .collect { refresh() }
         }
     }
 
-    fun stopWatching() { watchJob?.cancel(); watchJob = null }
+    fun stopWatching() { watchingRequested = false; watchJob?.cancel(); watchJob = null }
 
     /** Connect only while a screen is visible; the service owns ongoing playback independently. */
     fun connectPlayer() = player.connect()
@@ -109,6 +122,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun next() = player.next()
     fun previous() = player.previous()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
+    fun setSleepTimer(minutes: Int) = player.setSleepTimer(minutes)
 
     private fun hasAccess() =
         getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED

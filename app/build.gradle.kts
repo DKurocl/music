@@ -24,7 +24,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { compose = true }
-    testOptions { unitTests.isIncludeAndroidResources = true }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.systemProperty("music.testVariant", it.name) }
+    }
     // UseKtx: style only. ChromeOsAbiSupport: this APK is for one arm64 phone.
     lint { disable += listOf("UseKtx", "ChromeOsAbiSupport") }
 

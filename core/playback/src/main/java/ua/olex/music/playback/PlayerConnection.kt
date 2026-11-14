@@ -3,12 +3,14 @@ package ua.olex.music.playback
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,6 +39,8 @@ data class PlayerState(
     val queueSize: Int = 0,
     val positionMs: Long = 0,
     val error: String? = null,
+    val sleepDeadlineMs: Long? = null,
+    val sleepTimerError: String? = null,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -64,6 +68,12 @@ class PlayerConnection(context: Context) {
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val future = MediaController.Builder(app, token)
             .setListener(object : MediaController.Listener {
+                override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
+                    if (this@PlayerConnection.controller === controller) {
+                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 })
+                    }
+                }
+
                 override fun onDisconnected(controller: MediaController) {
                     if (this@PlayerConnection.controller !== controller) return
                     this@PlayerConnection.controller = null
@@ -134,6 +144,20 @@ class PlayerConnection(context: Context) {
     fun previous() { controller?.seekToPrevious() }
     fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
 
+    /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
+    fun setSleepTimer(minutes: Int) {
+        val player = controller ?: return
+        _state.value = _state.value.copy(sleepTimerError = null)
+        val result = player.sendCustomCommand(SleepTimerCommand.command, Bundle().apply { putInt(SleepTimerCommand.MINUTES, minutes) })
+        result.addListener({
+            if (controller !== player) return@addListener
+            val success = try {
+                Futures.getDone(result).resultCode == SessionResult.RESULT_SUCCESS
+            } catch (_: ExecutionException) { false } catch (_: CancellationException) { false }
+            if (!success) _state.value = _state.value.copy(sleepTimerError = "Couldn't update the sleep timer. Try again.")
+        }, app.mainExecutor)
+    }
+
     private fun publish(player: Player) {
         val item = player.currentMediaItem
         val meta = player.mediaMetadata
@@ -153,6 +177,8 @@ class PlayerConnection(context: Context) {
             queueSize = player.mediaItemCount,
             positionMs = player.currentPosition.coerceAtLeast(0),
             error = player.playerError?.let { "Couldn't play this file. Retry or choose another song." },
+            sleepDeadlineMs = (player as? MediaController)?.sessionExtras?.getLong(SleepTimerCommand.DEADLINE)?.takeIf { it > 0 },
+            sleepTimerError = _state.value.sleepTimerError,
         )
     }
 
