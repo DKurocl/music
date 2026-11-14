@@ -86,7 +86,7 @@ kbps/LDAC badge is shown without evidence. Physical validation remains required.
 [docs] https://developer.android.com/reference/android/media/MediaRouter2#showSystemOutputSwitcher()
 [docs] https://developer.android.com/reference/androidx/media3/exoplayer/analytics/AnalyticsListener
 
-## Optional EQ and Sony correction (implementation pending CI)
+## Optional EQ and Sony correction (CI verified; phone measurements pending)
 
 EQ is off by default and separate for each observed output. Sony WF-1000XM5 correction uses the
 AutoEq result from Rtings B&K 5128 measurements; exact source coefficients are retained in

@@ -54,7 +54,7 @@ hi-res and USB bit-perfect output (M3), synced and word-timed lyrics (M4), embed
 artwork (M1), playlists with m3u import/export and smart playlists (M1, new), ratings, play counts,
 recently added (M1), folder browsing (done), queue editing (done), sleep timer (done), resume on
 connect and headset button rules (M3, new), Android Auto (M3), widgets (M9), tag editor (M7),
-backup and restore of user data (M1, new).
+user data retained across updates (implemented); backup/export is excluded by the owner.
 
 ## M0 Foundation
 - [x] Gradle project, version catalog, five modules, CI workflow, agent docs (session 1)
@@ -105,7 +105,7 @@ backup and restore of user data (M1, new).
 - [ ] Playlists: m3u/m3u8 import and export; smart playlists (rules over tags, play counts, dates).
 - [ ] Ratings, play counts, recently added and recently played views.
 - [ ] Cue sheets (`.cue` beside a file and embedded CUESHEET): one file shown and played as its tracks.
-- [ ] Export and import of `user.db` (playlists, favourites, history) to a file the owner keeps.
+- Export/import backup of user.db excluded by the owner (2026-11-14); persistence across updates is sufficient.
 
 ## M2 Design system and the real shell (`:app`)
 
@@ -139,8 +139,9 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
 
 - [~] Equalizer (Codex, 2026-11-14, `agent/m3-equalizer`) as an audio processor that keeps float samples: parametric bands, pre-amp, presets
       per output device, AutoEq profile import (WF-1000XM5 first). Pure DSP code tested against
-      reference curves. Decide after measuring whether Kotlin is fast enough or the inner loop
-      moves to C++ with NEON.
+      reference curves. Core float/PCM16 EQ, route-isolated settings and WF-1000XM5 preset
+      verified at `4aa3efe`, CI 43640064817 (156 cases). Frequency/Q editing and external profile
+      import remain open. Measure on the phone before deciding whether any loop needs C++/NEON.
 - Crossfade and decorative transitions are excluded by the owner (2026-11-14). Gapless remains required.
 - [ ] Rules for outputs: resume on earbuds connect (optional), what headset buttons do, volume per output.
 

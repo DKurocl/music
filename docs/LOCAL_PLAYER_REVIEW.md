@@ -3,6 +3,7 @@
 Owner scope, 2026-11-14: Pixel 10 Pro XL / Tensor G5, Android 17 and newer, Sony WF-1000XM5,
 Bluetooth speakers and phone speakers. Local listening before other sources. All three entry points
 matter: albums/folders, shuffled library and playlists. Owner wants Sony correction and an equalizer.
+Backup/export of personal data is excluded; retaining it across app updates is sufficient.
 Crossfade and decorative track transitions are excluded; true gapless remains required. Visualizers
 are excluded. Finish functional behavior before a complete UI finish pass. Wallpaper colors only.
 
@@ -63,7 +64,7 @@ are excluded. Finish functional behavior before a complete UI finish pass. Wallp
    analytic and sine-response tests, route isolation and neutral bypass.
 2. ReplayGain/R128 with correct per-item/album behavior and peak handling; verify gapless with real
    FLAC/MP3/Opus albums. Extend codecs only when a real library file requires them.
-3. Durable personal-data export/restore, playlist m3u8 interoperability, sorting/multiselect and
+3. Playlist m3u8 interoperability, sorting/multiselect and
    efficient album/folder/library playback. Preserve missing-file entries and report unresolved imports.
 4. Offline sidecar lyrics/artwork, then queue drag editing and user-requested useful home-screen control.
 5. Review every visible state for fit: empty/loading/error, permissions, long titles, large fonts,
