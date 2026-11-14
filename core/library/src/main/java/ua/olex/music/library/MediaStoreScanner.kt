@@ -3,6 +3,9 @@ package ua.olex.music.library
 import android.content.ContentUris
 import android.content.Context
 import android.provider.MediaStore
+import java.io.IOException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import ua.olex.music.model.Origin
 import ua.olex.music.model.SongKey
 import ua.olex.music.model.TrackId
@@ -23,14 +26,18 @@ internal object MediaStoreScanner {
     )
     private val ALBUM_ART = MediaStore.AUTHORITY_URI.buildUpon().appendPath("external").appendPath("audio").appendPath("albumart").build()
 
-    fun scan(context: Context, scanId: Long): List<TrackEntity> {
+    suspend fun scan(context: Context, scanId: Long): List<TrackEntity> {
         val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         val out = ArrayList<TrackEntity>()
-        context.contentResolver.query(collection, COLUMNS, "${MediaStore.Audio.Media.IS_MUSIC} != 0", null, null)?.use { c ->
+        // A failed provider query is not an empty library: only a complete scan may replace it.
+        val cursor = context.contentResolver.query(collection, COLUMNS, "${MediaStore.Audio.Media.IS_MUSIC} != 0", null, null)
+            ?: throw IOException("MediaStore did not return a cursor")
+        cursor.use { c ->
             val col = COLUMNS.associateWith { c.getColumnIndexOrThrow(it) }
             fun text(name: String) = c.getString(col.getValue(name))?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
             fun number(name: String) = col.getValue(name).let { if (c.isNull(it)) null else c.getLong(it) }
             while (c.moveToNext()) {
+                currentCoroutineContext().ensureActive()
                 val id = c.getLong(col.getValue(MediaStore.Audio.Media._ID))
                 val file = text(MediaStore.Audio.Media.DISPLAY_NAME).orEmpty()
                 val title = text(MediaStore.Audio.Media.TITLE) ?: file.substringBeforeLast('.')
@@ -73,7 +80,9 @@ internal object MediaStoreScanner {
             "audio/x-wav", "audio/wav", "audio/vnd.wave" -> "wav"
             "audio/aiff", "audio/x-aiff" -> "aiff"
             "audio/alac" -> "alac"
-            "audio/mp4", "audio/m4a", "audio/x-m4a", "audio/aac", "audio/mp4a-latm" -> "aac"
+            // MP4/M4A may contain AAC or ALAC. A container is not evidence of an audio codec.
+            "audio/mp4", "audio/m4a", "audio/x-m4a" -> null
+            "audio/aac", "audio/mp4a-latm" -> "aac"
             else -> ext.ifEmpty { null }
         }
     }

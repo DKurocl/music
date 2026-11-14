@@ -3,6 +3,7 @@ package ua.olex.music.playback
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.google.common.util.concurrent.Futures
@@ -31,7 +32,9 @@ class PlaybackService : MediaLibraryService() {
     /** Swiped away from recents: keep playing if music is playing, otherwise stop for good. */
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = session?.player
-        if (player == null || !player.playWhenReady || player.mediaItemCount == 0) stopSelf()
+        if (player == null || !player.playWhenReady || player.mediaItemCount == 0 ||
+            player.playbackState == Player.STATE_ENDED || player.playbackState == Player.STATE_IDLE
+        ) stopSelf()
     }
 
     override fun onDestroy() {

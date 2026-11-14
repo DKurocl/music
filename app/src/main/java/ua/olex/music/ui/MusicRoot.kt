@@ -3,6 +3,10 @@
 package ua.olex.music.ui
 
 import android.Manifest
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,6 +25,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,6 +33,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
@@ -40,10 +47,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -64,6 +71,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleStartEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import ua.olex.music.graph
@@ -81,23 +92,51 @@ fun MusicRoot(model: LibraryViewModel) {
     val tracks by model.tracks.collectAsStateWithLifecycle()
     val playing by model.playing.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
+    var permissionRequested by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    val activity = LocalActivity.current
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { model.refresh() }
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
     BackHandler(expanded) { expanded = false }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
-        topBar = { TopAppBar(title = { Text("Songs") }, scrollBehavior = scroll) },
-        bottomBar = { if (playing.hasTrack) MiniPlayer(playing, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Songs") }, scrollBehavior = scroll,
+                actions = {
+                    if (model.allowed) TextButton(onClick = model::refresh, enabled = !model.scanning) {
+                        Text(if (model.scanning) "Scanning…" else "Rescan")
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            Column {
+                playing.error?.let { message ->
+                    ErrorNotice(message) { if (playing.connected) model.toggle() else model.connectPlayer() }
+                }
+                if (playing.hasTrack) MiniPlayer(playing, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next)
+            }
+        },
     ) { insets ->
         val list = tracks
         when {
             !model.allowed -> Notice(
                 insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow",
-            ) { ask.launch(arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS)) }
-            list == null -> Unit
+            ) {
+                if (permissionRequested && activity?.shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_AUDIO) == false) {
+                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+                } else {
+                    permissionRequested = true
+                    ask.launch(arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
+                }
+            }
+            model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
+            list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
             list.isEmpty() -> Notice(insets, "No music yet", if (model.scanning) "Looking for music…" else "Put music in the Music folder and it shows up here.", null) {}
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = insets) {
+                model.scanError?.let { message -> item(key = "scan-error") { ErrorNotice(message, model::refresh) } }
                 itemsIndexed(list, key = { _, track -> track.id.value }) { index, track ->
                     TrackRow(track, current = track.id.value == playing.mediaId) { model.play(list, index) }
                 }
@@ -111,6 +150,14 @@ fun MusicRoot(model: LibraryViewModel) {
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
         )
+    }
+}
+
+@Composable
+private fun ErrorNotice(message: String, onRetry: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = onRetry) { Text("Retry") }
     }
 }
 
@@ -162,8 +209,8 @@ private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit, onToggle: () -> U
                 Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(state.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            IconButton(onClick = onToggle, modifier = Modifier.semantics { contentDescription = if (state.isPlaying) "Pause" else "Play" }) {
-                Icon(if (state.isPlaying) AppIcons.Pause else AppIcons.Play, null)
+            IconButton(enabled = state.connected, onClick = onToggle, modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
+                Icon(if (state.playWhenReady) AppIcons.Pause else AppIcons.Play, null)
             }
             IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.semantics { contentDescription = "Next" }) { Icon(AppIcons.Next, null) }
         }
@@ -177,26 +224,33 @@ private fun NowPlaying(
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
-    DisposableEffect(monitor) { monitor.start(); onDispose { monitor.stop() } }
+    LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
 
-    // The position is read while the page is shown, four times a second; nothing runs otherwise.
-    var at by remember { mutableLongStateOf(position()) }
-    var dragged by remember { mutableStateOf<Float?>(null) }
-    LaunchedEffect(state.isPlaying, state.mediaId) {
-        while (true) { at = position(); if (!state.isPlaying) break; delay(250) }
+    // Composition may survive screen-off. Poll only while the page is visible and playing.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var at by remember(state.mediaId) { mutableLongStateOf(position()) }
+    var dragged by remember(state.mediaId) { mutableStateOf<Float?>(null) }
+    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            do { at = position(); if (state.isPlaying) delay(250) } while (state.isPlaying)
+        }
     }
 
     Surface(color = cs.surfaceContainerLow, modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.statusBarsPadding().navigationBarsPadding().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
+                .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Icon(AppIcons.Down, null) }
             }
-            Spacer(Modifier.weight(1f))
-            Artwork(state.artworkUri, Modifier.fillMaxWidth().aspectRatio(1f), 28.dp)
+            Artwork(state.artworkUri, Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), 28.dp)
             Spacer(Modifier.height(28.dp))
             Text(state.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            state.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.error, textAlign = TextAlign.Center) }
             Spacer(Modifier.height(8.dp))
             // The signal path, as far as it is known: what the file is and where it goes.
             Text(
@@ -221,14 +275,14 @@ private fun NowPlaying(
                 IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp).semantics { contentDescription = "Previous" }) {
                     Icon(AppIcons.Previous, null, Modifier.size(32.dp))
                 }
-                FilledIconButton(onClick = onToggle, modifier = Modifier.size(80.dp).semantics { contentDescription = if (state.isPlaying) "Pause" else "Play" }) {
-                    Icon(if (state.isPlaying) AppIcons.Pause else AppIcons.Play, null, Modifier.size(40.dp))
+                FilledIconButton(enabled = state.connected, onClick = onToggle, modifier = Modifier.size(80.dp).semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
+                    Icon(if (state.playWhenReady) AppIcons.Pause else AppIcons.Play, null, Modifier.size(40.dp))
                 }
                 IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.size(56.dp).semantics { contentDescription = "Next" }) {
                     Icon(AppIcons.Next, null, Modifier.size(32.dp))
                 }
             }
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

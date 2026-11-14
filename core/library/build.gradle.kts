@@ -18,4 +18,7 @@ dependencies {
     api(libs.coroutines.core)
     implementation(libs.room.runtime)
     ksp(libs.room.compiler)
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
+    testImplementation(libs.robolectric)
 }
