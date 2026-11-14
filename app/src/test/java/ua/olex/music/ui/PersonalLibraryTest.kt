@@ -29,10 +29,14 @@ class PersonalLibraryTest {
     @Test fun playlistCreateRequiresANameAndTrimsIt() {
         var created: String? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(emptyList(), actions(create = { name, _ -> created = name }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }
-        // Advance the dialog/text-input animation clock explicitly; caret animation has no terminal frame.
+        // Keep dialog/text-input animation time deterministic during semantic assertions.
         compose.mainClock.autoAdvance = false
         compose.onNodeWithText("New playlist").performClick()
-        compose.mainClock.advanceTimeBy(500)
+        // Dialog attachment uses the Android looper, independently of the Compose frame clock.
+        compose.waitUntil(5_000) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.onAllNodesWithText("Save").fetchSemanticsNodes().size == 1
+        }
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNodeWithText("Playlist name").performTextInput("  Travel  ")
         compose.mainClock.advanceTimeBy(100)

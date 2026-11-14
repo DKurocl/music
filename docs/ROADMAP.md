@@ -15,14 +15,13 @@ separate commits to keep merges trivial.
 - [x] `:core:playback`: PlaybackService, PlayerFactory, PlayerConnection, OutputRoute (session 1, compiled only)
 - [x] `:core:library`: Room cache, MediaStore scanner, LibraryRepository (session 1, compiled only)
 - [x] `:app`: songs list, mini player, player page with the signal path line (session 1, compiled only)
-- [~] First run on the phone (Codex, 2026-11-14): grant access, list fills, a FLAC plays, notification and lock screen
+- [ ] First run on the phone (physical device required): grant access, list fills, a FLAC plays, notification and lock screen
       controls work, earbud buttons work, pulling an earbud pauses. Record results in HANDOFF.
-      Preparing failure handling and regression tests; physical-device checks remain pending.
+      Failure handling and regression tests are implemented; physical-device checks remain pending.
 - [x] First-run hardening: preserve the library on failure, lifecycle-bound controller/progress,
       buffering-aware controls, retry UI and regression tests (`04bef1b`, CI 43549776145).
-- [ ] Owner adds repository secrets `OWNER_KEYSTORE_B64`, `OWNER_KEYSTORE_PASSWORD`,
-      `OWNER_KEY_ALIAS`, `OWNER_KEY_PASSWORD` (same key as Earbuds and VPN). Then a `main` build
-      publishes `music-v<code>` and Obtainium installs it.
+- [x] Owner signing secrets configured; signed build/release verified in CI 43546746908 (`90ded6f`).
+      Installation through Obtainium remains a physical-device check.
 
 ## M1 Library done right (`:core:library`, new `:core:tags`)
 - [ ] `:core:tags`: TagLib over JNI. Read all fields incl. multi-value artists, album artist, disc,
@@ -48,10 +47,11 @@ separate commits to keep merges trivial.
       Replace `AppIcons`; add a CI guard against other icon sources.
 - [ ] Navigation: Home, Library (Albums, Artists, Songs, Playlists, Folders), Search, Downloads;
       floating toolbar; predictive back.
-- [ ] Player page: container transform from the mini player, artwork-driven color scheme, queue
+- [~] Player page (Codex, 2026-11-14, owner prioritized functionality): container transform from the mini player, artwork-driven color scheme, queue
       sheet with drag to reorder, signal path sheet, sleep timer.
-      Sleep timer taken by Codex (2026-11-14); other player-page work remains open.
-      Queue controls, shuffle and repeat taken by Codex with the personal-library block.
+      Sleep timer verified at `4560b91`, CI 43566729401. Queue, shuffle/repeat, recovery and
+      output/diagnostics implemented at `e2b5d37`; final CI pending. Drag reordering and cosmetic
+      transforms are still open; owner deferred customization in favor of player reliability.
 - [ ] Album and artist pages; multi-select with batch actions.
 - [ ] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
 - [ ] Screenshot goldens (Robolectric, `-PminSdk=35` while it lacks API 37) for every page in
