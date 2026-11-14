@@ -22,6 +22,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
+import ua.olex.music.user.UserRepository
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -53,6 +56,34 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     fun setQuery(text: String) { savedState["search"] = text }
     fun retrySearch() { searchRetry.update { it + 1 } }
+
+    val personal: StateFlow<PersonalLibraryState> = combine(library, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
+        PersonalLibraryState.resolve(index ?: LibraryIndex.EMPTY, favourites, playlists, history)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
+
+    var userError by mutableStateOf<String?>(null); private set
+    val personalActions = PersonalLibraryActions(
+        create = { name, tracks -> editUserData { createPlaylist(name, tracks) } },
+        rename = { id, name -> editUserData { renamePlaylist(id, name) } },
+        delete = { id -> editUserData { deletePlaylist(id) } },
+        add = { id, tracks -> editUserData { addToPlaylist(id, tracks) } },
+        remove = { id, song -> editUserData { removeFromPlaylist(id, song) } },
+        move = { id, song, delta -> editUserData { moveInPlaylist(id, song, delta) } },
+        removeFavourite = { id -> editUserData { removeFavourite(id) } },
+    )
+
+    fun toggleFavourite(track: Track) {
+        val saved = personal.value.favouriteByTrackId[track.id.value]
+        editUserData { toggleFavourite(track, saved?.id) }
+    }
+    fun dismissUserError() { userError = null }
+    private fun editUserData(action: suspend UserRepository.() -> Unit) {
+        viewModelScope.launch {
+            try { graph.userLibrary.action() }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { userError = "Couldn't save your changes. Please try again." }
+        }
+    }
 
     var allowed by mutableStateOf(hasAccess()); private set
     var scanning by mutableStateOf(false); private set
@@ -123,6 +154,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun previous() = player.previous()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
     fun setSleepTimer(minutes: Int) = player.setSleepTimer(minutes)
+    fun toggleShuffle() = player.toggleShuffle()
+    fun cycleRepeat() = player.cycleRepeat()
+    fun playQueueItem(index: Int) = player.playQueueItem(index)
+    fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
+    fun removeQueueItem(index: Int) = player.removeQueueItem(index)
+    fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(tracks, next)
 
     private fun hasAccess() =
         getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED

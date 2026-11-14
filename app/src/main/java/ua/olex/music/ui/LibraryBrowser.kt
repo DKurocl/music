@@ -37,7 +37,9 @@ import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.Track
 
-private enum class LibraryTab(val title: String) { SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), GENRES("Genres"), FOLDERS("Folders") }
+private enum class LibraryTab(val title: String) {
+    SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres")
+}
 
 /** Browse one shared library snapshot or cancellable FTS results; taps play exactly the visible queue. */
 @Composable
@@ -52,22 +54,33 @@ internal fun LibraryBrowser(
     scanError: String?,
     onRescan: () -> Unit,
     onRetrySearch: () -> Unit = {},
+    personal: PersonalLibraryState = PersonalLibraryState(),
+    personalActions: PersonalLibraryActions? = null,
+    onTrackActions: (Track) -> Unit = {},
+    onAddToPlaylist: (List<Track>) -> Unit = {},
 ) {
     var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
+    var missingFavourite by rememberSaveable { mutableStateOf<String?>(null) }
     val tab = LibraryTab.valueOf(tabName)
     val groups = when (tab) {
         LibraryTab.ALBUMS -> library.albums
         LibraryTab.ARTISTS -> library.artists
         LibraryTab.GENRES -> library.genres
         LibraryTab.FOLDERS -> library.folders
-        LibraryTab.SONGS -> emptyList()
+        else -> emptyList()
     }
     val selected = groups.firstOrNull { it.id == selectedId }
     val searching = query.isNotBlank()
     LaunchedEffect(selectedId, groups) { if (selectedId != null && selected == null) selectedId = null }
     BackHandler(searching || selected != null) {
         if (searching) onQueryChange("") else selectedId = null
+    }
+    missingFavourite?.let { id ->
+        androidx.compose.material3.AlertDialog(onDismissRequest = { missingFavourite = null }, title = { Text("Remove unavailable favourite?") },
+            text = { Text("The saved entry will be removed. Your music files are not changed.") },
+            confirmButton = { TextButton(onClick = { personalActions?.removeFavourite?.invoke(id); missingFavourite = null }) { Text("Remove") } },
+            dismissButton = { TextButton(onClick = { missingFavourite = null }) { Text("Cancel") } })
     }
 
     Column(Modifier.fillMaxSize().padding(insets)) {
@@ -84,7 +97,9 @@ internal fun LibraryBrowser(
                 }
             }
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
+        if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
+            PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions)
+        } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
             when {
                 searching -> {
@@ -95,21 +110,35 @@ internal fun LibraryBrowser(
                         else -> {
                             item { BrowserMessage(songCount(search.tracks.size)) }
                             itemsIndexed(search.tracks, key = { _, track -> track.id.value }) { index, track ->
-                                TrackRow(track, current = track.id.value == currentId) { onPlay(search.tracks, index) }
+                                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(search.tracks, index) }
                             }
                         }
                     }
                 }
                 selected != null -> {
                     item(key = "collection-header") {
-                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { onPlay(selected.tracks, 0) })
+                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { onPlay(selected.tracks, 0) }, onAdd = { onAddToPlaylist(selected.tracks) })
                     }
                     itemsIndexed(selected.tracks, key = { _, track -> track.id.value }) { index, track ->
-                        TrackRow(track, current = track.id.value == currentId) { onPlay(selected.tracks, index) }
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(selected.tracks, index) }
                     }
                 }
-                tab == LibraryTab.SONGS -> itemsIndexed(library.songs, key = { _, track -> track.id.value }) { index, track ->
-                    TrackRow(track, current = track.id.value == currentId) { onPlay(library.songs, index) }
+                tab == LibraryTab.SONGS -> {
+                    if (library.songs.isEmpty()) item { BrowserMessage("No music yet. Put music in the Music folder, then rescan.") }
+                    itemsIndexed(library.songs, key = { _, track -> track.id.value }) { index, track ->
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(library.songs, index) }
+                    }
+                }
+                tab == LibraryTab.FAVOURITES || tab == LibraryTab.HISTORY -> {
+                    val rows = if (tab == LibraryTab.FAVOURITES) personal.favourites else personal.history
+                    val queue = rows.mapNotNull { it.track }.distinctBy { it.id }
+                    if (rows.isEmpty()) item { BrowserMessage(if (tab == LibraryTab.FAVOURITES) "Save songs from their More menu to find them here." else "Songs you play will appear here, most recent first.") }
+                    items(rows, key = { it.song.id }) { row ->
+                        SavedSongItem(row, currentId,
+                            onPlay = { val index = queue.indexOfFirst { it.id == row.track?.id }; if (index >= 0) onPlay(queue, index) },
+                            onMore = if (row.track != null) ({ onTrackActions(row.track) }) else if (tab == LibraryTab.FAVOURITES) ({ missingFavourite = row.song.id }) else null,
+                        )
+                    }
                 }
                 else -> items(groups, key = { it.id }) { collection ->
                     ListItem(
@@ -127,7 +156,7 @@ internal fun LibraryBrowser(
 }
 
 @Composable
-private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit) {
+private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(onClick = onBack) { Text("Back to collections") }
         Text(collection.name, style = MaterialTheme.typography.headlineMedium)
@@ -136,6 +165,7 @@ private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, on
             Button(onClick = onPlay) { Text("Play all") }
             Text(songCount(collection.tracks.size), style = MaterialTheme.typography.bodyMedium)
         }
+        TextButton(onClick = onAdd) { Text("Add all to playlist") }
     }
 }
 

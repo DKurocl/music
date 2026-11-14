@@ -10,4 +10,5 @@ rootProject.name = "Music"
 include(":core:model", ":core:lyrics")
 // Android libraries: one concern each, no UI.
 include(":core:library", ":core:playback")
+include(":core:user")
 include(":app")

@@ -26,6 +26,10 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.UUID
 import ua.olex.music.model.Track
 
 /** What is playing, as screens need it. Position is asked for ([PlayerConnection.positionMs]), not pushed. */
@@ -49,9 +53,19 @@ data class PlayerState(
     val error: String? = null,
     val sleepDeadlineMs: Long? = null,
     val sleepTimerError: String? = null,
+    val queue: List<QueueItem> = emptyList(),
+    val queueIndex: Int = -1,
+    val shuffle: Boolean = false,
+    val repeat: RepeatMode = RepeatMode.OFF,
 ) {
     val hasTrack get() = mediaId != null
 }
+
+/** Stable per-occurrence identity keeps repeated songs distinct while reordering a queue. */
+data class QueueItem(val key: String, val mediaId: String, val title: String, val artist: String, val artworkUri: String?)
+
+/** UI-level repeat policy, independent of Media3 constants. */
+enum class RepeatMode { OFF, ALL, ONE }
 
 /**
  * The app's side of the player: one controller for the whole app, connected to [PlaybackService].
@@ -66,9 +80,13 @@ class PlayerConnection(context: Context) {
     private var pendingPlay: Pair<List<Track>, Int>? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var queueJob: Job? = null
+    private val queueMutex = Mutex()
+    private var queueSnapshot: List<QueueItem> = emptyList()
 
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = publish(player)
+        override fun onEvents(player: Player, events: Player.Events) = publish(
+            player, events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
+        )
     }
 
     /** Idempotent, main-thread connection. A failed connection can be retried on the next action. */
@@ -86,7 +104,7 @@ class PlayerConnection(context: Context) {
 
                 override fun onDisconnected(controller: MediaController) {
                     if (this@PlayerConnection.controller !== controller) return
-                    queueJob?.cancel()
+                    scope.coroutineContext.cancelChildren()
                     queueJob = null
                     this@PlayerConnection.controller = null
                     connection = null
@@ -103,7 +121,7 @@ class PlayerConnection(context: Context) {
                 val connected = Futures.getDone(future)
                 controller = connected
                 connected.addListener(listener)
-                publish(connected)
+                publish(connected, updateQueue = true)
                 pendingPlay?.let { (tracks, index) ->
                     pendingPlay = null
                     play(tracks, index)
@@ -118,7 +136,7 @@ class PlayerConnection(context: Context) {
 
     /** Releases both completed and pending bindings without stopping the service's music. */
     fun disconnect() {
-        queueJob?.cancel()
+        scope.coroutineContext.cancelChildren()
         queueJob = null
         val future = connection
         connection = null
@@ -127,6 +145,7 @@ class PlayerConnection(context: Context) {
         controller = null
         if (future != null) MediaController.releaseFuture(future)
         _state.value = PlayerState()
+        queueSnapshot = emptyList()
     }
 
     private fun connectionFailed() {
@@ -147,9 +166,10 @@ class PlayerConnection(context: Context) {
             connect()
             return
         }
-        queueJob?.cancel()
+        scope.coroutineContext.cancelChildren()
         val snapshot = tracks.toList()
         queueJob = scope.launch {
+            queueMutex.withLock {
             // A large library can contain thousands of items; metadata construction must not
             // block touch handling. Player commands themselves still belong on the main thread.
             val items = withContext(Dispatchers.Default) {
@@ -159,6 +179,7 @@ class PlayerConnection(context: Context) {
             player.setMediaItems(items, index, C.TIME_UNSET)
             player.prepare()
             player.play()
+            }
         }
     }
 
@@ -167,6 +188,48 @@ class PlayerConnection(context: Context) {
     /** Back to the start of the track, or to the previous one when already near the start. */
     fun previous() { controller?.seekToPrevious() }
     fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
+
+    fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
+    fun cycleRepeat() {
+        controller?.let { it.repeatMode = when (it.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        } }
+    }
+    fun playQueueItem(index: Int) {
+        controller?.let { player ->
+            if (index !in 0 until player.mediaItemCount) return
+            player.seekToDefaultPosition(index)
+            if (player.playbackState == Player.STATE_IDLE) player.prepare()
+            player.play()
+        }
+    }
+    fun moveQueueItem(from: Int, to: Int) {
+        controller?.let { if (from in 0 until it.mediaItemCount && to in 0 until it.mediaItemCount) it.moveMediaItem(from, to) }
+    }
+    fun removeQueueItem(index: Int) {
+        controller?.let { if (index in 0 until it.mediaItemCount) it.removeMediaItem(index) }
+    }
+
+    /** Appends or inserts after the current item; queued additions keep their request order. */
+    fun enqueue(tracks: List<Track>, next: Boolean) {
+        if (tracks.isEmpty()) return
+        val player = controller ?: return play(tracks, 0)
+        val snapshot = tracks.toList()
+        scope.launch {
+            queueMutex.withLock {
+                val items = withContext(Dispatchers.Default) {
+                    snapshot.map { currentCoroutineContext().ensureActive(); mediaItem(it) }
+                }
+                if (controller !== player) return@withLock
+                val empty = player.mediaItemCount == 0
+                val index = if (next && !empty) player.currentMediaItemIndex + 1 else player.mediaItemCount
+                player.addMediaItems(index, items)
+                if (empty) { player.prepare(); player.play() }
+            }
+        }
+    }
 
     /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
     fun setSleepTimer(minutes: Int) {
@@ -182,7 +245,13 @@ class PlayerConnection(context: Context) {
         }, app.mainExecutor)
     }
 
-    private fun publish(player: Player) {
+    private fun publish(player: Player, updateQueue: Boolean = false) {
+        if (updateQueue) queueSnapshot = (0 until player.mediaItemCount).map { index ->
+            val queued = player.getMediaItemAt(index)
+            val metadata = queued.mediaMetadata
+            QueueItem(metadata.extras?.getString(QUEUE_KEY) ?: "$index:${queued.mediaId}", queued.mediaId,
+                metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString())
+        }
         val item = player.currentMediaItem
         val meta = player.mediaMetadata
         _state.value = PlayerState(
@@ -203,10 +272,16 @@ class PlayerConnection(context: Context) {
             error = player.playerError?.let { "Couldn't play this file. Retry or choose another song." },
             sleepDeadlineMs = (player as? MediaController)?.sessionExtras?.getLong(SleepTimerCommand.DEADLINE)?.takeIf { it > 0 },
             sleepTimerError = _state.value.sleepTimerError,
+            queue = queueSnapshot,
+            queueIndex = player.currentMediaItemIndex.takeIf { player.mediaItemCount > 0 } ?: -1,
+            shuffle = player.shuffleModeEnabled,
+            repeat = when (player.repeatMode) { Player.REPEAT_MODE_ALL -> RepeatMode.ALL; Player.REPEAT_MODE_ONE -> RepeatMode.ONE; else -> RepeatMode.OFF },
         )
     }
 
     companion object {
+        internal const val PATH_KEY = "ua.olex.music.path"
+        internal const val QUEUE_KEY = "ua.olex.music.queue_id"
         /** A track as the session carries it: its id, where to open it, and what to show. */
         fun mediaItem(track: Track): MediaItem {
             val uri = track.uri.takeIf { it.isNotEmpty() }?.let(Uri::parse)
@@ -220,6 +295,7 @@ class PlayerConnection(context: Context) {
                         .setArtworkUri(track.artworkUri?.let(Uri::parse))
                         .setTrackNumber(track.trackNumber).setDiscNumber(track.discNumber)
                         .setDurationMs(track.durationMs.takeIf { it > 0 })
+                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, UUID.randomUUID().toString()) })
                         .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                         .build(),
                 )
