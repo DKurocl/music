@@ -20,7 +20,6 @@ import java.util.concurrent.CancellationException
 import java.util.concurrent.ExecutionException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -58,6 +57,7 @@ data class PlayerState(
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.OFF,
     val audio: AudioDiagnostics = AudioDiagnostics(),
+    val queueError: String? = null,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -81,7 +81,6 @@ class PlayerConnection(context: Context) {
     private var connection: ListenableFuture<MediaController>? = null
     private var pendingPlay: Pair<List<Track>, Int>? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private var queueJob: Job? = null
     private val queueMutex = Mutex()
     private var queueSnapshot: List<QueueItem> = emptyList()
 
@@ -107,7 +106,6 @@ class PlayerConnection(context: Context) {
                 override fun onDisconnected(controller: MediaController) {
                     if (this@PlayerConnection.controller !== controller) return
                     scope.coroutineContext.cancelChildren()
-                    queueJob = null
                     this@PlayerConnection.controller = null
                     connection = null
                     pendingPlay = null
@@ -139,7 +137,6 @@ class PlayerConnection(context: Context) {
     /** Releases both completed and pending bindings without stopping the service's music. */
     fun disconnect() {
         scope.coroutineContext.cancelChildren()
-        queueJob = null
         val future = connection
         connection = null
         pendingPlay = null
@@ -162,6 +159,7 @@ class PlayerConnection(context: Context) {
     /** Replaces the queue with [tracks] and starts at [index], even during the initial connection. */
     fun play(tracks: List<Track>, index: Int) {
         if (index !in tracks.indices) return
+        dismissQueueError()
         val player = controller
         if (player == null) {
             pendingPlay = tracks.toList() to index
@@ -170,17 +168,17 @@ class PlayerConnection(context: Context) {
         }
         scope.coroutineContext.cancelChildren()
         val snapshot = tracks.toList()
-        queueJob = scope.launch {
+        scope.launch {
             queueMutex.withLock {
-            // A large library can contain thousands of items; metadata construction must not
-            // block touch handling. Player commands themselves still belong on the main thread.
-            val items = withContext(Dispatchers.Default) {
-                snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track) }
-            }
-            if (controller !== player) return@launch
-            player.setMediaItems(items, index, C.TIME_UNSET)
-            player.prepare()
-            player.play()
+                // A large library can contain thousands of items; metadata construction must not
+                // block touch handling. Player commands themselves still belong on the main thread.
+                val items = withContext(Dispatchers.Default) {
+                    snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track) }
+                }
+                if (controller !== player) return@withLock
+                player.setMediaItems(items, index, C.TIME_UNSET)
+                player.prepare()
+                player.play()
             }
         }
     }
@@ -222,6 +220,7 @@ class PlayerConnection(context: Context) {
     /** Appends or inserts after the current item; queued additions keep their request order. */
     fun enqueue(tracks: List<Track>, next: Boolean) {
         if (tracks.isEmpty()) return
+        dismissQueueError()
         val player = controller ?: return play(tracks, 0)
         val snapshot = tracks.toList()
         scope.launch {
@@ -238,11 +237,13 @@ class PlayerConnection(context: Context) {
                     if (controller !== player) return@addListener
                     val success = try { Futures.getDone(result).resultCode == SessionResult.RESULT_SUCCESS }
                         catch (_: ExecutionException) { false } catch (_: CancellationException) { false }
-                    if (!success) _state.value = _state.value.copy(error = "Couldn't add to the queue. Try again.")
+                    if (!success) _state.value = _state.value.copy(queueError = "Couldn't add to the queue. Use the song's actions to try again.")
                 }, app.mainExecutor)
             }
         }
     }
+
+    fun dismissQueueError() { _state.value = _state.value.copy(queueError = null) }
 
     /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
     fun setSleepTimer(minutes: Int) {
@@ -290,6 +291,7 @@ class PlayerConnection(context: Context) {
             shuffle = player.shuffleModeEnabled,
             repeat = when (player.repeatMode) { Player.REPEAT_MODE_ALL -> RepeatMode.ALL; Player.REPEAT_MODE_ONE -> RepeatMode.ONE; else -> RepeatMode.OFF },
             audio = (player as? MediaController)?.sessionExtras?.let(AudioDiagnostics::fromExtras) ?: AudioDiagnostics(),
+            queueError = _state.value.queueError,
         )
     }
 

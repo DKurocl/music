@@ -182,6 +182,10 @@ fun MusicRoot(model: LibraryViewModel) {
         }, confirmButton = { TextButton(onClick = { actionTrack = null }) { Text("Close") } })
     }
     playlistTracks?.let { PlaylistPicker(personal.playlists, it, model.personalActions) { playlistTracks = null } }
+    playing.queueError?.let { message ->
+        AlertDialog(onDismissRequest = model::dismissQueueError, title = { Text("Couldn't update queue") }, text = { Text(message) },
+            confirmButton = { TextButton(onClick = model::dismissQueueError) { Text("OK") } })
+    }
     model.userError?.let { message ->
         AlertDialog(onDismissRequest = model::dismissUserError, title = { Text("Couldn't save changes") }, text = { Text(message) },
             confirmButton = { TextButton(onClick = model::dismissUserError) { Text("OK") } })

@@ -163,6 +163,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
     fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(tracks, next)
+    fun dismissQueueError() = player.dismissQueueError()
 
     private fun hasAccess() =
         getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED

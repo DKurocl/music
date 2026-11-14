@@ -12,6 +12,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import ua.olex.music.playback.PlayerState
 
 /** Queue edits address stable occurrences, so repeated copies of the same song remain independent. */
@@ -37,7 +39,9 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     headlineContent = { Text(item.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     supportingContent = { Text(if (position == state.queueIndex) "Current · ${item.artist}" else item.artist) },
                     leadingContent = { Text("${position + 1}") },
-                    trailingContent = { TextButton(onClick = { editingKey = item.key }) { Text("More") } },
+                    trailingContent = { TextButton(onClick = { editingKey = item.key }, modifier = Modifier.semantics {
+                        contentDescription = "Actions for ${item.title}, queue item ${position + 1}"
+                    }) { Text("More") } },
                     modifier = Modifier.clickable { onPlay(item.key) },
                 )
             }
