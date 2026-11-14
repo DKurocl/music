@@ -14,6 +14,7 @@ android {
 
 dependencies {
     api(project(":core:model"))
+    api(project(":core:dsp"))
     api(libs.coroutines.core)
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.guava)

@@ -1,5 +1,28 @@
 # Handoff
 
+## Active continuation: audio processing (Codex, 2026-11-14)
+
+Main now contains `9c7dd00`: file-tag integration + new player surface + embedded lyrics.
+Code `85d7748` passed CI 43638096372; main release run 43638695765 is being monitored.
+Temporary metadata branch was deleted after integration. Work continues from main on
+`agent/m3-equalizer`, not on another agent's unmerged branch.
+
+Owner clarified: every listening entry point matters (albums/folders, shuffle, playlists). Wants
+ready Sony WF-1000XM5 correction and EQ. No crossfade/transitions; gapless still required.
+No visualizers; wallpaper palette everywhere; functionality before full UI polish. Asked to
+review the logic from the start, not just accumulate controls. See LOCAL_PLAYER_REVIEW.md.
+
+Current new work is an unconnected pure core:dsp scaffold (RBJ filters, state per channel,
+neutral bypass and bounds). Local `:core:dsp:test --offline --no-daemon` passed all 7 cases (Gradle 9.9.1, JDK 21). The
+headroom policy needs refinement from conservative summed boosts to combined response before
+Sony integration. Do not claim EQ works in the player yet.
+
+Next: implement AudioOutputProvider delegation with buffer-contract regression tests, service-owned
+per-output settings and safe transitions, then EQ controls/preset. Standard Media3 processor chains
+are skipped on float output, so do not wire there and silently miss hi-res playback. ReplayGain
+needs decoded-item association; audible-transition listeners alone are insufficient with prebuffering.
+
+
 ## Codex integrated local-player delivery (2026-11-14)
 
 Branch `agent/m1-file-metadata`, based on current main `f04db66`. The owner supplied Claude's
