@@ -24,14 +24,20 @@ options.layout_features = ['*']
 subsetter = subset.Subsetter(options=options)
 subsetter.populate(unicodes=ICONS.values())
 subsetter.subset(font)
-font.save(root / 'app/src/main/res/font/material_symbols.ttf')
+asset = root / 'scripts/assets/material_symbols.ttf'
+asset.parent.mkdir(parents=True, exist_ok=True)
+font.save(asset)
+filled = instantiateVariableFont(TTFont(asset), {'FILL': 1, 'wght': 400, 'GRAD': 0, 'opsz': 24})
 font = instantiateVariableFont(font, {'FILL': 0, 'wght': 400, 'GRAD': 0, 'opsz': 24})
 glyphs = font.getGlyphSet()
 scale = 24 / font['head'].unitsPerEm
 lines = []
 for name, codepoint in ICONS.items():
     pen = SVGPathPen(glyphs, lambda v: f'{v:.3f}'.rstrip('0').rstrip('.') if v else '0')
-    glyphs[font.getBestCmap()[codepoint]].draw(TransformPen(pen, (scale, 0, 0, -scale, 0, 24)))
+    if name == 'Favourite':
+        filled.getGlyphSet()[filled.getBestCmap()[codepoint]].draw(TransformPen(pen, (scale, 0, 0, -scale, 0, 24)))
+    else:
+        glyphs[font.getBestCmap()[codepoint]].draw(TransformPen(pen, (scale, 0, 0, -scale, 0, 24)))
     lines.append(f'    val {name} = icon("{pen.getCommands()}")')
 (root / 'app/src/main/java/ua/olex/music/ui/Icons.kt').write_text('''package ua.olex.music.ui
 
