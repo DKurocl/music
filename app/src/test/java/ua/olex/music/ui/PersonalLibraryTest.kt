@@ -29,10 +29,15 @@ class PersonalLibraryTest {
     @Test fun playlistCreateRequiresANameAndTrimsIt() {
         var created: String? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(emptyList(), actions(create = { name, _ -> created = name }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }
+        // Advance the dialog/text-input animation clock explicitly; caret animation has no terminal frame.
+        compose.mainClock.autoAdvance = false
         compose.onNodeWithText("New playlist").performClick()
+        compose.mainClock.advanceTimeBy(500)
         compose.onNodeWithText("Save").assertIsNotEnabled()
         compose.onNodeWithText("Playlist name").performTextInput("  Travel  ")
+        compose.mainClock.advanceTimeBy(100)
         compose.onNodeWithText("Save").performClick()
+        compose.mainClock.advanceTimeBy(500)
         compose.runOnIdle { assertEquals("Travel", created) }
     }
 

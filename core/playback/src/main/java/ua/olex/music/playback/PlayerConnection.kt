@@ -87,7 +87,7 @@ class PlayerConnection(context: Context) {
 
     private val listener = object : Player.Listener {
         override fun onEvents(player: Player, events: Player.Events) = publish(
-            player, events.contains(Player.EVENT_TIMELINE_CHANGED) || events.contains(Player.EVENT_MEDIA_METADATA_CHANGED),
+            player, events.contains(Player.EVENT_TIMELINE_CHANGED),
         )
     }
 
