@@ -11,7 +11,9 @@ Implemented: incremental file enrichment, exact audio properties, multiple artis
 ReplayGain/lyrics/MusicBrainz/cover range/delay/padding, cache v3. Per-file IO failure falls back
 and retries; permission/cancellation abort preserves the previous cache. New tests cover cache
 reuse/invalidation, metadata precedence, fallback, malformed values and separate collections.
-CI pending. Local model/tag-reader tests pass with the documented offline command.
+CI 43637047860 found a non-void expression-body JUnit method in the new scanner tests.
+The method now asserts its result and returns Unit; no tests removed. Complete player CI pending.
+Local model/tag-reader tests pass with the documented offline command.
 Physical library performance and real-file coverage remain unmeasured.
 
 Owner added PixelPlayerHQ/PixelPlayer as a possible design reference and explicitly rejected

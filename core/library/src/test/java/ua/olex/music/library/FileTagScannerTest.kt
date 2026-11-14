@@ -67,7 +67,8 @@ class FileTagScannerTest {
         val first = FileTagScanner.enrich(listOf(row()), emptyList()) { null }.single()
         assertEquals(row().title, first.title)
         assertEquals(row().codec, first.codec)
-        FileTagScanner.enrich(listOf(row()), listOf(first)) { error("Unsupported unchanged file reopened") }
+        val unchanged = FileTagScanner.enrich(listOf(row()), listOf(first)) { error("Unsupported unchanged file reopened") }
+        assertEquals(listOf(first), unchanged)
     }
 
     @Test fun transientFileErrorFallsBackAndRetriesWithoutHidingOtherSongs() = runBlocking {
