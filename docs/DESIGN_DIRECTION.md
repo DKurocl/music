@@ -19,7 +19,7 @@ Google Sans Flex and Material Symbols consistently with the owner's Earbuds app.
 The Home screenshot spends much of its space on an oversized mix headline and decorative artwork.
 For this owner's local listening, prioritize immediate access to albums, recent listening and the
 current queue. A new Home page is useful only if it reduces taps. Settings and decorative controls
-must not displace listening actions. Artwork-derived colors must preserve readable contrast.
+must not displace listening actions. Use the system wallpaper palette everywhere, including the player and modal surfaces. Album artwork never recolors the UI. Finish functionality before a complete design pass across every visible state.
 
 ## Acceptance
 

@@ -29,7 +29,7 @@ Take: one library over many sources, and the same policy on DRM.
 | Auxio | library indexing from tags instead of MediaStore, multi-value artists, ReplayGain, clean architecture | M1 scanner and library model |
 | Booming Music, Local Player | TTML/LRC word lyrics, in-app lyric editor | lyrics editor and offset tools |
 | Lotus | tag editing with TagLib, Material You | `:core:tags` |
-| PixelPlayer, Rhythm | expressive player pages, artwork-driven color, widgets | M2 design ideas |
+| PixelPlayer, Rhythm | expressive player layouts and widgets (use our wallpaper palette) | M2 design ideas |
 | Namida | very rich library views, video backgrounds, statistics | library screens, stats |
 | Symfonium, Poweramp (closed) | reference for audio options, signal path display, DSP | AUDIO.md options to consider |
 | Seeker (Android, C#/Xamarin over Soulseek.NET) | Soulseek on a phone: search UX, queues, sharing | `:core:soulseek` behaviour on mobile networks |

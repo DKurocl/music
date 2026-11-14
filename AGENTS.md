@@ -20,6 +20,9 @@ Any agent (Claude, Codex, others) continues the same work from these files. Read
 
 - Talk to the owner in Ukrainian. App UI, code, comments, commits and docs are in English.
 - Never write U+2013 or U+2014 (en and em dashes) in code, docs or UI text.
+- UI colors come only from the system wallpaper palette (Material You), including the player,
+  sheets and dialogs. Never recolor the app from album artwork. Functionality first, then a complete
+  design review of every visible state (owner, 2026-11-14). No visualizers.
 - One phone, newest Android only: `minSdk = 37`. No compatibility branches, no `Build.VERSION` checks
   for older releases, arm64-v8a only. (`-PminSdk=35` exists only for tools that lag, like Robolectric.)
 - Pins in `gradle/libs.versions.toml` are deliberate. Do not downgrade silently; a raise is its own

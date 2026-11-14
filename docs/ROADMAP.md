@@ -76,13 +76,14 @@ backup and restore of user data (M1, new).
       Vorbis, Opus, M4A, WAV; multi-value artists, album artist, disc, ReplayGain and R128,
       MusicBrainz ids, lyrics, pictures as byte ranges, real sample rate and bit depth, gapless
       delay and padding. 14 unit tests on byte fixtures.
-- [~] Wire the reader into the scan (Codex, 2026-11-14, `agent/m1-file-metadata`) (`:core:library`). MediaStore still lists the files; for each
+- [x] Wire the reader into the scan (`85d7748`, CI 43638096372; software acceptance verified,
+      physical-device acceptance pending) (`:core:library`). MediaStore still lists the files; for each
       new or changed file (mtime + size) open it (`contentResolver.openFileDescriptor(uri, "r")`,
       `ChannelSource(FileInputStream(fd).channel)`) and take `TagReader.read`: title, all artists,
       album artist, track/disc, year, genres, codec, rate, depth, duration, ReplayGain, cover range,
       delay/padding. Null result: keep the MediaStore values. Store artists and genres as lists
       (join table or separator column), gains and the cover range as columns; bump `library.db`.
-      Unchanged files are not opened again. Done when: a unit test with a fake file source shows
+      Unchanged files are not opened again. Physical follow-up: a unit test with a fake file source shows
       tag values winning over MediaStore values and an unchanged file not being reopened; on the
       phone a 24/96 FLAC shows "FLAC 24/96" and two artists show as two.
 - [ ] Real-file check of the reader on the phone: a debug screen or instrumentation test that runs
@@ -114,7 +115,7 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
       Replace `AppIcons`; add a CI guard against other icon sources.
 - [ ] Navigation: Home, Library (Albums, Artists, Songs, Playlists, Folders), Search, Downloads;
       floating toolbar; predictive back.
-- [~] Player page (Codex, 2026-11-14, owner prioritized functionality): container transform from the mini player, artwork-driven color scheme, queue
+- [~] Player page (Codex, 2026-11-14, owner prioritized functionality): container transform from the mini player, wallpaper-driven color scheme, queue
       sheet with drag to reorder, signal path sheet, sleep timer.
       Sleep timer verified at `4560b91`, CI 43566729401. Queue, shuffle/repeat, recovery and
       output/diagnostics verified at `f1ba244`, CI 43571427496. Drag reordering and cosmetic
