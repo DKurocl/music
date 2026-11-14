@@ -11,9 +11,8 @@ import ua.olex.music.model.SongKey
 import ua.olex.music.model.TrackId
 
 /**
- * The first scanner: what Android's own media index knows. It is instant and needs no native
- * code, but it only knows what MediaStore parsed (one artist, no ReplayGain, no embedded lyrics).
- * The file scanner with TagLib replaces it behind [LibraryRepository] (docs/ROADMAP.md, M1).
+ * MediaStore enumerates accessible files and provides fallback metadata. FileTagScanner enriches
+ * changed rows with the pure Kotlin tag reader before LibraryRepository replaces the cache.
  */
 internal object MediaStoreScanner {
     private val COLUMNS = arrayOf(

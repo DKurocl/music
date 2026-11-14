@@ -1,5 +1,23 @@
 # Handoff
 
+## Active: Codex file metadata integration (2026-11-14)
+
+Branch `agent/m1-file-metadata`, based on current main `f04db66`. The owner supplied Claude's
+latest chat: Claude owns design/fonts/icons; Codex takes the explicit open M1 task wiring the
+existing tag reader into the library. No parser duplication. Task claimed in ROADMAP.
+
+Implemented: incremental file enrichment, exact audio properties, multiple artists/genres, stored
+ReplayGain/lyrics/MusicBrainz/cover range/delay/padding, cache v3. Per-file IO failure falls back
+and retries; permission/cancellation abort preserves the previous cache. New tests cover cache
+reuse/invalidation, metadata precedence, fallback, malformed values and separate collections.
+CI pending. Physical library performance and real-file coverage remain unmeasured.
+
+Previous player head `f1ba244` passed CI 43571427496: all tests, lint, R8 and owner signing. It is
+already in main and release music-v1018 via Claude's integration. Earlier pending-CI language below
+is historical. The pasted Claude chat reports the owner has 890 tracks and audible FLAC playback;
+this is reported device evidence, not a new measurement by this agent.
+
+
 ## Session 3 (Claude, 2026-11-14): review of the Codex branch, tag reader
 
 Read first: this entry, then the Codex entry below (still accurate for its branch).

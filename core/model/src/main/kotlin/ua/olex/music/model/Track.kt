@@ -78,7 +78,22 @@ data class Track(
     /** Local files only: the path relative to the storage root, for the folder view and the organizer. */
     val path: String? = null,
     val genre: String? = null,
+    val artists: List<String> = listOf(artist),
+    val genres: List<String> = listOfNotNull(genre),
+    val metadata: FileMetadata? = null,
 ) {
     // Browsing does not need song matching; defer normalization until a source lookup asks for it.
     val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }
 }
+
+/** File-derived information retained for gain, gapless, artwork and lyrics consumers. Unknown stays null. */
+data class FileMetadata(
+    val albumArtists: List<String> = emptyList(),
+    val composers: List<String> = emptyList(),
+    val trackGainDb: Float? = null, val trackPeak: Float? = null,
+    val albumGainDb: Float? = null, val albumPeak: Float? = null,
+    val encoderDelay: Int? = null, val encoderPadding: Int? = null,
+    val lyrics: String? = null,
+    val musicBrainzTrackId: String? = null, val musicBrainzAlbumId: String? = null,
+    val coverOffset: Long? = null, val coverLength: Int? = null, val coverMime: String? = null,
+)
