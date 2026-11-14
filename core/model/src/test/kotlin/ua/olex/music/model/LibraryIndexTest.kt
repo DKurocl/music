@@ -8,6 +8,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LibraryIndexTest {
+    @Test fun multipleTagValuesProduceSeparateArtistAndGenreCollectionsWithoutSplittingBandNames() {
+        val track = song("multi", "Song").copy(albumArtist = "AC/DC; Guest", artists = listOf("AC/DC", "Guest"),
+            genres = listOf("Rock", "Electronic"), metadata = FileMetadata(albumArtists = listOf("AC/DC", "Guest")))
+        val index = LibraryIndex.build(listOf(track))
+        assertEquals(listOf("AC/DC", "Guest"), index.artists.map { it.name })
+        assertEquals(listOf("Electronic", "Rock"), index.genres.map { it.name })
+        assertEquals(1, index.albums.size)
+        assertTrue(index.artists.all { it.tracks == listOf(track) })
+    }
     @Test fun compilationsBelongToAlbumArtistAndFollowDiscThenTrackOrder() {
         val tracks = listOf(
             song("d2t1", "Second disc", disc = 2, number = 1),

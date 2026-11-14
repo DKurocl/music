@@ -39,7 +39,8 @@ data class LibraryIndex(
                 name: (Entry) -> String,
                 subtitle: (Entry) -> String? = { null },
                 order: Comparator<Entry>,
-            ): List<MusicCollection> = entries.groupBy(key).map { (parts, rows) ->
+                source: List<Entry> = entries,
+            ): List<MusicCollection> = source.groupBy(key).map { (parts, rows) ->
                 val ordered = rows.sortedWith(order)
                 val first = ordered.first()
                 MusicCollection(
@@ -53,17 +54,25 @@ data class LibraryIndex(
             return LibraryIndex(
                 songs = songs,
                 albums = groups("album", { listOf(it.artistId, it.albumId) }, { it.album }, { it.artist }, albumOrder),
-                artists = groups("artist", { listOf(it.artistId) }, { it.artist }, order = collectionOrder),
-                genres = groups("genre", { listOf(identity(it.genre)) }, { it.genre }, order = songOrder),
+                artists = groups("artist", { listOf(it.artistId) }, { it.artist }, order = collectionOrder,
+                    source = tracks.flatMap { track ->
+                        val names = track.metadata?.albumArtists?.takeIf { it.isNotEmpty() }
+                            ?: track.albumArtist?.takeIf(String::isNotBlank)?.let(::listOf)
+                            ?: track.artists.ifEmpty { listOf(track.artist) }
+                        names.distinctBy(::identity).map { Entry(track, artistOverride = it) }
+                    }),
+                genres = groups("genre", { listOf(identity(it.genre)) }, { it.genre }, order = songOrder,
+                    source = tracks.flatMap { track -> track.genres.ifEmpty { listOf(track.genre ?: "Unknown genre") }
+                        .distinctBy(::identity).map { Entry(track, genreOverride = it) } }),
                 folders = groups("folder", { listOf(it.folder) }, { it.folder.substringAfterLast('/') }, { it.folder }, collectionOrder),
             )
         }
 
-        private class Entry(val track: Track) {
+        private class Entry(val track: Track, artistOverride: String? = null, genreOverride: String? = null) {
             val titleOrder = LibraryOrder.name(track.title)
-            val artist = track.albumArtist?.takeIf(String::isNotBlank) ?: track.artist
+            val artist = artistOverride ?: track.albumArtist?.takeIf(String::isNotBlank) ?: track.artist
             val album = track.album?.takeIf(String::isNotBlank) ?: "Unknown album"
-            val genre = track.genre?.takeIf(String::isNotBlank) ?: "Unknown genre"
+            val genre = genreOverride ?: track.genre?.takeIf(String::isNotBlank) ?: "Unknown genre"
             val folder = track.path?.substringBeforeLast('/', "")?.trimEnd('/')?.takeIf(String::isNotBlank) ?: "Unknown folder"
             val artistId = identity(artist)
             val albumId = identity(album)

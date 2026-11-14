@@ -178,3 +178,12 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     destroyed service; queued write bursts coalesce before the next read barrier. It suspends while
     idle and starts no service, timer, platform job or wake lock. This prevents two service lifetimes
     from racing separate AtomicFile writers. Position polling exists only while audio is playing.
+
+28. MediaStore remains the file enumerator. FileTagScanner enriches new/changed rows with the existing
+    pure Kotlin core:tags reader, off the main thread, before atomic cache replacement. Cache reuse
+    requires matching id, URI, path, mtime, size and reader version. Unsupported files are remembered;
+    transient IO failures retain system metadata and retry next scan. Permission loss/cancellation
+    abort the scan. library.db v3 stores lossless JSON lists and supplemental metadata; user.db is
+    unchanged. Album ownership remains by album artist; multiple tagged album artists and genres
+    each get their own collection. Embedded artwork is stored as a validated byte range, never
+    loaded during scanning. Gain/lyrics/gapless values are data for later consumers, not yet applied.
