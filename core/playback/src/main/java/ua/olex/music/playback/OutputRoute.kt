@@ -5,6 +5,9 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.MediaRouter2
+import android.media.MediaRoute2Info
+import android.media.RouteDiscoveryPreference
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +24,10 @@ data class OutputRoute(val kind: Kind, val name: String, val sampleRatesHz: List
  * themselves (docs/AUDIO.md, "Signal path").
  */
 class OutputRouteMonitor(context: Context) {
+    private val app = context.applicationContext
     private val audio = context.getSystemService(AudioManager::class.java)
+    private val router = MediaRouter2.getInstance(app)
+    private var started = false
     private val music = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
     private val _route = MutableStateFlow(current())
     val route: StateFlow<OutputRoute?> = _route.asStateFlow()
@@ -30,9 +36,33 @@ class OutputRouteMonitor(context: Context) {
         override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>?) { _route.value = current() }
         override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>?) { _route.value = current() }
     }
+    private val routes = object : MediaRouter2.RouteCallback() {
+        override fun onRoutesUpdated(routes: List<MediaRoute2Info>) { refresh() }
+    }
+    private val controller = object : MediaRouter2.ControllerCallback() {
+        override fun onControllerUpdated(controller: MediaRouter2.RoutingController) { refresh() }
+    }
 
-    fun start() { audio.registerAudioDeviceCallback(callback, null); _route.value = current() }
-    fun stop() = audio.unregisterAudioDeviceCallback(callback)
+    private fun refresh() { if (started) _route.value = current() }
+
+    /** System-owned Bluetooth/speaker routing, with no codec guessing or forced communication route. */
+    fun showOutputSwitcher(): Boolean = router.showSystemOutputSwitcher()
+
+    fun start() {
+        if (started) return
+        started = true
+        audio.registerAudioDeviceCallback(callback, null)
+        router.registerRouteCallback(app.mainExecutor, routes, RouteDiscoveryPreference.Builder(emptyList(), false).build())
+        router.registerControllerCallback(app.mainExecutor, controller)
+        _route.value = current()
+    }
+    fun stop() {
+        if (!started) return
+        started = false
+        audio.unregisterAudioDeviceCallback(callback)
+        router.unregisterRouteCallback(routes)
+        router.unregisterControllerCallback(controller)
+    }
 
     private fun current(): OutputRoute? {
         val device = audio.getAudioDevicesForAttributes(music).firstOrNull() ?: return null

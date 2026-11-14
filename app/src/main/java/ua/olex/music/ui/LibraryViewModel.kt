@@ -59,7 +59,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     val personal: StateFlow<PersonalLibraryState> = combine(library, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
         PersonalLibraryState.resolve(index ?: LibraryIndex.EMPTY, favourites, playlists, history)
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
+    }.flowOn(Dispatchers.Default).catch {
+        userError = "Couldn't open your personal library. Your saved data has not been reset."
+        emit(PersonalLibraryState())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
 
     var userError by mutableStateOf<String?>(null); private set
     val personalActions = PersonalLibraryActions(
@@ -156,9 +159,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun setSleepTimer(minutes: Int) = player.setSleepTimer(minutes)
     fun toggleShuffle() = player.toggleShuffle()
     fun cycleRepeat() = player.cycleRepeat()
-    fun playQueueItem(index: Int) = player.playQueueItem(index)
-    fun moveQueueItem(from: Int, to: Int) = player.moveQueueItem(from, to)
-    fun removeQueueItem(index: Int) = player.removeQueueItem(index)
+    fun playQueueItem(key: String) = player.playQueueItem(key)
+    fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
+    fun removeQueueItem(key: String) = player.removeQueueItem(key)
     fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(tracks, next)
 
     private fun hasAccess() =
