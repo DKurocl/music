@@ -101,6 +101,8 @@ fun MusicRoot(model: LibraryViewModel) {
     val query by model.query.collectAsStateWithLifecycle()
     val search by model.search.collectAsStateWithLifecycle()
     val personal by model.personal.collectAsStateWithLifecycle()
+    val lyrics by model.embeddedLyrics.collectAsStateWithLifecycle()
+    val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
@@ -164,6 +166,9 @@ fun MusicRoot(model: LibraryViewModel) {
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
+            lyrics = lyrics, lyricOffset = lyricOffset, onLyricOffset = model::setLyricOffset,
+            favourite = playing.mediaId in personal.favouriteByTrackId,
+            onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
             onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
@@ -271,11 +276,15 @@ private fun NowPlaying(
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
     onMore: (() -> Unit)?,
+    lyrics: ua.olex.music.lyrics.Lyrics, lyricOffset: Long, onLyricOffset: (Long) -> Unit,
+    favourite: Boolean, onFavourite: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
+    var lyricsOpen by rememberSaveable { mutableStateOf(false) }
+    if (lyricsOpen) LyricsSheet(lyrics, state, lyricOffset, position, onSeek, onLyricOffset) { lyricsOpen = false }
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var queueSheet by rememberSaveable { mutableStateOf(false) }
     var audioPath by rememberSaveable { mutableStateOf(false) }
@@ -291,64 +300,79 @@ private fun NowPlaying(
         )
     }
 
+    PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
+        onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
+        onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true })
+    if (outputUnavailable) AlertDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
+        text = { Text("Open Android's media output controls to choose a device.") },
+        confirmButton = { TextButton(onClick = { outputUnavailable = false }) { Text("OK") } })
+}
+
+/** The player surface is independent of service/route bindings so its real layouts can be reviewed in tests. */
+@Composable
+internal fun PlayerPage(
+    state: PlayerState, format: String?, route: OutputRoute?, favourite: Boolean, position: () -> Long,
+    onClose: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
+    onShuffle: () -> Unit, onRepeat: () -> Unit, onFavourite: (() -> Unit)?, onMore: (() -> Unit)?,
+    onOutput: () -> Unit, onQueue: () -> Unit, onLyrics: () -> Unit, onAudioPath: () -> Unit, onTimer: () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
     Surface(color = cs.surfaceContainerLow, modifier = Modifier.fillMaxSize()) {
-        Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()
-                .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())
+            .padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Icon(AppIcons.Down, null) }
-                Spacer(Modifier.weight(1f))
-                if (onMore != null) TextButton(onClick = onMore) { Text("More") }
+                Text("Now playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
+                IconButton(onClick = onQueue, modifier = Modifier.semantics { contentDescription = "Open queue" }) { Icon(AppIcons.Queue, null) }
             }
-            Artwork(state.artworkUri, Modifier.widthIn(max = 400.dp).fillMaxWidth().aspectRatio(1f), 28.dp)
-            Spacer(Modifier.height(28.dp))
-            Text(state.title, style = MaterialTheme.typography.headlineSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-            Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            state.error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.error, textAlign = TextAlign.Center) }
-            Spacer(Modifier.height(8.dp))
-            // The signal path, as far as it is known: what the file is and where it goes.
-            TextButton(onClick = { audioPath = true }) {
-                Text(listOfNotNull(format, route?.label()).joinToString("  →  ").ifEmpty { "Audio path" }, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
-            Spacer(Modifier.height(16.dp))
-            PlaybackProgress(state, position, onSeek)
             Spacer(Modifier.height(12.dp))
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
-                IconButton(onClick = onPrevious, modifier = Modifier.size(56.dp).semantics { contentDescription = "Previous" }) {
-                    Icon(AppIcons.Previous, null, Modifier.size(32.dp))
-                }
-                FilledIconButton(enabled = state.connected, onClick = onToggle, modifier = Modifier.size(80.dp).semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
-                    Icon(if (state.playWhenReady) AppIcons.Pause else AppIcons.Play, null, Modifier.size(40.dp))
-                }
-                IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.size(56.dp).semantics { contentDescription = "Next" }) {
-                    Icon(AppIcons.Next, null, Modifier.size(32.dp))
-                }
+            Artwork(state.artworkUri, Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f), 32.dp)
+            Spacer(Modifier.height(24.dp))
+            Text(state.title, style = MaterialTheme.typography.headlineMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+            Spacer(Modifier.height(8.dp))
+            Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, textAlign = TextAlign.Center)
+            state.error?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
+            TextButton(onClick = onAudioPath) {
+                Text(listOfNotNull(format, route?.label()).joinToString("  →  ").ifEmpty { "Audio path" }, style = MaterialTheme.typography.labelMedium, maxLines = 2)
+            }
+            PlaybackProgress(state, position, onSeek)
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.widthIn(max = 400.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
+                IconButton(enabled = state.connected, onClick = onShuffle, modifier = Modifier.semantics {
+                    contentDescription = "Shuffle"; selected = state.shuffle; stateDescription = if (state.shuffle) "On" else "Off"
+                }) { Icon(AppIcons.Shuffle, null, tint = if (state.shuffle) cs.primary else cs.onSurfaceVariant) }
+                IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp).semantics { contentDescription = "Previous" }) { Icon(AppIcons.Previous, null, Modifier.size(30.dp)) }
+                FilledIconButton(enabled = state.connected, onClick = onToggle, shape = RoundedCornerShape(28.dp), modifier = Modifier.size(88.dp).semantics {
+                    contentDescription = if (state.playWhenReady) "Pause" else "Play"
+                }) { Icon(if (state.playWhenReady) AppIcons.Pause else AppIcons.Play, null, Modifier.size(42.dp)) }
+                IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.size(52.dp).semantics { contentDescription = "Next" }) { Icon(AppIcons.Next, null, Modifier.size(30.dp)) }
+                IconButton(enabled = state.connected, onClick = onRepeat, modifier = Modifier.semantics {
+                    contentDescription = "Repeat"; stateDescription = state.repeat.name.lowercase()
+                }) { Icon(if (state.repeat == ua.olex.music.playback.RepeatMode.ONE) AppIcons.RepeatOne else AppIcons.Repeat, null,
+                    tint = if (state.repeat == ua.olex.music.playback.RepeatMode.OFF) cs.onSurfaceVariant else cs.primary) }
             }
             Spacer(Modifier.height(24.dp))
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = changeOutput, label = { Text("Output") })
-                AssistChip(onClick = { queueSheet = true }, label = { Text("Queue (${state.queueSize})") })
-                FilterChip(selected = state.shuffle, onClick = onShuffle, label = { Text(if (state.shuffle) "Shuffle on" else "Shuffle off") })
-                AssistChip(onClick = onRepeat, label = { Text(when (state.repeat) {
-                    ua.olex.music.playback.RepeatMode.OFF -> "Repeat off"
-                    ua.olex.music.playback.RepeatMode.ALL -> "Repeat all"
-                    ua.olex.music.playback.RepeatMode.ONE -> "Repeat one"
-                }) })
+            Surface(color = cs.surfaceContainerHigh, shape = RoundedCornerShape(28.dp)) {
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    IconButton(onClick = onLyrics, modifier = Modifier.semantics { contentDescription = "Lyrics" }) { Icon(AppIcons.Lyrics, null) }
+                    IconButton(enabled = onFavourite != null, onClick = { onFavourite?.invoke() }, modifier = Modifier.semantics {
+                        contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
+                    }) { Icon(if (favourite) AppIcons.Favourite else AppIcons.FavouriteOutline, null, tint = if (favourite) cs.primary else cs.onSurface) }
+                    IconButton(onClick = onOutput, modifier = Modifier.semantics { contentDescription = "Change output" }) { Icon(AppIcons.Output, null) }
+                    IconButton(onClick = onTimer, enabled = state.connected, modifier = Modifier.semantics {
+                        contentDescription = "Sleep timer"; stateDescription = if (state.sleepDeadlineMs != null) "On" else "Off"
+                    }) { Icon(AppIcons.Timer, null) }
+                    if (onMore != null) IconButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Song actions" }) { Icon(AppIcons.More, null) }
+                }
             }
-            if (outputUnavailable) Text("Open Android's media output controls to choose a device.", style = MaterialTheme.typography.bodyMedium)
-            TextButton(enabled = state.connected, onClick = { timerDialog = true }) {
-                Text(if (state.sleepDeadlineMs != null) "Sleep timer on" else "Sleep timer")
-            }
-            state.sleepTimerError?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.error, textAlign = TextAlign.Center) }
-            Spacer(Modifier.height(16.dp))
+            state.sleepTimerError?.let { Text(it, color = cs.error) }
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
-private fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit) {
+internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit) {
     // Keep the frequent position updates out of artwork, metadata and controls. Composition may
     // survive screen-off, so the poller also follows lifecycle rather than only visibility.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
