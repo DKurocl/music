@@ -90,7 +90,7 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [ ] Real-file check of the reader on the phone: a debug screen or instrumentation test that runs
       `TagReader` over the whole library and reports files that returned null or disagree with
       MediaStore on duration by more than 1 s. Fix every class of failure found.
-- [~] Incremental cache writes (Codex, 2026-11-15, `agent/m1-incremental-cache`): unchanged scans
+- [x] Incremental cache writes (`023bc1c`, CI 43651556524, 167 tests): unchanged scans
       must not rewrite rows/FTS or invalidate library observers; changed scans update only the delta
       atomically. SQLite regression tests cover no-op, deletion, metadata edits and rollback.
 - [ ] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
@@ -133,7 +133,7 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
 - [ ] Measure bit depth and sample rate reaching the mixer; fix if not float/24-bit.
 - [ ] Earbuds provider: read-only ContentProvider in `DKurocl/xm5` (signature permission) with
       codec, battery, mode; client here; codec in the signal path.
-- [ ] ReplayGain/R128: track and album mode, pre-amp, clipping prevention; pure logic tested.
+- [~] ReplayGain/R128 (Codex, 2026-11-15, `agent/m3-replaygain`): track and album mode, pre-amp, clipping prevention; sample-associated gain before sink buffering, with pure and integration tests.
 - [ ] Gapless verified with a gapless album (FLAC, MP3, Opus).
 - [ ] Offload for lossy with screen off after a battery measurement.
 - [ ] USB DAC bit-perfect mode.

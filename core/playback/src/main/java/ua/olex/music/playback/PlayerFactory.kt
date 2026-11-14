@@ -14,15 +14,16 @@ import androidx.media3.exoplayer.ExoPlayer
  */
 @OptIn(UnstableApi::class)
 internal object PlayerFactory {
-    fun create(context: Context, equalizer: () -> ua.olex.music.dsp.EqualizerSettings = { ua.olex.music.dsp.EqualizerSettings() }): ExoPlayer {
+    fun create(context: Context, equalizer: () -> ua.olex.music.dsp.EqualizerSettings = { ua.olex.music.dsp.EqualizerSettings() },
+        replayGain: () -> ua.olex.music.dsp.ReplayGainSettings = { ua.olex.music.dsp.ReplayGainSettings() }): ExoPlayer {
         val renderers = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
-                androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                ReplayGainAudioSink(androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
                     .setAudioOutputProvider(EqualizerAudioOutputProvider(
                         androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider.Builder(context).build(), equalizer,
-                    )).build()
+                     )).build(), replayGain)
         }
             // Without this ExoPlayer cuts 24-bit and float PCM down to 16 bits before the mixer.
             // With it, high-resolution PCM retains its precision as 32-bit float; 16-bit audio is
@@ -32,6 +33,7 @@ internal object PlayerFactory {
             // preferring them stays off so the platform's FLAC/MP3/AAC/Opus decoders are used.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         return ExoPlayer.Builder(context, renderers)
+            .setMediaSourceFactory(ReplayGainMediaSourceFactory(context))
             // Music, with Android's audio focus rules: pause for calls, duck for navigation prompts.
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             // Output disconnected: pause before falling back to the speaker. Wear detection is

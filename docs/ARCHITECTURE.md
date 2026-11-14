@@ -217,3 +217,15 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     for content equality and retained on unchanged rows. Prefix/scan generation and duplicate IDs
     are validated before writes. Empty successful snapshots remove only their own source. This
     avoids triggering FTS and rebuilding every library view merely because the app came forward.
+
+34. ReplayGain is applied to decoded PCM before DefaultAudioSink buffers/converts/trims it.
+    Scanner-normalized gains (including R128 conversion) travel in MediaItem extras, queue checkpoints
+    and per-source extractor Format.customData. MediaCodecRenderer's timestamped output-format queue
+    and MediaCodecAudioRenderer's customData copy associate the tags with the corresponding PCM.
+    Audible item-transition listeners do not control gain. Existing extractor customData is retained
+    inside the wrapper. Encoded passthrough/offload is disabled so effects cannot be silently skipped.
+35. ReplayGain is opt-in and global; EQ remains per output. Album mode uses album gain/peak together,
+    falling back to the track pair only when album gain is missing. Missing peaks prevent positive
+    boost with clipping protection enabled; untagged/legacy queue items remain neutral. Gain settings
+    changes ramp over 10 ms within a stream. Stream boundaries use the next stream's gain immediately,
+    without crossfading songs. Packed PCM8/16/24/32 and float preserve format, endianness and frame size.

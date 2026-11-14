@@ -1,3 +1,28 @@
+# Active: sample-associated ReplayGain (Codex, 2026-11-15)
+
+Work branch: `agent/m3-replaygain`. Implementation and regression tests are in progress; do not
+merge until CI confirms tests, both lints and debug/release R8 builds. Physical playback is unmeasured.
+
+The previous incremental-cache change is now in main at 3cce85f. Retrieved CI 43651556524 XML:
+167 distinct cases, 167 executions, zero failures/errors/skips, including 11 LibrarySearchTest cases.
+Both lints, both APK variants and owner signature verification passed. Main release CI 43653234944
+is in progress. Its outcome and the signed release must be checked before claiming delivery.
+
+Network publication is now active: GitHub API and Robolectric mirror requests succeed. No prior
+network changes were reapplied and nothing was published by this agent.
+The standalone local Room harness still has incomplete Android Gradle variant modeling and fails
+with missing SupportSQLiteOpenHelper classes; this is a harness limitation, not a CI test failure.
+Use production CI evidence above. Do not report this local full-suite attempt as passing.
+
+ReplayGain code: opt-in Off/Track/Album, preamp, peak guard; source tags attached before extraction
+and retained in the decoder's timestamped Format.customData. Gain precedes sink buffering and
+conversion; no onMediaItemTransition gain changes. PCM format/byte order preserved, reusable direct
+buffers, stable partial-write identity including bypass. Settings changes ramp; tracks do not crossfade.
+Global preferences/session state and controls in Equalizer, with queue tag persistence/backward read.
+Pure model/tag/lyrics/DSP/delta run now passes 87 tests; new Android integration/UI tests not yet run.
+Next: inspect full branch CI, fix failures, verify source-to-buffer/queue/UI regressions, update
+comparison/audio docs, then integrate after green. Phone gapless/24-bit/calls/battery gates remain.
+
 # Active work: incremental cache and local-player comparison (Codex, 2026-11-15)
 
 Unmerged branch: `agent/m1-incremental-cache`. Full CI/APK validation remains blocked by network

@@ -32,6 +32,15 @@ class EqualizerSheetTest {
         compose.onNodeWithText("Sony correction").assertDoesNotExist()
         compose.onNodeWithContentDescription("Enable equalizer").assertIsOff()
     }
+    @Test fun normalizationCanSelectAlbumModeWithoutEnablingHeadphoneEq() {
+        var normalized: ReplayGainSettings? = null
+        compose.setContent { AppTheme { EqualizerSheet(EqualizerState("phone-speaker", "Phone speakers"), true, null,
+            { _, _ -> error("ReplayGain changed the EQ") }, {}, onLoudness = { normalized = it }) } }
+        compose.onNodeWithText("Album").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(ReplayGainMode.ALBUM, normalized?.mode) }
+        compose.onNodeWithContentDescription("Enable equalizer").performScrollTo().assertIsOff()
+    }
+
     @Test fun unavailableControllerCannotChangeProcessing() {
         compose.setContent { AppTheme { EqualizerSheet(EqualizerState(), false, null, { _, _ -> error("Disconnected output modified") }, {}) } }
         compose.onNodeWithContentDescription("Enable equalizer").assertIsNotEnabled()

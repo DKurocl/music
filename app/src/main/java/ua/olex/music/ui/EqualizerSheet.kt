@@ -12,6 +12,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ua.olex.music.dsp.EqualizerSettings
+import ua.olex.music.dsp.ReplayGainSettings
+import ua.olex.music.dsp.ReplayGainMode
 import ua.olex.music.dsp.SonyCorrection
 import ua.olex.music.playback.EqualizerState
 import java.util.Locale
@@ -19,7 +21,8 @@ import java.util.Locale
 /** One active output at a time; updates name their route so a Bluetooth handover cannot alter another profile. */
 @Composable
 internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: String?,
-    onApply: (String, EqualizerSettings) -> Unit, onDismiss: () -> Unit) {
+    onApply: (String, EqualizerSettings) -> Unit, onDismiss: () -> Unit,
+    loudness: ReplayGainSettings = ReplayGainSettings(), onLoudness: (ReplayGainSettings) -> Unit = {}) {
     var draft by remember(state.routeKey, state.settings) { mutableStateOf(state.settings) }
     val editable = connected && state.routeKey != "none"
     fun apply(settings: EqualizerSettings) { draft = settings; onApply(state.routeKey, settings) }
@@ -27,6 +30,8 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
         Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Equalizer", style = MaterialTheme.typography.headlineMedium)
+            ReplayGainControls(loudness, connected, onLoudness)
+            HorizontalDivider()
             Text(state.routeName, style = MaterialTheme.typography.titleMedium)
             Text("Saved separately for this output. Processing is off until you enable it.", style = MaterialTheme.typography.bodyMedium)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -59,4 +64,30 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
             Spacer(Modifier.height(16.dp))
         }
     }
+}
+
+/** Normalization is global, independent of per-output headphone correction. */
+@Composable
+private fun ReplayGainControls(settings: ReplayGainSettings, enabled: Boolean, onApply: (ReplayGainSettings) -> Unit) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+    fun apply(value: ReplayGainSettings) { draft = value; onApply(value) }
+    Text("ReplayGain", style = MaterialTheme.typography.titleLarge)
+    Text("Uses file loudness tags. Album keeps the intended level differences within an album; Track suits shuffled listening. Untagged files keep their original level.", style = MaterialTheme.typography.bodySmall)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ReplayGainMode.entries.forEach { mode ->
+            FilterChip(selected = draft.mode == mode, enabled = enabled, onClick = { apply(draft.copy(mode = mode)) },
+                label = { Text(mode.name.lowercase().replaceFirstChar(Char::uppercase)) })
+        }
+    }
+    Text("ReplayGain preamp ${String.format(Locale.ROOT, "%+.1f", draft.preampDb)} dB")
+    Slider(value = draft.preampDb.toFloat(), valueRange = -24f..12f, enabled = enabled && draft.mode != ReplayGainMode.OFF,
+        onValueChange = { draft = draft.copy(preampDb = it.toDouble()) }, onValueChangeFinished = { onApply(draft) },
+        modifier = Modifier.semantics { contentDescription = "ReplayGain preamp" })
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("Prevent clipping", style = MaterialTheme.typography.titleMedium)
+        Switch(checked = draft.preventClipping, enabled = enabled && draft.mode != ReplayGainMode.OFF,
+            onCheckedChange = { apply(draft.copy(preventClipping = it)) },
+            modifier = Modifier.semantics { contentDescription = "Prevent ReplayGain clipping" })
+    }
+    Text("Without a known peak, clipping protection prevents positive gain. EQ can reserve additional headroom.", style = MaterialTheme.typography.bodySmall)
 }

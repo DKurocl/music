@@ -178,7 +178,8 @@ fun MusicRoot(model: LibraryViewModel) {
         )
     }
     if (equalizerOpen) EqualizerSheet(playing.equalizer, playing.connected, playing.equalizerError,
-        onApply = model::setEqualizer, onDismiss = { equalizerOpen = false })
+        onApply = model::setEqualizer, onDismiss = { equalizerOpen = false },
+        loudness = playing.replayGain, onLoudness = model::setReplayGain)
     actionTrack?.let { track ->
         AlertDialog(onDismissRequest = { actionTrack = null }, title = { Text(track.title) }, text = {
             Column {
