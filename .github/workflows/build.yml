@@ -26,7 +26,8 @@ jobs:
           done
       - name: No en or em dashes in authored files
         run: |
-          ! grep -rIlP '[\x{2013}\x{2014}]' --include='*.kt' --include='*.kts' --include='*.md' --include='*.xml' --include='*.toml' --include='*.yml' --exclude-dir=.agents --exclude-dir=build . \
+          # Byte patterns, so the check does not depend on the runner's locale.
+          ! grep -rIl -e $'\xe2\x80\x93' -e $'\xe2\x80\x94' --include='*.kt' --include='*.kts' --include='*.md' --include='*.xml' --include='*.toml' --include='*.yml' --exclude-dir=.agents --exclude-dir=build . \
             || { echo '::error::U+2013/U+2014 found in the files above (AGENTS.md, Rules)'; exit 1; }
       - name: Owner signing key
         id: key
