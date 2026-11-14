@@ -25,7 +25,7 @@ internal object PlayerFactory {
                     )).build()
         }
             // Without this ExoPlayer cuts 24-bit and float PCM down to 16 bits before the mixer.
-            // With it, high-resolution PCM goes out as 32-bit float, untouched; 16-bit audio is
+            // With it, high-resolution PCM retains its precision as 32-bit float; 16-bit audio is
             // not affected. (Float output skips the speed/pitch processors: a music player has none.)
             .setEnableAudioFloatOutput(true)
             // Decoders the phone lacks (ALAC, APE, ...) are added as extension renderers later;
