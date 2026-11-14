@@ -1,0 +1,44 @@
+name: Pixel APK build
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      apps: ${{ steps.matrix.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: matrix
+        run: |
+          jq -e 'type == "array" and length > 0' apps.json > /dev/null
+          echo "apps=$(jq -c . apps.json)" >> "$GITHUB_OUTPUT"
+  build:
+    needs: select
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.select.outputs.apps) }}
+    env:
+      APP: ${{ matrix.app.name }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.9.1'
+          cache-provider: basic
+      - run: sdkmanager 'platforms;android-37.1' 'build-tools;37.0.0'
+      - run: |
+          [[ "$APP" =~ ^[a-z][a-z0-9-]*$ ]]
+          gradle ":apps:$APP:testDebugUnitTest" ":apps:$APP:lintRelease" ":apps:$APP:assembleRelease" -Pheavy=true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app.name }}-unsigned
+          path: apps/${{ matrix.app.name }}/build/outputs/apk/release/*-unsigned.apk
+          if-no-files-found: error
+
