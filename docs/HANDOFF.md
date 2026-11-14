@@ -10,7 +10,13 @@ Implemented: incremental file enrichment, exact audio properties, multiple artis
 ReplayGain/lyrics/MusicBrainz/cover range/delay/padding, cache v3. Per-file IO failure falls back
 and retries; permission/cancellation abort preserves the previous cache. New tests cover cache
 reuse/invalidation, metadata precedence, fallback, malformed values and separate collections.
-CI pending. Physical library performance and real-file coverage remain unmeasured.
+CI pending. Local model/tag-reader tests pass with the documented offline command.
+Physical library performance and real-file coverage remain unmeasured.
+
+Owner added PixelPlayerHQ/PixelPlayer as a possible design reference and explicitly rejected
+visualizers. README and the published Home/player screenshots were reviewed; findings and
+Google-quality acceptance criteria are in DESIGN_DIRECTION.md for the design agent. No UI
+implementation or reference code/assets were copied by this metadata task.
 
 Previous player head `f1ba244` passed CI 43571427496: all tests, lint, R8 and owner signing. It is
 already in main and release music-v1018 via Claude's integration. Earlier pending-CI language below
