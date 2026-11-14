@@ -51,7 +51,7 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
 internal class ReplayGainExtractorsFactory(private val delegate: ExtractorsFactory, private val tags: ReplayGainTags) : ExtractorsFactory by delegate {
     override fun createExtractors(): Array<Extractor> = wrap(delegate.createExtractors())
     override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> = wrap(delegate.createExtractors(uri, responseHeaders))
-    private fun wrap(extractors: Array<Extractor>) = extractors.map { extractor ->
+    private fun wrap(extractors: Array<Extractor>): Array<Extractor> = extractors.map<Extractor, Extractor> { extractor ->
         object : Extractor by extractor {
             override fun init(output: ExtractorOutput) = extractor.init(object : ExtractorOutput by output {
                 override fun track(id: Int, type: Int): TrackOutput {

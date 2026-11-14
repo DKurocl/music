@@ -41,6 +41,23 @@ class EqualizerSheetTest {
         compose.onNodeWithContentDescription("Enable equalizer").performScrollTo().assertIsOff()
     }
 
+    @Test fun filterEditorRejectsInvalidFrequencyAndAppliesTheCompleteFilter() {
+        var applied: EqualizerSettings? = null
+        compose.setContent { AppTheme { EqualizerSheet(EqualizerState("phone-speaker", "Phone speakers"), true, null,
+            { _, settings -> applied = settings }, {}) } }
+        compose.onNodeWithText("31 Hz").performScrollTo().performClick()
+        compose.onNodeWithText("Frequency (Hz)").performTextReplacement("invalid")
+        compose.onNodeWithText("Apply").assertIsNotEnabled()
+        compose.onNodeWithText("Frequency (Hz)").performTextReplacement("80")
+        compose.onNodeWithText("Q", substring = false).performTextReplacement("0.8")
+        compose.onNodeWithText("Low shelf").performClick()
+        compose.onNodeWithText("Apply").performClick()
+        compose.runOnIdle {
+            assertEquals(EqualizerBand(80.0, 0.0, 0.8, FilterType.LOW_SHELF), applied?.bands?.first())
+            assertFalse(requireNotNull(applied).enabled)
+        }
+    }
+
     @Test fun unavailableControllerCannotChangeProcessing() {
         compose.setContent { AppTheme { EqualizerSheet(EqualizerState(), false, null, { _, _ -> error("Disconnected output modified") }, {}) } }
         compose.onNodeWithContentDescription("Enable equalizer").assertIsNotEnabled()

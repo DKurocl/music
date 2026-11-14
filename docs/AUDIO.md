@@ -36,7 +36,7 @@ unless it says so; "to measure" items are tasks in ROADMAP M3 with the command t
 | Wake lock while playing | screen-off playback of local files | set |
 | No speed/pitch/silence processors | nothing between decoder and mixer | set (float output skips them) |
 | Gapless | ExoPlayer reads encoder delay/padding (MP3 LAME, M4A iTunSMPB, FLAC/Opus natively) | to verify with a gapless album |
-| ReplayGain / R128 | album and track gain from tags, applied as one volume step, never clipping | M3 |
+| ReplayGain / R128 | decoder-associated PCM gain, track/album modes, preamp and peak guard | implemented on work branch; focused tests pass, phone pending |
 | Audio offload for lossy files with the screen off | lower power on long listening; FLAC decode is cheap anyway | M3, measure battery first |
 | USB DAC bit-perfect | `AudioManager.setPreferredMixerAttributes` with `MIXER_BEHAVIOR_BIT_PERFECT` (API 34+) | M3, needs a DAC |
 | Formats the platform lacks (ALAC, APE, WavPack, DSD) | an FFmpeg extension renderer | M3, pick a maintained prebuilt, check 16 KB pages |
@@ -97,10 +97,32 @@ The audio-output wrapper retains the sink's encoding/rate: high-resolution float
 to 16-bit to run the EQ. Standard PCM16 is processed internally in double precision and returned
 in the negotiated PCM16 format. Processing bypass forwards original samples; active settings
 reserve headroom and change over 10 ms. Buffer protocol and math are tested separately from device
-measurements. ReplayGain is still not applied. Offload remains disabled; a future offload feature
+measurements. ReplayGain is implemented on the active work branch before sink buffering/conversion/trimming.
+Track/album tags travel in the decoder format; buffered old samples keep their gain. Unknown peaks
+prevent positive boost when clipping protection is on. Untagged and legacy queue entries stay neutral.
+Offload remains disabled; a future offload feature
 must account for effects rather than silently bypass them.
 
 Phone acceptance: compare bypass/flat/Sony with matched listening volume; confirm output changes
 restore the correct profile; inspect audio_flinger/AudioTrack encoding with 24/96 files; test
 seek/flush, pauses/calls, gapless albums and screen-off battery. No audible-quality or battery
 improvement is claimed until those are measured.
+
+## Functional audio additions awaiting the deferred full verification batch
+
+[code] ReplayGain controls are global and opt-in; per-output EQ remains independent. Album gain
+uses album peak, with track-pair fallback only if album gain is unavailable. The existing scanner
+normalizes R128 to the ReplayGain reference; the PCM stage does not add that offset again.
+Source/partial-write/queue tests pass in the focused JVM harness. Composer UI/AGP and device checks
+are pending. Old queues written before gain tags were stored remain readable and neutral; rebuild
+such a queue from the library to attach the scanned tags.
+
+[code] The EQ sheet now allows frequency/Q/type editing and strict AutoEq/Equalizer APO parametric
+TXT import. Import accepts only implemented filters, preserves source coefficients, rejects a
+partial/unsupported curve and leaves processing disabled. A document read cannot target a different
+output after routing changes. These Compose/file-picker flows remain unverified on Android.
+
+[code] Association was checked in pinned Media3 1.11.1 sources: MediaCodecRenderer.updateOutputFormatForTime
+uses the output timestamp's format queue; MediaCodecAudioRenderer.onOutputFormatChanged copies customData
+to the PCM AudioSinkConfig. The custom gain sink processes that PCM before DefaultAudioSink buffering.
+Source artifact: https://dl.google.com/android/maven2/androidx/media3/media3-exoplayer/1.11.1/media3-exoplayer-1.11.1-sources.jar
