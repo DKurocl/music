@@ -2,7 +2,7 @@ package ua.olex.music.library
 
 import android.content.Context
 import android.net.Uri
-import java.io.FileInputStream
+import android.os.ParcelFileDescriptor
 import java.io.IOException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
@@ -16,7 +16,7 @@ import ua.olex.music.tags.TagReader
 internal class AndroidTagSource(private val context: Context) {
     fun read(uri: String): AudioTags? {
         val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r") ?: throw IOException("No file descriptor")
-        return descriptor.use { opened -> FileInputStream(opened.fileDescriptor).use { stream -> TagReader.read(ChannelSource(stream.channel)) } }
+        return ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { stream -> TagReader.read(ChannelSource(stream.channel)) }
     }
 }
 
