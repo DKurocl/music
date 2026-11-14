@@ -20,7 +20,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        model.connectPlayer()
         // Files change behind the app's back (downloads, a cable, another app): look again on return.
         model.refresh()
+    }
+
+    override fun onStop() {
+        model.disconnectPlayer()
+        super.onStop()
     }
 }

@@ -59,4 +59,11 @@ class SongKeyTest {
         assertEquals(Origin.YOUTUBE, id.origin)
         assertEquals("dQw4w9WgXcQ", id.raw)
     }
+
+    @Test fun unknownResolutionIsNeverPresentedAsMeasured() {
+        assertEquals("FLAC 96 kHz", AudioFormat("flac", sampleRateHz = 96_000).label)
+        assertEquals("FLAC 44.1 kHz", AudioFormat("flac", sampleRateHz = 44_100).label)
+        assertEquals("FLAC 24-bit", AudioFormat("flac", bitDepth = 24).label)
+        assertEquals("FLAC", AudioFormat("flac").label)
+    }
 }

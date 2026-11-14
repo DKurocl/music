@@ -19,4 +19,6 @@ dependencies {
     implementation(libs.coroutines.guava)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.session)
+    testImplementation(libs.junit)
+    testImplementation(libs.robolectric)
 }

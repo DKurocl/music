@@ -26,7 +26,8 @@ internal object PlayerFactory {
         return ExoPlayer.Builder(context, renderers)
             // Music, with Android's audio focus rules: pause for calls, duck for navigation prompts.
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
-            // Earbuds taken out or disconnected: pause, never play on through the speaker.
+            // Output disconnected: pause before falling back to the speaker. Wear detection is
+            // an earbud-generated media command and must be verified separately on the phone.
             .setHandleAudioBecomingNoisy(true)
             // Keeps the CPU awake while playing with the screen off (local files; streams add Wi-Fi).
             .setWakeMode(C.WAKE_MODE_LOCAL)

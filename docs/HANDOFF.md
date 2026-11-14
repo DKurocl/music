@@ -3,6 +3,35 @@
 The newest entry is on top. Every session adds one: what changed, what is verified and how, what is
 only on paper, what failed, what comes next.
 
+## Session 2 (2026-11-14): M0 first-run reliability
+
+**Changed.** Work branch `agent/m0-first-run-reliability`. Failed or cancelled scans preserve the
+library; successful empty scans remove deleted files. Scan errors and retry are visible, and
+permanently denied audio access opens app settings. A tap during controller startup retains the
+requested queue. Controller bindings, progress polling and output callbacks stop with their UI
+lifecycle. Pause handles buffering/focus suppression; Play retries an errored item or restarts an
+ended queue. The player page scrolls for small windows and large fonts. Unknown bit depth and
+M4A codecs are no longer shown as measured audio properties. `[код]`
+
+**Verification in progress.** Regression tests added for scanner/provider failures, cancellation,
+concurrent scans, player commands, media metadata and unknown audio resolution. CI results will
+be recorded here after the branch build. No physical-device or visual verification yet.
+
+**Baseline verified.** GitHub Actions run 43546746908 for `90ded6f` passed the existing build and
+release jobs. The owner-signing step and signature verification passed; the old note below about
+missing signing secrets is superseded. This does not prove installation through Obtainium.
+`[код]` https://github.com/DKurocl/music/actions/runs/43546746908
+
+**Environment.** Cloud has JDK 21, authenticated GitHub and no Android SDK/device/KVM. Use CI
+instead of claiming local Android builds. `check_versions.py --network` resolved all five checked
+pins. AGP 9.5.1 POM declares Kotlin Gradle plugin 2.2.10; the project explicitly pins Kotlin and
+Compose plugin 2.2.21. Existing baseline CI compiled this combination. No pins downgraded.
+
+**Next.** Finish CI verification, then run the M0 checklist on the Pixel with a known FLAC and
+WF-1000XM5. Earbud wear detection, notification/lock-screen controls, API 37 behavior, screenshot
+goldens, accessibility, cold start, background measurement and baseline profiles remain unverified.
+M1 starts after recording the first phone run; do not mark M0 done based on unit tests.
+
 ## Session 1 (2026-11-14): foundation
 
 **Changed.** The repository was empty. It now has the Gradle project (five modules), the first

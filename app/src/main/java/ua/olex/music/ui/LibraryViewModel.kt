@@ -12,6 +12,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import ua.olex.music.graph
 import ua.olex.music.model.Track
 import ua.olex.music.playback.PlayerState
@@ -27,18 +29,41 @@ class LibraryViewModel(app: Application) : AndroidViewModel(app) {
 
     var allowed by mutableStateOf(hasAccess()); private set
     var scanning by mutableStateOf(false); private set
+    var scanError by mutableStateOf<String?>(null); private set
+    private var scanJob: Job? = null
 
     val positionMs: Long get() = player.positionMs
 
     /** Called when the app comes forward and after the permission dialog. */
     fun refresh() {
         allowed = hasAccess()
-        if (!allowed || scanning) return
+        if (!allowed) {
+            scanJob?.cancel()
+            scanError = null
+            return
+        }
+        if (scanning) return
         scanning = true
-        viewModelScope.launch {
-            try { graph.library.rescan() } finally { scanning = false }
+        scanError = null
+        scanJob = viewModelScope.launch {
+            try {
+                graph.library.rescan()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: SecurityException) {
+                allowed = hasAccess()
+                scanError = if (allowed) "Music access changed. Try scanning again." else null
+            } catch (_: Exception) {
+                scanError = "Couldn't scan your music. Your saved library is unchanged."
+            } finally {
+                scanning = false
+            }
         }
     }
+
+    /** Connect only while a screen is visible; the service owns ongoing playback independently. */
+    fun connectPlayer() = player.connect()
+    fun disconnectPlayer() = player.disconnect()
 
     fun play(list: List<Track>, index: Int) = player.play(list, index)
     fun toggle() = player.toggle()
