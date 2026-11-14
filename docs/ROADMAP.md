@@ -145,7 +145,7 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
       per output device, AutoEq profile import (WF-1000XM5 first). Pure DSP code tested against
       reference curves. Core float/PCM16 EQ, route-isolated settings and WF-1000XM5 preset
       verified at `4aa3efe`, CI 43640064817 (156 cases). Frequency/Q editing and external profile
-      import remain open. Measure on the phone before deciding whether any loop needs C++/NEON.
+      import are being completed on `agent/m3-replaygain`. Measure on the phone before deciding whether any loop needs C++/NEON.
 - Crossfade and decorative transitions are excluded by the owner (2026-11-14). Gapless remains required.
 - [ ] Rules for outputs: resume on earbuds connect (optional), what headset buttons do, volume per output.
 
