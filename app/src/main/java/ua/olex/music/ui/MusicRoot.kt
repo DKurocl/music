@@ -30,8 +30,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -79,6 +77,7 @@ import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 import ua.olex.music.graph
 import ua.olex.music.model.Track
+import ua.olex.music.model.TrackId
 import ua.olex.music.playback.OutputRoute
 import ua.olex.music.playback.PlayerState
 
@@ -89,7 +88,10 @@ import ua.olex.music.playback.PlayerState
  */
 @Composable
 fun MusicRoot(model: LibraryViewModel) {
-    val tracks by model.tracks.collectAsStateWithLifecycle()
+    val library by model.library.collectAsStateWithLifecycle()
+    val tracks = library?.songs
+    val query by model.query.collectAsStateWithLifecycle()
+    val search by model.search.collectAsStateWithLifecycle()
     val playing by model.playing.collectAsStateWithLifecycle()
     var expanded by rememberSaveable { mutableStateOf(false) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
@@ -97,13 +99,12 @@ fun MusicRoot(model: LibraryViewModel) {
     val activity = LocalActivity.current
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { model.refresh() }
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
-    BackHandler(expanded) { expanded = false }
 
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text("Songs") }, scrollBehavior = scroll,
+                title = { Text("Library") }, scrollBehavior = scroll,
                 actions = {
                     if (model.allowed) TextButton(onClick = model::refresh, enabled = !model.scanning) {
                         Text(if (model.scanning) "Scanning…" else "Rescan")
@@ -135,26 +136,27 @@ fun MusicRoot(model: LibraryViewModel) {
             model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
             list.isEmpty() -> Notice(insets, "No music yet", if (model.scanning) "Looking for music…" else "Put music in the Music folder and it shows up here.", null) {}
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = insets) {
-                model.scanError?.let { message -> item(key = "scan-error") { ErrorNotice(message, model::refresh) } }
-                itemsIndexed(list, key = { _, track -> track.id.value }) { index, track ->
-                    TrackRow(track, current = track.id.value == playing.mediaId) { model.play(list, index) }
-                }
-            }
+            else -> LibraryBrowser(
+                library = requireNotNull(library), insets = insets,
+                query = query, search = search, onQueryChange = model::setQuery,
+                currentId = playing.mediaId, onPlay = model::play,
+                scanError = model.scanError, onRescan = model::refresh,
+            )
         }
     }
 
     AnimatedVisibility(expanded && playing.hasTrack, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
         NowPlaying(
-            playing, format = tracks?.firstOrNull { it.id.value == playing.mediaId }?.format?.label,
+            playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.label },
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
         )
     }
+    BackHandler(expanded) { expanded = false }
 }
 
 @Composable
-private fun ErrorNotice(message: String, onRetry: () -> Unit) {
+internal fun ErrorNotice(message: String, onRetry: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(message, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
         TextButton(onClick = onRetry) { Text("Retry") }
@@ -174,7 +176,7 @@ private fun Notice(insets: PaddingValues, title: String, body: String, action: S
 }
 
 @Composable
-private fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
+internal fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     ListItem(
         headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface) },
@@ -188,7 +190,7 @@ private fun TrackRow(track: Track, current: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Artwork(uri: String?, modifier: Modifier, corner: Dp) {
+internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp) {
     val cs = MaterialTheme.colorScheme
     Box(modifier.clip(RoundedCornerShape(corner)).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         Icon(AppIcons.Note, null, tint = cs.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.4f))

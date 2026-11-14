@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Entity
+import androidx.room.Fts4
+import androidx.room.FtsOptions
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import androidx.room.Query
@@ -45,18 +47,32 @@ data class TrackEntity(
     val sizeBytes: Long,
     /** The scan that last saw the file; rows left behind by a scan are files that are gone. */
     val scanId: Long,
+    val genre: String? = null,
 ) {
     fun toTrack() = Track(
         id = TrackId(id), uri = uri, title = title, artist = artist, album = album, albumArtist = albumArtist,
         durationMs = durationMs, trackNumber = trackNumber, discNumber = discNumber, year = year, artworkUri = artworkUri,
-        format = codec?.let { AudioFormat(it, sampleRateHz, bitDepth, bitrateKbps) }, path = path,
+        format = codec?.let { AudioFormat(it, sampleRateHz, bitDepth, bitrateKbps) }, path = path, genre = genre,
     )
 }
+
+/** External-content FTS: Room's triggers index tracks without storing a second copy of their tags. */
+@Fts4(
+    contentEntity = TrackEntity::class,
+    tokenizer = FtsOptions.TOKENIZER_UNICODE61,
+    tokenizerArgs = ["remove_diacritics=2"],
+    prefix = [2, 3, 4],
+)
+@Entity(tableName = "track_search")
+data class TrackSearchEntity(val title: String, val artist: String, val album: String?, val albumArtist: String?)
 
 @Dao
 interface TrackDao {
     @Query("SELECT * FROM tracks ORDER BY title COLLATE NOCASE")
     fun observeAll(): Flow<List<TrackEntity>>
+
+    @Query("SELECT tracks.* FROM tracks JOIN track_search ON tracks.rowid = track_search.rowid WHERE track_search MATCH :expression")
+    fun search(expression: String): Flow<List<TrackEntity>>
 
     @Query("SELECT * FROM tracks WHERE songKey = :key")
     suspend fun byKey(key: String): List<TrackEntity>
@@ -78,7 +94,7 @@ interface TrackDao {
     }
 }
 
-@Database(entities = [TrackEntity::class], version = 1, exportSchema = false)
+@Database(entities = [TrackEntity::class, TrackSearchEntity::class], version = 2, exportSchema = false)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun tracks(): TrackDao
 

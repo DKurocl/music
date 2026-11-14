@@ -13,9 +13,18 @@ lifecycle. Pause handles buffering/focus suppression; Play retries an errored it
 ended queue. The player page scrolls for small windows and large fonts. Unknown bit depth and
 M4A codecs are no longer shown as measured audio properties. `[код]`
 
-**Verification in progress.** Regression tests added for scanner/provider failures, cancellation,
-concurrent scans, player commands, media metadata and unknown audio resolution. CI results will
-be recorded here after the branch build. No physical-device or visual verification yet.
+**Verified M0 hardening.** CI run 43549776145 for `04bef1b` passed `gradle test -PminSdk=35`,
+`lintDebug`, `lintRelease`, `assembleDebug`, R8 `assembleRelease` and owner-signature verification.
+Regression tests cover scanner/provider failures, cancellation, concurrent scans, player commands,
+media metadata and unknown audio resolution. No physical-device or visual verification yet.
+`[код]` https://github.com/DKurocl/music/actions/runs/43549776145
+
+**Expanded scope requested by the owner.** Continue M1 in this branch while M0's physical-device
+gate is pending. Added pure Kotlin library grouping/sorting, Songs/Albums/Artists/Genres/Folders
+tabs, collection pages with ordered Play all queues, and cancellable prefix/diacritic-insensitive
+Room FTS search. `library.db` v2 rebuilds its cache; FTS has external content and transactional
+triggers. New tests cover grouping, ordering, safe search expressions, SQLite matching and index
+updates/rollback. Preserve this work if the next session begins before CI is complete.
 
 **Baseline verified.** GitHub Actions run 43546746908 for `90ded6f` passed the existing build and
 release jobs. The owner-signing step and signature verification passed; the old note below about
@@ -26,6 +35,8 @@ missing signing secrets is superseded. This does not prove installation through 
 instead of claiming local Android builds. `check_versions.py --network` resolved all five checked
 pins. AGP 9.5.1 POM declares Kotlin Gradle plugin 2.2.10; the project explicitly pins Kotlin and
 Compose plugin 2.2.21. Existing baseline CI compiled this combination. No pins downgraded.
+The local wrapper could not download Gradle through Java's network configuration; no local test
+success is claimed. CI is the verified execution environment.
 
 **Next.** Finish CI verification, then run the M0 checklist on the Pixel with a known FLAC and
 WF-1000XM5. Earbud wear detection, notification/lock-screen controls, API 37 behavior, screenshot

@@ -77,6 +77,7 @@ data class Track(
     val format: AudioFormat? = null,
     /** Local files only: the path relative to the storage root, for the folder view and the organizer. */
     val path: String? = null,
+    val genre: String? = null,
 ) {
     val key: SongKey get() = SongKey.of(artist, title)
 }

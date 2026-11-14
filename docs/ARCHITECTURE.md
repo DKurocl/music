@@ -122,3 +122,13 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
 16. Android unit tests use Robolectric 4.17 on API 35 with `-PminSdk=35`; lint and APK builds run
     separately with the normal minSdk 37. Coroutines test uses the same version as runtime.
     These tests are not API 37 device evidence. No runtime dependency pins were changed. `[код]`
+17. `LibraryIndex` is a pure Kotlin snapshot shared by the library pages. Album artist groups
+    compilations; disc/track numbers order queues. Sort keys are computed off the main thread,
+    ignoring English articles and accent marks without depending on the phone locale. Collection
+    identifiers encode complete key parts; same-named albums by different artists stay separate.
+18. `library.db` version 2 adds genre and an external-content Room FTS4 table over title, artist,
+    album and album artist. Room triggers keep the index transactional with track changes;
+    `unicode61 remove_diacritics=2` handles accents. Queries contain only quoted token prefixes,
+    never raw FTS syntax, and are debounced/cancelled in the ViewModel. The rebuildable version 1
+    cache is dropped on upgrade; no user data is stored in it. `[код]`
+    [docs] https://www.sqlite.org/fts3.html#external_content_fts4_tables
