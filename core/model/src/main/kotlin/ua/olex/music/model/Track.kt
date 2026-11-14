@@ -79,5 +79,5 @@ data class Track(
     val path: String? = null,
     val genre: String? = null,
 ) {
-    val key: SongKey get() = SongKey.of(artist, title)
+    val key: SongKey = SongKey.of(artist, title)
 }
