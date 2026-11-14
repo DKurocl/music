@@ -50,19 +50,24 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var equalizer: EqualizerController
     private var equalizerRoute: OutputRouteMonitor? = null
     private var persistence: PlaybackPersistence? = null
+    @Volatile private var replayGain = ua.olex.music.dsp.ReplayGainSettings()
 
     override fun onCreate() {
         super.onCreate()
         equalizer = EqualizerController(this) { state -> session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply { putBundle(EqualizerCommand.KEY, EqualizerCommand.bundle(state)) })
         } }
-        val player = PlayerFactory.create(this) { equalizer.active }
+        replayGain = getSharedPreferences("replaygain-v1", MODE_PRIVATE).getString("settings", null)?.let {
+            runCatching { ReplayGainCodec.decode(it) }.getOrNull()
+        } ?: ua.olex.music.dsp.ReplayGainSettings()
+        val player = PlayerFactory.create(this, { equalizer.active }, { replayGain })
         val builder = MediaLibrarySession.Builder(this, player, Callback())
         // Tapping the notification opens the app.
         packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
+        session?.setSessionExtras(Bundle().apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(replayGain)) })
         equalizerRoute = OutputRouteMonitor(this).also { monitor ->
             monitor.start()
             equalizer.routeChanged(monitor.route.value)
@@ -187,7 +192,7 @@ class PlaybackService : MediaLibraryService() {
             if (controller.uid == Process.myUid()) {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                        .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).build(),
+                        .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command).build(),
                 )
             }
             return Futures.immediateFuture(result.build())
@@ -196,6 +201,17 @@ class PlaybackService : MediaLibraryService() {
         override fun onCustomCommand(
             session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == ReplayGainCommand.ACTION) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                val accepted = runCatching {
+                    val text = requireNotNull(args.getString(ReplayGainCommand.KEY))
+                    val settings = ReplayGainCodec.decode(text)
+                    getSharedPreferences("replaygain-v1", MODE_PRIVATE).edit().putString("settings", ReplayGainCodec.encode(settings)).apply()
+                    replayGain = settings
+                    session.setSessionExtras(Bundle(session.sessionExtras).apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(settings)) })
+                }.isSuccess
+                return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
+            }
             if (customCommand.customAction == EqualizerCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 val accepted = try {
