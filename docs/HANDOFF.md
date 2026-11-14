@@ -1,3 +1,48 @@
+# Current functional work (Codex, 2026-11-15)
+
+Active branch: `agent/m3-replaygain`. Owner now requests functionality first and no unnecessary
+releases or full APK builds. Do not merge/publish or trigger a new full pipeline for each edit.
+Use focused tests. The next source checkpoint uses [skip ci] to preserve code without a new build.
+This preference overrides earlier routine push/build/release instructions for this phase.
+
+Implemented locally:
+- ReplayGain Off/Track/Album, tagged-track preamp and peak guard. Album fallback keeps gain/peak
+  pairs intact. Unknown peaks prevent positive boost; untagged and legacy queue entries are neutral.
+- Scanner tags -> item extras -> per-source extractor Format.customData -> timestamped decoded PCM.
+  No audible-transition volume listener. Format/endianness/frame count preserved for PCM8/16/24/32
+  and float. Original buffer bypass, stable identity/partial writes, reusable direct storage.
+  Global persistent settings, service-owned private commands, queue checkpoint tags and controls.
+- Parametric EQ editing: frequency, Q and Peak/Low shelf/High shelf type, validated as one update.
+- AutoEq TXT import: supported PK/LS/LSC/HS/HSC commands, preamp, comments/BOM/CRLF, bounded size,
+  duplicate/filter-count validation and complete rejection of unsupported commands. Import leaves
+  processing disabled and targets the route captured when the file picker opened. IO off main;
+  service route guard protects a Bluetooth switch during reading.
+
+Verified locally: `python3 /workspace/toolchains/music-jvm/check.py`: 90 JVM tests pass.
+Focused playback harness command from /workspace/toolchains/music-playback-check:
+`GRADLE_USER_HOME=/workspace/.gradle-music /workspace/toolchains/gradle-9.9.1/bin/gradle test --tests ua.olex.music.playback.ReplayGainIntegrationTest --tests ua.olex.music.playback.PlaybackStoreTest --no-daemon --console=plain`
+passed 12 tests (4 source/PCM/codec integration, 8 checkpoint tests), no failures/errors/skips.
+Actual playback source and test sources compiled in that JVM harness against Android 17 APIs.
+The Compose controls/import picker and new UI interaction tests have NOT been compiled/run in AGP.
+Phone gapless, decoder/mixer depth, interruptions, sound and battery remain unmeasured.
+
+CI 43653974545 for initial f79e399 failed on an inferred anonymous Array<Extractor> type.
+Fixed with explicit map/return types; actual corrected playback sources compiled and focused tests
+passed locally. No new full CI run, lint, APK or release requested after the owner's instruction.
+Full UI/AGP checks remain pending by that instruction, not a network blocker.
+
+Previous incremental-cache code is already main 3cce85f, CI 43651556524 XML: 167 cases, zero failures,
+errors or skips, both lints/APKs and owner signature passed. Main CI 43653234944 succeeded and
+published music-v1041 BEFORE the owner paused releases. Downloaded APK SHA-256 matches GitHub's
+published digest: 2db2c662fc1bf2af9df5233678436fff189d5f96354c368281b68c30d1c29edf.
+The standalone Room harness has incomplete Android variant classpath modeling; its local failures
+are not production CI failures. Use the retrieved production evidence for the cache change.
+Network access is functional; no old environment draft changes were reapplied.
+
+Next useful functional block: M3U8 import/export and folder/sort/batch workflows, then offline
+sidecar lyrics and queue drag editing. Before eventual integration run the deferred production
+checks once for a coherent batch. No claim of Poweramp/Symfonium superiority without phone evidence.
+
 # Active: sample-associated ReplayGain (Codex, 2026-11-15)
 
 Work branch: `agent/m3-replaygain`. Implementation and regression tests are in progress; do not

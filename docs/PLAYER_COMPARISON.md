@@ -70,14 +70,14 @@ Quality labels are implementation descriptions, not numerical sound-quality scor
 | ALAC/APE/WavPack/DSD edge cases | Broad; output can convert | Verify formats and decoder versions | No extension decoder pack; parsing M4A tags does not prove ALAC playback |
 | High-resolution output | Hardware/firmware dependent | Hardware/firmware dependent | Float output enabled; actual decoder/mixer depth and rate unmeasured |
 | Equalizer | Mature audio controls | Parametric EQ/AutoEq | Present: custom float/PCM16 DSP, channel isolation and response/buffer tests |
-| Parametric frequency/Q editing | Verify Player version; separate EQ app differs | Present | Partial: DSP supports frequency/Q/types, UI currently changes gains/preamp |
+| Parametric frequency/Q editing | Verify Player version; separate EQ app differs | Present | Implemented on work branch: frequency/Q/type editor; Compose checks pending |
 | WF-1000XM5 correction | Headphone preset support varies | AutoEq support | Present: retained measured-reference AutoEq profile, opt-in; not individual-ear calibration |
-| External EQ profile import | Verify current Player formats | Present | Missing |
+| External EQ profile import | Verify current Player formats | Present | Implemented on work branch: bounded, strict AutoEq TXT import; parser tests pass, Android picker checks pending |
 | Per-output EQ | Present | Present | Present with caveat: model/name-based route key, not unique hardware identity |
 | Neutral processing bypass | Verify exact sample behavior | Verify exact sample behavior | Present: original buffer forwarded with EQ disabled; JVM buffer tests pass |
 | EQ headroom | Present; controls differ | Present; controls differ | Present: combined-response bound plus margin and final clipping guard |
-| ReplayGain track/album | Present | Present | Partial: tag/R128 values parsed, no gain application or mode controls |
-| ReplayGain clipping prevention | Present | Present | Missing; EQ headroom does not implement ReplayGain |
+| ReplayGain track/album | Present | Present | Implemented on work branch: sample-associated PCM gain, modes/preamp/peak guard; focused tests pass, phone/UI checks pending |
+| ReplayGain clipping prevention | Present | Present | Implemented on work branch: ReplayGain peak guard, conservative unknown-peak behavior; separate from EQ headroom |
 | Gapless | Present | Present | Delegated to Media3; real FLAC/MP3/Opus boundary verification missing |
 | DSP setting transitions | Present; implementation private | Present; implementation private | Present: 10 ms transition and partial-write/flush contracts; physical checks missing |
 | USB bit-perfect mode | Verify device/path and definition | Verify device/path and definition | Missing preferred-mixer implementation and DAC validation |
