@@ -90,9 +90,10 @@ class LibraryRepositoryTest {
             val incoming = tracks.associateBy { it.id }
             rows.value = rows.value.filterNot { it.id in incoming } + tracks
         }
-        override suspend fun deleteNotSeen(prefix: String, scanId: Long): Int {
+        override suspend fun snapshot(prefix: String) = rows.value.filter { it.id.startsWith("$prefix:") }
+        override suspend fun deleteIds(ids: List<String>): Int {
             val old = rows.value
-            rows.value = old.filterNot { it.id.startsWith("$prefix:") && it.scanId != scanId }
+            rows.value = old.filterNot { it.id in ids }
             return old.size - rows.value.size
         }
         override suspend fun replace(prefix: String, scanId: Long, tracks: List<TrackEntity>) {
