@@ -36,25 +36,36 @@ value class SongKey private constructor(val value: String) {
             """\b(remaster(ed)?|mono|stereo|deluxe|bonus( track)?|explicit|clean|original( mix| version)?|album version|single version|radio edit|\d{4} (mix|version|edit)|official (audio|video|music video)|lyrics?( video)?|audio|hq|hd)\b""",
             RegexOption.IGNORE_CASE,
         )
-        private val ARTIST_SPLIT = Regex("""\s*(,|;|&|/| x | vs\.? | and )\s*""", RegexOption.IGNORE_CASE)
+        private val YEAR = Regex("""\b(19|20)\d{2}\b""")
+        private val MARKS = Regex("""\p{M}+""")
+        private val PUNCTUATION = Regex("""[^\p{L}\p{N}]+""")
 
         private fun primaryArtist(artist: String): String =
-            fold(FEAT.replace(artist, "").split(ARTIST_SPLIT).firstOrNull().orEmpty())
+            // Punctuation is part of band names (AC/DC, Earth, Wind & Fire). Only explicit
+            // featured credits are unambiguous until the tag reader supplies multi-value artists.
+            fold(FEAT.replace(artist, ""))
 
         private fun cleanTitle(title: String): String {
             var t = FEAT.replace(title, "")
-            t = BRACKETS.replace(t) { m -> if (EDITION.containsMatchIn(m.groupValues[1])) "" else " " + m.groupValues[1] }
-            t = DASH_NOTE.replace(t) { m -> if (EDITION.containsMatchIn(m.groupValues[1])) "" else " " + m.groupValues[1] }
+            t = BRACKETS.replace(t) { m -> annotation(m.groupValues[1]) }
+            t = DASH_NOTE.replace(t) { m -> annotation(m.groupValues[1]) }
             return fold(t)
+        }
+
+        private fun annotation(note: String): String {
+            if (!EDITION.containsMatchIn(note)) return " $note"
+            // Removing the whole bracket would turn "Live, Remastered 2011" into a studio song.
+            val recording = YEAR.replace(EDITION.replace(note, " "), " ")
+            return " $recording"
         }
 
         /** Lower case, no accents, letters and digits of any script, single spaces. */
         private fun fold(s: String): String =
             Normalizer.normalize(s, Normalizer.Form.NFKD)
-                .replace(Regex("""\p{M}+"""), "")
+                .replace(MARKS, "")
                 .lowercase()
                 .replace("&", " and ")
-                .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+                .replace(PUNCTUATION, " ")
                 .trim()
     }
 }
