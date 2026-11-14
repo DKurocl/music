@@ -2,8 +2,8 @@
 
 Owner direction, 2026-11-14: Google-quality behavior and finish for Pixel 10 Pro XL, Android 17+.
 No visualizers. No theme marketplace, shape sliders or decorative settings. Sound quality and daily
-listening are the priority. Claude owns the design implementation; Codex owns file-metadata integration
-at this checkpoint. Coordinate through main, ROADMAP and HANDOFF before touching shared UI files.
+listening are the priority. Claude exhausted its quota; the owner assigned Codex the complete local-player delivery
+within the 12-hour travel window, including design and metadata integration. Coordinate through main, ROADMAP and HANDOFF before touching shared UI files.
 
 ## Reference reviewed
 
