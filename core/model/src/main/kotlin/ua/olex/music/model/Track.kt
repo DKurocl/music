@@ -79,5 +79,6 @@ data class Track(
     val path: String? = null,
     val genre: String? = null,
 ) {
-    val key: SongKey = SongKey.of(artist, title)
+    // Browsing does not need song matching; defer normalization until a source lookup asks for it.
+    val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }
 }

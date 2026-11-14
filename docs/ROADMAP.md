@@ -39,7 +39,7 @@ separate commits to keep merges trivial.
       migration test. Keys by SongKey + path.
 - [ ] Artwork: embedded picture or `cover.*`/`folder.*` in the folder, decoded once into a disk
       cache at 3 sizes; Coil fetcher for `track:` models.
-- [~] Watch for file changes (Codex, 2026-11-14) while the app is open (ContentObserver/FileObserver) instead of only
+- [x] Watch for file changes (`5aa0d92`, CI 43564927822) while the app is open (ContentObserver/FileObserver) instead of only
       on start.
 
 ## M2 Design system and the real shell (`:app`)

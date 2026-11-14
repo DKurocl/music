@@ -2,20 +2,40 @@ package ua.olex.music.playback
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Bundle
+import android.os.Process
+import android.os.SystemClock
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionError
+import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import ua.olex.music.model.SleepTimer
 
 /**
  * Playback lives here, apart from any screen: Android keeps it alive as a media foreground
  * service while music plays, shows its notification and lock-screen controls, and routes
  * headset buttons, Assistant and Android Auto to it through the session.
  */
+@OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
     private var session: MediaLibrarySession? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val sleepTimer = SleepTimer()
+    private var sleepJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -38,12 +58,65 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        scope.cancel()
         session?.run { player.release(); release() }
         session = null
         super.onDestroy()
     }
 
+    private fun setSleepTimer(minutes: Int) {
+        sleepTimer.set(minutes, SystemClock.elapsedRealtime())
+        sleepJob?.cancel()
+        sleepJob = null
+        publishSleepTimer()
+        val deadline = sleepTimer.deadlineMs ?: return
+        sleepJob = scope.launch {
+            delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            if (sleepTimer.expire(SystemClock.elapsedRealtime())) {
+                session?.player?.pause()
+                publishSleepTimer()
+            }
+        }
+    }
+
+    private fun publishSleepTimer() {
+        session?.let { current ->
+            current.setSessionExtras(Bundle(current.sessionExtras).apply {
+                putLong(SleepTimerCommand.DEADLINE, sleepTimer.deadlineMs ?: 0)
+            })
+        }
+    }
+
     private inner class Callback : MediaLibrarySession.Callback {
+        override fun onConnectAsync(
+            session: MediaSession, controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.ConnectionResult> {
+            val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+            // Preserve Media3's default read-only permissions for untrusted controllers.
+            if (controller.uid == Process.myUid()) {
+                result.setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                        .add(SleepTimerCommand.command).build(),
+                )
+            }
+            return Futures.immediateFuture(result.build())
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction != SleepTimerCommand.ACTION) {
+                return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            val minutes = args.getInt(SleepTimerCommand.MINUTES, -1)
+            val code = when {
+                controller.uid != Process.myUid() -> SessionError.ERROR_PERMISSION_DENIED
+                minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
+                else -> { setSleepTimer(minutes); SessionResult.RESULT_SUCCESS }
+            }
+            return Futures.immediateFuture(SessionResult(code))
+        }
+
         /**
          * Items cross the process boundary without their URI (a controller may not dictate what
          * the service opens); the sender puts it in the request metadata and it is restored here.
