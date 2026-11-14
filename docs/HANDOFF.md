@@ -9,7 +9,8 @@ Temporary metadata branch was deleted after integration. Work continues from mai
 
 Owner clarified: every listening entry point matters (albums/folders, shuffle, playlists). Wants
 ready Sony WF-1000XM5 correction and EQ. No crossfade/transitions; gapless still required.
-No visualizers; wallpaper palette everywhere; functionality before full UI polish. Asked to
+No backup/export: owner explicitly declined, persistence across updates is sufficient. Temporary
+backup worktree was removed without implementation. No visualizers; wallpaper palette everywhere; functionality before full UI polish. Asked to
 review the logic from the start, not just accumulate controls. See LOCAL_PLAYER_REVIEW.md.
 
 New EQ block implemented: AudioOutputProvider wrapper preserves PCM16/float encoding/rate and
@@ -18,11 +19,13 @@ bypass, per-channel double-precision RBJ state, combined-response headroom and a
 transition. Per-output persistent settings and route-key command guards prevent Sony settings from
 carrying over to phone/unrelated speakers. Private same-uid session commands only. UI has flat/manual
 bands, preamp, opt-in Sony AutoEq preset and route/error labels. Sony preset source and MIT license
-retained; it is not an individual-ear calibration. 15 pure DSP tests pass locally. Android CI pending.
+retained; it is not an individual-ear calibration. 15 pure DSP tests pass locally. Code `4aa3efe` passed full CI 43640064817. Downloaded
+XML reports contain 156 distinct cases / 156 executions, zero failures/errors. Both lints, R8
+APKs and owner signing passed. This final checkpoint changes documentation and a comment only.
 
 Main release 43638695765 succeeded: music-v1025 is installable through Obtainium. EQ is not yet in
-that release. Inspect the EQ CI and fix every failure, then integrate into main and delete the task
-branch. ReplayGain is not implemented: decoded-item association must handle prebuffered transitions.
+that release. Integrate this verified code into main and delete the task branch; monitor its release.
+Further local-player work: library sorting, multiselect/batch actions, m3u8 and sidecar lyrics. ReplayGain is not implemented: decoded-item association must handle prebuffered transitions.
 Full lifecycle/output/battery measurements remain phone gates. Never claim Poweramp/Symfonium parity
 from JVM tests. See LOCAL_PLAYER_REVIEW.md for the full flow and remaining priorities.
 
