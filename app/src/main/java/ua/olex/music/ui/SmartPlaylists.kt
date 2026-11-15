@@ -56,7 +56,7 @@ internal fun SmartPlaylistBrowser(
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } })
     }
 
-    LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
+    LazyColumn(modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (open == null) {
             item(key = "new") {
                 FilledTonalButton(onClick = { editing = SmartPlaylist("", listOf(SmartRule(SmartField.GENRE, SmartOp.CONTAINS, ""))) },
