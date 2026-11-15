@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.platform.LocalInspectionMode
@@ -228,7 +229,6 @@ private fun TrackRowContent(
         },
         supportingContent = {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (current) Symbol(Glyph.WAVE, size = 16.dp, color = cs.primary, bold = true)
                 if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 else Text(clock(track.durationMs), maxLines = 1)
                 if (showQuality) track.format?.let { QualityTag(it.label, it.lossless) }
@@ -237,10 +237,14 @@ private fun TrackRowContent(
         leadingContent = {
             if (selecting) Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
                 modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
-            else if (number != null) Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) {
-                Text(number.toString(), style = MaterialTheme.typography.titleMedium, color = if (current) cs.primary else cs.onSurfaceVariant)
+            else if (number != null) Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                if (current) NowPlayingOverlay(Modifier.matchParentSize().background(cs.primary))
+                else Text(number.toString(), style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
             }
-            else Artwork(track.artworkUri, Modifier.size(52.dp), 12.dp)
+            else Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) {
+                Artwork(track.artworkUri, Modifier.fillMaxSize(), 12.dp)
+                if (current) NowPlayingOverlay(Modifier.matchParentSize())
+            }
         },
         trailingContent = {
             if (onMore != null && !selecting) IconButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) {
@@ -376,6 +380,8 @@ internal fun PlayerPage(
     inlineLyrics: (@Composable (Modifier) -> Unit)? = null, startWithLyrics: Boolean = false,
     /** A moving cover beside the song (cover.mp4 in its folder), played over the still cover. */
     motionCover: String? = null,
+    /** Opens the lyrics options; shown in the top bar while the lyrics are on. */
+    onLyricsTools: (() -> Unit)? = null,
 ) {
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val cs = MaterialTheme.colorScheme
@@ -408,15 +414,26 @@ internal fun PlayerPage(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Symbol(Glyph.COLLAPSE, size = 28.dp) }
+                // Equal sides keep "Playing from" centred whether the lyrics options show or not.
+                Box(Modifier.width(96.dp)) {
+                    IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Symbol(Glyph.COLLAPSE, size = 28.dp) }
+                }
                 // Where the music comes from; a tap opens that album.
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = "Open album", onClick = onOpenAlbum) else Modifier)
                     .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     Text(state.album ?: "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                // Song actions top right, where Google's players keep them; the queue moved to the pill below.
-                IconButton(enabled = onMore != null, onClick = { onMore?.invoke() }, modifier = Modifier.semantics { contentDescription = "Song actions" }) { Symbol(Glyph.MORE) }
+                Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End) {
+                    // With the lyrics on, their options (timing, sources, online) sit up here, clear of the text.
+                    androidx.compose.animation.AnimatedVisibility(lyricsShown && inlineLyrics != null && onLyricsTools != null,
+                        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.6f),
+                        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.6f)) {
+                        IconButton(onClick = { onLyricsTools?.invoke() }, modifier = Modifier.semantics { contentDescription = "Lyrics options" }) { Symbol(Glyph.TUNE) }
+                    }
+                    // Song actions top right, where Google's players keep them.
+                    IconButton(enabled = onMore != null, onClick = { onMore?.invoke() }, modifier = Modifier.semantics { contentDescription = "Song actions" }) { Symbol(Glyph.MORE) }
+                }
             }
             Spacer(Modifier.height(16.dp))
             // Swipe the cover for the next or previous song; double tap for favourites; long press for actions.
@@ -450,7 +467,7 @@ internal fun PlayerPage(
                 arrive.snapTo(0f); arrive.animateTo(1f, motion.fastSpatialSpec())
             }
             // The Lyrics button swaps the cover for the lyrics, in the same place and size.
-            if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 420.dp).fillMaxWidth().aspectRatio(0.9f))
+            if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f))
             else Box(contentAlignment = Alignment.Center) {
             Artwork(
                 state.artworkUri,
@@ -592,6 +609,42 @@ private fun SignalPath(format: String?, onClick: () -> Unit) {
     )
 }
 
+/**
+ * The seek bar's track as Android 16's media controls draw it: the played part a moving wave, the
+ * rest a quiet straight line, a gap around Material's own handle. The wave travels only while the
+ * music plays; on pause or while dragging it flattens on a spring and stops.
+ */
+@Composable
+private fun WaveTrack(fraction: Float, wave: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val amplitude by animateFloatAsState(if (wave) 1f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "wave")
+    // The wave travels only while it shows; once flat, nothing keeps running.
+    val phase = if (wave || amplitude > 0.01f) androidx.compose.animation.core.rememberInfiniteTransition(label = "wave-phase").animateFloat(0f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1_200, easing = androidx.compose.animation.core.LinearEasing)), label = "phase").value
+        else 0f
+    androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(24.dp)) {
+        val mid = size.height / 2
+        val gap = 6.dp.toPx()
+        val end = (fraction.coerceIn(0f, 1f) * size.width)
+        val stroke = 4.dp.toPx()
+        // The rest of the song: straight, muted, ending in a dot like Android's.
+        if (end + gap < size.width) drawLine(cs.secondaryContainer, androidx.compose.ui.geometry.Offset(end + gap, mid), androidx.compose.ui.geometry.Offset(size.width, mid), stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        // What has played: a sine that fades in from its start, so the line leaves the edge flat.
+        val stop = (end - gap).coerceAtLeast(0f)
+        if (stop > 0f) {
+            val length = 24.dp.toPx(); val height = 3.dp.toPx() * amplitude
+            val path = androidx.compose.ui.graphics.Path()
+            var x = 0f
+            while (x <= stop) {
+                val y = mid + height * kotlin.math.sin(((x / length) - phase) * 2 * Math.PI).toFloat()
+                if (x == 0f) path.moveTo(x, y) else path.lineTo(x, y)
+                x += 2f
+            }
+            drawPath(path, cs.primary, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        }
+    }
+}
+
 /** The seek bar, in the page's accent, with the time played and the length under it. */
 @Composable
 internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
@@ -610,12 +663,15 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     val haptics = rememberHaptics()
     Column(modifier.fillMaxWidth()) {
         // Material's own slider: the expressive track with the handle in a gap, nothing imitated.
+        val slider = remember { androidx.compose.material3.SliderState(0f, 0, 0f..1f) }
+        val shown = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f)
+        androidx.compose.runtime.SideEffect { if (dragged == null) slider.value = shown }
         androidx.compose.material3.Slider(
-            value = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f),
-            onValueChange = { if (dragged == null) haptics.tick(); dragged = it },
+            state = slider, enabled = state.durationMs > 0,
+            onValueChange = { v: Float -> if (dragged == null) haptics.tick(); dragged = v; slider.value = v },
             onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null; haptics.tick() },
-            enabled = state.durationMs > 0,
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Position"; stateDescription = "${clock(at)} of ${clock(state.durationMs)}" },
+            track = { _: androidx.compose.material3.SliderState -> WaveTrack(shown, wave = state.isPlaying && dragged == null) },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
