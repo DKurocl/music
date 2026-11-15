@@ -175,6 +175,11 @@ fun MusicRoot(model: LibraryViewModel) {
     // YouTube Music's moods for Home; the usual set when it is off or unreachable (they still play
     // from the library by genre).
     val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) { if (youTubeOn) value = context.graph.youTube.moods() }
+    // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
+    val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
+    val youTubeHome by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), youTubeOn, youTubeSignedIn) {
+        value = if (youTubeOn) runCatching { context.graph.youTube.home() }.getOrDefault(emptyList()) else emptyList()
+    }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) { onlineStack = emptyList(); returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
@@ -209,6 +214,7 @@ fun MusicRoot(model: LibraryViewModel) {
             openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
             download = { start -> if (context.graph.soulseek.account == null) afterSignIn = start else start() },
             playMood = { mood, moodPage -> model.startMood(mood, moodPage) },
+            playMix = { id, title -> model.startPlaylistRadio(id, title) },
         )
     }
     val powerSave = rememberPowerSave()
@@ -301,6 +307,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
                 moods = moods,
+                youTubeHome = youTubeHome,
                 onSeeAll = { tab ->
                     // Smart playlists live in Playlists; albums, artists and history are Search tiles.
                     if (tab == "SMART") { returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }

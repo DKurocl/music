@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit
  * so lists, queue and player treat them like the owner's files. Wherever an online song is also in
  * the library ([localCopy]), the file is played instead: better sound, no data, works offline.
  */
-internal class YouTubeMusic {
+internal class YouTubeMusic(private val account: () -> Map<String, String>? = { null }) {
     private val http = OkHttpClient.Builder().readTimeout(20, TimeUnit.SECONDS).connectTimeout(10, TimeUnit.SECONDS).build()
     @Volatile private var ready = false
 
@@ -104,12 +104,30 @@ internal class YouTubeMusic {
         post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage)
     }
 
+    /** A home shelf: its title, and its songs or its cards. */
+    data class Shelf(val title: String, val songs: List<Track>, val cards: List<Card>)
+    /** A card on a shelf; a mix ([kind] MIX) plays as radio from its playlist id. */
+    data class Card(val id: String, val title: String, val subtitle: String?, val cover: String?, val kind: Kind) { enum class Kind { ALBUM, PLAYLIST, ARTIST, MIX, SONG } }
+
+    /** YouTube Music's home: the owner's own when signed in (quick picks, mixes, listen again...). */
+    suspend fun home(): List<Shelf> = withContext(Dispatchers.IO) {
+        post("browse", """"browseId":"FEmusic_home"""")?.let(::parseHome).orEmpty()
+    }
+
+    /** A mix or other watch playlist, played as YouTube Music plays it ("My Mix 1"). */
+    suspend fun playlistRadio(playlistId: String): RadioPage? = withContext(Dispatchers.IO) {
+        post("next", """"playlistId":${quote(playlistId)},"params":"wAEB","isAudioOnly":true""")?.let(::parseRadio)
+    }
+
     /** One call to YouTube Music, as its web app makes it. */
     private fun post(endpoint: String, fields: String): String? {
         val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}},$fields}"""
         val request = okhttp3.Request.Builder().url("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false")
             .post(body.toRequestBody("application/json".toMediaTypeOrNull()))
-            .header("User-Agent", USER_AGENT).header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/").build()
+            .header("User-Agent", USER_AGENT).header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/")
+            // Signed in: the owner's own home, mixes and radio (YouTubeAccount).
+            .apply { account()?.forEach { (k, v) -> header(k, v) } }
+            .build()
         return http.newCall(request).execute().use { if (it.isSuccessful) it.body?.string() else null }
     }
 
@@ -197,7 +215,11 @@ internal class YouTubeMusic {
         /** Songs from a YouTube Music search answer: album tracks, then official videos, then uploads. */
         fun parseSearch(json: String, fallbackArtist: String? = null, keepOrder: Boolean = false): List<Track> {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
-            val rows = collect(root, "musicResponsiveListItemRenderer")
+            return songRows(collect(root, "musicResponsiveListItemRenderer"), fallbackArtist, keepOrder)
+        }
+
+        /** Song rows, already parsed, as tracks. */
+        private fun songRows(rows: List<Map<*, *>>, fallbackArtist: String? = null, keepOrder: Boolean = false): List<Track> {
             val ranked = rows.mapNotNull { row ->
                 val id = ((row["playlistItemData"] as? Map<*, *>)?.get("videoId") as? String) ?: return@mapNotNull null
                 val kind = Regex(""""musicVideoType"\s*:\s*"([A-Z_]+)"""").find(dump(row["overlay"]))?.groupValues?.get(1) ?: "MUSIC_VIDEO_TYPE_ATV"
@@ -267,6 +289,34 @@ internal class YouTubeMusic {
             if (split != null) return split.groupValues[1].trim() to split.groupValues[2].trim()
             val artist = channel.replace(Regex("""\s*-\s*Topic$|VEVO$|\s*\(official\)$|\s*Official$""", RegexOption.IGNORE_CASE), "").trim()
             return artist to clean
+        }
+
+        /** Home shelves: songs (rows) or cards (albums, playlists, artists, mixes); podcasts and episodes are left out. */
+        fun parseHome(json: String): List<Shelf> {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
+            return collect(root, "musicCarouselShelfRenderer").mapNotNull { shelf ->
+                val header = shelf["header"] as? Map<*, *>
+                val title = text((header?.get("musicCarouselShelfBasicHeaderRenderer") as? Map<*, *>)?.get("title")).ifEmpty { return@mapNotNull null }
+                val contents = (shelf["contents"] as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+                val songs = songRows(contents.mapNotNull { it["musicResponsiveListItemRenderer"] as? Map<*, *> }, keepOrder = true)
+                val cards = contents.mapNotNull { it["musicTwoRowItemRenderer"] as? Map<*, *> }.mapNotNull { card ->
+                    val nav = dump(card["navigationEndpoint"])
+                    val name = text(card["title"]).ifEmpty { return@mapNotNull null }
+                    val sub = text(card["subtitle"]).ifEmpty { null }
+                    val cover = biggestImage(card["thumbnailRenderer"])
+                    fun id(key: String) = Regex(""""$key"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1)
+                    when {
+                        nav.contains("MUSIC_PAGE_TYPE_PODCAST") || nav.contains("NON_MUSIC") -> null
+                        nav.contains("MUSIC_PAGE_TYPE_ALBUM") -> id("browseId")?.let { Card(it, name, sub, cover, Card.Kind.ALBUM) }
+                        nav.contains("MUSIC_PAGE_TYPE_ARTIST") -> id("browseId")?.let { Card(it, name, sub, cover, Card.Kind.ARTIST) }
+                        nav.contains("MUSIC_PAGE_TYPE_PLAYLIST") -> id("browseId")?.let { Card(it, name, sub, cover, Card.Kind.PLAYLIST) }
+                        nav.contains("watchPlaylistEndpoint") -> id("playlistId")?.let { Card(it, name, sub, cover, Card.Kind.MIX) }
+                        nav.contains("watchEndpoint") -> id("videoId")?.let { Card(it, name, sub, cover, Card.Kind.SONG) }
+                        else -> null
+                    }
+                }.distinctBy { it.id }
+                if (songs.isEmpty() && cards.isEmpty()) null else Shelf(title, songs, cards)
+            }.filterNot { it.title.contains("podcast", true) || it.title.contains("episode", true) }
         }
 
         /** The usual moods, in YouTube Music's order, for when its home can't be read. */

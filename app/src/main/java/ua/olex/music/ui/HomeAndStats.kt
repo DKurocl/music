@@ -43,6 +43,7 @@ internal fun HomePage(
     onOpenArtist: (MusicCollection) -> Unit = {}, duplicates: Int = 0, onStats: () -> Unit = {}, onDuplicates: () -> Unit = {},
     favourites: List<Track> = emptyList(), onSeeAll: (String) -> Unit = {},
     moods: List<YouTubeMusic.Mood> = emptyList(),
+    youTubeHome: List<YouTubeMusic.Shelf> = emptyList(),
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -81,6 +82,14 @@ internal fun HomePage(
 
         // Moods first, as in YouTube Music: Energize, Relax, Sad, Sleep... one tap to their page.
         if (moods.isNotEmpty()) item(key = "moods") { MoodRow(moods, Modifier.padding(top = 4.dp, bottom = 4.dp)) }
+
+        // The owner's own YouTube Music home, at the top as they asked: quick picks, mixes, listen
+        // again... Songs they have as files play from the files.
+        youTubeHome.take(4).forEachIndexed { i, shelf ->
+            item(key = "yt-h-$i") { SectionTitle(shelf.title) }
+            if (shelf.songs.isNotEmpty()) item(key = "yt-s-$i") { QuickPicks(shelf.songs.take(20), currentId, onPlay, onTrackActions) }
+            if (shelf.cards.isNotEmpty()) item(key = "yt-c-$i") { YouTubeCards(shelf.cards) }
+        }
 
         // Bento: the album to jump back into, large; two bright one-tap starts beside it.
         item(key = "bento") {
@@ -325,7 +334,7 @@ internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modif
  * many songs in little height, the way YouTube Music opens. A tap plays the shelf from that song.
  */
 @Composable
-private fun QuickPicks(songs: List<Track>, currentId: String?, onPlay: (List<Track>, Int) -> Unit, onTrackActions: (Track) -> Unit) {
+internal fun QuickPicks(songs: List<Track>, currentId: String?, onPlay: (List<Track>, Int) -> Unit, onTrackActions: (Track) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val columns = songs.chunked(4)
     val state = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -355,7 +364,7 @@ private fun QuickPicks(songs: List<Track>, currentId: String?, onPlay: (List<Tra
 }
 
 @Composable
-private fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) {
+internal fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp).clip(RoundedCornerShape(16.dp))
         .then(if (onSeeAll != null) Modifier.clickable(onClickLabel = "See all $text", onClick = onSeeAll) else Modifier)
         .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
