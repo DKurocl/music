@@ -128,12 +128,11 @@ fun MusicRoot(model: LibraryViewModel) {
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         topBar = {
             TopAppBar(
-                title = { Text("Library") }, scrollBehavior = scroll,
+                title = { Text("Library", style = MaterialTheme.typography.headlineMediumEmphasized) }, scrollBehavior = scroll,
                 actions = {
-                    TextButton(onClick = { equalizerOpen = true }) { Text("Audio") }
-                    if (model.allowed) TextButton(onClick = model::rescanManually, enabled = !model.scanning) {
-                        Text(if (model.scanning) "Scanning…" else "Rescan")
-                    }
+                    IconButton(onClick = { equalizerOpen = true }, modifier = Modifier.semantics { contentDescription = "Audio" }) { Symbol(Glyph.TUNE) }
+                    if (model.allowed) IconButton(onClick = model::rescanManually, enabled = !model.scanning,
+                        modifier = Modifier.semantics { contentDescription = if (model.scanning) "Scanning" else "Rescan" }) { Symbol(Glyph.REFRESH) }
                 },
             )
         },
@@ -148,7 +147,7 @@ fun MusicRoot(model: LibraryViewModel) {
                         TextButton(onClick = model::dismissQueueError) { Text("Dismiss") }
                     }
                 }
-                if (playing.hasTrack) MiniPlayer(playing, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next)
+                if (playing.hasTrack) MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next)
             }
         },
     ) { insets ->
@@ -199,17 +198,14 @@ fun MusicRoot(model: LibraryViewModel) {
         onApply = model::setEqualizer, onDismiss = { equalizerOpen = false },
         loudness = playing.replayGain, onLoudness = model::setReplayGain)
     actionTrack?.let { track ->
-        AlertDialog(onDismissRequest = { actionTrack = null }, title = { Text(track.title) }, text = {
-            Column {
-                TextButton(onClick = { equalizerOpen = true; actionTrack = null }) { Text("Equalizer") }
-                TextButton(onClick = { model.toggleFavourite(track); actionTrack = null }) {
-                    Text(if (track.id.value in personal.favouriteByTrackId) "Remove from favourites" else "Add to favourites")
-                }
-                TextButton(onClick = { playlistTracks = listOf(track); actionTrack = null }) { Text("Add to playlist") }
-                TextButton(onClick = { model.enqueue(listOf(track), true); actionTrack = null }) { Text("Play next") }
-                TextButton(onClick = { model.enqueue(listOf(track), false); actionTrack = null }) { Text("Add to queue") }
-            }
-        }, confirmButton = { TextButton(onClick = { actionTrack = null }) { Text("Close") } })
+        val saved = track.id.value in personal.favouriteByTrackId
+        TrackActionsSheet(track, saved, onDismiss = { actionTrack = null }, actions = listOf(
+            TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
+            TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
+            TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
+            TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
+            TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
+        ))
     }
     playlistTracks?.let { PlaylistPicker(personal.playlists, it, model.personalActions) { playlistTracks = null } }
     playing.queueError?.let { message ->
@@ -240,62 +236,6 @@ private fun Notice(insets: PaddingValues, title: String, body: String, action: S
         Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (action != null) Button(onClick = onAction) { Text(action) }
-    }
-}
-
-@Composable
-internal fun TrackRow(track: Track, current: Boolean, onMore: (() -> Unit)? = null,
-    selecting: Boolean = false, checked: Boolean = false, onSelect: (() -> Unit)? = null, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    ListItem(
-        headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface) },
-        supportingContent = {
-            Text(listOfNotNull(track.artist, track.format?.label).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
-        },
-        leadingContent = {
-            if (selecting) androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
-                modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
-            else Artwork(track.artworkUri, Modifier.size(48.dp), 8.dp)
-        },
-        trailingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (current) Text("Current", style = MaterialTheme.typography.labelSmall)
-                if (onMore != null && !selecting) TextButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) { Text("More") }
-            }
-        },
-        colors = ListItemDefaults.colors(containerColor = if (selecting && checked) cs.secondaryContainer else cs.surface),
-        modifier = Modifier.combinedClickable(onLongClickLabel = if (onSelect != null) "Select song" else null, onLongClick = onSelect, onClick = { if (selecting) onSelect?.invoke() else onClick() })
-            .semantics { selected = if (selecting) checked else current },
-    )
-}
-
-@Composable
-internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ua.olex.music.model.ArtworkPlan.SMALL) {
-    val cs = MaterialTheme.colorScheme
-    Box(modifier.clip(RoundedCornerShape(corner)).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-        Icon(AppIcons.Note, null, tint = cs.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.4f))
-        if (uri != null) AsyncImage(model = ua.olex.music.library.ArtworkUris.variant(uri, LocalContext.current.packageName, pixels), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-    }
-}
-
-@Composable
-private fun MiniPlayer(state: PlayerState, onOpen: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Surface(color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth().clickable(onClickLabel = "Open player", onClick = onOpen)) {
-        Row(
-            Modifier.navigationBarsPadding().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Artwork(state.artworkUri, Modifier.size(44.dp), 8.dp)
-            Column(Modifier.weight(1f)) {
-                Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(state.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
-            IconButton(enabled = state.connected, onClick = onToggle, modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
-                Icon(if (state.playWhenReady) AppIcons.Pause else AppIcons.Play, null)
-            }
-            IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.semantics { contentDescription = "Next" }) { Icon(AppIcons.Next, null) }
-        }
     }
 }
 
@@ -345,101 +285,6 @@ private fun NowPlaying(
         confirmButton = { TextButton(onClick = { outputUnavailable = false }) { Text("OK") } })
 }
 
-/** The player surface is independent of service/route bindings so its real layouts can be reviewed in tests. */
-@Composable
-internal fun PlayerPage(
-    state: PlayerState, format: String?, route: OutputRoute?, favourite: Boolean, position: () -> Long,
-    onClose: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
-    onShuffle: () -> Unit, onRepeat: () -> Unit, onFavourite: (() -> Unit)?, onMore: (() -> Unit)?,
-    onOutput: () -> Unit, onQueue: () -> Unit, onLyrics: () -> Unit, onAudioPath: () -> Unit, onTimer: () -> Unit,
-) {
-    val cs = MaterialTheme.colorScheme
-    Surface(color = cs.surfaceContainerLow, modifier = Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Icon(AppIcons.Down, null) }
-                Text("Now playing", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f), textAlign = TextAlign.Center)
-                IconButton(onClick = onQueue, modifier = Modifier.semantics { contentDescription = "Open queue" }) { Icon(AppIcons.Queue, null) }
-            }
-            Spacer(Modifier.height(12.dp))
-            Artwork(state.artworkUri, Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f), 32.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
-            Spacer(Modifier.height(24.dp))
-            Text(state.title, style = MaterialTheme.typography.headlineMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
-            Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, textAlign = TextAlign.Center)
-            state.error?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
-            TextButton(onClick = onAudioPath) {
-                Text(listOfNotNull(format, route?.label()).joinToString("  →  ").ifEmpty { "Audio path" }, style = MaterialTheme.typography.labelMedium, maxLines = 2)
-            }
-            PlaybackProgress(state, position, onSeek)
-            Spacer(Modifier.height(8.dp))
-            Row(Modifier.widthIn(max = 400.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceEvenly) {
-                IconButton(enabled = state.connected, onClick = onShuffle, modifier = Modifier.semantics {
-                    contentDescription = "Shuffle"; selected = state.shuffle; stateDescription = if (state.shuffle) "On" else "Off"
-                }) { Icon(AppIcons.Shuffle, null, tint = if (state.shuffle) cs.primary else cs.onSurfaceVariant) }
-                IconButton(onClick = onPrevious, modifier = Modifier.size(52.dp).semantics { contentDescription = "Previous" }) { Icon(AppIcons.Previous, null, Modifier.size(30.dp)) }
-                FilledIconButton(enabled = state.connected, onClick = onToggle, shape = RoundedCornerShape(28.dp), modifier = Modifier.size(88.dp).semantics {
-                    contentDescription = if (state.playWhenReady) "Pause" else "Play"
-                }) { Icon(if (state.playWhenReady) AppIcons.Pause else AppIcons.Play, null, Modifier.size(42.dp)) }
-                IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.size(52.dp).semantics { contentDescription = "Next" }) { Icon(AppIcons.Next, null, Modifier.size(30.dp)) }
-                IconButton(enabled = state.connected, onClick = onRepeat, modifier = Modifier.semantics {
-                    contentDescription = "Repeat"; stateDescription = state.repeat.name.lowercase()
-                }) { Icon(if (state.repeat == ua.olex.music.playback.RepeatMode.ONE) AppIcons.RepeatOne else AppIcons.Repeat, null,
-                    tint = if (state.repeat == ua.olex.music.playback.RepeatMode.OFF) cs.onSurfaceVariant else cs.primary) }
-            }
-            Spacer(Modifier.height(24.dp))
-            Surface(color = cs.surfaceContainerHigh, shape = RoundedCornerShape(28.dp)) {
-                Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    IconButton(onClick = onLyrics, modifier = Modifier.semantics { contentDescription = "Lyrics" }) { Icon(AppIcons.Lyrics, null) }
-                    IconButton(enabled = onFavourite != null, onClick = { onFavourite?.invoke() }, modifier = Modifier.semantics {
-                        contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
-                    }) { Icon(if (favourite) AppIcons.Favourite else AppIcons.FavouriteOutline, null, tint = if (favourite) cs.primary else cs.onSurface) }
-                    IconButton(onClick = onOutput, modifier = Modifier.semantics { contentDescription = "Change output" }) { Icon(AppIcons.Output, null) }
-                    IconButton(onClick = onTimer, enabled = state.connected, modifier = Modifier.semantics {
-                        contentDescription = "Sleep timer"; stateDescription = if (state.sleepDeadlineMs != null) "On" else "Off"
-                    }) { Icon(AppIcons.Timer, null) }
-                    if (onMore != null) IconButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Song actions" }) { Icon(AppIcons.More, null) }
-                }
-            }
-            state.sleepTimerError?.let { Text(it, color = cs.error) }
-            Spacer(Modifier.height(24.dp))
-        }
-    }
-}
-
-@Composable
-internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit) {
-    // Keep the frequent position updates out of artwork, metadata and controls. Composition may
-    // survive screen-off, so the poller also follows lifecycle rather than only visibility.
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var at by remember(state.mediaId) { mutableLongStateOf(position()) }
-    var dragged by remember(state.mediaId) { mutableStateOf<Float?>(null) }
-    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            do { at = position(); if (state.isPlaying) delay(250) } while (state.isPlaying)
-        }
-    }
-    val duration = state.durationMs.coerceAtLeast(1)
-    val cs = MaterialTheme.colorScheme
-    Column {
-        Slider(
-            value = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f),
-            onValueChange = { dragged = it },
-            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null },
-            enabled = state.durationMs > 0,
-            modifier = Modifier.semantics {
-                contentDescription = "Position"
-                stateDescription = "${clock(at)} of ${clock(state.durationMs)}"
-            },
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-            Text(clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-        }
-    }
-}
-
 /** Timer choices send a single command; there is no UI countdown or background polling loop. */
 @Composable
 internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit) {
@@ -459,16 +304,3 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
     )
 }
 
-private fun OutputRoute.label(): String = when (kind) {
-    OutputRoute.Kind.SPEAKER -> "Phone speaker"
-    OutputRoute.Kind.BLUETOOTH -> name.ifEmpty { "Bluetooth" }
-    OutputRoute.Kind.LE_AUDIO -> name.ifEmpty { "LE Audio" }
-    OutputRoute.Kind.USB -> name.ifEmpty { "USB audio" }
-    OutputRoute.Kind.WIRED -> "Headphones"
-    OutputRoute.Kind.REMOTE, OutputRoute.Kind.OTHER -> name.ifEmpty { "Other output" }
-}
-
-private fun clock(ms: Long): String {
-    val seconds = (ms / 1000).coerceAtLeast(0)
-    return "%d:%02d".format(java.util.Locale.ROOT, seconds / 60, seconds % 60)
-}
