@@ -71,7 +71,7 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
         })
     } }
     val cs = MaterialTheme.colorScheme
-    // Three cards — Equalizer, Loudness, Channels — each with its switch or choice in its header,
+    // Three cards (Equalizer, Loudness, Channels), each with its switch or choice in its header,
     // one-line explanations, and the controls below. The output it belongs to is named on top.
     AppSheet(onDismiss, cs.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().heightIn(max = 760.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),

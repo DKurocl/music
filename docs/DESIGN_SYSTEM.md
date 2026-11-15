@@ -27,7 +27,7 @@ YouTube Music, LastWave, PixelPlayer; taken further where they are vague. Review
 | Playlists | what the owner made: Favourites, Smart, own playlists | "Playlists", Search | the owner's own lists are a different job from browsing the files; albums, artists and songs live in Search tiles |
 | Search | find by words | the field itself (no title) | the field is the page; recent searches and genres fill the empty state |
 
-- **Short navigation bar (M3E)**: three items only — more would shrink targets and labels. The
+- **Short navigation bar (M3E)**: three items only: more would shrink targets and labels. The
   selected item fills its icon and thickens it (state by shape).
 - **Back**: Playlists and Search go back to Home; an open album goes back to its grid; Home leaves.
   Predictive back previews each step.
@@ -57,7 +57,7 @@ colour, scale and motion with intent; Home is where that pays most, because it s
 
 ## Playlists
 
-- **Two hub cards** on top: Favourites (pink, heart in a cookie shape — a heart in a heart read as
+- **Two hub cards** on top: Favourites (pink, heart in a cookie shape: a heart in a heart read as
   clutter) and Smart (sparkles). Under them New playlist and Import M3U8 as two equal cards.
 - **Playlist rows**: a 2×2 cover mosaic, name, count, chevron. The page has a big mosaic, Play all,
   and Export / Rename / Delete as chips (Delete asks first).
@@ -66,8 +66,8 @@ colour, scale and motion with intent; Home is where that pays most, because it s
 
 ## Albums, artists, songs (opened from Search tiles)
 
-- **Album and artist order**: A–Z, Newest, Year (albums), Most played — one tap, kept per kind.
-- **Song lists**: one row of chips — Sort first, then filters (Lossless, Hi-res, Unplayed, 4+ stars,
+- **Album and artist order**: A-Z, Newest, Year (albums), Most played: one tap, kept per kind.
+- **Song lists**: one row of chips: Sort first, then filters (Lossless, Hi-res, Unplayed, 4+ stars,
   Decade, Genre), then a Select button at the end. One row instead of two keeps songs higher.
 - **Albums**: a grid of covers, two per row: covers are how albums are recognised.
 - **Artists**: a grid of round photos, three per row (photos from Deezer, cached; the initial
@@ -88,7 +88,7 @@ colour, scale and motion with intent; Home is where that pays most, because it s
   Years, Folders, History, Composers, Lossless, Hi-res, Never played. Name on the left, a tonal icon on the right (colours
   rotate through the wallpaper's accents). A tile opens its list with a back arrow; tiles that would
   be empty (no hi-res files, no composers) are not shown. Recent searches sit above the tiles.
-- **Results** in sections — Artists (photos), Albums (covers), Songs — in relevance order, all rows
+- **Results** in sections (Artists with photos, Albums with covers, Songs) in relevance order, all rows
   on one left edge with the same rounded press.
 
 ## Song rows (everywhere)
@@ -108,10 +108,10 @@ Edit tags, Equalizer.
 
 ## Feel: small things that make it breathe (used sparingly)
 
-- **Squish on press**: cards, tiles and covers give 3–6 % while pressed and spring back.
+- **Squish on press**: cards, tiles and covers give 3-6 % while pressed and spring back.
 - **Rubber band**: a thing dragged where it cannot go (the mini player downward, the cover when
   there is no next song) follows a little with resistance and springs back, instead of ignoring the finger.
-- **One icon at a time**: only the icon just activated animates — the chosen navigation item hops
+- **One icon at a time**: only the icon just activated animates: the chosen navigation item hops
   and fills; a switch that turns on (shuffle, repeat, timer) hops. Nothing animates in bulk.
 - **Rows as soft segments**: list rows are inset with rounded corners; the playing song is a light
   tonal pill, selected songs a stronger one.
@@ -152,7 +152,7 @@ repeat with large ranks. Few numbers, large; the rest is shape and colour.
 
 ## Settings
 
-Grouped by what the owner thinks about — Sound, Playback, Library, Lyrics — in Android 16 style
+Grouped by what the owner thinks about (Sound, Playback, Library, Lyrics) in Android 16 style
 containers (rows touch, groups breathe). Every row says what it does in one line; icons stay
 centred on the row even when the help runs to three lines. Options also live
 where they matter (EQ in the player, play-on-connect in the audio path); Settings is where all are.
