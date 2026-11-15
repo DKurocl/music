@@ -172,6 +172,9 @@ fun MusicRoot(model: LibraryViewModel) {
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by remember { mutableStateOf<Place?>(null) }
     var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
+    // YouTube Music's moods for Home; the usual set when it is off or unreachable (they still play
+    // from the library by genre).
+    val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) { if (youTubeOn) value = context.graph.youTube.moods() }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) { onlineStack = emptyList(); returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
@@ -205,6 +208,7 @@ fun MusicRoot(model: LibraryViewModel) {
             actions = { actionTrack = it },
             openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
             download = { start -> if (context.graph.soulseek.account == null) afterSignIn = start else start() },
+            playMood = { mood, moodPage -> model.startMood(mood, moodPage) },
         )
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav) {
@@ -273,6 +277,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
                 is OnlineTarget.Artist -> OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
                 is OnlineTarget.Album -> OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
+                is OnlineTarget.Mood -> MoodPage(top, playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
@@ -293,6 +298,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
+                moods = moods,
                 onSeeAll = { tab ->
                     // Smart playlists live in Playlists; albums, artists and history are Search tiles.
                     if (tab == "SMART") { returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
@@ -386,7 +392,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 library?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) ua.olex.music.model.Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
                     playing.title, playing.artist, album = playing.album, durationMs = playing.durationMs, artworkUri = playing.artworkUri) else null
             }?.let { track -> { actionTrack = track } },
-            mixFrom = model.mixSeed?.title,
+            mixFrom = model.mixLabel,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } },
             onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } }
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } },

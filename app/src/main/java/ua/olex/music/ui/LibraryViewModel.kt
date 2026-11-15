@@ -380,11 +380,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         return list.map { if (YouTubeMusic.isOnline(it)) YouTubeMusic.localCopy(it, index) ?: it else it }
     }
     // "Start mix": YouTube Music's radio for a song, cleaned (see Mix), endless while it plays.
-    private class MixRun(val seed: Track, @Volatile var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>)
+    private class MixRun(val seed: Track, @Volatile var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>, @Volatile var startFrom: String? = null)
     @Volatile private var mixRun: MixRun? = null
     private var mixMore: kotlinx.coroutines.Job? = null
-    /** The song the running mix grew from, for "Mix from …" in the queue; null when no mix runs. */
-    var mixSeed by mutableStateOf<Track?>(null); private set
+    /** What the running mix is ("Mix from Teardrop", "Sad"), for the queue; null when no mix runs. */
+    var mixLabel by mutableStateOf<String?>(null); private set
     /** True while the first page of a mix is being found. */
     var mixLoading by mutableStateOf(false); private set
 
@@ -424,7 +424,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                     player.enqueue(upcoming, false)
                 } else player.play(listOf(seedHere) + upcoming, 0)
                 mixRun = if (online.size >= 5) MixRun(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seedHere.id.value + seed.id.value).toMutableSet()) else null
-                mixSeed = seed
+                mixLabel = "Mix from ${seed.title}"
             } finally { mixLoading = false }
         }
     }
@@ -433,13 +433,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private fun followMix(state: PlayerState) {
         val run = mixRun ?: return
         val id = state.mediaId ?: return
-        if (id !in run.ids) { mixRun = null; mixSeed = null; return }
+        if (id !in run.ids) { mixRun = null; mixLabel = null; return }
         val left = state.queueSize - state.queueIndex - 1
         val token = run.token
-        if (left > 3 || token == null || mixMore?.isActive == true) return
+        val start = run.startFrom
+        if (left > 3 || (token == null && start == null) || mixMore?.isActive == true) return
         mixMore = viewModelScope.launch {
-            val page = runCatching { graph.youTube.radioMore(token) }.getOrNull() ?: return@launch
+            val page = runCatching { if (token != null) graph.youTube.radioMore(token) else graph.youTube.radio(start!!) }.getOrNull() ?: return@launch
             if (mixRun !== run) return@launch
+            run.startFrom = null
             run.token = page.continuation
             val more = localFirst(Mix.clean(page.tracks, run.seed, run.seen))
             run.seen += more.map(Mix::songKey)
@@ -449,6 +451,35 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     init { viewModelScope.launch { player.state.collect(::followMix) } }
+
+    /**
+     * Plays a mood: its first YouTube Music playlist, cleaned like a mix, flowing into the radio of
+     * its first song when it ends; without one, a mix grown from a library song of that mood.
+     */
+    internal fun startMood(mood: YouTubeMusic.Mood, page: YouTubeMusic.MoodPage?) {
+        viewModelScope.launch {
+            mixLoading = true
+            try {
+                val yt = graph.youTube
+                val listed = page?.playlists?.firstOrNull()?.let { runCatching { yt.album(it.id)?.second }.getOrNull() }.orEmpty().ifEmpty { page?.songs.orEmpty() }
+                if (listed.size >= 5) {
+                    val first = listed.first()
+                    val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
+                    val queue = localFirst(listOf(first) + Mix.clean(listed.drop(1), first, seen))
+                    seen += queue.map(Mix::songKey)
+                    player.play(queue, 0)
+                    mixRun = MixRun(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
+                    mixLabel = mood.label
+                    return@launch
+                }
+                val songs = library.value?.songs.orEmpty()
+                val matches = Mix.moodSongs(mood.label, songs)
+                if (matches.isEmpty()) { userError = "Nothing for \"${mood.label}\" yet: YouTube Music isn't reachable and no song in the library has a genre that fits."; return@launch }
+                startMix(matches.random())
+                mixLabel = mood.label
+            } finally { mixLoading = false }
+        }
+    }
 
     /** Plays what a spoken or typed search finds; an empty query plays the library shuffled. */
     fun playSearch(query: String) {

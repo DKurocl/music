@@ -28,7 +28,9 @@ import ua.olex.music.model.Track
 /** A YouTube Music page to show over the current place: an artist (by name or id) or an album. */
 internal sealed interface OnlineTarget {
     data class Artist(val name: String, val id: String? = null) : OnlineTarget
-    data class Album(val id: String, val title: String) : OnlineTarget
+    /** An album, or a playlist when [playlist] (no album download for a playlist of many artists). */
+    data class Album(val id: String, val title: String, val playlist: Boolean = false) : OnlineTarget
+    data class Mood(val mood: YouTubeMusic.Mood) : OnlineTarget
 }
 
 /** What online pages can do in the app: open another page, play, show a song's actions, open the owner's own artist. */
@@ -39,6 +41,8 @@ internal class OnlineNav(
     val openLocalArtist: (MusicCollection) -> Unit = {},
     /** Starts a Soulseek download, asking for the account first when there is none. */
     val download: (() -> Unit) -> Unit = { it() },
+    /** Plays a mood (its playlist, or a mix of the owner's songs of that mood). */
+    val playMood: (YouTubeMusic.Mood, YouTubeMusic.MoodPage?) -> Unit = { _, _ -> },
 )
 
 internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
@@ -169,12 +173,12 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                             // The whole album in lossless from Soulseek, into the library. Nothing to fetch
                             // once every song plays from a file.
                             val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
-                            DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, album.title),
+                            if (!target.playlist) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, album.title),
                                 owned = songs.isNotEmpty() && songs.none { it.id.value.startsWith("yt:") }, what = "the album") {
                                 nav.download { graph.soulseek.album(artistName, album.title) }
                             }
                         }
-                        DownloadStatus(ua.olex.music.soulseek.SoulseekDownloads.albumKey(songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty(), album.title))
+                        if (!target.playlist) DownloadStatus(ua.olex.music.soulseek.SoulseekDownloads.albumKey(songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty(), album.title))
                     }
                 }
                 itemsIndexed(songs, key = { _, t -> "a-" + t.id.value }) { i, t ->
@@ -303,6 +307,91 @@ internal fun DownloadStatus(key: String) {
             contentColor = if (shown.failed) cs.onErrorContainer else cs.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp)) {
             Text(shown.status, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).animateContentSize())
+        }
+    }
+}
+
+/** The glyph for a mood, so the row reads at a glance. */
+internal fun moodGlyph(label: String): Glyph = when (TextFold.fold(label)) {
+    "energize" -> Glyph.ENERGY; "feel good" -> Glyph.HAPPY; "relax", "chill" -> Glyph.RELAX; "party" -> Glyph.PARTY
+    "workout" -> Glyph.WORKOUT; "commute" -> Glyph.COMMUTE; "romance" -> Glyph.FAVOURITE; "sad" -> Glyph.RAIN
+    "focus" -> Glyph.FOCUS; "sleep" -> Glyph.SLEEP; else -> Glyph.MIX
+}
+
+/** The moods along the top of Home: one tap opens the mood; its page plays it. */
+@Composable
+internal fun MoodRow(moods: List<YouTubeMusic.Mood>, modifier: Modifier = Modifier) {
+    val nav = LocalOnlineNav.current
+    val haptics = rememberHaptics()
+    LazyRow(modifier, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(moods, key = { it.label }) { mood ->
+            Surface(onClick = { haptics.tick(); nav.open(OnlineTarget.Mood(mood)) }, shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.height(40.dp).squish(0.04f)) {
+                Row(Modifier.padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Symbol(moodGlyph(mood.label), size = 20.dp, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text(mood.label, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A mood: its name, Play, YouTube Music's playlists for it and any songs it lists. Play works even
+ * when YouTube Music lists nothing here: it grows a mix from the owner's songs of that mood.
+ */
+@Composable
+internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: PaddingValues, onBack: () -> Unit) {
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val nav = LocalOnlineNav.current
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val on by graph.youTubeOn.collectAsState()
+    val state = rememberLoad(target, 0) { if (on) graph.youTube.mood(target.mood) ?: YouTubeMusic.MoodPage(emptyList(), emptyList()) else YouTubeMusic.MoodPage(emptyList(), emptyList()) }
+    val page = (state as? Load.Done)?.value
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
+        item(key = "back") { IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) } }
+        item(key = "head") {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Surface(shape = androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, modifier = Modifier.size(72.dp)) {
+                    Box(contentAlignment = Alignment.Center) { Symbol(moodGlyph(target.mood.label), size = 36.dp, filled = true) }
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(target.mood.label, style = MaterialTheme.typography.displaySmall)
+                Spacer(Modifier.height(16.dp))
+                Button(enabled = state !is Load.Wait, onClick = { haptics.confirm(); nav.playMood(target.mood, page) }, modifier = Modifier.height(52.dp)) {
+                    Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
+                }
+            }
+        }
+        when {
+            state is Load.Wait -> item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { LoadingIndicator() } }
+            page == null || (page.playlists.isEmpty() && page.songs.isEmpty()) -> item {
+                Text(if (on) "YouTube Music lists nothing for this mood here. Play makes a mix from your own ${target.mood.label.lowercase()} songs."
+                    else "Play makes a mix from your own ${target.mood.label.lowercase()} songs. Turn on YouTube Music in Settings for its playlists.",
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, modifier = Modifier.padding(16.dp))
+            }
+            else -> {
+                if (page.playlists.isNotEmpty()) {
+                    item(key = "pl-h") { OnlineHeading("Playlists") }
+                    item(key = "pl") {
+                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            items(page.playlists, key = { it.id }) { pl ->
+                                Column(Modifier.width(160.dp).clip(RoundedCornerShape(20.dp)).clickable { nav.open(OnlineTarget.Album(pl.id, pl.title, playlist = true)) }) {
+                                    Artwork(pl.cover, Modifier.size(160.dp), 20.dp)
+                                    Text(pl.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
+                                    pl.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (page.songs.isNotEmpty()) {
+                    item(key = "s-h") { OnlineHeading("Songs") }
+                    itemsIndexed(page.songs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(page.songs, i) } }
+                }
+            }
         }
     }
 }
