@@ -53,6 +53,8 @@ data class TrackEntity(
     val genresJson: String? = null,
     val metadataJson: String? = null,
     val tagReaderVersion: Int = 0,
+    /** MediaStore's DATE_ADDED in epoch ms; 0 when unknown. */
+    val addedAt: Long = 0,
 ) {
     fun toTrack(artworkPackage: String? = null, artworkRevision: Long = 0): Track {
         val metadata = metadataJson?.let(FileMetadataCodec::decode)
@@ -64,6 +66,7 @@ data class TrackEntity(
         artists = FileMetadataCodec.strings(artistsJson).ifEmpty { listOf(artist) },
         genres = FileMetadataCodec.strings(genresJson).ifEmpty { listOfNotNull(genre) },
         metadata = metadata,
+        addedAt = addedAt.takeIf { it > 0 },
     )
     }
 }
@@ -115,7 +118,7 @@ interface TrackDao {
     }
 }
 
-@Database(entities = [TrackEntity::class, TrackSearchEntity::class], version = 3, exportSchema = false)
+@Database(entities = [TrackEntity::class, TrackSearchEntity::class], version = 4, exportSchema = false)
 abstract class LibraryDatabase : RoomDatabase() {
     abstract fun tracks(): TrackDao
 
