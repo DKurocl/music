@@ -338,6 +338,17 @@ class DesignGalleryTest {
         shot("08-search-results")
     }
 
+    @Test fun searchWithYouTubeMusic() {
+        val q = "air"
+        val hits = library.songs.filter { it.artist == "Air" }.take(2)
+        val online = listOf("Sexy Boy" to 297, "Kelly Watch the Stars" to 225, "Playground Love" to 213).mapIndexed { i, (title, s) ->
+            ua.olex.music.model.Track(ua.olex.music.model.TrackId("yt:v$i"), "ytm://v$i", title, "Air", durationMs = s * 1000L, artworkUri = library.albums[i].artworkUri)
+        }
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, q, LibrarySearchResult(q, hits), {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
+            online = OnlineSearch(q, online), onlineOn = true) } }
+        shot("08b-search-youtube")
+    }
+
     @Test fun player() {
         compose.setContent { AppTheme { Images { PlayerPage(now, "FLAC 24/96", null, true, { 92_000 }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } } }
         shot("09-player")
