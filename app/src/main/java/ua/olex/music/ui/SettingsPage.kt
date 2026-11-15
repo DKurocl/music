@@ -87,6 +87,21 @@ internal fun SettingsPage(
                 on, first = true, last = true) { graph.setYouTube(it) }
         }
 
+        // Soulseek: lossless copies of songs and albums found online, saved into the library.
+        item { Group("Soulseek") }
+        item {
+            val downloads = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
+            var account by remember { mutableStateOf(downloads.account) }
+            var editing by remember { mutableStateOf(false) }
+            val state by downloads.client.state.collectAsState()
+            Row(Glyph.DOWNLOAD, "Soulseek account", account?.let { (user, _) ->
+                "$user · " + when (val st = state) { is ua.olex.music.soulseek.SoulseekClient.State.Online -> "online"
+                    is ua.olex.music.soulseek.SoulseekClient.State.Failed -> st.reason; ua.olex.music.soulseek.SoulseekClient.State.Connecting -> "signing in…"
+                    else -> "signs in when you download" }
+            } ?: "Sign in to download songs and albums in lossless. A new name is created on first sign-in", first = true, last = true) { editing = true }
+            if (editing) SoulseekDialog(account, onDismiss = { editing = false }) { new -> downloads.account = new; account = new; editing = false }
+        }
+
         // Moving covers from Apple Music, with the owner's own MusicKit key.
         item { Group("Moving covers") }
         item {
@@ -202,4 +217,23 @@ private fun AppleKeyDialog(current: AppleMotion.Key?, onDismiss: () -> Unit, onS
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = { if (current != null) onSave(null) else onDismiss() }) { Text(if (current != null) "Remove key" else "Cancel") } })
+}
+
+/** Soulseek name and password, kept only in the app's private storage. */
+@Composable
+private fun SoulseekDialog(current: Pair<String, String>?, onDismiss: () -> Unit, onSave: (Pair<String, String>?) -> Unit) {
+    var user by remember { mutableStateOf(current?.first.orEmpty()) }
+    var password by remember { mutableStateOf(current?.second.orEmpty()) }
+    AppDialog(onDismissRequest = onDismiss, title = { Text("Soulseek account") },
+        text = {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                Text("Downloads only: the app shares nothing. Some people only send to those who share, so a few downloads may be refused.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.OutlinedTextField(user, { user = it.trim() }, label = { Text("Name") }, singleLine = true)
+                androidx.compose.material3.OutlinedTextField(password, { password = it }, label = { Text("Password") }, singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation())
+            }
+        },
+        confirmButton = { TextButton(enabled = user.isNotBlank() && password.isNotBlank(), onClick = { onSave(user to password) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = { if (current != null) onSave(null) else onDismiss() }) { Text(if (current != null) "Sign out" else "Cancel") } })
 }

@@ -24,6 +24,8 @@ class AppGraph(context: Context) {
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
     internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic() }
+    /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
+    val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {} }
     private val onlinePrefs by lazy { app.getSharedPreferences("online", Context.MODE_PRIVATE) }
     /** YouTube Music in search and playback; the owner can turn it off in Settings. */
     val youTubeOn by lazy { kotlinx.coroutines.flow.MutableStateFlow(onlinePrefs.getBoolean("youtube", true)) }
