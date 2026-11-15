@@ -137,10 +137,18 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         synchronized(streams) { streams[id]?.takeIf { System.currentTimeMillis() - it.second < 4 * 3_600_000L }?.first }?.let { return it }
         val info = StreamInfo.getInfo(ServiceList.YouTube, "https://music.youtube.com/watch?v=$id")
         val best = info.audioStreams.filter { it.isUrl }.maxByOrNull { it.averageBitrate } ?: return null
+        // What the player will say about the sound: codec and bitrate of the stream it plays.
+        val codec = when { best.format?.name?.contains("opus", true) == true || best.codec?.contains("opus", true) == true -> "Opus"
+            best.format?.name?.contains("m4a", true) == true || best.codec?.contains("mp4a", true) == true -> "AAC"; else -> best.format?.name ?: "Stream" }
+        formats[id] = "$codec \u00b7 ${best.averageBitrate.takeIf { it > 0 } ?: best.bitrate / 1000} kbps \u00b7 YouTube Music"
         Uri.parse(best.content).also { synchronized(streams) { streams[id] = it to System.currentTimeMillis() } }
     }.getOrNull()
 
     private val streams = HashMap<String, Pair<Uri, Long>>()
+    private val formats = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** "Opus \u00b7 160 kbps \u00b7 YouTube Music" once the song's stream was chosen; null before. */
+    fun format(id: String): String? = formats[id]
 
     companion object {
         const val WEB_REMIX = "1.20251110.01.00"
@@ -319,6 +327,18 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
             }.filterNot { it.title.contains("podcast", true) || it.title.contains("episode", true) }
         }
 
+        /**
+         * The artist in a card's subtitle, "Song \u2022 predayed", "Video \u2022 Batón \u2022 201K views":
+         * the kind of item, view counts and years are left out, the first name that remains is it.
+         */
+        fun artistOf(subtitle: String?): String {
+            val kinds = setOf("song", "video", "single", "ep", "album", "playlist", "episode", "podcast", "artist", "profile")
+            return subtitle.orEmpty().split('\u2022').map { it.trim() }.firstOrNull { part ->
+                part.isNotEmpty() && part.lowercase() !in kinds && !part.matches(Regex("""\d{4}""")) &&
+                    !Regex("""(views|plays|likes|subscribers|songs)$""", RegexOption.IGNORE_CASE).containsMatchIn(part)
+            }.orEmpty()
+        }
+
         /** The usual moods, in YouTube Music's order, for when its home can't be read. */
         val DEFAULT_MOODS = listOf("Energize", "Feel good", "Relax", "Party", "Workout", "Commute", "Romance", "Sad", "Focus", "Sleep").map { Mood(it, null) }
 
@@ -357,6 +377,23 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
          * "(Remastered)"-style extras) and a length within three seconds when both are known.
          */
         fun localCopy(online: Track, library: LibraryIndex): Track? = library.songs.firstOrNull { sameSong(online, it) }
+
+        /** Keys under which a library song can be found by an online one (each of its artists). */
+        fun keysOf(song: Track): List<String> = (song.artists + song.artist + song.artist.substringBefore(",")).map { clean(song.title) + "\u0000" + clean(it.substringBefore(",")) }.distinct()
+
+        /** The key an online song is looked up by. */
+        fun keyOf(online: Track): String = clean(online.title) + "\u0000" + clean(online.artist.substringBefore(","))
+
+        /**
+         * The library indexed for [localCopy]: built once per library, so matching a mix of fifty
+         * songs is fifty lookups, not fifty passes over every file with regular expressions.
+         */
+        class Index(songs: List<Track>) {
+            private val byKey = HashMap<String, MutableList<Track>>().apply { songs.forEach { s -> keysOf(s).forEach { getOrPut(it) { ArrayList(1) } += s } } }
+            fun copyOf(online: Track): Track? = byKey[keyOf(online)]?.firstOrNull { song ->
+                online.durationMs <= 0 || song.durationMs <= 0 || kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
+            }
+        }
 
         private fun clean(s: String) = TextFold.fold(s).replace(Regex("""\s*[(\[].*?[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "").trim()
 

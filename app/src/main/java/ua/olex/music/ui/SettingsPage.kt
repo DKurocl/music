@@ -144,7 +144,7 @@ internal fun SettingsPage(
                 "$user · " + when (val st = state) { is ua.olex.music.soulseek.SoulseekClient.State.Online -> "online"
                     is ua.olex.music.soulseek.SoulseekClient.State.Failed -> st.reason; ua.olex.music.soulseek.SoulseekClient.State.Connecting -> "signing in…"
                     else -> "signs in when you download" }
-            } ?: "Sign in to download songs and albums in lossless. A new name is created on first sign-in", first = true, last = soulseekJobs.isEmpty()) { editing = true }
+            } ?: "Sign in to download songs and albums, lossless first. A new name is created on first sign-in", first = true, last = soulseekJobs.isEmpty()) { editing = true }
             if (editing) SoulseekDialog(account, onDismiss = { editing = false }) { new -> downloads.account = new; account = new; editing = false }
         }
         // Recent downloads in the same group, newest first: where each one is, and a retry for a failed one.
