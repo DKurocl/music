@@ -211,7 +211,9 @@ fun MusicRoot(model: LibraryViewModel) {
             playMood = { mood, moodPage -> model.startMood(mood, moodPage) },
         )
     }
-    androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav) {
+    val powerSave = rememberPowerSave()
+    androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
+        LocalPowerSave provides powerSave) {
     afterSignIn?.let { pending ->
         SoulseekDialog(null, onDismiss = { afterSignIn = null }) { account ->
             context.graph.soulseek.account = account

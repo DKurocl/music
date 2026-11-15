@@ -161,7 +161,8 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
     val alpha by androidx.compose.animation.core.animateFloatAsState(
         when { !timed || active -> 1f; distance == 1 -> 0.42f; else -> 0.26f }, motion.defaultEffectsSpec(), label = "lyric-alpha")
     val scale by androidx.compose.animation.core.animateFloatAsState(if (!timed || active) 1f else 0.94f, motion.defaultSpatialSpec(), label = "lyric-scale")
-    val blur by androidx.compose.animation.core.animateDpAsState(if (timed && distance >= 2) 1.5.dp else 0.dp, motion.defaultEffectsSpec(), label = "lyric-blur")
+    // Distant lines go soft, as in Apple Music; in Battery Saver they only dim (blur is GPU work per line).
+    val blur by androidx.compose.animation.core.animateDpAsState(if (timed && distance >= 2 && !LocalPowerSave.current) 1.5.dp else 0.dp, motion.defaultEffectsSpec(), label = "lyric-blur")
     val base = if (line.background) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium
     val style = base.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = (-0.2).sp)
     val dim = cs.onSurface.copy(alpha = 0.32f)

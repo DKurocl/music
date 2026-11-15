@@ -27,6 +27,9 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     private val prefs = context.getSharedPreferences("soulseek", Context.MODE_PRIVATE)
     val client = SoulseekClient(scope)
     private val one = Mutex()
+    // Signed in only while there is something to download: the server connection is closed two
+    // minutes after the last job, so an idle Soulseek never keeps the radio awake.
+    private var idle: kotlinx.coroutines.Job? = null
 
     /** One download as the app shows it. [key] names what is being fetched, so a button finds its own job. */
     data class Job(val id: Int, val key: String, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false) {
@@ -75,6 +78,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         val id = (System.nanoTime() % 1_000_000).toInt().let { if (it < 0) -it else it }
         fun set(job: Job) { _jobs.value = (_jobs.value.filterNot { it.id == id || (it.key == key && !it.running) } + job).takeLast(20); notify(job) }
         set(Job(id, key, title, "Waiting…"))
+        idle?.cancel()
         scope.launch {
             one.withLock {
                 try {
@@ -86,6 +90,10 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                 } catch (e: Exception) {
                     set(Job(id, key, title, e.message ?: "The download failed", failed = true))
                 }
+            }
+            if (_jobs.value.none { it.running }) {
+                idle?.cancel()
+                idle = scope.launch { kotlinx.coroutines.delay(120_000); if (_jobs.value.none { it.running }) client.disconnect() }
             }
         }
     }

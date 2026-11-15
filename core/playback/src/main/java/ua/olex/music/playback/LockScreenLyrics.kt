@@ -52,6 +52,19 @@ internal class LyricLinePlayer(private val real: Player) : ForwardingPlayer(real
 class LockScreenLyrics internal constructor(private val context: Context, private val real: Player, private val shown: LyricLinePlayer, private val scope: CoroutineScope) {
     private var lyrics: Lyrics = Lyrics.EMPTY
     private var loadedFor: String? = null
+    // The line moves only while the screen is on: with it off nobody sees the lock screen, and every
+    // change would wake the system to redraw the media card for nothing. The line stays where it is
+    // and jumps to the current one the moment the screen turns on.
+    private val power = context.getSystemService(android.os.PowerManager::class.java)
+    private val screen = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context?, intent: android.content.Intent?) { update() }
+    }
+    init {
+        context.registerReceiver(screen, android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_SCREEN_ON); addAction(android.content.Intent.ACTION_SCREEN_OFF)
+        })
+    }
+    fun release() { ticker?.cancel(); runCatching { context.unregisterReceiver(screen) } }
     private var ticker: Job? = null
     internal var appVisible = false
         set(value) { field = value; update() }
@@ -62,6 +75,7 @@ class LockScreenLyrics internal constructor(private val context: Context, privat
     internal fun update() {
         ticker?.cancel()
         if (!enabled || appVisible || !real.isPlaying) { shown.line = null; return }
+        if (power?.isInteractive == false) return
         val item = real.currentMediaItem ?: run { shown.line = null; return }
         ticker = scope.launch {
             if (loadedFor != item.mediaId) {
