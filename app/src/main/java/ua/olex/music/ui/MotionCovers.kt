@@ -16,7 +16,7 @@ import java.security.MessageDigest
  * in the app's own storage and played for every song of that album (by album and album artist, so
  * every copy and every rescan finds it). Up to [MAX_BYTES] each. Nothing is fetched from anywhere.
  */
-class MotionCovers(context: Context) {
+class MotionCovers(private val context: Context) {
     private val dir = File(context.filesDir, "motion").apply { mkdirs() }
     private val resolver = context.contentResolver
     private val _revision = MutableStateFlow(0)
@@ -31,6 +31,8 @@ class MotionCovers(context: Context) {
 
     /** The album's moving cover, if one was attached. */
     fun file(track: Track): File? = key(track)?.let { File(dir, "$it.mp4") }?.takeIf { it.isFile && it.length() > 0 }
+        // Shown now: the last to go when the budget runs over.
+        ?.also { it.setLastModified(System.currentTimeMillis()) }
 
     /** Copies a video into the album's single file; false when it is not a video or is too large. */
     suspend fun attach(track: Track, video: Uri): Boolean = withContext(Dispatchers.IO) {
@@ -43,7 +45,8 @@ class MotionCovers(context: Context) {
                 while (true) { val n = input.read(buffer); if (n < 0) break; total += n; require(total <= MAX_BYTES); out.write(buffer, 0, n) }
             } } != null
         }.getOrDefault(false)
-        if (ok && tmp.renameTo(target)) { _revision.value++; true } else { tmp.delete(); false }
+        // The owner's own video is theirs, not cache: marked so the budget never drops it.
+        if (ok && tmp.renameTo(target)) { File(dir, "$key.own").createNewFile(); _revision.value++; true } else { tmp.delete(); false }
     }
 
     /** Keeps a joined video (from Apple Music) as the album's single file. */
@@ -52,12 +55,20 @@ class MotionCovers(context: Context) {
         if (bytes.size > MAX_BYTES) return@withContext false
         val target = File(dir, "$key.mp4"); val tmp = File(dir, "$key.tmp")
         tmp.writeBytes(bytes)
-        if (tmp.renameTo(target)) { _revision.value++; true } else { tmp.delete(); false }
+        if (tmp.renameTo(target)) { File(dir, "$key.own").delete(); trim(); _revision.value++; true } else { tmp.delete(); false }
     }
 
-    fun remove(track: Track) { file(track)?.delete(); _revision.value++ }
+    fun remove(track: Track) { key(track)?.let { File(dir, "$it.own").delete() }; file(track)?.delete(); _revision.value++ }
 
-    fun bytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
+    /** Drops the fetched moving covers shown longest ago while they take more than their share of the budget. */
+    fun trim() {
+        val limit = ua.olex.music.playback.CacheBudget.motionBytes(context)
+        val fetched = dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }.orEmpty().sortedBy { it.lastModified() }
+        var total = fetched.sumOf { it.length() }
+        for (f in fetched) { if (total <= limit) break; total -= f.length(); f.delete() }
+    }
+
+    fun bytes(): Long = dir.listFiles { f -> f.name.endsWith(".mp4") }?.sumOf { it.length() } ?: 0L
 
     companion object { const val MAX_BYTES = 40L * 1024 * 1024 }
 }
