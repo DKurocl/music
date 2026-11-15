@@ -11,8 +11,12 @@ artists and empty states) in a blue to violet to pink gradient, like a record se
 a white note on it. Google's 2025 icons are one bold shape, a soft gradient and a white symbol; the
 note sits a little left of centre so the flag has room, as a note is read.
 
-The splash: the record turns by one scallop and settles (a spring), the note dips and springs up,
-and a ring of sound leaves the edge. 650 ms, within Android's 1000 ms for phones.
+The mark takes about two thirds of what a launcher shows (the inner 72 dp of the 108 dp layers),
+on white, as Google's own icons sit; the first version filled the whole circle and looked loud.
+
+The splash: no white disc behind it (the mark floats on the page colour, as Google's apps start).
+The record grows in with a half turn and settles on a spring; the note pops in a beat later with a
+small tilt that straightens. 700 ms, within Android's 1000 ms for phones.
 """
 import math
 import os
@@ -24,6 +28,9 @@ C = 54.0           # centre of the 108 dp canvas
 R = 30.5           # cookie radius: 61 dp across, inside the 66 dp safe zone
 WAVE = 0.075       # depth of the scallops
 LOBES = 9
+
+# The whole mark is drawn at full size and scaled around the centre: 61 dp becomes about 43 dp.
+MARK = 0.7
 
 STOPS = [(0.0, "#FF2F7BF5"), (0.55, "#FF7B61FF"), (1.0, "#FFF06AB4")]
 
@@ -116,13 +123,11 @@ def foreground(named=False):
               f'<group android:name="sheen" android:pivotX="{C}" android:pivotY="{C}">'
               f'<path android:pathData="M14,14 L94,14 L94,94 L14,94 Z">{gradient(84, 24, 24, 84)}</path></group></group>') if named else \
         f'<path android:pathData="{cookie()}">{gradient(84, 24, 24, 84)}</path>'
-    ring = (f'<group android:name="pulse" android:pivotX="{C}" android:pivotY="{C}">'
-            f'<path android:name="pulse_ring" android:strokeColor="#FF7B61FF" android:strokeWidth="1.6" android:strokeAlpha="0" '
-            f'android:pathData="{circle(C, C, R)}"/></group>') if named else ""
     note = (f'<group android:name="note" android:pivotX="{NOTE_PIVOT[0]}" android:pivotY="{NOTE_PIVOT[1] + 12}">'
             f'<path android:fillColor="#FFFFFFFF" android:pathData="{NOTE}"/></group>') if named else \
         f'<path android:fillColor="#FFFFFFFF" android:pathData="{NOTE}"/>'
-    return ring + record + note
+    return (f'<group android:name="mark" android:pivotX="{C}" android:pivotY="{C}" android:scaleX="{MARK}" android:scaleY="{MARK}">'
+            + record + note + '</group>')
 
 
 def write(name, text):
@@ -131,7 +136,7 @@ def write(name, text):
         out.write(text)
 
 
-def keyframes(prop, frames, duration=650):
+def keyframes(prop, frames, duration=700):
     ks = "".join(
         f'<keyframe android:fraction="{fr:.3f}" android:value="{v}"' + (f' android:interpolator="@interpolator/{i}"' if i else "") + "/>"
         for fr, v, i in frames)
@@ -148,35 +153,40 @@ def main():
     write("ic_launcher_background.xml", HEADER + '<shape xmlns:android="http://schemas.android.com/apk/res/android"><solid android:color="#FFFFFFFF"/></shape>\n')
     # Themed icons: the record as the tint, the note cut out of it.
     write("ic_launcher_monochrome.xml", HEADER + VECTOR.replace(' xmlns:aapt="http://schemas.android.com/aapt"', "") +
-          f'<path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{cookie()} {NOTE}"/></vector>\n')
-    turn = 360 / LOBES
+          f'<group android:pivotX="{C}" android:pivotY="{C}" android:scaleX="{MARK}" android:scaleY="{MARK}">'
+          f'<path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{cookie()} {NOTE}"/></group></vector>\n')
+    d = 700
     anim = "".join([
-        target("record", keyframes("rotation", [(0, 0, None), (0.08, 0, None), (0.62, turn, "splash_spring"), (1, turn, None)])),
-        target("sheen", keyframes("rotation", [(0, 0, None), (0.08, 0, None), (0.62, -turn, "splash_spring"), (1, -turn, None)])),
+        # The record grows in with a half turn; the light under it turns back, so it stays put.
+        target("record",
+               keyframes("scaleX", [(0, 0.4, None), (0.58, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("scaleY", [(0, 0.4, None), (0.58, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("rotation", [(0, -100, None), (0.58, 0, "w_emphasized"), (1, 0, None)], d)),
+        target("sheen", keyframes("rotation", [(0, 100, None), (0.58, 0, "w_emphasized"), (1, 0, None)], d)),
+        # The note pops in a beat later and straightens.
         target("note",
-               keyframes("scaleY", [(0, 1, None), (0.15, 1, None), (0.32, 0.86, "w_emphasized"), (0.6, 1.06, "w_emphasized"), (0.86, 1, "splash_spring"), (1, 1, None)]),
-               keyframes("scaleX", [(0, 1, None), (0.15, 1, None), (0.32, 1.08, "w_emphasized"), (0.6, 0.97, "w_emphasized"), (0.86, 1, "splash_spring"), (1, 1, None)]),
-               keyframes("translateY", [(0, 0, None), (0.15, 0, None), (0.32, 1.2, "w_emphasized"), (0.6, -2.4, "w_emphasized"), (0.86, 0, "splash_spring"), (1, 0, None)])),
-        target("pulse",
-               keyframes("scaleX", [(0, 1, None), (0.5, 1, None), (1, 1.28, "w_emphasized")]),
-               keyframes("scaleY", [(0, 1, None), (0.5, 1, None), (1, 1.28, "w_emphasized")])),
-        target("pulse_ring", keyframes("strokeAlpha", [(0, 0, None), (0.5, 0, None), (0.56, 0.8, None), (1, 0, "w_emphasized")])),
+               keyframes("scaleX", [(0, 0, None), (0.22, 0, None), (0.74, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("scaleY", [(0, 0, None), (0.22, 0, None), (0.74, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("rotation", [(0, -18, None), (0.22, -18, None), (0.8, 0, "w_emphasized"), (1, 0, None)], d)),
     ])
     inner = '<vector tools:ignore="VectorPath" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">'
     write("splash_icon.xml", HEADER + '<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" xmlns:tools="http://schemas.android.com/tools">'
           f'<aapt:attr name="android:drawable">{inner}{foreground(named=True)}</vector></aapt:attr>{anim}</animated-vector>\n')
-    # A preview for review: the icon in a circle mask and a squircle mask, and the monochrome one.
+    # A preview for review, as a launcher shows it (the inner 72 dp): circle, squircle, themed, and
+    # the splash (the mark on the dark page, no disc).
     stops = "".join(f'<stop offset="{o}" stop-color="#{c[3:]}"/>' for o, c in STOPS)
-    def icon(x, clip):
-        return (f'<g transform="translate({x},0)"><clipPath id="m{x}">{clip}</clipPath><g clip-path="url(#m{x})">'
-                f'<rect width="108" height="108" fill="#fff"/><path d="{cookie()}" fill="url(#g)"/><path d="{NOTE}" fill="#fff"/></g></g>')
-    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 108" width="1344" height="324"><defs>'
+    mark = f'<g transform="translate(54 54) scale({MARK}) translate(-54 -54)">'
+    def tile(i, clip, body):
+        x = i * 80
+        return (f'<g transform="translate({x - 18},-18)"><clipPath id="m{i}">{clip}</clipPath><g clip-path="url(#m{i})">{body}</g></g>')
+    color = f'<rect width="108" height="108" fill="#fff"/>{mark}<path d="{cookie()}" fill="url(#g)"/><path d="{NOTE}" fill="#fff"/></g>'
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 312 72" width="1248" height="288"><defs>'
            f'<linearGradient id="g" x1="84" y1="24" x2="24" y2="84" gradientUnits="userSpaceOnUse">{stops}</linearGradient></defs>'
-           f'<rect width="448" height="108" fill="#1b1b21"/>'
-           + icon(0, '<circle cx="54" cy="54" r="54"/>')
-           + icon(112, '<rect x="0" y="0" width="108" height="108" rx="34"/>')
-           + f'<g transform="translate(224,0)"><circle cx="54" cy="54" r="54" fill="#2b2a33"/><path d="{cookie()} {NOTE}" fill-rule="evenodd" fill="#d0bcff"/></g>'
-           + f'<g transform="translate(336,0)"><circle cx="54" cy="54" r="54" fill="#fff"/><path d="{cookie()}" fill="url(#g)"/><path d="{NOTE}" fill="#fff"/></g>'
+           f'<rect width="312" height="72" fill="#1b1b21"/>'
+           + tile(0, '<circle cx="54" cy="54" r="36"/>', color)
+           + tile(1, '<rect x="18" y="18" width="72" height="72" rx="22"/>', color)
+           + tile(2, '<circle cx="54" cy="54" r="36"/>', f'<rect width="108" height="108" fill="#2b2a33"/>{mark}<path d="{cookie()} {NOTE}" fill-rule="evenodd" fill="#d0bcff"/></g>')
+           + tile(3, '<rect x="18" y="18" width="72" height="72"/>', f'<rect width="108" height="108" fill="#121318"/>{mark}<path d="{cookie()}" fill="url(#g)"/><path d="{NOTE}" fill="#fff"/></g>')
            + '</svg>')
     with open(os.path.join(ROOT, "docs/design/icon-preview.svg"), "w") as out:
         out.write(svg)

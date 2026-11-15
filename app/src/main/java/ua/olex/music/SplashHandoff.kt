@@ -10,10 +10,10 @@ import java.time.Duration
 import java.time.Instant
 
 /**
- * From the splash into the app, as Google's apps do it. Android shows the launcher icon in its
- * circle and plays its gesture (drawable/splash_icon.xml: the record turns one scallop, the note
- * dips and springs, a ring of sound leaves the edge). Then the circle sinks back a little and
- * fades while the splash dissolves into the page behind it, on an emphasized curve.
+ * From the splash into the app, as Google's apps do it. Android shows the mark alone on the page
+ * colour and plays its gesture (drawable/splash_icon.xml: the record grows in with a half turn, the
+ * note pops in and straightens). Then the mark sinks back a little and fades while the splash
+ * dissolves into the page behind it, on an emphasized curve.
  */
 object SplashHandoff {
     // Material's emphasized decelerate curve.
