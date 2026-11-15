@@ -111,6 +111,11 @@ fun MusicRoot(model: LibraryViewModel) {
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
     val lyricOwner = playing.mediaId
+    val currentArtwork = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.artworkUri }
+    LaunchedEffect(playing.connected, playing.mediaId, currentArtwork) {
+        val id = playing.mediaId
+        if (playing.connected && id != null && currentArtwork != null) model.updateCurrentArtwork(id, currentArtwork)
+    }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
@@ -126,7 +131,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 title = { Text("Library") }, scrollBehavior = scroll,
                 actions = {
                     TextButton(onClick = { equalizerOpen = true }) { Text("Audio") }
-                    if (model.allowed) TextButton(onClick = model::refresh, enabled = !model.scanning) {
+                    if (model.allowed) TextButton(onClick = model::rescanManually, enabled = !model.scanning) {
                         Text(if (model.scanning) "Scanning…" else "Rescan")
                     }
                 },
@@ -265,11 +270,11 @@ internal fun TrackRow(track: Track, current: Boolean, onMore: (() -> Unit)? = nu
 }
 
 @Composable
-internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp) {
+internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ua.olex.music.model.ArtworkPlan.SMALL) {
     val cs = MaterialTheme.colorScheme
     Box(modifier.clip(RoundedCornerShape(corner)).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         Icon(AppIcons.Note, null, tint = cs.onSurfaceVariant, modifier = Modifier.fillMaxSize(0.4f))
-        if (uri != null) AsyncImage(model = uri, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        if (uri != null) AsyncImage(model = ua.olex.music.library.ArtworkUris.variant(uri, LocalContext.current.packageName, pixels), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
     }
 }
 
@@ -358,7 +363,7 @@ internal fun PlayerPage(
                 IconButton(onClick = onQueue, modifier = Modifier.semantics { contentDescription = "Open queue" }) { Icon(AppIcons.Queue, null) }
             }
             Spacer(Modifier.height(12.dp))
-            Artwork(state.artworkUri, Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f), 32.dp)
+            Artwork(state.artworkUri, Modifier.widthIn(max = 360.dp).fillMaxWidth().aspectRatio(1f), 32.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
             Spacer(Modifier.height(24.dp))
             Text(state.title, style = MaterialTheme.typography.headlineMedium, maxLines = 3, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
             Spacer(Modifier.height(8.dp))

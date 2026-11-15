@@ -6,6 +6,12 @@ Crossfade, visualizers and personal-data backup/export are excluded by the owner
 
 ## Evidence and interpretation
 
+Latest artwork update (2026-11-15): the work branch now implements embedded and scoped folder
+artwork through the private provider and three-size cache. The pure suite passes 117 tests.
+Standalone Android/Compose source compilation and focused artwork/storage tests are recorded in
+HANDOFF.md. This remains source work, not a measured Pixel comparison. The initial inspection
+and network limitations in the following paragraphs are historical, not current environment status.
+
 [code] Music columns below come from the current checkout, including this session's incremental
 cache change. Existing HANDOFF CI results are historical reports, not rerun evidence.
 This session executed 79 JVM tests using Kotlin 2.2.21 and JUnit 4.13.2. The actual library sources, Room-generated
@@ -45,8 +51,8 @@ Quality labels are implementation descriptions, not numerical sound-quality scor
 | Incremental database writes | Verify implementation | Verify implementation | New: linear snapshot delta, no unchanged-row writes; JVM tests pass, Room tests pending |
 | Automatic library updates | Present | Present | Present: visible-activity observer, debounced rescans |
 | Ten-thousand-track scan speed | Requires measurement | Requires measurement | Unmeasured; synthetic delta tests are not scan benchmarks |
-| Embedded artwork | Present | Present | Partial: embedded picture ranges read; full fetch/decode/cache pipeline missing |
-| Folder cover/folder artwork | Present | Present | Missing dedicated lookup and three-size disk cache |
+| Embedded artwork | Present | Present | Implemented on work branch: bounded range reads, decode and deduplicated three-size disk cache; local tests pass, Pixel acceptance pending |
+| Folder cover/folder artwork | Present | Present | Implemented on work branch: cover/folder/front lookup in selected internal-storage roots, then MediaStore fallback; local tests pass, Android picker/Pixel acceptance pending |
 | Manual playlists | Present | Present | Present: durable transactional storage, add/remove/reorder/rename |
 | Missing playlist files retained | Verify current behavior | Verify current behavior | Present: durable song records survive disappearance from library |
 | Duplicate playlist occurrences | Verify current behavior | Verify current behavior | Missing: playlist additions deduplicate saved song identity; queue occurrences are separate |

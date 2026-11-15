@@ -274,3 +274,19 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     Plain/empty lyrics run no position poller; timed polling stops on pause/hidden lifecycle.
 44. TTML rejects document types/entity declarations and has a non-fetching entity resolver. External
     DTD/entity IO is never part of rendering local lyrics, including on parsers lacking optional flags.
+
+
+45. Local artwork uses a private, non-exported read-only content provider backed by one application
+    cache. Logical URIs carry scanner fingerprints and optional embedded byte ranges, not image
+    payloads. Embedded data wins, then a named picture in the track's selected primary-storage
+    directory, then the MediaStore album URI. IO/decode happens on the image loader's worker thread;
+    no scan-time bitmap work or idle watcher. SHA-256 image identity shares three PNG variants
+    (192/512/1280 px) across tracks, without upscaling. Encoded sources are limited to 16 MB and
+    dimensions to 64 million pixels; decoded pixels use software sRGB. Atomic disk writes and a
+    128 MB LRU disk budget bound the cache. No new dependency or artwork-derived theme colors.
+46. Folder grants and explicit Reload/Rescan increment a persisted local-file revision. The revision
+    invalidates artwork request identities and reloads sidecar lyrics even for a regrant of the same
+    folder. Foreground lifecycle refresh does not increment it. Current media metadata can update
+    via Media3 replaceMediaItem while retaining source/occurrence/gain data. Physical continuity and
+    notification behavior remain acceptance checks. The private provider is not an external-client
+    URI-sharing contract; future external clients need explicit integration.

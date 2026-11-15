@@ -193,6 +193,16 @@ class PlayerConnection(context: Context) {
     fun previous() { controller?.seekToPrevious() }
     fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
 
+    /** Metadata-only replacement preserves the URI, occurrence key, gain tags and playback intent. */
+    fun updateCurrentArtwork(mediaId: String, uri: String) {
+        val player = controller ?: return
+        val item = player.currentMediaItem ?: return
+        if (item.mediaId != mediaId || !player.isCommandAvailable(androidx.media3.common.Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
+        val artwork = android.net.Uri.parse(uri)
+        if (item.mediaMetadata.artworkUri == artwork) return
+        player.replaceMediaItem(player.currentMediaItemIndex, item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build())
+    }
+
     fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun cycleRepeat() {
         controller?.let { it.repeatMode = when (it.repeatMode) {

@@ -1,3 +1,43 @@
+# Current functional work: local artwork (Codex, 2026-11-15)
+
+Branch: `agent/m3-replaygain`. Owner still requests functionality first, no unnecessary APK builds
+or releases. Source-only [skip ci] checkpoint; do not merge this batch to main yet.
+
+Implemented:
+- Embedded picture range -> cover/folder/front file in the track's selected internal-storage folder
+  -> MediaStore album art. Existing read-only document-tree grants are reused; no new permission,
+  network request, dependency or database schema. No bitmap decoding during library scans.
+- Private non-exported read-only provider consumed by Coil in library/player and by media metadata.
+  Image SHA-256 deduplicates disk variants at 192/512/1280 px. Preserve aspect, no upscaling,
+  bounded source bytes/dimensions, software sRGB decode, atomic writes and 128 MB disk pruning.
+- Manual Rescan/Reload and folder changes invalidate request identities through a persisted local
+  revision. Ordinary lifecycle refresh does not invalidate the cache. Current artwork metadata is
+  updated without explicitly seeking or preparing the player. Wallpaper colors remain unchanged.
+
+Verified locally, after final source changes:
+- `python3 /workspace/toolchains/music-jvm/check.py`: 117 tests passed. Includes 3 artwork-plan
+  cases for dimensions, filename priority and ambiguity. Expected malformed-XML fixture logs remain.
+- From /workspace/toolchains/music-room-check:
+  `GRADLE_USER_HOME=/workspace/.gradle-music /workspace/toolchains/gradle-9.9.1/bin/gradle test --tests ua.olex.music.library.LocalArtworkCacheTest --tests ua.olex.music.library.LocalMusicFilesTest --no-daemon --console=plain`
+  passed 9 tests, zero failures/errors/skips. Native Robolectric graphics decode real PNG bytes from
+  embedded offsets, validate colors/sizes/cache hits, shared variants and invalid-embedded fallback.
+  Storage tests cover chosen-folder cover priority, scope boundaries, revision persistence and the
+  preceding sidecar behavior. URI tests preserve source fields and absent optional fields.
+- From /workspace/toolchains/music-ui-check, `compileKotlin --no-daemon --console=plain` with the
+  same GRADLE_USER_HOME/toolchain: succeeded for all actual main Kotlin/Compose sources. Temporary
+  font R ID stand-in only; this is API/type checking, not AGP/resource/manifest linking or rendered UI.
+- `git diff --check` passed. Logs: /workspace/verification/artwork-pure-tests.log,
+  local-artwork-tests.log and ui-typecheck.log.
+
+No full CI, APK, release, Android lint, system picker test or physical Pixel check was run.
+Notification/lock-screen artwork, uninterrupted metadata replacement and memory/latency on the
+Pixel still need acceptance. The private provider does not grant external clients direct access.
+Only explicitly chosen primary internal-storage folders are supported; use current Lyrics > Sources
+folder controls and Rescan after editing an external cover file. A broader library-folder settings
+entry can follow. No performance or competitor superiority is claimed from these local checks.
+
+Next: queue drag and selection retention, then a coherent phone acceptance batch when requested.
+
 # Current functional work: scoped local sidecar lyrics (Codex, 2026-11-15)
 
 Branch: `agent/m3-replaygain`. Owner instruction remains: functionality first, no unnecessary full

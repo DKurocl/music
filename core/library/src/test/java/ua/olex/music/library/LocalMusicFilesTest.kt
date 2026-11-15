@@ -82,6 +82,21 @@ class LocalMusicFilesTest {
         assertEquals(SidecarStatus.OUTSIDE_FOLDER, files.lyrics("Music2/song.flac").status)
         assertEquals(1, queries)
     }
+    @Test fun folderArtworkUsesChosenScopeAndRefreshChangesRevision() = runBlocking {
+        write("folder.png", byteArrayOf(1, 2, 3))
+        write("cover.jpg", byteArrayOf(4, 5, 6))
+        files.addFolder(tree)
+        assertArrayEquals(byteArrayOf(4, 5, 6), files.coverBytesBlocking("Music/Album/song.flac"))
+        assertEquals(1, queries)
+        assertNull(files.coverBytesBlocking("Music2/song.flac"))
+        assertEquals(1, queries)
+        val previous = files.revision.value
+        files.refresh()
+        assertTrue(files.revision.value > previous)
+        assertEquals(files.revision.value, LocalMusicFiles(context).revision.value)
+        files.clearFolders()
+        assertNull(files.coverBytesBlocking("Music/Album/song.flac"))
+    }
     @Test fun revokedAccessIsDistinctFromMissingLyrics() = runBlocking {
         files.addFolder(tree)
         context.contentResolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
