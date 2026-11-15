@@ -47,14 +47,14 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     fun song(artist: String, title: String, album: String?, durationMs: Long): Unit = start(songKey(artist, title), "$artist · $title", { song(artist, title, album, durationMs) }) { update ->
         update("Searching Soulseek…", null)
         val results = client.search("$artist $title")
-        val best = chooseSong(results, title, durationMs / 1000) ?: error("No lossless copy found on Soulseek")
+        val best = chooseSong(results, title, durationMs / 1000) ?: error("Not on Soulseek in lossless or 320 kbps")
         save(best, artist, album ?: "Singles", update, 1, 1)
     }
 
     /** Finds the best copy of a whole album (one peer's folder) and saves every song in it. */
     fun album(artist: String, album: String): Unit = start(albumKey(artist, album), "$artist · $album", { album(artist, album) }) { update ->
         update("Searching Soulseek…", null)
-        val files = chooseAlbum(client.search("$artist $album", seconds = 10)) ?: error("No lossless copy of this album found on Soulseek")
+        val files = chooseAlbum(client.search("$artist $album", seconds = 10)) ?: error("This album isn't on Soulseek in lossless or 320 kbps")
         files.forEachIndexed { i, f -> save(f, artist, album, update, i + 1, files.size) }
     }
 
@@ -85,7 +85,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                     val (user, password) = account ?: error("Add your Soulseek account in Settings")
                     if (client.state.value !is SoulseekClient.State.Online) { set(Job(id, key, title, "Signing in to Soulseek…")); client.login(user, password) }
                     work { status, progress -> set(Job(id, key, title, status, progress)) }
-                    set(Job(id, key, title, "Saved to Music/Soulseek", 1f, done = true))
+                    set(Job(id, key, title, "Saved to Music/Soulseek" + (lastKind?.let { " \u00b7 $it" } ?: ""), 1f, done = true))
                     onSaved()
                 } catch (e: Exception) {
                     set(Job(id, key, title, e.message ?: "The download failed", failed = true))
@@ -98,7 +98,10 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         }
     }
 
+    @Volatile private var lastKind: String? = null
+
     private suspend fun save(file: SoulseekClient.Result, artist: String, album: String, update: (String, Float?) -> Unit, n: Int, of: Int) {
+        lastKind = if (file.extension in LOSSLESS) file.extension.uppercase() else "${file.extension.uppercase()} ${file.bitrate ?: ""}".trim()
         val resolver = context.contentResolver
         val safe = { s: String -> s.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "Unknown" } }
         val values = ContentValues().apply {
@@ -143,20 +146,34 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
 
         private fun words(s: String) = TextFold.fold(s).replace(Regex("""[(\[].*?[)\]]"""), " ").split(Regex("""\W+""")).filter { it.length > 1 }.toSet()
 
-        /** The best file for a song: lossless, named like it, the right length, then the quickest peer to start. */
+        /** A lossy copy good enough to keep: MP3 (or AAC) at 256 kbps or more, by its tag or by size over length. */
+        fun goodLossy(r: SoulseekClient.Result): Boolean {
+            if (r.extension !in setOf("mp3", "m4a", "aac", "ogg", "opus")) return false
+            val kbps = r.bitrate ?: r.seconds?.takeIf { it > 0 }?.let { (r.size * 8 / 1000 / it).toInt() } ?: return false
+            return kbps >= 256
+        }
+
+        /**
+         * The best file for a song: lossless first; when nobody has it, the best MP3 at 256 kbps or
+         * more (most music on Soulseek outside the big catalogues is 320 kbps). Named like the
+         * song, the right length, then the quickest peer to start.
+         */
         fun chooseSong(results: List<SoulseekClient.Result>, title: String, seconds: Long): SoulseekClient.Result? {
             val want = words(title)
-            return results.filter { it.extension in LOSSLESS && it.size in 2_000_000..400_000_000 }
-                .filter { r -> words(r.name).containsAll(want) }
+            val named = results.filter { r -> words(r.name).containsAll(want) }
                 .filter { r -> seconds <= 0 || r.seconds == null || kotlin.math.abs(r.seconds - seconds) <= 5 }
-                .maxByOrNull { r -> (if (r.extension == "flac") 1_000_000L else 0L) + (if (r.slotFree) 500_000L else 0L) - r.queue * 1_000 + r.speed / 1_000 }
+            fun best(list: List<SoulseekClient.Result>) = list.maxByOrNull { r -> (if (r.extension == "flac") 1_000_000L else 0L) + (if (r.slotFree) 500_000L else 0L) - r.queue * 1_000 + r.speed / 1_000 + (r.bitrate ?: 0) * 100L }
+            return best(named.filter { it.extension in LOSSLESS && it.size in 2_000_000..400_000_000 }) ?: best(named.filter(::goodLossy))
         }
 
         /** The best album: one peer's folder with the most lossless songs, the quickest peer winning ties. */
-        fun chooseAlbum(results: List<SoulseekClient.Result>): List<SoulseekClient.Result>? =
-            results.filter { it.extension in LOSSLESS }.groupBy { it.username to it.folder }.values
+        fun chooseAlbum(results: List<SoulseekClient.Result>): List<SoulseekClient.Result>? {
+            fun best(keep: (SoulseekClient.Result) -> Boolean) = results.filter(keep).groupBy { it.username to it.folder }.values
                 .filter { it.size >= 3 }
                 .maxByOrNull { files -> files.size * 1_000_000L + (if (files.first().slotFree) 500_000L else 0L) + files.first().speed / 1_000 }
                 ?.sortedBy { it.name }
+            // Lossless when anyone has it; else the fullest folder at 256 kbps or more.
+            return best { it.extension in LOSSLESS } ?: best(::goodLossy)
+        }
     }
 }

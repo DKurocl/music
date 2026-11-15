@@ -58,7 +58,8 @@ internal object Mix {
         val longest = maxOf(8 * 60_000L, seed.durationMs + 3 * 60_000L)
         val keys = HashSet(seen)
         val kept = batch.filter { t ->
-            (marks(t) - allowed).isEmpty() &&
+            // The radio starts with the seed itself: never play it twice, whatever its artist line says.
+            t.id != seed.id && (marks(t) - allowed).isEmpty() &&
                 (t.durationMs <= 0 || t.durationMs in 90_000L..longest) &&
                 keys.add(songKey(t))
         }

@@ -230,6 +230,10 @@ class PlayerConnection(context: Context) {
             if (from >= 0 && to in 0 until it.mediaItemCount.toLong()) it.moveMediaItem(from, to.toInt())
         }
     }
+    /** Drops everything after the current song in one call (a mix replacing the rest of the queue). */
+    fun clearUpcoming() {
+        controller?.let { val from = it.currentMediaItemIndex + 1; if (from in 1 until it.mediaItemCount) it.removeMediaItems(from, it.mediaItemCount) }
+    }
     fun removeQueueItem(key: String) {
         controller?.let { val index = it.indexOfQueueKey(key); if (index >= 0) it.removeMediaItem(index) }
     }
