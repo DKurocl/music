@@ -110,6 +110,8 @@ user data retained across updates (implemented); backup/export is excluded by th
       codec, preview, path resolution, missing-file retention and transactional save implemented.
       102 JVM / 9 focused user-repository tests pass; Android picker/UI checks deferred by owner.
       Repeated playlist occurrences and smart playlist rules remain open.
+- [~] Library sort choices (Codex, 2026-11-15, `agent/m3-replaygain`): persisted per song/search/collection
+      scope, off-main sorting, visible-order playback; pure tests pass, Compose check deferred.
 - [ ] Ratings, play counts, recently added and recently played views.
 - [ ] Cue sheets (`.cue` beside a file and embedded CUESHEET): one file shown and played as its tracks.
 - Export/import backup of user.db excluded by the owner (2026-11-14); persistence across updates is sufficient.

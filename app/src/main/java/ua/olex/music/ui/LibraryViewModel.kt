@@ -32,6 +32,9 @@ import kotlinx.coroutines.Job
 import ua.olex.music.graph
 import ua.olex.music.model.Track
 import ua.olex.music.model.LibraryIndex
+import ua.olex.music.model.TrackSortScope
+import ua.olex.music.model.TrackSortMode
+import ua.olex.music.model.TrackSortOrder
 import ua.olex.music.playback.PlayerState
 
 /** The library and the player, as the first screens need them. */
@@ -42,6 +45,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Null until the first read from the database: the list shows nothing rather than "empty". */
     val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private val sortPreferences = app.getSharedPreferences("library-sort-v1", android.content.Context.MODE_PRIVATE)
+    private val _sortOrders = MutableStateFlow(TrackSortScope.entries.associateWith { scope ->
+        val mode = runCatching { TrackSortMode.valueOf(sortPreferences.getString(scope.name, null).orEmpty()) }.getOrDefault(TrackSortMode.DEFAULT)
+        TrackSortOrder(mode, runCatching { sortPreferences.getBoolean("${scope.name}.descending", false) }.getOrDefault(false))
+    })
+    val sortOrders: StateFlow<Map<TrackSortScope, TrackSortOrder>> = _sortOrders
+    fun setSortOrder(scope: TrackSortScope, order: TrackSortOrder) {
+        _sortOrders.value = _sortOrders.value + (scope to order)
+        sortPreferences.edit().putString(scope.name, order.mode.name).putBoolean("${scope.name}.descending", order.descending).apply()
+    }
+
     val playing: StateFlow<PlayerState> get() = player.state
     val query: StateFlow<String> = savedState.getStateFlow("search", "")
     private val searchRetry = MutableStateFlow(0)

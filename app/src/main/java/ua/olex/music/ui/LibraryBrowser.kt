@@ -24,6 +24,16 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ua.olex.music.model.TrackSortMode
+import ua.olex.music.model.TrackSortScope
+import ua.olex.music.model.TrackSortOrder
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Checkbox
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -58,6 +68,8 @@ internal fun LibraryBrowser(
     personalActions: PersonalLibraryActions? = null,
     onTrackActions: (Track) -> Unit = {},
     onAddToPlaylist: (List<Track>) -> Unit = {},
+    sortOrders: Map<TrackSortScope, TrackSortOrder> = emptyMap(),
+    onSortOrder: (TrackSortScope, TrackSortOrder) -> Unit = { _, _ -> },
 ) {
     var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -72,6 +84,28 @@ internal fun LibraryBrowser(
     }
     val selected = groups.firstOrNull { it.id == selectedId }
     val searching = query.isNotBlank()
+    val sortScope = when {
+        searching -> TrackSortScope.SEARCH
+        selected == null -> TrackSortScope.SONGS
+        tab == LibraryTab.ALBUMS -> TrackSortScope.ALBUM_TRACKS
+        tab == LibraryTab.ARTISTS -> TrackSortScope.ARTIST_TRACKS
+        tab == LibraryTab.GENRES -> TrackSortScope.GENRE_TRACKS
+        else -> TrackSortScope.FOLDER_TRACKS
+    }
+    val unsorted = when {
+        searching -> search?.takeIf { it.query == query && !it.failed }?.tracks
+        selected != null -> selected.tracks
+        tab == LibraryTab.SONGS -> library.songs
+        else -> null
+    }
+    val order = sortOrders[sortScope] ?: TrackSortOrder()
+    val source = unsorted?.let(::SortSource)
+    val sorted by produceState<SortedTracks?>(null, source, order) {
+        value = if (source == null || order == TrackSortOrder()) null else withContext(Dispatchers.Default) {
+            SortedTracks(source, order, order.sort(source.tracks))
+        }
+    }
+    val visible = if (order == TrackSortOrder()) unsorted else sorted?.takeIf { it.source == source && it.order == order }?.tracks
     LaunchedEffect(selectedId, groups) { if (selectedId != null && selected == null) selectedId = null }
     BackHandler(searching || selected != null) {
         if (searching) onQueryChange("") else selectedId = null
@@ -97,6 +131,7 @@ internal fun LibraryBrowser(
                 }
             }
         }
+        if (unsorted != null) LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) }
         if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
             PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library)
         } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
@@ -109,24 +144,27 @@ internal fun LibraryBrowser(
                         search.tracks.isEmpty() -> item { BrowserMessage("No matching songs. Try a title, artist or album.") }
                         else -> {
                             item { BrowserMessage(songCount(search.tracks.size)) }
-                            itemsIndexed(search.tracks, key = { _, track -> track.id.value }) { index, track ->
-                                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(search.tracks, index) }
+                            if (visible == null) item { BrowserMessage("Sorting...") }
+                            else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
+                                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(visible, index) }
                             }
                         }
                     }
                 }
                 selected != null -> {
                     item(key = "collection-header") {
-                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { onPlay(selected.tracks, 0) }, onAdd = { onAddToPlaylist(selected.tracks) })
+                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
-                    itemsIndexed(selected.tracks, key = { _, track -> track.id.value }) { index, track ->
-                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(selected.tracks, index) }
+                    if (visible == null) item { BrowserMessage("Sorting...") }
+                    else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(visible, index) }
                     }
                 }
                 tab == LibraryTab.SONGS -> {
                     if (library.songs.isEmpty()) item { BrowserMessage("No music yet. Put music in the Music folder, then rescan.") }
-                    itemsIndexed(library.songs, key = { _, track -> track.id.value }) { index, track ->
-                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(library.songs, index) }
+                    if (visible == null) item { BrowserMessage("Sorting...") }
+                    else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(visible, index) }
                     }
                 }
                 tab == LibraryTab.FAVOURITES || tab == LibraryTab.HISTORY -> {
@@ -156,16 +194,16 @@ internal fun LibraryBrowser(
 }
 
 @Composable
-private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit) {
+private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true) {
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         TextButton(onClick = onBack) { Text("Back to collections") }
         Text(collection.name, style = MaterialTheme.typography.headlineMedium)
         collection.subtitle?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(onClick = onPlay) { Text("Play all") }
+            Button(enabled = enabled, onClick = onPlay) { Text("Play all") }
             Text(songCount(collection.tracks.size), style = MaterialTheme.typography.bodyMedium)
         }
-        TextButton(onClick = onAdd) { Text("Add all to playlist") }
+        TextButton(enabled = enabled, onClick = onAdd) { Text("Add all to playlist") }
     }
 }
 
@@ -175,3 +213,34 @@ private fun BrowserMessage(text: String) {
 }
 
 private fun songCount(count: Int) = if (count == 1) "1 song" else "$count songs"
+
+/** Reference identity prevents stale work when two collections contain structurally equal lists. */
+private class SortSource(val tracks: List<Track>) {
+    override fun equals(other: Any?) = other is SortSource && tracks === other.tracks
+    override fun hashCode() = System.identityHashCode(tracks)
+}
+private data class SortedTracks(val source: SortSource, val order: TrackSortOrder, val tracks: List<Track>)
+
+@Composable
+private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onChange: (TrackSortOrder) -> Unit) {
+    var expanded by remember(scope) { mutableStateOf(false) }
+    fun label(mode: TrackSortMode) = when (mode) {
+        TrackSortMode.DEFAULT -> "Default"
+        TrackSortMode.TITLE -> "Title"
+        TrackSortMode.ARTIST -> "Artist"
+        TrackSortMode.ALBUM -> "Album"
+        TrackSortMode.YEAR -> "Year"
+        TrackSortMode.DURATION -> "Duration"
+        TrackSortMode.FILE_NAME -> "File name"
+    }
+    androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 16.dp)) {
+        TextButton(onClick = { expanded = true }) { Text("Sort: ${label(order.mode)}${if (order.descending) " descending" else ""}") }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            TrackSortMode.entries.forEach { mode ->
+                DropdownMenuItem(text = { Text(label(mode)) }, onClick = { onChange(order.copy(mode = mode)); expanded = false })
+            }
+            DropdownMenuItem(text = { Text("Descending") }, trailingIcon = { Checkbox(checked = order.descending, onCheckedChange = null) },
+                onClick = { onChange(order.copy(descending = !order.descending)); expanded = false })
+        }
+    }
+}

@@ -69,6 +69,29 @@ class LibraryBrowserTest {
         }
     }
 
+    @Test fun sortedSongTapUsesTheDisplayedOrderAndIndex() {
+        val order = mutableStateOf(ua.olex.music.model.TrackSortOrder())
+        val long = opening.copy(durationMs = 3_000)
+        val short = finale.copy(durationMs = 1_000)
+        val index = LibraryIndex.build(listOf(short, long))
+        var played = emptyList<Track>()
+        var start = -1
+        compose.setContent { BrowserTestTheme {
+            LibraryBrowser(index, PaddingValues(), "", null, {}, null, { tracks, selected -> played = tracks; start = selected }, null, {},
+                sortOrders = mapOf(ua.olex.music.model.TrackSortScope.SONGS to order.value), onSortOrder = { _, value -> order.value = value })
+        } }
+        compose.onNodeWithText("Sort: Default").performClick()
+        compose.onNodeWithText("Duration", substring = false).performClick()
+        compose.onNodeWithText("Sort: Duration").performClick()
+        compose.onNodeWithText("Descending", substring = false).performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("A Finale").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("A Finale").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(long, short), played)
+            assertEquals(1, start)
+        }
+    }
+
     @Test fun staleSearchResultsCannotBePlayedUnderANewQuery() {
         compose.setContent {
             BrowserTestTheme {

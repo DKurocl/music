@@ -242,3 +242,10 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     UTF-8 export. The import preview supplies an editable base folder when a provider hides location.
     URI encoding must preserve filesystem Unicode exactly; URI.toASCIIString NFC normalization is
     unsuitable for NFD filenames. Compose/picker and full AGP checks remain deferred by the owner.
+
+39. User-selected track ordering is pure core:model logic with precomputed sort keys, stable identity
+    ties and unknown values last in both directions. Descending album order retains disc/track order
+    inside each album. The UI persists independent song/search/collection choices in private preferences;
+    playlists are never automatically reordered. Non-default sorting runs on Dispatchers.Default.
+    Source identity and order guard the completed snapshot, so stale rows cannot play under a new
+    sort selection. Both row taps and Play all/Add all use the exact displayed snapshot.
