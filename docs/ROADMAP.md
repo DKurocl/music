@@ -101,8 +101,10 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [x] Search (`92c4fdf`, CI 43550547422): Room FTS over title, artist, album; prefix and diacritic-insensitive.
 - [x] `user.db` (`f1ba244`, CI 43571427496, integrated into main): playlists, favourites, play history, lyric offsets, with exported schemas and a
       migration test. Keys by SongKey + path.
-- [ ] Artwork: embedded picture or `cover.*`/`folder.*` in the folder, decoded once into a disk
-      cache at 3 sizes; Coil fetcher for `track:` models.
+- [~] Artwork (Codex, 2026-11-15, `agent/m3-replaygain`): embedded -> selected-folder
+      `cover.*`/`folder.*`/`front.*` -> MediaStore. Private content provider consumed by Coil and
+      media metadata, deduplicated bounded three-size disk cache, wallpaper colors preserved.
+      Source implementation and local checks complete; real Android/Pixel acceptance pending.
 - [x] Watch for file changes (`5aa0d92`, CI 43564927822) while the app is open (ContentObserver/FileObserver) instead of only
       on start.
 

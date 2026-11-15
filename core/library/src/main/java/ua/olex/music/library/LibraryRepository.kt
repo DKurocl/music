@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -27,25 +28,28 @@ class LibraryRepository internal constructor(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     val changes: Flow<Unit> = kotlinx.coroutines.flow.emptyFlow(),
     private val enrich: suspend (List<TrackEntity>) -> List<TrackEntity> = { it },
+    private val artworkPackage: String? = null,
+    private val artworkRevision: Flow<Long> = flowOf(0L),
 ) {
-    constructor(context: Context, database: LibraryDatabase) : this(
+    constructor(context: Context, database: LibraryDatabase, files: LocalMusicFiles? = null) : this(
         database.tracks(), { scanId -> MediaStoreScanner.scan(context.applicationContext, scanId) },
         changes = context.applicationContext.contentResolver.musicChanges(),
         enrich = { rows -> FileTagScanner.enrich(rows, database.tracks().observeAll().first(), AndroidTagSource(context.applicationContext)::read) },
+        artworkPackage = context.applicationContext.packageName, artworkRevision = files?.revision ?: flowOf(0L),
     )
 
     private val scanning = Mutex()
     private var lastScanId = 0L
 
-    val tracks: Flow<List<Track>> = dao.observeAll().map { rows -> rows.map(TrackEntity::toTrack) }.flowOn(Dispatchers.Default)
+    val tracks: Flow<List<Track>> = combine(dao.observeAll(), artworkRevision) { rows, revision -> rows.map { it.toTrack(artworkPackage, revision) } }.flowOn(Dispatchers.Default)
     val index: Flow<LibraryIndex> = tracks.map(LibraryIndex::build).flowOn(Dispatchers.Default)
 
     /** Prefix matches across title, artist, album and album artist; accents are handled by SQLite. */
     fun search(query: String): Flow<List<Track>> {
         if (query.isBlank()) return index.map { it.songs }
         val expression = LibrarySearch.expression(query) ?: return flowOf(emptyList())
-        return dao.search(expression).map { rows ->
-            rows.map { it.toTrack() to LibraryOrder.name(it.title) }
+        return combine(dao.search(expression), artworkRevision) { rows, revision ->
+            rows.map { it.toTrack(artworkPackage, revision) to LibraryOrder.name(it.title) }
                 .sortedWith(compareBy<Pair<Track, String>> { it.second }.thenBy { it.first.id.value })
                 .map { it.first }
         }.flowOn(Dispatchers.Default)
@@ -67,8 +71,10 @@ class LibraryRepository internal constructor(
      * The owned copy of a song from anywhere, if there is one: the best-sounding local file with
      * the same [SongKey] and a matching length. A mix plays this instead of a stream.
      */
-    suspend fun owned(song: Track): Track? =
-        dao.byKey(song.key.value).map(TrackEntity::toTrack)
+    suspend fun owned(song: Track): Track? {
+        val revision = artworkRevision.first()
+        return dao.byKey(song.key.value).map { it.toTrack(artworkPackage, revision) }
             .filter { SongKey.sameSong(it, song) }
             .maxByOrNull { it.format?.rank ?: 0 }
+    }
 }

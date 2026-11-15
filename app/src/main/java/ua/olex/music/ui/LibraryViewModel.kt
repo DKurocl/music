@@ -81,12 +81,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
 
     val musicFolders = graph.musicFiles.folders
-    private val lyricsReload = MutableStateFlow(0)
     private val lyricTrack = combine(library, playing.map { it.mediaId }.distinctUntilChanged()) { index, id ->
         id?.let { index?.byId?.get(ua.olex.music.model.TrackId(it)) }
     }.distinctUntilChanged()
-    val localLyrics = combine(lyricTrack, musicFolders, lyricsReload) { track, folders, revision -> Triple(track, folders, revision) }
-        .mapLatest { (track, _, _) ->
+    val localLyrics = combine(lyricTrack, graph.musicFiles.revision) { track, revision -> track to revision }
+        .mapLatest { (track, _) ->
             if (track == null) return@mapLatest LocalLyricsState()
             val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
             val fallback = LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)
@@ -107,7 +106,14 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             catch (_: Exception) { fallback.copy(note = "Couldn't read the sidecar. Use UTF-8 lyrics up to 1 MB, then Reload.") }
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
-    fun reloadLyrics() { lyricsReload.update { it + 1 } }
+    fun reloadLyrics() = refreshLocalFiles(rescan = false)
+    fun rescanManually() = refreshLocalFiles(rescan = true)
+    private fun refreshLocalFiles(rescan: Boolean) { viewModelScope.launch {
+        try { graph.musicFiles.refresh(); if (rescan) refresh() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { userError = "Couldn't refresh local files. Try again." }
+    } }
+    fun updateCurrentArtwork(mediaId: String, uri: String) = player.updateCurrentArtwork(mediaId, uri)
     fun addMusicFolder(uri: android.net.Uri) {
         viewModelScope.launch {
             try { graph.musicFiles.addFolder(uri) }

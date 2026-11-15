@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import ua.olex.music.model.SidecarLyrics
+import ua.olex.music.model.ArtworkPlan
 
 /** A user-selected internal-storage subtree; access remains controlled by Android's persisted grant. */
 data class MusicFolder(val uri: String, val path: String)
@@ -34,6 +35,28 @@ class LocalMusicFiles(context: Context) {
     private val editing = Mutex()
     private val _folders = MutableStateFlow(load())
     val folders: StateFlow<List<MusicFolder>> = _folders.asStateFlow()
+    private val _revision = MutableStateFlow(runCatching { preferences.getLong("revision", 0L) }.getOrDefault(0L))
+    val revision: StateFlow<Long> = _revision.asStateFlow()
+    suspend fun refresh() = withContext(Dispatchers.IO) { editing.withLock { save(_folders.value) } }
+
+    /** Called synchronously only by the image provider's IO caller; no nested dispatcher blocking. */
+    internal fun coverBytesBlocking(audioPath: String?): ByteArray? {
+        if (audioPath == null) return null
+        val granted = resolver.persistedUriPermissions.filter { it.isReadPermission }.mapTo(HashSet()) { it.uri.toString() }
+        val root = _folders.value.filter { it.uri in granted && SidecarLyrics.directory(audioPath, it.path) != null }.maxByOrNull { it.path.length } ?: return null
+        val directory = requireNotNull(SidecarLyrics.directory(audioPath, root.path))
+        val tree = Uri.parse(root.uri)
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, "primary:$directory")
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_MIME_TYPE)
+        val documents = ArrayList<Pair<String, String>>()
+        resolver.query(children, projection, null, null, null)?.use { rows ->
+            val id = rows.getColumnIndexOrThrow(projection[0]); val name = rows.getColumnIndexOrThrow(projection[1]); val mime = rows.getColumnIndexOrThrow(projection[2])
+            while (rows.moveToNext()) if (rows.getString(mime) != DocumentsContract.Document.MIME_TYPE_DIR) documents += rows.getString(id) to rows.getString(name)
+        }
+        val chosen = ArtworkPlan.folderFile(documents.map { it.second }) ?: return null
+        val uri = DocumentsContract.buildDocumentUriUsingTree(tree, documents.single { it.second == chosen }.first)
+        return resolver.openInputStream(uri)?.use { it.readNBytes(LocalArtworkCache.MAX_ENCODED_BYTES + 1) }?.takeIf { it.size <= LocalArtworkCache.MAX_ENCODED_BYTES }
+    }
 
     suspend fun addFolder(uri: Uri) = withContext(Dispatchers.IO) { editing.withLock {
         val folder = requireNotNull(folder(uri)) { "Choose a folder on internal storage" }
@@ -98,8 +121,10 @@ class LocalMusicFiles(context: Context) {
     }
 
     private fun save(folders: List<MusicFolder>) {
-        preferences.edit().putString("folders", JSONArray(folders.map { it.uri }).toString()).apply()
+        val revision = _revision.value + 1
+        preferences.edit().putString("folders", JSONArray(folders.map { it.uri }).toString()).putLong("revision", revision).apply()
         _folders.value = folders
+        _revision.value = revision
     }
     private fun load(): List<MusicFolder> = runCatching {
         val rows = JSONArray(preferences.getString("folders", "[]"))
