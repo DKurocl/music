@@ -37,6 +37,8 @@ internal class OnlineNav(
     val play: (List<Track>, Int) -> Unit = { _, _ -> },
     val actions: (Track) -> Unit = {},
     val openLocalArtist: (MusicCollection) -> Unit = {},
+    /** Starts a Soulseek download, asking for the account first when there is none. */
+    val download: (() -> Unit) -> Unit = { it() },
 )
 
 internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
@@ -164,13 +166,13 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                             }
                             FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0) },
                                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
-                            // The whole album in lossless from Soulseek, into the library.
-                            val snackbar = LocalSnackbar.current
-                            val scope = rememberCoroutineScope()
-                            FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = {
-                                graph.soulseek.album(songs.first().artist.substringBefore(",").trim(), album.title)
-                                scope.launch { snackbar?.showSnackbar(if (graph.soulseek.account == null) "Add your Soulseek account in Settings first" else "Looking for the album on Soulseek. Progress is in the notifications") }
-                            }, modifier = Modifier.size(52.dp).semantics { contentDescription = "Download the album in lossless" }) { Symbol(Glyph.DOWNLOAD) }
+                            // The whole album in lossless from Soulseek, into the library. Nothing to fetch
+                            // once every song plays from a file.
+                            val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
+                            DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, album.title),
+                                owned = songs.isNotEmpty() && songs.none { it.id.value.startsWith("yt:") }, what = "the album") {
+                                nav.download { graph.soulseek.album(artistName, album.title) }
+                            }
                         }
                     }
                 }
@@ -228,5 +230,56 @@ private fun OnlineCard(cover: String?, title: String, subtitle: String?, onClick
         Spacer(Modifier.height(8.dp))
         Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
         subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
+    }
+}
+
+/**
+ * A download button that shows where its download is, in place, as Play Store's install button
+ * does: an arrow, a spinner while Soulseek searches, a ring filling with the percent, a tick when
+ * the files are in the library, and a retry on the error colour when it failed. Tapping while it
+ * runs says what it is doing; a failed one tells why and tries again.
+ */
+@Composable
+internal fun DownloadButton(key: String, owned: Boolean, what: String, onStart: () -> Unit) {
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val jobs by graph.soulseek.jobs.collectAsState()
+    val job = jobs.lastOrNull { it.key == key }
+    val snackbar = LocalSnackbar.current
+    val scope = rememberCoroutineScope()
+    val cs = MaterialTheme.colorScheme
+    val done = owned || job?.done == true
+    val failed = job?.failed == true
+    val description = when {
+        done -> "Already in your library"
+        failed -> "Download failed: ${job?.status}. Try again"
+        job?.running == true -> job.status
+        else -> "Download $what in lossless"
+    }
+    FilledTonalIconButton(onClick = {
+        when {
+            done -> scope.launch { snackbar?.showSnackbar("Already in your library") }
+            job?.running == true -> scope.launch { snackbar?.showSnackbar(job.status) }
+            failed -> { graph.soulseek.retry(job!!); scope.launch { snackbar?.showSnackbar("${job.status}. Trying again") } }
+            else -> onStart()
+        }
+    }, colors = if (failed) androidx.compose.material3.IconButtonDefaults.filledTonalIconButtonColors(containerColor = cs.errorContainer, contentColor = cs.onErrorContainer)
+        else androidx.compose.material3.IconButtonDefaults.filledTonalIconButtonColors(),
+        modifier = Modifier.size(52.dp).semantics { contentDescription = description }) {
+        androidx.compose.animation.Crossfade(when { done -> 0; failed -> 1; job?.running == true -> 2; else -> 3 }, label = "download") { stage ->
+            when (stage) {
+                0 -> Symbol(Glyph.CHECK)
+                1 -> Symbol(Glyph.REFRESH)
+                2 -> Box(contentAlignment = Alignment.Center) {
+                    val p = job?.progress
+                    if (p == null) androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    else {
+                        val shown by androidx.compose.animation.core.animateFloatAsState(p, label = "progress")
+                        androidx.compose.material3.CircularProgressIndicator(progress = { shown }, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                    }
+                    Symbol(Glyph.DOWNLOAD, size = 14.dp)
+                }
+                else -> Symbol(Glyph.DOWNLOAD)
+            }
+        }
     }
 }

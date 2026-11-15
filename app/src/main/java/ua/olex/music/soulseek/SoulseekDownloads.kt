@@ -28,7 +28,11 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     val client = SoulseekClient(scope)
     private val one = Mutex()
 
-    data class Job(val id: Int, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false)
+    /** One download as the app shows it. [key] names what is being fetched, so a button finds its own job. */
+    data class Job(val id: Int, val key: String, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false) {
+        val running get() = !done && !failed
+    }
+    private val again = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
     private val _jobs = MutableStateFlow<List<Job>>(emptyList())
     val jobs: StateFlow<List<Job>> = _jobs
 
@@ -37,7 +41,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         set(value) { prefs.edit().apply { if (value == null) { remove("user"); remove("password") } else { putString("user", value.first); putString("password", value.second) } }.apply(); client.disconnect() }
 
     /** Finds and saves one song in the best quality the network has. */
-    fun song(artist: String, title: String, album: String?, durationMs: Long) = start("$artist · $title") { update ->
+    fun song(artist: String, title: String, album: String?, durationMs: Long): Unit = start(songKey(artist, title), "$artist · $title", { song(artist, title, album, durationMs) }) { update ->
         update("Searching Soulseek…", null)
         val results = client.search("$artist $title")
         val best = chooseSong(results, title, durationMs / 1000) ?: error("No lossless copy found on Soulseek")
@@ -45,26 +49,42 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     }
 
     /** Finds the best copy of a whole album (one peer's folder) and saves every song in it. */
-    fun album(artist: String, album: String) = start("$artist · $album") { update ->
+    fun album(artist: String, album: String): Unit = start(albumKey(artist, album), "$artist · $album", { album(artist, album) }) { update ->
         update("Searching Soulseek…", null)
         val files = chooseAlbum(client.search("$artist $album", seconds = 10)) ?: error("No lossless copy of this album found on Soulseek")
         files.forEachIndexed { i, f -> save(f, artist, album, update, i + 1, files.size) }
     }
 
-    private fun start(title: String, work: suspend (update: (String, Float?) -> Unit) -> Unit) {
-        val id = (System.currentTimeMillis() % 1_000_000).toInt()
-        fun set(job: Job) { _jobs.value = (_jobs.value.filterNot { it.id == id } + job).takeLast(20); notify(job) }
-        set(Job(id, title, "Waiting…"))
+    /** For screenshots and tests: shows these jobs as if they ran. */
+    @androidx.annotation.VisibleForTesting
+    internal fun show(jobs: List<Job>) { _jobs.value = jobs }
+
+    /** The latest job for [key], running or finished. */
+    fun job(key: String): Job? = _jobs.value.lastOrNull { it.key == key }
+
+    /** Runs a failed download again, the same way it was asked for. */
+    fun retry(job: Job) { again[job.key]?.invoke() }
+
+    /** Forgets finished and failed downloads; running ones stay. */
+    fun clearFinished() { _jobs.value = _jobs.value.filter { it.running } }
+
+    private fun start(key: String, title: String, redo: () -> Unit, work: suspend (update: (String, Float?) -> Unit) -> Unit) {
+        // A second tap while it runs changes nothing: one download per song or album at a time.
+        if (job(key)?.running == true) return
+        again[key] = redo
+        val id = (System.nanoTime() % 1_000_000).toInt().let { if (it < 0) -it else it }
+        fun set(job: Job) { _jobs.value = (_jobs.value.filterNot { it.id == id || (it.key == key && !it.running) } + job).takeLast(20); notify(job) }
+        set(Job(id, key, title, "Waiting…"))
         scope.launch {
             one.withLock {
                 try {
                     val (user, password) = account ?: error("Add your Soulseek account in Settings")
-                    if (client.state.value !is SoulseekClient.State.Online) { set(Job(id, title, "Signing in to Soulseek…")); client.login(user, password) }
-                    work { status, progress -> set(Job(id, title, status, progress)) }
-                    set(Job(id, title, "Saved to Music/Soulseek", 1f, done = true))
+                    if (client.state.value !is SoulseekClient.State.Online) { set(Job(id, key, title, "Signing in to Soulseek…")); client.login(user, password) }
+                    work { status, progress -> set(Job(id, key, title, status, progress)) }
+                    set(Job(id, key, title, "Saved to Music/Soulseek", 1f, done = true))
                     onSaved()
                 } catch (e: Exception) {
-                    set(Job(id, title, e.message ?: "The download failed", failed = true))
+                    set(Job(id, key, title, e.message ?: "The download failed", failed = true))
                 }
             }
         }
@@ -108,6 +128,8 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     companion object {
         const val CHANNEL = "downloads"
         const val NOTIFICATION_BASE = 4_000
+        fun songKey(artist: String, title: String) = "song:" + TextFold.fold(artist) + "\u0000" + TextFold.fold(title)
+        fun albumKey(artist: String, album: String) = "album:" + TextFold.fold(artist) + "\u0000" + TextFold.fold(album)
         val LOSSLESS = setOf("flac", "wav", "aiff", "alac", "ape", "wv")
 
         private fun words(s: String) = TextFold.fold(s).replace(Regex("""[(\[].*?[)\]]"""), " ").split(Regex("""\W+""")).filter { it.length > 1 }.toSet()

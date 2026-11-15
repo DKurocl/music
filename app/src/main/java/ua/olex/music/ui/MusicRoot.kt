@@ -172,6 +172,8 @@ fun MusicRoot(model: LibraryViewModel) {
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by remember { mutableStateOf<Place?>(null) }
     var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
+    // A download asked for before the Soulseek account was set: it starts once the owner signs in.
+    var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) { onlineStack = emptyList(); returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     BackHandler(page != null) { page = null }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
@@ -202,9 +204,17 @@ fun MusicRoot(model: LibraryViewModel) {
             play = model::play,
             actions = { actionTrack = it },
             openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
+            download = { start -> if (context.graph.soulseek.account == null) afterSignIn = start else start() },
         )
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav) {
+    afterSignIn?.let { pending ->
+        SoulseekDialog(null, onDismiss = { afterSignIn = null }) { account ->
+            context.graph.soulseek.account = account
+            afterSignIn = null
+            if (account != null) pending()
+        }
+    }
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
@@ -397,9 +407,21 @@ fun MusicRoot(model: LibraryViewModel) {
             if (online) null else TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
             if (online) TrackAction(Glyph.PERSON, "Go to artist") { onlineNav.open(OnlineTarget.Artist(track.artist.substringBefore(",").trim())) } else null,
             // A song from YouTube Music, kept for good: Soulseek finds a lossless copy and the library plays it from then on.
-            if (online) TrackAction(Glyph.DOWNLOAD, "Download in lossless") {
-                context.graph.soulseek.song(track.artist.substringBefore(",").trim(), track.title, track.album, track.durationMs)
-                scope.launch { snackbar.showSnackbar(if (context.graph.soulseek.account == null) "Add your Soulseek account in Settings first" else "Looking on Soulseek. Progress is in the notifications") }
+            if (online) {
+                val artist = track.artist.substringBefore(",").trim()
+                val job = context.graph.soulseek.job(ua.olex.music.soulseek.SoulseekDownloads.songKey(artist, track.title))
+                when {
+                    job?.running == true -> TrackAction(Glyph.DOWNLOAD, job.status) { }
+                    job?.failed == true -> TrackAction(Glyph.REFRESH, "Try the download again") {
+                        context.graph.soulseek.retry(job); scope.launch { snackbar.showSnackbar("Looking on Soulseek again") }
+                    }
+                    else -> TrackAction(Glyph.DOWNLOAD, "Download in lossless") {
+                        onlineNav.download {
+                            context.graph.soulseek.song(artist, track.title, track.album, track.durationMs)
+                            scope.launch { snackbar.showSnackbar("Looking for a lossless copy on Soulseek") }
+                        }
+                    }
+                }
             } else null,
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
