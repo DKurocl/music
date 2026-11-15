@@ -2,6 +2,7 @@ package ua.olex.music.model
 
 /** Independent song-list choices leave playlist order and album defaults untouched. */
 enum class TrackSortMode { DEFAULT, TITLE, ARTIST, ALBUM, YEAR, DURATION, FILE_NAME }
+/** Preference namespaces for track lists; playlist ordering is deliberately outside these scopes. */
 enum class TrackSortScope { SONGS, SEARCH, ALBUM_TRACKS, ARTIST_TRACKS, GENRE_TRACKS, FOLDER_TRACKS }
 
 /** Deterministic user-selected ordering. Missing values stay last in both directions. */

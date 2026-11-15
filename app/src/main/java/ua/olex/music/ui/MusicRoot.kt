@@ -15,6 +15,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -133,6 +134,12 @@ fun MusicRoot(model: LibraryViewModel) {
                 playing.error?.let { message ->
                     ErrorNotice(message) { if (playing.connected) model.toggle() else model.connectPlayer() }
                 }
+                playing.queueError?.let { message ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(message, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = model::dismissQueueError) { Text("Dismiss") }
+                    }
+                }
                 if (playing.hasTrack) MiniPlayer(playing, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next)
             }
         },
@@ -157,7 +164,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 currentId = playing.mediaId, onPlay = model::play,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
-                personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder,
+                personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             )
         }
@@ -227,22 +234,28 @@ private fun Notice(insets: PaddingValues, title: String, body: String, action: S
 }
 
 @Composable
-internal fun TrackRow(track: Track, current: Boolean, onMore: (() -> Unit)? = null, onClick: () -> Unit) {
+internal fun TrackRow(track: Track, current: Boolean, onMore: (() -> Unit)? = null,
+    selecting: Boolean = false, checked: Boolean = false, onSelect: (() -> Unit)? = null, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     ListItem(
         headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface) },
         supportingContent = {
             Text(listOfNotNull(track.artist, track.format?.label).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
-        leadingContent = { Artwork(track.artworkUri, Modifier.size(48.dp), 8.dp) },
+        leadingContent = {
+            if (selecting) androidx.compose.material3.Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
+                modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
+            else Artwork(track.artworkUri, Modifier.size(48.dp), 8.dp)
+        },
         trailingContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (current) Text("Current", style = MaterialTheme.typography.labelSmall)
-                if (onMore != null) TextButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) { Text("More") }
+                if (onMore != null && !selecting) TextButton(onClick = onMore, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) { Text("More") }
             }
         },
-        colors = ListItemDefaults.colors(containerColor = cs.surface),
-        modifier = Modifier.clickable(onClick = onClick).semantics { selected = current },
+        colors = ListItemDefaults.colors(containerColor = if (selecting && checked) cs.secondaryContainer else cs.surface),
+        modifier = Modifier.combinedClickable(onLongClickLabel = if (onSelect != null) "Select song" else null, onLongClick = onSelect, onClick = { if (selecting) onSelect?.invoke() else onClick() })
+            .semantics { selected = if (selecting) checked else current },
     )
 }
 

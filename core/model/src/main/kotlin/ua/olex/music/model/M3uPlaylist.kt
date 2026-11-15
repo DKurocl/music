@@ -10,9 +10,11 @@ import java.nio.charset.CodingErrorAction
 data class M3uEntry(val path: String, val line: Int, val label: String? = null, val durationMs: Long = 0)
 /** The original entries stay intact while the owner edits the import's base folder. */
 data class M3uDocument(val name: String?, val entries: List<M3uEntry>, val warnings: List<String>)
+/** Explicit preview outcomes: unavailable local references are kept, unsupported/repeated ones reported. */
 enum class M3uMatch { EXACT, RELOCATED, MISSING, AMBIGUOUS, UNSUPPORTED, NEEDS_FOLDER, REPEATED }
 /** An unresolved local path remains a durable song; unsupported URIs are reported, never opened. */
 data class M3uResolved(val entry: M3uEntry, val match: M3uMatch, val song: SavedSong?)
+/** Ordered, deduplicated import candidates and precomputed counts for the preview UI. */
 data class M3uImport(val entries: List<M3uResolved>) {
     val songs: List<SavedSong> = entries.mapNotNull { it.song }
     private val counts = entries.groupingBy { it.match }.eachCount()
@@ -127,6 +129,7 @@ object M3uPlaylist {
 /** Lazy, shared path lookup: exact paths first, then only a unique suffix of at least two segments. */
 class PlaylistPathIndex(tracks: List<Track>) {
     internal data class Path(val value: String, val needsFolder: Boolean = false)
+    /** A known track is returned only for an unambiguous exact or relocated path. */
     data class Match(val match: M3uMatch, val path: String, val track: Track? = null)
     private val exact = tracks.mapNotNull { track -> track.path?.let { normalize(it, null)?.value }?.let { it to track } }.groupBy({ it.first }, { it.second })
     private val uris = tracks.groupBy { it.uri }

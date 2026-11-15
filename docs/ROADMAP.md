@@ -129,7 +129,9 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
       Sleep timer verified at `4560b91`, CI 43566729401. Queue, shuffle/repeat, recovery and
       output/diagnostics verified at `f1ba244`, CI 43571427496. Drag reordering and cosmetic
       transforms are still open; owner deferred customization in favor of player reliability.
-- [ ] Album and artist pages; multi-select with batch actions.
+- [~] Album and artist pages; multi-select with batch actions (Codex, 2026-11-15):
+      library/search/collection selection and play/next/queue/playlist batches implemented locally;
+      pure and bulk-command tests pass, Compose interaction deferred.
 - [ ] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
 - [ ] Screenshot goldens (Robolectric, `-PminSdk=35` while it lacks API 37) for every page in
       dark/light and font scale 1 and 2; accessibility test on an emulator; reviewed by eye.

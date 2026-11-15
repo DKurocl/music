@@ -1,3 +1,37 @@
+# Current functional work: multiselect and bulk queue (Codex, 2026-11-15)
+
+Active source branch: `agent/m3-replaygain`. Keep owner instruction: no unnecessary APK builds or
+releases, source checkpoints use [skip ci], UI/AGP validation deferred, do not merge to main yet.
+The preceding functional batch includes ReplayGain/EQ/AutoEq, M3U8 and persisted sorting.
+
+Implemented: selection mode via long press or Select, per-row accessible checkboxes, Select all,
+Clear/Close, Back-to-cancel, and Play selected / Play next / Add to queue / Add to playlist.
+Actions preserve displayed order rather than tap order. Selection is scoped to tab/collection/query,
+retains IDs through sort changes and prunes removed rows. No selection work on empty/default startup.
+Current limit: 20000 items, explicitly shown. Selection is ephemeral and clears on Activity/process
+recreation; it does not serialize a huge saved-state Bundle. Favourites/history/playlist editing
+multiselect and batch favourite operations are not included in this first library selection block.
+
+Found/fixed old enqueue >500-item rejection: QueueCommand now uses Media3 BundleListRetriever for
+paginated Binder transport. The service resolves all items on Dispatchers.Default before enqueue;
+private same-UID checks, count bounds and URI validation remain. The client awaits completion under
+its queue mutex, preserving append request order. Errors appear directly in Library with Dismiss.
+The existing service-owned shuffle/live-cursor insertion algorithm is unchanged.
+Source inspected: media3-common 1.11.1 BundleListRetriever.java, public pagination/in-process APIs.
+
+Verification: pure JVM run passed 110 tests, including 3 new selection cases. Focused playback
+harness passed 2 BulkQueueCommandTest cases: 1001 ordered items retain URIs/occurrence keys via Binder,
+and missing URI validation fails before mutation. Actual playback sources and test sources compiled
+against pinned Media3/Android APIs. Remote Binder transport itself was not instrumented; pagination
+is the upstream class's implementation, not a measured cross-process result of this test.
+The later early count-check/error-text addition is straightforward source inspection, not a new
+full build. New Compose multiselect interaction test authored, not compiled/run under AGP.
+Existing earlier evidence: 12 audio/checkpoint tests, 9 user-repository tests; see entries below.
+No APK, lint, full CI, release or physical Pixel performance checks ran in this phase.
+
+Next functional priorities: local artwork and sidecar lyrics; queue drag; retaining selection across
+rotation. Before eventual integration, run one coherent deferred verification batch with the owner.
+
 # Current functional work: persisted library sorting (Codex, 2026-11-15)
 
 Active branch: `agent/m3-replaygain`. Source batch includes ReplayGain/parametric EQ/AutoEq, M3U8
