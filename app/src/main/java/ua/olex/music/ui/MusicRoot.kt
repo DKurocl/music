@@ -103,16 +103,19 @@ fun MusicRoot(model: LibraryViewModel) {
     val search by model.search.collectAsStateWithLifecycle()
     val personal by model.personal.collectAsStateWithLifecycle()
     val sortOrders by model.sortOrders.collectAsStateWithLifecycle()
-    val lyrics by model.embeddedLyrics.collectAsStateWithLifecycle()
+    val lyricsState by model.localLyrics.collectAsStateWithLifecycle()
+    val musicFolders by model.musicFolders.collectAsStateWithLifecycle()
     val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
     var equalizerOpen by rememberSaveable { mutableStateOf(false) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
+    val lyricOwner = playing.mediaId
     var expanded by rememberSaveable { mutableStateOf(false) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
     val context = LocalContext.current
     val activity = LocalActivity.current
+    val chooseMusicFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(model::addMusicFolder) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { model.refresh() }
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -177,7 +180,9 @@ fun MusicRoot(model: LibraryViewModel) {
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
             onEqualizer = { equalizerOpen = true },
-            lyrics = lyrics, lyricOffset = lyricOffset, onLyricOffset = model::setLyricOffset,
+            lyricsState = lyricsState, lyricOffset = lyricOffset, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
+            musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
+            onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
             favourite = playing.mediaId in personal.favouriteByTrackId,
             onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
@@ -298,7 +303,8 @@ private fun NowPlaying(
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
     onMore: (() -> Unit)?,
-    lyrics: ua.olex.music.lyrics.Lyrics, lyricOffset: Long, onLyricOffset: (Long) -> Unit,
+    lyricsState: LocalLyricsState, lyricOffset: Long, onLyricOffset: (Long) -> Unit,
+    musicFolders: List<String>, onChooseMusicFolder: () -> Unit, onClearMusicFolders: () -> Unit, onReloadLyrics: () -> Unit,
     favourite: Boolean, onFavourite: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -306,7 +312,11 @@ private fun NowPlaying(
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
-    if (lyricsOpen) LyricsSheet(lyrics, state, lyricOffset, position, onSeek, onLyricOffset) { lyricsOpen = false }
+    if (lyricsOpen) LyricsSheet(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY,
+        state, lyricOffset, position, onSeek, onLyricOffset, onDismiss = { lyricsOpen = false },
+        source = if (lyricsState.mediaId == state.mediaId) lyricsState.source else "Loading local lyrics...",
+        note = lyricsState.note.takeIf { lyricsState.mediaId == state.mediaId }, folders = musicFolders,
+        onChooseFolder = onChooseMusicFolder, onClearFolders = onClearMusicFolders, onReload = onReloadLyrics)
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var queueSheet by rememberSaveable { mutableStateOf(false) }
     var audioPath by rememberSaveable { mutableStateOf(false) }

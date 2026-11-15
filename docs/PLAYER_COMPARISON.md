@@ -101,7 +101,7 @@ Quality labels are implementation descriptions, not numerical sound-quality scor
 | Plain embedded lyrics | Present | Present | Present |
 | Line-synced lyrics | Version/source dependent | Present | Present for embedded LRC; offset, follow toggle, line seeking |
 | Word-synced lyrics | Verify current Player version | Verify current format/display support | Partial: enhanced LRC/TTML parsers tested; UI highlights lines, not word fill |
-| Sidecar LRC | Present | Present | Missing discovery, precedence and storage pipeline |
+| Sidecar LRC | Present | Present | Implemented on work branch: scoped folder grants, LRC/TTML/TXT lookup, source notices, embedded fallback/reload; 4 storage tests and main source compile pass, Android picker/device pending |
 | KRC/QRC/SYLT | Verify each format | Verify each format | Missing parsers/integration |
 | Lyric editor | Verify scope | Verify scope | Partial: per-song offset only, no line/word timing editor |
 | Online lyric search | Source/plugin dependent | Source dependent | Missing; optional separate from deferred network libraries |

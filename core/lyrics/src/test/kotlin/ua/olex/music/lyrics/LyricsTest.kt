@@ -88,6 +88,12 @@ class LyricsTest {
         assertNull(TtmlParser.time(""))
     }
 
+    @Test fun ttmlNeverResolvesDocumentTypesOrExternalEntities() {
+        val xml = "<!DOCTYPE tt SYSTEM 'https://example.invalid/lyrics.dtd'><tt><body><p begin=\"1s\" end=\"2s\">Words</p></body></tt>"
+        assertEquals(Lyrics.EMPTY, TtmlParser.parse(xml))
+        assertEquals(Lyrics.EMPTY, TtmlParser.parse("<!DOCTYPE tt [<!ENTITY external SYSTEM 'file:///not-a-lyric-source'>]><tt/>"))
+    }
+
     @Test fun brokenInputIsEmptyNotACrash() {
         assertEquals(Lyrics.EMPTY, Lyrics.parse("<tt><body><p begin=\"1\">unclosed"))
         assertEquals(Sync.NONE, Lyrics.parse("").sync)

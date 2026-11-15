@@ -37,4 +37,14 @@ class LyricsSheetTest {
         compose.onNodeWithText("Words without timing").assertExists()
         compose.onNodeWithText("Earlier").assertDoesNotExist()
     }
+    @Test fun emptyLyricsOfferExplicitFolderSelectionWithoutStartingPlayback() {
+        var chosen = false
+        compose.setContent { AppTheme {
+            LyricsSheet(Lyrics.EMPTY, PlayerState(mediaId = "local:1"), 0, { 0 }, {}, {}, {},
+                source = "No local lyrics", note = "Choose a music folder.", onChooseFolder = { chosen = true })
+        } }
+        compose.onNodeWithText("Choose music folder").performScrollTo().performClick()
+        compose.runOnIdle { org.junit.Assert.assertTrue(chosen) }
+    }
+
 }
