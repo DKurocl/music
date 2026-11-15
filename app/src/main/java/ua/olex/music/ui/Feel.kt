@@ -94,6 +94,29 @@ class Haptics(private val view: View) {
     private fun perform(constant: Int) { view.performHapticFeedback(constant) }
 }
 
+/**
+ * Whether Battery Saver is on, following it as it changes. Decoration that costs power (a moving
+ * cover's video, blur on distant lyrics) stops while it is on: that is when the owner chose battery.
+ */
+/** Battery Saver, read once at the root (one receiver) and handed down. */
+val LocalPowerSave = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+@Composable
+fun rememberPowerSave(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val power = remember(context) { context.getSystemService(android.os.PowerManager::class.java) }
+    var on by remember { androidx.compose.runtime.mutableStateOf(power?.isPowerSaveMode == true) }
+    androidx.compose.runtime.DisposableEffect(context) {
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: android.content.Context?, i: android.content.Intent?) { on = power?.isPowerSaveMode == true }
+        }
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter(android.os.PowerManager.ACTION_POWER_SAVE_MODE_CHANGED),
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(receiver) }
+    }
+    return on
+}
+
 @Composable
 fun rememberHaptics(): Haptics { val view = LocalView.current; return remember(view) { Haptics(view) } }
 

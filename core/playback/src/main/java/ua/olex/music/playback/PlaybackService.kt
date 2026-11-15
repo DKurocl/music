@@ -163,6 +163,11 @@ class PlaybackService : MediaLibraryService() {
         })
         player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                // A Wi-Fi lock only while an online song plays or is next (it buffers ahead); the
+                // owner's files need the CPU alone, and a Wi-Fi lock would only cost battery.
+                fun online(item: MediaItem?) = item?.mediaId?.startsWith("yt:") == true || item?.localConfiguration?.uri?.scheme == OnlineStreams.SCHEME
+                val next = player.nextMediaItemIndex.takeIf { it != androidx.media3.common.C.INDEX_UNSET }?.let { player.getMediaItemAt(it) }
+                exoOrNull()?.setWakeMode(if (online(mediaItem) || online(next)) androidx.media3.common.C.WAKE_MODE_NETWORK else androidx.media3.common.C.WAKE_MODE_LOCAL)
                 lockLyrics?.update()
                 historyGate.transition()
                 recordCurrentPlayback()
@@ -221,6 +226,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        lockLyrics?.release()
         runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
         usb.clear()

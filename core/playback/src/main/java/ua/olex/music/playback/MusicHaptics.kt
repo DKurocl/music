@@ -143,23 +143,26 @@ internal class MusicHapticsOutput(
         if (found.isNotEmpty()) startPump()
     }
 
-    /** Fires pulses as the output plays their frames. Sleeps a few ms between looks; stops when idle. */
+    /**
+     * Fires pulses as the output plays their frames. It sleeps until the next beat is due (a couple
+     * of wake-ups a second at 120 BPM, not hundreds), re-reading the output's position before each,
+     * and ends itself when nothing is waiting.
+     */
     private fun startPump() {
         if (pump?.isAlive == true) return
         pump = Thread({
-            var idle = 0
-            while (!Thread.currentThread().isInterrupted && idle < 500) {
+            while (!Thread.currentThread().isInterrupted) {
+                val next = pending.peekFirst() ?: break
                 val position = runCatching { delegate.positionUs }.getOrDefault(0L)
-                var fired = false
-                while (true) {
-                    val (at, beat) = pending.peekFirst() ?: break
-                    if (at > position + 8_000) break
-                    pending.pollFirst()
-                    // A beat long past (a stall, a pause) is dropped, not played late.
-                    if (position - at < 60_000 && playing) { pulse(beat); fired = true }
+                val wait = next.first - position - 8_000 // the vibrator's own latency, about 8 ms
+                if (wait > 1_000) {
+                    // Wake a little early and look again: the position, not the clock, decides.
+                    try { Thread.sleep((wait / 1_000).coerceAtMost(250) * 3 / 4 + 1) } catch (_: InterruptedException) { break }
+                    continue
                 }
-                idle = if (fired || pending.isNotEmpty()) 0 else idle + 1
-                try { Thread.sleep(4) } catch (_: InterruptedException) { break }
+                pending.pollFirst()
+                // A beat long past (a stall, a pause) is dropped, not played late.
+                if (position - next.first < 60_000 && playing) pulse(next.second)
             }
         }, "music-haptics").apply { isDaemon = true; priority = Thread.MAX_PRIORITY - 1; start() }
     }
