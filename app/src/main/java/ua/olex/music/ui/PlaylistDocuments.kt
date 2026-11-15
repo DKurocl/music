@@ -68,7 +68,7 @@ internal fun PlaylistImportDialog(loaded: PlaylistDocuments.Loaded, library: Lib
         computed = folder to result; computedIndex = library
     }
     val preview = computed?.takeIf { it.first == folder && computedIndex === library }?.second
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Import playlist") }, text = {
+    AppDialog(onDismissRequest = onDismiss, title = { Text("Import playlist") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(name, { name = it }, label = { Text("Playlist name") }, singleLine = true)
             OutlinedTextField(folder, { folder = it }, label = { Text("Playlist folder") }, singleLine = true,

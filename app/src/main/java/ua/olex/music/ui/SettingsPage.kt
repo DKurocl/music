@@ -1,5 +1,7 @@
 package ua.olex.music.ui
 
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -88,13 +90,17 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
     val big = 24.dp; val small = 4.dp
     val shape = RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, onClick = onClick ?: {}, enabled = onClick != null, modifier = Modifier.fillMaxWidth()) {
-        ListItem(
-            headlineContent = { Text(title) },
-            supportingContent = { Text(subtitle, maxLines = 3, overflow = TextOverflow.Ellipsis) },
-            leadingContent = { Symbol(glyph, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            trailingContent = trailing,
-            colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-        )
+        // A ListItem pins its icon to the top once the text runs to three lines; settings keep it centred.
+        androidx.compose.foundation.layout.Row(Modifier.padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp).heightIn(min = 48.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Symbol(glyph, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            androidx.compose.foundation.layout.Spacer(Modifier.width(20.dp))
+            androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+            if (trailing != null) { androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp)); trailing() }
+        }
     }
 }
 

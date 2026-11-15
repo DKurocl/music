@@ -164,3 +164,27 @@ fun Modifier.hopWhen(active: Boolean): Modifier = composed {
 
 /** Resistance for a drag that has nowhere to go: the element follows a little, never far. */
 fun rubber(offset: Float, limit: Float): Float = limit * (1f - 1f / (kotlin.math.abs(offset) / limit + 1f)) * kotlin.math.sign(offset)
+
+/** An alert dialog, or its card drawn inline when [LocalInlineSheets] is set (gallery and tests). */
+@Composable
+internal fun AppDialog(
+    onDismissRequest: () -> Unit, confirmButton: @Composable () -> Unit, modifier: Modifier = Modifier,
+    dismissButton: (@Composable () -> Unit)? = null, icon: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null, text: (@Composable () -> Unit)? = null,
+) {
+    if (!LocalInlineSheets.current) {
+        androidx.compose.material3.AlertDialog(onDismissRequest = onDismissRequest, confirmButton = confirmButton, modifier = modifier,
+            dismissButton = dismissButton, icon = icon, title = title, text = text, shape = RoundedCornerShape(32.dp))
+        return
+    }
+    androidx.compose.material3.Surface(shape = RoundedCornerShape(32.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier.padding(24.dp)) {
+        androidx.compose.foundation.layout.Column(Modifier.padding(24.dp)) {
+            icon?.let { Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp)) { it() } }
+            title?.let { androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalTextStyle provides MaterialTheme.typography.headlineSmall) { Box(Modifier.padding(bottom = 16.dp)) { it() } } }
+            text?.let { androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalTextStyle provides MaterialTheme.typography.bodyMedium) { Box(Modifier.padding(bottom = 24.dp)) { it() } } }
+            androidx.compose.foundation.layout.Row(Modifier.align(Alignment.End), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                dismissButton?.invoke(); confirmButton()
+            }
+        }
+    }
+}

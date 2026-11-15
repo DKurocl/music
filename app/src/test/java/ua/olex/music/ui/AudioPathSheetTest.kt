@@ -24,7 +24,7 @@ class AudioPathSheetTest {
             AudioPathSheet("FLAC 24/96", OutputRoute(OutputRoute.Kind.BLUETOOTH, "WF-1000XM5", listOf(96_000)),
                 AudioDiagnostics("c2.android.flac.decoder", "32-bit float PCM", 96_000, 2), {}, { outputRequests++ })
         } }
-        compose.onNodeWithText("32-bit float PCM · 96000 Hz · 2 channels").assertExists()
+        compose.onNodeWithText("32-bit float PCM · 96 kHz · 2 channels").assertExists()
         compose.onNodeWithText("WF-1000XM5").assertExists()
         compose.onNodeWithText("LDAC").assertDoesNotExist()
         compose.onNodeWithText("Change output").performScrollTo().performClick()

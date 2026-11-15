@@ -67,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material3.toShape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
@@ -167,7 +168,7 @@ fun MusicRoot(model: LibraryViewModel) {
         target ?: return
         haptics.tick(); expanded = false; actionTrack = null; page = null
         if (place == Place.SEARCH) model.setQuery("")
-        openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.LIBRARY
+        openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.SEARCH
     }
     BackHandler(page == null && place != Place.HOME && !expanded) { go(Place.HOME) }
     var trashing by remember { mutableStateOf<List<Track>?>(null) }
@@ -246,14 +247,14 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             place == Place.HOME -> HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
                 Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
-                onOpenAlbum = { openInLibrary = "ALBUMS" to it.id; place = Place.LIBRARY },
-                onOpenArtist = { openInLibrary = "ARTISTS" to it.id; place = Place.LIBRARY },
+                onOpenAlbum = { openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
+                onOpenArtist = { openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
                 onSeeAll = { tab ->
-                    if (tab == "HISTORY" || tab == "SMART") { openTile = tab; place = Place.SEARCH }
-                    else { openInLibrary = tab to ""; place = Place.LIBRARY }
+                    // Smart playlists live in Playlists; albums, artists and history are Search tiles.
+                    if (tab == "SMART") { openInLibrary = tab to ""; place = Place.LIBRARY } else { openTile = tab; place = Place.SEARCH }
                 })
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
@@ -340,6 +341,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } },
             onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } },
+            fileRateHz = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.sampleRateHz },
         )
         }
     }
@@ -370,16 +372,16 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     model.tagMessage?.let { message ->
-        AlertDialog(onDismissRequest = model::dismissTagMessage, title = { Text("Tags") }, text = { Text(message) },
+        AppDialog(onDismissRequest = model::dismissTagMessage, title = { Text("Tags") }, text = { Text(message) },
             confirmButton = { TextButton(onClick = model::dismissTagMessage) { Text("OK") } })
     }
     playlistTracks?.let { PlaylistPicker(personal.playlists, it, model.personalActions) { playlistTracks = null } }
     playing.queueError?.let { message ->
-        AlertDialog(onDismissRequest = model::dismissQueueError, title = { Text("Couldn't update queue") }, text = { Text(message) },
+        AppDialog(onDismissRequest = model::dismissQueueError, title = { Text("Couldn't update queue") }, text = { Text(message) },
             confirmButton = { TextButton(onClick = model::dismissQueueError) { Text("OK") } })
     }
     model.userError?.let { message ->
-        AlertDialog(onDismissRequest = model::dismissUserError, title = { Text("Couldn't save changes") }, text = { Text(message) },
+        AppDialog(onDismissRequest = model::dismissUserError, title = { Text("Couldn't save changes") }, text = { Text(message) },
             confirmButton = { TextButton(onClick = model::dismissUserError) { Text("OK") } })
     }
 }
@@ -393,16 +395,11 @@ internal fun ErrorNotice(message: String, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun Notice(insets: PaddingValues, title: String, body: String, action: String?, onAction: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(insets).padding(32.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        // While nothing can be done yet, the M3E loading shape morphs instead of a static line of text.
-        if (action == null) @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class) androidx.compose.material3.LoadingIndicator(Modifier.size(64.dp))
-        Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
-        Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        if (action != null) Button(onClick = onAction) { Text(action) }
+internal fun Notice(insets: PaddingValues, title: String, body: String, action: String?, onAction: () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(insets), contentAlignment = Alignment.Center) {
+        EmptyState(if (action != null) Glyph.LIBRARY else Glyph.NOTE, title, body, loading = action == null) {
+            if (action != null) Button(onClick = onAction, modifier = Modifier.height(52.dp)) { Text(action) }
+        }
     }
 }
 
@@ -420,7 +417,7 @@ private fun NowPlaying(
     onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
     onSaveLyricTiming: ((ua.olex.music.lyrics.Lyrics) -> Unit)? = null, onResetLyricTiming: () -> Unit = {},
     favourite: Boolean, onFavourite: (() -> Unit)?,
-    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null,
+    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
@@ -439,10 +436,17 @@ private fun NowPlaying(
     var audioPath by rememberSaveable { mutableStateOf(false) }
     var outputUnavailable by rememberSaveable { mutableStateOf(false) }
     val changeOutput: () -> Unit = { outputUnavailable = !monitor.showOutputSwitcher() }
-    if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput, onEqualizer = { audioPath = false; onEqualizer() })
+    if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput, onEqualizer = { audioPath = false; onEqualizer() },
+        fileRateHz = fileRateHz, processing = listOfNotNull(
+            state.equalizer.settings.takeIf { it.enabled }?.let { "Equalizer: ${it.profile}" },
+            state.equalizer.settings.channels.takeIf { !it.neutral }?.let { c -> listOfNotNull(if (c.mono) "mono" else null, if (c.swap) "left/right swapped" else null,
+                if (c.balance != 0f) "balance ${(c.balance * 100).toInt()}%" else null).joinToString(", ").replaceFirstChar(Char::uppercase) },
+            state.replayGain.mode.takeIf { it != ua.olex.music.dsp.ReplayGainMode.OFF }?.let { "ReplayGain: ${it.name.lowercase()}" },
+        ))
     if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove)
     if (timerDialog) {
         SleepTimerDialog(
+            deadline = state.sleepDeadlineMs,
             active = state.sleepDeadlineMs != null,
             onDismiss = { timerDialog = false },
             onSet = { minutes -> onSleepTimer(minutes); timerDialog = false },
@@ -452,35 +456,85 @@ private fun NowPlaying(
     PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
         onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
         onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
-        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist)
-    if (outputUnavailable) AlertDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
+        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist,
+        inlineLyrics = { mod ->
+            InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
+                onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus, modifier = mod)
+        })
+    if (outputUnavailable) AppDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
         text = { Text("Open Android's media output controls to choose a device.") },
         confirmButton = { TextButton(onClick = { outputUnavailable = false }) { Text("OK") } })
 }
 
-/** Timer choices send a single command; there is no UI countdown or background polling loop. */
+/**
+ * The sleep timer as a sheet, not a list of buttons in a dialog. While a timer runs, what is left
+ * comes first with +10 min and Turn off. Below: the common lengths as large tiles (one tap sets and
+ * closes), "When this song ends" as its own wide tile, and a slider for any other length. Each choice
+ * says in words what happens, and the timer fades the music out over its last 30 seconds.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Sleep timer") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Pause music after:")
-                TextButton(onClick = { onSet(ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK) }, modifier = Modifier.fillMaxWidth()) { Text("When this song ends") }
-                listOf(5, 15, 30, 60, 90).forEach { minutes ->
-                    TextButton(onClick = { onSet(minutes) }, modifier = Modifier.fillMaxWidth()) { Text("$minutes minutes") }
+internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit, deadline: Long? = null) {
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    var custom by rememberSaveable { mutableStateOf(25f) }
+    AppSheet(onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(44.dp).clip(androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape()).background(cs.tertiaryContainer), contentAlignment = Alignment.Center) {
+                    Symbol(Glyph.SLEEP, color = cs.onTertiaryContainer, filled = true)
+                }
+                Column(Modifier.padding(start = 14.dp)) {
+                    Text("Sleep timer", style = MaterialTheme.typography.titleLargeEmphasized)
+                    Text("Music fades out, then pauses", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                 }
             }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-        dismissButton = { if (active) TextButton(onClick = { onSet(0) }) { Text("Cancel timer") } },
-    )
+            if (active) {
+                val left = deadline?.let { d -> if (d == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE) null
+                    else ((d - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(0) + 59_999) / 60_000 }
+                Surface(shape = RoundedCornerShape(28.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer) {
+                    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (left == null) "Stops after this song" else "Stops in $left min", style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.weight(1f))
+                        if (left != null) TextButton(onClick = { haptics.confirm(); onSet((left + 10).toInt()) }) { Text("+10 min") }
+                        TextButton(onClick = { haptics.toggle(false); onSet(0) }) { Text("Turn off") }
+                    }
+                }
+            }
+            val choices = listOf(15, 30, 45, 60)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                choices.forEach { m ->
+                    Surface(onClick = { haptics.confirm(); onSet(m) }, shape = RoundedCornerShape(24.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer,
+                        modifier = Modifier.weight(1f).height(84.dp).squish()) {
+                        Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("$m", style = MaterialTheme.typography.headlineMediumEmphasized)
+                            Text("min", style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+            }
+            Surface(onClick = { haptics.confirm(); onSet(ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK) }, shape = RoundedCornerShape(24.dp),
+                color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().height(64.dp).squish(0.02f)) {
+                Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Symbol(Glyph.NOTE, filled = true, color = cs.primary)
+                    Text("When this song ends", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 14.dp))
+                }
+            }
+            // Any other length: drag, then set. Ticks every 5 minutes.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Other: ${custom.toInt()} min", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Button(onClick = { haptics.confirm(); onSet(custom.toInt()) }) { Text("Set") }
+                }
+                Slider(value = custom, onValueChange = { v -> val r = (v / 5).toInt() * 5f; if (r != custom) haptics.tick(); custom = r.coerceIn(5f, 180f) },
+                    valueRange = 5f..180f, modifier = Modifier.semantics { contentDescription = "Other length" })
+            }
+        }
+    }
 }
 
 
 /** The three places of the app, in the navigation bar. */
-internal enum class Place(val title: String, val glyph: Glyph) { HOME("Home", Glyph.HOME), LIBRARY("Library", Glyph.LIBRARY), SEARCH("Search", Glyph.SEARCH) }
+internal enum class Place(val title: String, val glyph: Glyph) { HOME("Home", Glyph.HOME), LIBRARY("Playlists", Glyph.PLAYLIST), SEARCH("Search", Glyph.SEARCH) }
 
 /** Pages opened over Home. */
 internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates"), SETTINGS("Settings") }

@@ -91,7 +91,7 @@ internal fun HomePage(
                 Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     StartTile("Shuffle all", "${library.songs.size} songs", Glyph.SHUFFLE, androidx.compose.material3.MaterialShapes.Sunny.toShape(),
                         cs.tertiaryContainer, cs.onTertiaryContainer, cs.tertiary, cs.onTertiary, Modifier.weight(1f)) { haptics.confirm(); onShuffle(library.songs) }
-                    StartTile("Liked", if (favourites.isEmpty()) "Nothing yet" else "${favourites.size} songs", Glyph.FAVOURITE, androidx.compose.material3.MaterialShapes.Heart.toShape(),
+                    StartTile("Liked", if (favourites.isEmpty()) "Nothing yet" else "${favourites.size} songs", Glyph.FAVOURITE, androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(),
                         cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary, cs.onSecondary, Modifier.weight(1f), enabled = favourites.isNotEmpty()) { haptics.confirm(); onPlay(favourites, 0) }
                 }
             }
@@ -162,9 +162,14 @@ internal fun HomePage(
                         Box(Modifier.align(Alignment.TopEnd).offset(x = 24.dp, y = (-24).dp).size(120.dp)
                             .clip(androidx.compose.material3.MaterialShapes.Cookie12Sided.toShape()).background(cs.onTertiaryContainer.copy(alpha = 0.08f)))
                         Column(Modifier.align(Alignment.BottomStart).padding(18.dp)) {
-                            Text(if (listened.listenedMs >= 3_600_000) "${listened.listenedMs / 3_600_000} h" else "${listened.listenedMs / 60_000} min",
-                                style = MaterialTheme.typography.displaySmallEmphasized)
-                            Text("listened · ${listened.plays} plays", style = MaterialTheme.typography.bodyMedium)
+                            if (listened.plays == 0) {
+                                Text("Your listening", style = MaterialTheme.typography.headlineSmallEmphasized)
+                                Text("Plays and time show up as you listen", style = MaterialTheme.typography.bodyMedium)
+                            } else {
+                                Text(if (listened.listenedMs >= 3_600_000) "${listened.listenedMs / 3_600_000} h" else "${listened.listenedMs / 60_000} min",
+                                    style = MaterialTheme.typography.displaySmallEmphasized)
+                                Text("listened · ${listened.plays} plays", style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
                 }

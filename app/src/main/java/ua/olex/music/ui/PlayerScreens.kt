@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -317,7 +318,10 @@ internal fun PlayerPage(
     onShuffle: () -> Unit, onRepeat: () -> Unit, onFavourite: (() -> Unit)?, onMore: (() -> Unit)?,
     onOutput: () -> Unit, onQueue: () -> Unit, onLyrics: () -> Unit, onAudioPath: () -> Unit, onTimer: () -> Unit,
     onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null,
+    /** Lyrics shown in place of the cover, toggled by the Lyrics button; null keeps the old sheet behaviour. */
+    inlineLyrics: (@Composable (Modifier) -> Unit)? = null, startWithLyrics: Boolean = false,
 ) {
+    var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val cs = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     // The cover settles back a little while paused and comes forward when the music plays.
@@ -352,7 +356,9 @@ internal fun PlayerPage(
             val heartScale by animateFloatAsState(if (heart) 1f else 0f, motion.fastSpatialSpec(), label = "heart",
                 finishedListener = { if (heart) heart = false })
             val spatial = motion.defaultSpatialSpec<Float>()
-            Box(contentAlignment = Alignment.Center) {
+            // The Lyrics button swaps the cover for the lyrics, in the same place and size.
+            if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(0.92f))
+            else Box(contentAlignment = Alignment.Center) {
             Artwork(
                 state.artworkUri,
                 Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
@@ -414,7 +420,9 @@ internal fun PlayerPage(
             // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
             Surface(shape = CircleShape, color = cs.surfaceContainerHigh) {
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ToggleAction(Glyph.LYRICS, "Lyrics", false, true, null, onLyrics)
+                    ToggleAction(Glyph.LYRICS, "Lyrics", lyricsShown && inlineLyrics != null, true, if (lyricsShown) "Shown" else "Hidden") {
+                        if (inlineLyrics != null) lyricsShown = !lyricsShown else onLyrics()
+                    }
                     ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
                     ToggleAction(route.glyph(), "Change output", false, true, null, onOutput)
                     ToggleAction(Glyph.QUEUE, "Open queue", false, true, null, onQueue)
@@ -431,7 +439,8 @@ internal fun PlayerPage(
                             Text("UP NEXT", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                             Text("${next.title} · ${next.artist}", style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Symbol(Glyph.QUEUE, color = cs.onSurfaceVariant)
+                        // A chevron, not a second queue icon: the pill above already has one.
+                        Symbol(Glyph.CHEVRON, color = cs.onSurfaceVariant)
                     }
                 }
             }
