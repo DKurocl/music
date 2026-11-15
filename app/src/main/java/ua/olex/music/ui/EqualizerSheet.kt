@@ -192,7 +192,14 @@ private fun EqCurve(settings: EqualizerSettings, enabled: Boolean, held: Int?, o
                 var raw = 0.0
                 detectVerticalDragGestures(
                     onDragStart = { at ->
-                        index = bands.indices.minByOrNull { kotlin.math.abs(xOf(bands[it].frequencyHz, size.width.toFloat()) - at.x) } ?: -1
+                        // The dot under the finger, by real distance: AutoEq often stacks bands a few
+                        // hundred hertz apart, one above another, and frequency alone can't tell them apart.
+                        val perDb = (size.height / 2f - 16.dp.toPx()) / range.toFloat()
+                        index = bands.indices.minByOrNull {
+                            val dx = xOf(bands[it].frequencyHz, size.width.toFloat()) - at.x
+                            val dy = (size.height / 2f - bands[it].gainDb.coerceIn(-range, range) * perDb).toFloat() - at.y
+                            dx * dx + dy * dy
+                        } ?: -1
                         if (index >= 0) { onHold(index); raw = bands[index].gainDb; lastDb = raw.toInt(); haptics.tick() }
                     },
                     onDragEnd = { if (index >= 0) onDone(); index = -1 },
