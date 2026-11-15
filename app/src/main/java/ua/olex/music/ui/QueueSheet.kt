@@ -37,7 +37,7 @@ import kotlin.math.roundToInt
  * stay independent.
  */
 @Composable
-internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (String) -> Unit, onMove: (String, Int) -> Unit, onRemove: (String) -> Unit) {
+internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (String) -> Unit, onMove: (String, Int) -> Unit, onRemove: (String) -> Unit, mixFrom: String? = null) {
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
@@ -55,7 +55,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
             Column(Modifier.weight(1f)) {
                 Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)
                 Text(
-                    listOfNotNull("${state.queue.size} songs", if (state.shuffle) "shuffled" else null).joinToString(" · "),
+                    listOfNotNull(mixFrom?.let { "Mix from $it" }, "${state.queue.size} songs", if (state.shuffle) "shuffled" else null).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
                 )
             }
