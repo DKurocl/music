@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto shows the app as a media source and browses it through PlaybackService. -->
+<automotiveApp>
+    <uses name="media" />
+</automotiveApp>
