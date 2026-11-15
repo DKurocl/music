@@ -141,6 +141,29 @@ class DesignGalleryTest {
         shot("14b-settings-lower")
     }
 
+    @Test fun downloads() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<ua.olex.music.MusicApp>()
+        val J = ua.olex.music.soulseek.SoulseekDownloads
+        app.graph.soulseek.show(listOf(
+            ua.olex.music.soulseek.SoulseekDownloads.Job(1, J.albumKey("Radiohead", "Kid A"), "Radiohead · Kid A", "Couldn't reach anyone who has it", failed = true),
+            ua.olex.music.soulseek.SoulseekDownloads.Job(2, J.songKey("Air", "Sexy Boy"), "Air · Sexy Boy", "Saved to Music/Soulseek", 1f, done = true),
+            ua.olex.music.soulseek.SoulseekDownloads.Job(3, J.albumKey("Moderat", "III"), "Moderat · III", "4 of 10 · Downloading 62%", 0.62f),
+            ua.olex.music.soulseek.SoulseekDownloads.Job(4, J.songKey("Björk", "Joga"), "Björk · Jóga", "Searching Soulseek…"),
+        ))
+        compose.setContent { Shell("Settings", null) { pad -> Column(Modifier.fillMaxSize().padding(pad)) {
+            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceEvenly) {
+                DownloadButton("none", owned = false, what = "it") {}
+                DownloadButton(J.songKey("Björk", "Joga"), owned = false, what = "it") {}
+                DownloadButton(J.albumKey("Moderat", "III"), owned = false, what = "it") {}
+                DownloadButton(J.songKey("Air", "Sexy Boy"), owned = false, what = "it") {}
+                DownloadButton(J.albumKey("Radiohead", "Kid A"), owned = false, what = "it") {}
+            }
+            SettingsPage(Modifier.weight(1f), listOf("Music"), false, true, {}, {}, {}, {}, {})
+        } } }
+        compose.onNode(androidx.compose.ui.test.hasScrollAction()).performScrollToNode(androidx.compose.ui.test.hasText("Soulseek account"))
+        shot("14c-downloads")
+    }
+
     @Test fun songActions() {
         val t = library.songs[3]
         compose.setContent { Shell("Playlists", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
