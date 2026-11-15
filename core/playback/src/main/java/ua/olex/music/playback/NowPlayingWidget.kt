@@ -44,12 +44,13 @@ internal object NowPlaying {
     fun render(context: Context, ids: IntArray) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val playing = prefs.getBoolean("playing", false)
-        val views = RemoteViews(context.packageName, R.layout.widget_now_playing).apply {
+        val art = artwork(context, prefs.getString("art", null))
+        fun layout(id: Int) = RemoteViews(context.packageName, id).apply {
             setTextViewText(R.id.widget_title, prefs.getString("title", null) ?: context.getString(R.string.widget_idle))
             setTextViewText(R.id.widget_artist, prefs.getString("artist", null).orEmpty())
             setImageViewResource(R.id.widget_play, if (playing) R.drawable.widget_pause else R.drawable.widget_play)
             setContentDescription(R.id.widget_play, context.getString(if (playing) R.string.widget_pause else R.string.widget_play))
-            artwork(context, prefs.getString("art", null))?.let { setImageViewBitmap(R.id.widget_art, it) }
+            art?.let { setImageViewBitmap(R.id.widget_art, it) }
                 ?: setImageViewResource(R.id.widget_art, R.drawable.widget_note)
             setOnClickPendingIntent(R.id.widget_play, button(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
             setOnClickPendingIntent(R.id.widget_next, button(context, KeyEvent.KEYCODE_MEDIA_NEXT))
@@ -58,6 +59,11 @@ internal object NowPlaying {
                 setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE))
             }
         }
+        // Two rows when the widget is tall enough, one row when it is short; the launcher picks.
+        val views = RemoteViews(mapOf(
+            android.util.SizeF(0f, 0f) to layout(R.layout.widget_now_playing_short),
+            android.util.SizeF(0f, 90f) to layout(R.layout.widget_now_playing),
+        ))
         AppWidgetManager.getInstance(context).updateAppWidget(ids, views)
     }
 
