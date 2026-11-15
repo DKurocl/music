@@ -47,6 +47,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Null until the first read from the database: the list shows nothing rather than "empty". */
     val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val sortPreferences = app.getSharedPreferences("library-sort-v1", android.content.Context.MODE_PRIVATE)
+    private val prefs = app.getSharedPreferences("library-options", android.content.Context.MODE_PRIVATE)
     private val _sortOrders = MutableStateFlow(TrackSortScope.entries.associateWith { scope ->
         val mode = runCatching { TrackSortMode.valueOf(sortPreferences.getString(scope.name, null).orEmpty()) }.getOrDefault(TrackSortMode.DEFAULT)
         TrackSortOrder(mode, runCatching { sortPreferences.getBoolean("${scope.name}.descending", false) }.getOrDefault(false))
@@ -130,14 +131,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun dismissTagMessage() { tagMessage = null }
 
     /** Writes the edited fields into the files (after Android's write permission), then rescans. */
-    fun writeTags(tracks: List<Track>, fields: Map<String, String>) {
-        val edits = tagEdits(fields)
-        if (edits.isEmpty()) return
-        tagMessage = "Writing tags…"
+    internal fun writeTags(tracks: List<Track>, request: TagEditRequest) {
+        val edits = tagEdits(request.fields)
+        if (edits.isEmpty() && request.cover == null && request.nameTemplate == null && request.folderTemplate == null) return
+        if (!request.quiet) tagMessage = "Writing tags…"
         viewModelScope.launch {
-            val result = TagEditing.write(getApplication(), tracks.filter { '#' !in it.id.value }) { edits }
-            tagMessage = buildString {
+            val result = TagEditing.write(getApplication(), tracks.filter { '#' !in it.id.value }, request.cover, request.nameTemplate, request.folderTemplate) { edits }
+            if (!request.quiet || result.failed.isNotEmpty()) tagMessage = buildString {
                 append(if (result.written == 1) "Tags saved in 1 file." else "Tags saved in ${result.written} files.")
+                if (result.renamed > 0) append(" ${result.renamed} renamed or moved.")
                 if (result.unsupported.isNotEmpty()) append(" ${result.unsupported.size} not supported yet (only FLAC and MP3).")
                 if (result.failed.isNotEmpty()) append(" ${result.failed.size} couldn't be written.")
             }
@@ -191,8 +193,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     /** Plays and ratings per song identity (SongKey value). */
-    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = graph.userLibrary.stats
-        .catch { emit(emptyMap()) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    /** Ratings in the files count when the app has none of its own, so they survive a reinstall. */
+    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, library) { own, index ->
+        val fromFiles = index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.key.value to it } }.orEmpty()
+        if (fromFiles.isEmpty()) own else own.toMutableMap().apply {
+            for ((key, stars) in fromFiles) { val s = get(key) ?: ua.olex.music.model.SongStats.NONE; if (s.rating == 0) put(key, s.copy(rating = stars)) }
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Whether star ratings are also written into the files (FLAC RATING, MP3 POPM). */
+    var ratingsToFiles by mutableStateOf(prefs.getBoolean("ratings_to_files", false)); private set
+    fun changeRatingsToFiles(on: Boolean) { ratingsToFiles = on; prefs.edit().putBoolean("ratings_to_files", on).apply() }
 
     /** Built-in and the owner's smart playlists, worked out off the main thread whenever their inputs change. */
     val smart: StateFlow<List<SmartPlaylistUi>> = combine(library, stats, graph.userLibrary.smartPlaylists.catch { emit(emptyList()) }, personal) { index, stats, own, personal ->
@@ -214,9 +225,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         importPlaylist = { name, songs -> editUserData { importPlaylist(name, songs) } },
         rename = { id, name -> editUserData { renamePlaylist(id, name) } },
         delete = { id -> editUserData { deletePlaylist(id) } },
-        add = { id, tracks -> editUserData { addToPlaylist(id, tracks) } },
-        remove = { id, song -> editUserData { removeFromPlaylist(id, song) } },
-        move = { id, song, delta -> editUserData { moveInPlaylist(id, song, delta) } },
+        add = { id, tracks, duplicates -> editUserData { addToPlaylist(id, tracks, duplicates) } },
+        remove = { id, song, position -> editUserData { removeFromPlaylist(id, song, position) } },
+        move = { id, song, delta, position -> editUserData { moveInPlaylist(id, song, delta, position) } },
         removeFavourite = { id -> editUserData { removeFavourite(id) } },
     )
 

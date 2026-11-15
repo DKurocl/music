@@ -51,7 +51,6 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
     fun delete(track: Track) { FoundLyrics.Format.entries.forEach { File(dir, name(track, it)).delete() }; _revision.value++ }
 
     private fun name(track: Track, f: FoundLyrics.Format): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest(track.key.value.toByteArray())
-        return digest.take(12).joinToString("") { "%02x".format(it) } + "." + f.extension
+        return ua.olex.music.lyrics.LyricsStore.stem(track.key.value) + "." + f.extension
     }
 }

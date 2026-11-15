@@ -14,6 +14,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -33,7 +34,7 @@ internal fun PlaylistBrowser(
     var namingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var create by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
-    var editingSong by rememberSaveable { mutableStateOf<String?>(null) }
+    var editingSong by rememberSaveable { mutableStateOf<Int?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var loadingDocument by remember { mutableStateOf(false) }
@@ -90,15 +91,15 @@ internal fun PlaylistBrowser(
             confirmButton = { TextButton(onClick = { actions.delete(id); deleting = null; selectedId = null }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } })
     }
-    val editRow = selected?.songs?.firstOrNull { it.song.id == editingSong }
+    val editRow = editingSong?.let { selected?.songs?.getOrNull(it) }
     if (selected != null && editRow != null) {
-        val index = selected.songs.indexOf(editRow)
+        val index = editingSong!!
         AlertDialog(onDismissRequest = { editingSong = null }, title = { Text(editRow.song.title) }, text = {
             Column {
                 if (editRow.track != null) TextButton(onClick = { onTrackActions(editRow.track); editingSong = null }) { Text("Song actions") }
-                TextButton(enabled = index > 0, onClick = { actions.move(selected.id, editRow.song.id, -1); editingSong = null }) { Text("Move up") }
-                TextButton(enabled = index < selected.songs.lastIndex, onClick = { actions.move(selected.id, editRow.song.id, 1); editingSong = null }) { Text("Move down") }
-                TextButton(onClick = { actions.remove(selected.id, editRow.song.id); editingSong = null }) { Text("Remove from playlist") }
+                TextButton(enabled = index > 0, onClick = { actions.move(selected.id, editRow.song.id, -1, index); editingSong = null }) { Text("Move up") }
+                TextButton(enabled = index < selected.songs.lastIndex, onClick = { actions.move(selected.id, editRow.song.id, 1, index); editingSong = null }) { Text("Move down") }
+                TextButton(onClick = { actions.remove(selected.id, editRow.song.id, index); editingSong = null }) { Text("Remove from playlist") }
             }
         }, confirmButton = { TextButton(onClick = { editingSong = null }) { Text("Close") } })
     }
@@ -139,11 +140,11 @@ internal fun PlaylistBrowser(
                 }
             }
             if (selected.songs.isEmpty()) item { Text("Add music from a song's More menu or an album's Add all to playlist action.", Modifier.padding(16.dp)) }
-            items(selected.songs, key = { it.song.id }) { row ->
+            // Keyed by position: the same song can be in a playlist twice.
+            itemsIndexed(selected.songs, key = { position, row -> "$position:${row.song.id}" }) { position, row ->
                 SavedSongItem(row, currentId, onPlay = {
-                    val index = selected.playable.indexOfFirst { it.id == row.track?.id }
-                    if (index >= 0) onPlay(selected.playable, index)
-                }, onMore = { editingSong = row.song.id })
+                    if (row.track != null) onPlay(selected.playable, selected.songs.take(position).count { it.track != null })
+                }, onMore = { editingSong = position })
             }
         }
     }
@@ -176,11 +177,17 @@ internal fun PlaylistPicker(playlists: List<PlaylistUi>, tracks: List<Track>, ac
         PlaylistNameDialog("New playlist", onDismiss = { creating = false }, onSave = { actions.create(it, tracks); onDismiss() })
         return
     }
+    var again by rememberSaveable { mutableStateOf(false) }
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Add to playlist") }, text = {
         LazyColumn(Modifier.heightIn(max = 360.dp)) {
             item { Text("${tracks.size} songs selected") }
+            item {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(again, { again = it }); Text("Add again if already there")
+                }
+            }
             items(playlists, key = { it.id }) { playlist ->
-                TextButton(onClick = { actions.add(playlist.id, tracks); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(playlist.name) }
+                TextButton(onClick = { actions.add(playlist.id, tracks, again); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(playlist.name) }
             }
         }
     }, confirmButton = { TextButton(onClick = { creating = true }) { Text("New playlist") } },

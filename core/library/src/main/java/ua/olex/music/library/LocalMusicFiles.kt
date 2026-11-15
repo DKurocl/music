@@ -40,6 +40,40 @@ class LocalMusicFiles(context: Context) {
     suspend fun refresh() = withContext(Dispatchers.IO) { editing.withLock { save(_folders.value) } }
 
     /** Called synchronously only by the image provider's IO caller; no nested dispatcher blocking. */
+    /**
+     * A cue sheet beside a one-file album: "<file name>.cue" first, otherwise the only .cue in the
+     * folder whose FILE line names this file. Needs the folder to be chosen; null otherwise.
+     */
+    internal fun sidecarCueBlocking(audioPath: String): String? {
+        val granted = resolver.persistedUriPermissions.filter { it.isReadPermission }.mapTo(HashSet()) { it.uri.toString() }
+        val root = _folders.value.filter { it.uri in granted && SidecarLyrics.directory(audioPath, it.path) != null }.maxByOrNull { it.path.length } ?: return null
+        val directory = requireNotNull(SidecarLyrics.directory(audioPath, root.path))
+        val tree = Uri.parse(root.uri)
+        val file = audioPath.substringAfterLast('/')
+        fun read(uri: Uri) = resolver.openInputStream(uri)?.use { it.readNBytes(256 * 1024) }?.let(::cueText)
+        val stem = file.substringBeforeLast('.', file)
+        for (name in listOf("$stem.cue", "$file.cue")) {
+            val direct = DocumentsContract.buildDocumentUriUsingTree(tree, "primary:$directory/$name")
+            try { read(direct)?.let { return it } } catch (_: FileNotFoundException) {}
+        }
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, "primary:$directory")
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        val cues = ArrayList<String>()
+        resolver.query(children, projection, null, null, null)?.use { rows ->
+            while (rows.moveToNext()) if (rows.getString(1)?.endsWith(".cue", ignoreCase = true) == true) cues += rows.getString(0)
+        }
+        return cues.mapNotNull { id -> read(DocumentsContract.buildDocumentUriUsingTree(tree, id)) }
+            .filter { text -> Regex("""(?im)^\s*FILE\s+"?([^"\r\n]+?)"?\s+\w+\s*$""").findAll(text).any { it.groupValues[1].substringAfterLast('\\').substringAfterLast('/') == file } }
+            .singleOrNull()
+    }
+
+    /** Cue files are UTF-8 or, from old rippers, Windows-1252. */
+    private fun cueText(bytes: ByteArray): String? {
+        val utf8 = java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+        val text = runCatching { utf8.decode(java.nio.ByteBuffer.wrap(bytes)).toString() }.getOrElse { String(bytes, charset("windows-1252")) }
+        return text.takeIf { "TRACK" in it.uppercase() }
+    }
+
     internal fun coverBytesBlocking(audioPath: String?): ByteArray? {
         if (audioPath == null) return null
         val granted = resolver.persistedUriPermissions.filter { it.isReadPermission }.mapTo(HashSet()) { it.uri.toString() }
