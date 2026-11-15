@@ -49,6 +49,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -62,11 +64,14 @@ import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.Track
 
 private enum class LibraryTab(val title: String) {
-    HOME("Home"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres"), YEARS("Years"), COMPOSERS("Composers"), STATS("Stats")
+    ALBUMS("Albums"), ARTISTS("Artists"), SONGS("Songs"), PLAYLISTS("Playlists"), SMART("Smart"), FAVOURITES("Favourites"), GENRES("Genres"), FOLDERS("Folders"), YEARS("Years"), COMPOSERS("Composers"), HISTORY("History")
 }
 
+/** Where the browser is shown: the Library place (no search field), the Search place (field, no chips), or both (tests). */
+internal enum class BrowserMode { ALL, LIBRARY, SEARCH }
+
 /** The section the library opens on: Home normally; tests start on Songs. */
-internal val LocalStartTab = androidx.compose.runtime.staticCompositionLocalOf { "HOME" }
+internal val LocalStartTab = androidx.compose.runtime.staticCompositionLocalOf { "ALBUMS" }
 
 /** Browse one shared library snapshot or cancellable FTS results; taps play exactly the visible queue. */
 @Composable
@@ -94,6 +99,10 @@ internal fun LibraryBrowser(
     onSortOrder: (TrackSortScope, TrackSortOrder) -> Unit = { _, _ -> },
     onEnqueue: (List<Track>, Boolean) -> Unit = { _, _ -> },
     stats: Map<String, ua.olex.music.model.SongStats> = emptyMap(),
+    mode: BrowserMode = BrowserMode.ALL,
+    /** Open a collection from elsewhere (Home): section name and collection id; [onOpened] clears it. */
+    open: Pair<String, String>? = null, onOpened: () -> Unit = {},
+    recentSearches: List<String> = emptyList(), onSearchUsed: (String) -> Unit = {}, onClearRecent: () -> Unit = {},
 ) {
     val startTab = LocalStartTab.current
     var tabName by rememberSaveable { mutableStateOf(startTab) }
@@ -152,6 +161,7 @@ internal fun LibraryBrowser(
     LaunchedEffect(source) { if (unsorted != null && picked.ids.isNotEmpty()) picked = picked.retain(unsorted) }
     fun batch(action: (List<Track>) -> Unit) { visible?.let(picked::ordered)?.takeIf { it.isNotEmpty() }?.let(action) }
     LaunchedEffect(selectedId, groups) { if (selectedId != null && selected == null) selectedId = null }
+    LaunchedEffect(open) { open?.let { (t, id) -> tabName = t; selectedId = id; onOpened() } }
     BackHandler(searching || selected != null) {
         if (searching) onQueryChange("") else selectedId = null
     }
@@ -165,7 +175,9 @@ internal fun LibraryBrowser(
 
     Column(Modifier.fillMaxSize().padding(insets)) {
         // A search pill, as in Google's apps, and the library's sections as chips below it.
-        androidx.compose.material3.TextField(
+        val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+        if (mode == BrowserMode.SEARCH) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+        if (mode != BrowserMode.LIBRARY) androidx.compose.material3.TextField(
             value = query, onValueChange = onQueryChange, singleLine = true,
             placeholder = { Text("Search your music") },
             leadingIcon = { Symbol(Glyph.SEARCH, color = MaterialTheme.colorScheme.onSurfaceVariant) },
@@ -180,9 +192,23 @@ internal fun LibraryBrowser(
                 focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                 unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
             ),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).focusRequester(focus),
         )
-        if (!searching) {
+        if (mode == BrowserMode.SEARCH && !searching && selected == null) {
+            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                RecentSearches(recentSearches, onPick = onQueryChange, onClear = onClearRecent)
+                if (library.genres.size > 1) {
+                    Text("Genres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
+                    androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        library.genres.sortedByDescending { it.tracks.size }.take(16).forEach { g ->
+                            androidx.compose.material3.AssistChip(onClick = { tabName = LibraryTab.GENRES.name; selectedId = g.id }, label = { Text(g.name) })
+                        }
+                    }
+                }
+            }
+            return@Column
+        }
+        if (!searching && mode != BrowserMode.SEARCH && selected == null) {
             androidx.compose.foundation.lazy.LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(bottom = 4.dp),
@@ -197,24 +223,21 @@ internal fun LibraryBrowser(
                 }
             }
         }
-        if (unsorted != null) {
+        // An album keeps its own order and a clean page; long press still selects.
+        val tools = unsorted != null && !(selected != null && tab == LibraryTab.ALBUMS) && !picking
+        if (tools) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) }
                 if (!picking) TextButton(onClick = { picking = true }) { Text("Select") }
             }
-            TrackFilterRow(filter, raw.orEmpty()) { filter = it }
+            if (mode != BrowserMode.SEARCH && selected == null) TrackFilterRow(filter, raw.orEmpty()) { filter = it }
         }
         if (picking) TrackSelectionToolbar(picked.ids.size, visible?.size ?: 0, visible != null,
             onAll = { visible?.let { picked = picked.all(it) } }, onClear = { picked = TrackSelection() },
             onClose = { picking = false; picked = TrackSelection() }, onPlay = { batch { onPlay(it, 0) } },
             onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
             onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) })
-        if (!searching && tab == LibraryTab.HOME) {
-            HomePage(library, personal.history.mapNotNull { it.track }, stats, smart, currentId, Modifier.weight(1f), onPlay, onShuffle,
-                onOpenAlbum = { tabName = LibraryTab.ALBUMS.name; selectedId = it.id }, onTrackActions = onTrackActions)
-        } else if (!searching && tab == LibraryTab.STATS) {
-            StatsPage(library, stats, Modifier.weight(1f), onPlay)
-        } else if (!searching && tab == LibraryTab.SMART) {
+        if (!searching && tab == LibraryTab.SMART) {
             SmartPlaylistBrowser(smart, currentId, Modifier.weight(1f), onPlay = onPlay, onShuffle = onShuffle, onTrackActions = onTrackActions,
                 onSave = onSaveSmart, onDelete = onDeleteSmart)
         } else if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
@@ -236,8 +259,8 @@ internal fun LibraryBrowser(
                                     androidx.compose.material3.ListItem(
                                         headlineContent = { Text(collection.name, maxLines = 1) },
                                         supportingContent = { Text(listOfNotNull(kind.title.dropLast(1), collection.subtitle, songCount(collection.tracks.size)).joinToString(" · "), maxLines = 1) },
-                                        leadingContent = { Artwork(collection.artworkUri, Modifier.size(48.dp), corner = 8.dp) },
-                                        modifier = Modifier.clickable { tabName = kind.name; selectedId = collection.id; onQueryChange("") },
+                                        leadingContent = { if (kind == LibraryTab.ARTISTS) ArtistImage(collection.name, Modifier.size(48.dp), 48.dp) else Artwork(collection.artworkUri, Modifier.size(48.dp), corner = 8.dp) },
+                                        modifier = Modifier.clickable { onSearchUsed(query); tabName = kind.name; selectedId = collection.id; onQueryChange("") },
                                     )
                                 }
                             }
@@ -245,14 +268,14 @@ internal fun LibraryBrowser(
                             if (visible == null) item { BrowserMessage("Sorting...") }
                             else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
                                 TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
-                            checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }) { onPlay(visible, index) }
+                            checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) { onSearchUsed(query); onPlay(visible, index) }
                             }
                         }
                     }
                 }
                 selected != null -> {
                     item(key = "collection-header") {
-                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
+                        CollectionHeader(selected, artist = tab == LibraryTab.ARTISTS, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else {
@@ -264,15 +287,17 @@ internal fun LibraryBrowser(
                                     modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
                             } }
                             item(key = track.id.value) {
+                                val inAlbum = tab == LibraryTab.ALBUMS && order == TrackSortOrder()
                                 TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
-                                    checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }) { onPlay(visible, index) }
+                                    checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) },
+                                    number = if (inAlbum) track.trackNumber ?: (index + 1) else null, albumArtist = selected.subtitle) { onPlay(visible, index) }
                             }
                         }
                     }
                 }
                 tab == LibraryTab.SONGS -> {
                     if (library.songs.isEmpty()) item { BrowserMessage("No music yet. Put music in the Music folder, then rescan.") }
-                    else item(key = "shuffle-all") {
+                    else if (!picking) item(key = "shuffle-all") {
                         androidx.compose.material3.FilledTonalButton(onClick = { visible?.let(onShuffle) }, enabled = visible != null,
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).height(48.dp)) {
                             Symbol(Glyph.SHUFFLE, size = 20.dp); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
@@ -282,7 +307,7 @@ internal fun LibraryBrowser(
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
-                            checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }) { onPlay(visible, index) }
+                            checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) { onPlay(visible, index) }
                     }
                 }
                 tab == LibraryTab.FAVOURITES || tab == LibraryTab.HISTORY -> {
@@ -294,6 +319,22 @@ internal fun LibraryBrowser(
                             onPlay = { val index = queue.indexOfFirst { it.id == row.track?.id }; if (index >= 0) onPlay(queue, index) },
                             onMore = if (row.track != null) ({ onTrackActions(row.track) }) else if (tab == LibraryTab.FAVOURITES) ({ missingFavourite = row.song.id }) else null,
                         )
+                    }
+                }
+                // Artists as round photos, three to a row.
+                tab == LibraryTab.ARTISTS -> items(groups.chunked(3), key = { row -> row.first().id }) { row ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { artist ->
+                            Column(Modifier.weight(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+                                .clickable(onClickLabel = "Open ${artist.name}") { selectedId = artist.id }.padding(vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally) {
+                                ArtistImage(artist.name, Modifier.fillMaxWidth(0.86f).aspectRatio(1f), 104.dp)
+                                Text(artist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
+                                Text(songCount(artist.tracks.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        repeat(3 - row.size) { androidx.compose.foundation.layout.Spacer(Modifier.weight(1f)) }
                     }
                 }
                 // Albums as a grid of covers, two to a row (four on a wide screen), as music apps show them.
@@ -323,20 +364,37 @@ internal fun LibraryBrowser(
             }
         }
         // Items above the first song: the scan error notice and the shuffle button.
-        railTracks?.let { LetterRail(it, firstItem = (if (scanError != null) 1 else 0) + 1, listState, descending = order.descending, Modifier.align(Alignment.CenterEnd)) }
+        // The letter rail appears while the list moves (and while it is held), so it never covers the rows' buttons.
+        var railHeld by remember { mutableStateOf(false) }
+        var railShown by remember { mutableStateOf(false) }
+        LaunchedEffect(listState.isScrollInProgress, railHeld) {
+            if (listState.isScrollInProgress || railHeld) railShown = true else { kotlinx.coroutines.delay(1_500); railShown = false }
+        }
+        railTracks?.let {
+            androidx.compose.animation.AnimatedVisibility(railShown, modifier = Modifier.align(Alignment.CenterEnd),
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInHorizontally { w -> w },
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutHorizontally { w -> w }) {
+                LetterRail(it, firstItem = (if (scanError != null) 1 else 0) + 1, listState, descending = order.descending, Modifier, onHeld = { h -> railHeld = h })
+            }
+        }
+        if (picking) SelectionActions(visible != null && picked.ids.isNotEmpty(),
+            onPlay = { batch { onPlay(it, 0) } }, onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
+            onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
         }
     }
 }
 
 @Composable
-private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true, onShuffle: () -> Unit = {}) {
+private fun CollectionHeader(collection: MusicCollection, artist: Boolean = false, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true, onShuffle: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val minutes = collection.tracks.sumOf { it.durationMs } / 60_000
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Row(Modifier.fillMaxWidth()) {
             androidx.compose.material3.IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
         }
-        Artwork(collection.artworkUri, Modifier.size(220.dp), 28.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
+        if (artist) ArtistImage(collection.name, Modifier.size(200.dp), 200.dp)
+        else Artwork(collection.artworkUri, Modifier.size(220.dp), 28.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
         androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
         Text(collection.name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -418,22 +476,16 @@ private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onC
 @Composable
 private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll: () -> Unit, onClear: () -> Unit,
     onClose: () -> Unit, onPlay: () -> Unit, onNext: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onTags: () -> Unit = {}) {
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("$count selected", style = MaterialTheme.typography.titleMedium)
-            TextButton(onClick = onClose) { Text("Close selection") }
-        }
-        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    // Compact: close, the count, select all. The actions are in the floating toolbar below.
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close selection" }) { Symbol(Glyph.CLOSE) }
+            Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            if (count > 0) TextButton(onClick = onClear) { Text("Clear selection") }
             TextButton(enabled = ready && total <= TrackSelection.MAX_ITEMS, onClick = onAll) { Text("Select all") }
-            TextButton(enabled = count > 0, onClick = onClear) { Text("Clear selection") }
-            TextButton(enabled = ready && count > 0, onClick = onPlay) { Text("Play selected") }
-            TextButton(enabled = ready && count > 0, onClick = onNext) { Text("Play next") }
-            TextButton(enabled = ready && count > 0, onClick = onQueue) { Text("Add to queue") }
-            TextButton(enabled = ready && count > 0, onClick = onPlaylist) { Text("Add to playlist") }
-            TextButton(enabled = ready && count > 0, onClick = onTags) { Text("Edit tags") }
         }
         if (total > TrackSelection.MAX_ITEMS || count >= TrackSelection.MAX_ITEMS)
-            Text("Select up to ${TrackSelection.MAX_ITEMS} songs per batch.", style = MaterialTheme.typography.bodySmall)
+            Text("Select up to ${TrackSelection.MAX_ITEMS} songs per batch.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))
     }
 }
 
@@ -472,7 +524,8 @@ private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List
 
 /** A letter rail beside a long song list sorted by title: drag or tap a letter to jump there. */
 @Composable
-private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.compose.foundation.lazy.LazyListState, descending: Boolean, modifier: Modifier) {
+private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.compose.foundation.lazy.LazyListState, descending: Boolean, modifier: Modifier, onHeld: (Boolean) -> Unit = {}) {
+    val haptics = rememberHaptics()
     if (tracks.size < 50) return
     val starts = remember(tracks) {
         val map = LinkedHashMap<Char, Int>()
@@ -489,14 +542,14 @@ private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.comp
     fun jump(y: Float) {
         val i = (y / height * starts.size).toInt().coerceIn(0, starts.lastIndex)
         val (letter, index) = starts[i]
-        if (active != letter) { active = letter; scope.launch { state.scrollToItem(firstItem + index) } }
+        if (active != letter) { active = letter; haptics.tick(); scope.launch { state.scrollToItem(firstItem + index) } }
     }
     Box(modifier.fillMaxHeight().padding(vertical = 24.dp)) {
         Column(
             Modifier.fillMaxHeight().width(28.dp)
                 .onSizeChanged { height = it.height.coerceAtLeast(1) }
                 .pointerInput(starts) {
-                    detectVerticalDragGestures(onDragStart = { jump(it.y) }, onDragEnd = { active = null }, onDragCancel = { active = null }) { change, _ -> jump(change.position.y) }
+                    detectVerticalDragGestures(onDragStart = { onHeld(true); jump(it.y) }, onDragEnd = { active = null; onHeld(false) }, onDragCancel = { active = null; onHeld(false) }) { change, _ -> jump(change.position.y) }
                 }
                 .pointerInput(starts) { detectTapGestures { jump(it.y); active = null } },
             verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally,
@@ -528,6 +581,41 @@ private fun HiddenFolders() {
                 Text("Hidden: ${folder.trimEnd('/')}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = { ua.olex.music.library.LibraryFolders.setExcluded(context, folder, false) }) { Text("Show") }
             }
+        }
+    }
+}
+
+/** The actions for selected songs, as a floating toolbar over the list (M3E). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SelectionActions(enabled: Boolean, onPlay: () -> Unit, onNext: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onTags: () -> Unit, modifier: Modifier) {
+    val haptics = rememberHaptics()
+    androidx.compose.material3.HorizontalFloatingToolbar(expanded = true, modifier = modifier,
+        colors = androidx.compose.material3.FloatingToolbarDefaults.vibrantFloatingToolbarColors()) {
+        listOf(Triple(Glyph.PLAY, "Play selected", onPlay), Triple(Glyph.NEXT, "Play next", onNext), Triple(Glyph.QUEUE, "Add to queue", onQueue),
+            Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags)).forEach { (glyph, label, action) ->
+            androidx.compose.material3.IconButton(enabled = enabled, onClick = { haptics.confirm(); action() },
+                modifier = Modifier.semantics { contentDescription = label }) { Symbol(glyph, filled = glyph == Glyph.PLAY) }
+        }
+    }
+}
+
+/** The Search place before typing: what was searched lately, one tap to search it again. */
+@Composable
+private fun RecentSearches(recent: List<String>, onPick: (String) -> Unit, onClear: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        if (recent.isEmpty()) {
+            Text("Search songs, artists and albums. Accents and case don't matter.", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(vertical = 16.dp))
+            return
+        }
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Recent", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onClear) { Text("Clear") }
+        }
+        recent.forEach { q ->
+            ListItem(headlineContent = { Text(q) }, leadingContent = { Symbol(Glyph.HISTORY, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).clickable { onPick(q) })
         }
     }
 }

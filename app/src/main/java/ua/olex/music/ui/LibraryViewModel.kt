@@ -126,6 +126,19 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
     private fun lyricTrackNow() = playing.value.mediaId?.let { library.value?.byId?.get(ua.olex.music.model.TrackId(it)) }
 
+    /** Songs kept in more than one file, best copy first in each group (worked out off the main thread). */
+    val duplicates: StateFlow<List<List<Track>>> = library.map { index -> index?.let { ua.olex.music.model.Duplicates.find(it.songs) }.orEmpty() }
+        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** The last searches that led somewhere, newest first (at most 10). */
+    var recentSearches by mutableStateOf(prefs.getString("recent_searches", null)?.split('\n')?.filter { it.isNotBlank() }.orEmpty()); private set
+    fun addRecentSearch(query: String) {
+        val q = query.trim().takeIf { it.isNotEmpty() } ?: return
+        recentSearches = (listOf(q) + recentSearches.filterNot { it.equals(q, true) }).take(10)
+        prefs.edit().putString("recent_searches", recentSearches.joinToString("\n")).apply()
+    }
+    fun clearRecentSearches() { recentSearches = emptyList(); prefs.edit().remove("recent_searches").apply() }
+
     /** The outcome of the last tag edit, shown once. */
     var tagMessage by mutableStateOf<String?>(null); private set
     fun dismissTagMessage() { tagMessage = null }
