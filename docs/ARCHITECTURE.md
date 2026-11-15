@@ -249,3 +249,13 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     playlists are never automatically reordered. Non-default sorting runs on Dispatchers.Default.
     Source identity and order guard the completed snapshot, so stale rows cannot play under a new
     sort selection. Both row taps and Play all/Add all use the exact displayed snapshot.
+
+40. Library multiselect is ephemeral and scoped to the current tab/collection/query. Track IDs survive
+    sort changes and removed files are pruned; actions resolve selected IDs against the displayed list
+    at dispatch. Selection is not written to user.db or a large saved-state Bundle. Rotation/process
+    recreation currently clears it; retaining it in ViewModel is a later UI refinement.
+41. Bulk enqueue uses Media3 BundleListRetriever for paginated IPC instead of a single large Bundle.
+    Up to 20000 items are validated/resolved off main before any queue mutation. Same-UID authorization
+    remains required; legacy small-list arguments remain readable. The client waits for the response
+    under its queue mutex so asynchronous decoding cannot reorder successive append requests. Service
+    teardown completes/cancels outstanding replies. Rejected operations surface in the library UI.
