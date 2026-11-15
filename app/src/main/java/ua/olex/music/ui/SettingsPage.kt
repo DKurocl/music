@@ -80,18 +80,19 @@ internal fun SettingsPage(
         // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
         item { Group("Storage") }
         item {
-            var sizes by remember { mutableStateOf<Triple<Long, Long, Long>?>(null) }
+            var sizes by remember { mutableStateOf<List<Long>?>(null) }
+            val motion = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.motionCovers }
             var cleared by remember { mutableStateOf(0) }
             LaunchedEffect(cleared) {
                 sizes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     fun size(f: java.io.File): Long = if (f.isDirectory) f.listFiles()?.sumOf { size(it) } ?: 0L else f.length()
-                    Triple(size(context.cacheDir), images.bytes(), size(java.io.File(context.filesDir, "lyrics")))
+                    listOf(size(context.cacheDir), images.bytes(), size(java.io.File(context.filesDir, "lyrics")), motion.bytes())
                 }
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
             fun mb(b: Long) = if (b < 1024 * 1024) "${b / 1024} KB" else "${b / (1024 * 1024)} MB"
             Row(Glyph.DELETE, "Clear covers and photos",
-                sizes?.let { (cache, photos, lyrics) -> "Covers ${mb(cache)} · Artist photos ${mb(photos)} · Lyrics ${mb(lyrics)} (kept). Covers are capped at 128 MB, photos at 80 MB" } ?: "Counting…",
+                sizes?.let { (cache, photos, lyrics, moving) -> "Covers ${mb(cache)} · Artist photos ${mb(photos)}. Kept: lyrics ${mb(lyrics)}, moving covers ${mb(moving)}" } ?: "Counting…",
                 first = true, last = true) {
                 scope.launch {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }; images.clear() }
