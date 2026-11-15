@@ -46,6 +46,15 @@ class MotionCovers(context: Context) {
         if (ok && tmp.renameTo(target)) { _revision.value++; true } else { tmp.delete(); false }
     }
 
+    /** Keeps a joined video (from Apple Music) as the album's single file. */
+    suspend fun attachBytes(track: Track, bytes: ByteArray): Boolean = withContext(Dispatchers.IO) {
+        val key = key(track) ?: return@withContext false
+        if (bytes.size > MAX_BYTES) return@withContext false
+        val target = File(dir, "$key.mp4"); val tmp = File(dir, "$key.tmp")
+        tmp.writeBytes(bytes)
+        if (tmp.renameTo(target)) { _revision.value++; true } else { tmp.delete(); false }
+    }
+
     fun remove(track: Track) { file(track)?.delete(); _revision.value++ }
 
     fun bytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
