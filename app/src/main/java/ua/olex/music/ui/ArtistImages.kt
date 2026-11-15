@@ -94,12 +94,12 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
 
 /** A round artist photo, or the artist's initial on a tonal circle while there is none. */
 @Composable
-internal fun ArtistImage(name: String, modifier: Modifier, size: Dp) {
+internal fun ArtistImage(name: String, modifier: Modifier, size: Dp, shape: androidx.compose.ui.graphics.Shape = CircleShape) {
     val context = LocalContext.current
     val images = (context.applicationContext as ua.olex.music.MusicApp).graph.artistImages
     val file by produceState(images.cached(name), name) { if (value == null) value = images.image(name) }
     val cs = MaterialTheme.colorScheme
-    Box(modifier.clip(CircleShape).background(cs.tertiaryContainer), contentAlignment = Alignment.Center) {
+    Box(modifier.clip(shape).background(cs.tertiaryContainer), contentAlignment = Alignment.Center) {
         Text(name.trim().firstOrNull()?.uppercase() ?: "?", color = cs.onTertiaryContainer, fontSize = (size.value * 0.4f).sp,
             style = MaterialTheme.typography.titleLarge)
         file?.let { AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
