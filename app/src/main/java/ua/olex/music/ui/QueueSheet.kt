@@ -43,7 +43,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     var dragOffset by remember { mutableFloatStateOf(0f) }
     val rowHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
 
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = cs.surfaceContainerLow, sheetGesturesEnabled = draggingKey == null) {
+    AppSheet(onDismiss, cs.surfaceContainerLow, gestures = draggingKey == null) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)

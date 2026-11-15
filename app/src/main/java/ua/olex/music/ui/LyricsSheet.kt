@@ -65,7 +65,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     LaunchedEffect(current, follow, sourcesOpen) {
         if (follow && !sourcesOpen && current >= 0) list.animateScrollToItem(current)
     }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    AppSheet(onDismiss, MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().heightIn(max = 680.dp)) {
             FlowRow(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Lyrics", style = MaterialTheme.typography.headlineMedium)

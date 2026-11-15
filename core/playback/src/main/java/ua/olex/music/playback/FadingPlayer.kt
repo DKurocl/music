@@ -15,10 +15,9 @@ import kotlinx.coroutines.launch
  * EQ and ReplayGain are untouched, and seeking or skipping is never delayed.
  */
 @OptIn(UnstableApi::class)
-internal class FadingPlayer(private val real: Player, private val scope: CoroutineScope) : ForwardingPlayer(real) {
+class FadingPlayer internal constructor(private val real: Player, private val scope: CoroutineScope, private val wanted: () -> Boolean = { true }) : ForwardingPlayer(real) {
     private var fade: Job? = null
-    /** Turned off only for tests or if the owner ever prefers hard stops. */
-    var enabled = true
+    private val enabled get() = wanted()
 
     override fun play() = setPlayWhenReady(true)
     override fun pause() = setPlayWhenReady(false)
@@ -41,13 +40,13 @@ internal class FadingPlayer(private val real: Player, private val scope: Corouti
     }
 
     /** The last half minute of a sleep timer: a slow fade to silence instead of a sudden stop. */
-    fun sleepFade(durationMs: Long, then: () -> Unit): Job {
+    internal fun sleepFade(durationMs: Long, then: () -> Unit): Job {
         fade?.cancel()
         return scope.launch { ramp(real.volume, 0f, durationMs).join(); then(); real.volume = 1f }.also { fade = it }
     }
 
     /** A changed or cancelled sleep timer stops its fade and restores full volume. */
-    fun cancelFade() { fade?.cancel(); fade = null; real.volume = 1f }
+    internal fun cancelFade() { fade?.cancel(); fade = null; real.volume = 1f }
 
     private fun ramp(from: Float, to: Float, ms: Long): Job = scope.launch {
         val steps = (ms / 16).coerceAtLeast(1)
@@ -60,5 +59,8 @@ internal class FadingPlayer(private val real: Player, private val scope: Corouti
         real.volume = to
     }
 
-    companion object { const val FADE_OUT_MS = 200L; const val FADE_IN_MS = 300L }
+    companion object {
+        const val FADE_OUT_MS = 200L; const val FADE_IN_MS = 300L
+        const val PREFS = "playback"; const val KEY = "fades"
+    }
 }

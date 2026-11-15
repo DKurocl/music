@@ -42,16 +42,24 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     /** Stores a photo as if fetched (tests and previews). */
     internal fun put(name: String, bytes: ByteArray) { File(dir, key(name) + ".jpg").writeBytes(bytes) }
 
-    fun cached(name: String): File? = File(dir, key(name) + ".jpg").takeIf { it.isFile }
+    fun cached(name: String): File? = if (!enabled) null else cachedFile(name)
+    private fun cachedFile(name: String): File? = File(dir, key(name) + ".jpg").takeIf { it.isFile }
+
+    /** The owner can turn photos off in Settings; cached photos stay until then cleared. */
+    var enabled: Boolean
+        get() = prefs.getBoolean("artist_photos", true)
+        set(value) { prefs.edit().putBoolean("artist_photos", value).apply() }
+    private val prefs = context.getSharedPreferences("artist_images", Context.MODE_PRIVATE)
 
     suspend fun image(name: String): File? {
+        if (!enabled) return null
         if (name.isBlank() || TextFold.fold(name) in NOT_ARTISTS) return null
-        cached(name)?.let { return it }
+        cachedFile(name)?.let { return it }
         val miss = File(dir, key(name) + ".none")
         if (miss.isFile && System.currentTimeMillis() - miss.lastModified() < 30L * 24 * 3600 * 1000) return null
         return gate.withPermit {
             withContext(Dispatchers.IO) {
-                cached(name) ?: fetch(name)?.let { bytes ->
+                cachedFile(name) ?: fetch(name)?.let { bytes ->
                     val file = File(dir, key(name) + ".jpg"); val tmp = File(dir, file.name + ".tmp")
                     tmp.writeBytes(bytes); tmp.renameTo(file); file
                 } ?: run { miss.writeText(""); null }
