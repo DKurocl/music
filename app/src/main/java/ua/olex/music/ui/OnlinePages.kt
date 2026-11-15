@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.TextFold
@@ -163,6 +164,13 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                             }
                             FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0) },
                                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
+                            // The whole album in lossless from Soulseek, into the library.
+                            val snackbar = LocalSnackbar.current
+                            val scope = rememberCoroutineScope()
+                            FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = {
+                                graph.soulseek.album(songs.first().artist.substringBefore(",").trim(), album.title)
+                                scope.launch { snackbar?.showSnackbar(if (graph.soulseek.account == null) "Add your Soulseek account in Settings first" else "Looking for the album on Soulseek. Progress is in the notifications") }
+                            }, modifier = Modifier.size(52.dp).semantics { contentDescription = "Download the album in lossless" }) { Symbol(Glyph.DOWNLOAD) }
                         }
                     }
                 }
