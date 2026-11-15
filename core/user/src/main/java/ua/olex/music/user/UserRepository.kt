@@ -58,13 +58,14 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         id
     }
 
-    /** Imports complete durable references atomically, retaining unavailable files and first occurrence order. */
+    /** Imports complete durable references atomically, retaining unavailable files and the file's order. */
     suspend fun importPlaylist(name: String, songs: List<SavedSong>): Long = database.withTransaction {
         require(songs.size <= ua.olex.music.model.M3uPlaylist.MAX_ENTRIES)
-        val ordered = songs.distinctBy { it.id }
+        // Duplicates in the file are kept, as the playlist was written (a song can appear twice).
+        val ordered = songs
         require(ordered.isNotEmpty() && ordered.all { it.id.isNotBlank() && it.path.isNotBlank() })
         val id = dao.createPlaylist(PlaylistEntity(name = validName(name), createdAt = now()))
-        ordered.chunked(500).forEach { dao.saveSongs(it.map(UserSongEntity::from)) }
+        ordered.distinctBy { it.id }.chunked(500).forEach { dao.saveSongs(it.map(UserSongEntity::from)) }
         ordered.mapIndexed { position, song -> PlaylistEntryEntity(id, song.id, position) }.chunked(500).forEach { dao.insertEntries(it) }
         id
     }
@@ -72,23 +73,30 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     suspend fun renamePlaylist(id: Long, name: String) = dao.renamePlaylist(id, validName(name))
     suspend fun deletePlaylist(id: Long) = dao.deletePlaylist(id)
 
-    suspend fun addToPlaylist(id: Long, tracks: List<Track>) = database.withTransaction {
+    /** Adds songs at the end; songs already in the playlist are skipped unless [duplicates] is true. */
+    suspend fun addToPlaylist(id: Long, tracks: List<Track>, duplicates: Boolean = false) = database.withTransaction {
         check(dao.playlistExists(id)) { "Playlist no longer exists" }
-        val songs = tracks.map(SavedSong::from).distinctBy { it.id }
-        songs.chunked(500).forEach { dao.saveSongs(it.map(UserSongEntity::from)) }
+        val all = tracks.map(SavedSong::from)
+        all.distinctBy { it.id }.chunked(500).forEach { dao.saveSongs(it.map(UserSongEntity::from)) }
         val existing = dao.entries(id)
         val ids = existing.map { it.songId }.toSet()
-        dao.insertEntries(songs.filterNot { it.id in ids }.mapIndexed { index, song -> PlaylistEntryEntity(id, song.id, existing.size + index) })
+        val adding = if (duplicates) all else all.distinctBy { it.id }.filterNot { it.id in ids }
+        adding.mapIndexed { index, song -> PlaylistEntryEntity(id, song.id, existing.size + index) }.chunked(500).forEach { dao.insertEntries(it) }
     }
 
-    suspend fun removeFromPlaylist(id: Long, songId: String) = database.withTransaction {
-        replaceEntries(id, dao.entries(id).map { it.songId }.filterNot { it == songId })
+    /** Removes the entry at [position] (only if it still holds [songId], so a stale screen removes nothing else). */
+    suspend fun removeFromPlaylist(id: Long, songId: String, position: Int? = null) = database.withTransaction {
+        val ids = dao.entries(id).map { it.songId }.toMutableList()
+        val at = position?.takeIf { ids.getOrNull(it) == songId } ?: ids.indexOf(songId)
+        if (at < 0) return@withTransaction
+        ids.removeAt(at)
+        replaceEntries(id, ids)
     }
 
     /** Re-read within the transaction so a concurrent add/remove is never overwritten by stale UI. */
-    suspend fun moveInPlaylist(id: Long, songId: String, delta: Int) = database.withTransaction {
+    suspend fun moveInPlaylist(id: Long, songId: String, delta: Int, position: Int? = null) = database.withTransaction {
         val ids = dao.entries(id).map { it.songId }.toMutableList()
-        val from = ids.indexOf(songId)
+        val from = position?.takeIf { ids.getOrNull(it) == songId } ?: ids.indexOf(songId)
         if (from < 0) return@withTransaction
         val to = (from.toLong() + delta).coerceIn(0, ids.lastIndex.toLong()).toInt()
         if (from == to) return@withTransaction

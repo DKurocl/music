@@ -103,4 +103,6 @@ data class FileMetadata(
     val coverOffset: Long? = null, val coverLength: Int? = null, val coverMime: String? = null,
     /** An embedded cue sheet: the file is a whole album, split into tracks by [CueSheet]. */
     val cueSheet: String? = null,
+    /** Stars (1-5) written in the file by this or another app; null when the file has none. */
+    val rating: Int? = null,
 )

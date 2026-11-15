@@ -39,6 +39,18 @@ class UserRepositoryTest {
 
     @After fun close() { database.close(); context.deleteDatabase("user-test.db") }
 
+    @Test fun duplicatesOnPurposeAndPositionalEdits() = runBlocking {
+        val id = repository.createPlaylist("Loop", listOf(a))
+        repository.addToPlaylist(id, listOf(b, a), duplicates = true)
+        assertEquals(listOf("Song 1", "Song 2", "Song 1"), names())
+        repository.removeFromPlaylist(id, SavedSong.from(a).id, position = 2)
+        assertEquals(listOf("Song 1", "Song 2"), names())
+        repository.addToPlaylist(id, listOf(a), duplicates = true)
+        repository.moveInPlaylist(id, SavedSong.from(a).id, -1, position = 2)
+        assertEquals(listOf("Song 1", "Song 1", "Song 2"), names())
+        assertEquals(listOf(0, 1, 2), database.userData().entries(id).map { it.position })
+    }
+
     @Test fun playlistEditsPreserveOrderAndDeduplicateAdds() = runBlocking {
         val id = repository.createPlaylist("  Evening  ", listOf(a, b, a))
         repository.addToPlaylist(id, listOf(b, c))
@@ -99,7 +111,7 @@ class UserRepositoryTest {
         database.close(); reopen()
         val playlist = repository.playlists.first().single()
         assertEquals("Imported", playlist.name)
-        assertEquals(listOf(missing, saved), playlist.songs)
+        assertEquals(listOf(missing, saved, missing), playlist.songs) // the file's duplicates are kept
     }
 
     @Test fun largeImportsAreBatchedWithoutLosingPositionsOrFavourites() = runBlocking {

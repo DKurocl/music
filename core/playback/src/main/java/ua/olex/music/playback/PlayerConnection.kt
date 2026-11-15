@@ -100,6 +100,7 @@ class PlayerConnection(context: Context) {
         _state.value = _state.value.copy(connecting = true, error = null)
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val future = MediaController.Builder(app, token)
+            .setConnectionHints(Bundle().apply { putBoolean(LockScreenLyrics.APP_UI_HINT, true) })
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
                     if (this@PlayerConnection.controller === controller) {

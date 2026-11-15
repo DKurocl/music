@@ -81,6 +81,14 @@ data class AudioTags(
     val lyrics: String? get() = first("SYNCEDLYRICS") ?: first("LYRICS")
     /** An embedded cue sheet (FLAC CUESHEET comment), for one-file albums. */
     val cueSheet: String? get() = first("CUESHEET")
+    /** Stars 1-5 from RATING (0-100, or 1-5 as some apps write) or FMPS_RATING (0-1); null when unrated. */
+    val stars: Int? get() {
+        first("RATING")?.trim()?.toDoubleOrNull()?.let { v ->
+            val s = if (v <= 5) v else v / 20
+            return kotlin.math.round(s).toInt().takeIf { it in 1..5 }
+        }
+        return first("FMPS_RATING")?.toDoubleOrNull()?.let { kotlin.math.round(it * 5).toInt().takeIf { s -> s in 1..5 } }
+    }
     val frontCover: Picture? get() = pictures.firstOrNull { it.frontCover } ?: pictures.firstOrNull()
 
     /**
