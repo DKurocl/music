@@ -77,7 +77,10 @@ data class AudioTags(
     /** The year of the recording, from the first date field that has one. */
     val year: Int? get() = listOf("ORIGINALDATE", "ORIGINALYEAR", "DATE", "YEAR").firstNotNullOfOrNull { n -> first(n)?.let(YEAR::find)?.value?.toIntOrNull() }
     val compilation: Boolean get() = first("COMPILATION")?.trim() == "1"
-    val lyrics: String? get() = first("LYRICS")
+    /** Timed lyrics win over plain ones: SYLT (as LRC) or an LRC-looking LYRICS tag. */
+    val lyrics: String? get() = first("SYNCEDLYRICS") ?: first("LYRICS")
+    /** An embedded cue sheet (FLAC CUESHEET comment), for one-file albums. */
+    val cueSheet: String? get() = first("CUESHEET")
     val frontCover: Picture? get() = pictures.firstOrNull { it.frontCover } ?: pictures.firstOrNull()
 
     /**

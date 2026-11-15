@@ -18,7 +18,7 @@ internal object FileMetadataCodec {
         put("albumGain", value.albumGainDb); put("albumPeak", value.albumPeak)
         put("delay", value.encoderDelay); put("padding", value.encoderPadding); put("lyrics", value.lyrics)
         put("mbTrack", value.musicBrainzTrackId); put("mbAlbum", value.musicBrainzAlbumId)
-        put("coverOffset", value.coverOffset); put("coverLength", value.coverLength); put("coverMime", value.coverMime)
+        put("coverOffset", value.coverOffset); put("coverLength", value.coverLength); put("coverMime", value.coverMime); put("cue", value.cueSheet)
     }.toString()
 
     fun decode(text: String): FileMetadata {
@@ -30,7 +30,7 @@ internal object FileMetadataCodec {
             trackGainDb = float("trackGain"), trackPeak = float("trackPeak"), albumGainDb = float("albumGain"), albumPeak = float("albumPeak"),
             encoderDelay = string("delay")?.toInt(), encoderPadding = string("padding")?.toInt(), lyrics = string("lyrics"),
             musicBrainzTrackId = string("mbTrack"), musicBrainzAlbumId = string("mbAlbum"),
-            coverOffset = string("coverOffset")?.toLong(), coverLength = string("coverLength")?.toInt(), coverMime = string("coverMime"),
+            coverOffset = string("coverOffset")?.toLong(), coverLength = string("coverLength")?.toInt(), coverMime = string("coverMime"), cueSheet = if (row.has("cue")) string("cue") else null,
         )
     }
 }

@@ -31,7 +31,8 @@ import ua.olex.music.playback.PlayerState
 internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, position: () -> Long,
     onSeek: (Long) -> Unit, onOffset: (Long) -> Unit, onDismiss: () -> Unit,
     source: String = "Embedded lyrics", note: String? = null, folders: List<String> = emptyList(),
-    onChooseFolder: (() -> Unit)? = null, onClearFolders: (() -> Unit)? = null, onReload: (() -> Unit)? = null) {
+    onChooseFolder: (() -> Unit)? = null, onClearFolders: (() -> Unit)? = null, onReload: (() -> Unit)? = null,
+    onFindOnline: (() -> Unit)? = null, onlineStatus: String? = null) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val list = rememberLazyListState()
     val dragging by list.interactionSource.collectIsDraggedAsState()
@@ -76,6 +77,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 onChooseFolder?.let { TextButton(onClick = it) { Text("Choose music folder") } }
                                 onReload?.let { TextButton(onClick = it) { Text("Reload") } }
+                                onFindOnline?.let { TextButton(onClick = it) { Text("Find online") } }
                                 if (folders.isNotEmpty()) onClearFolders?.let { TextButton(onClick = it) { Text("Clear folder access") } }
                             }
                             if (folders.isNotEmpty()) Text(folders.take(3).joinToString(" · ") + if (folders.size > 3) " · +${folders.size - 3} folders" else "",
@@ -83,6 +85,8 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                         }
                         Text(if (lyrics.lines.isEmpty()) "No local lyrics available." else if (timed) "Tap a line to seek" else "Plain lyrics · no timing",
                             style = MaterialTheme.typography.bodyMedium)
+                        onlineStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
+                        if (lyrics.lines.isEmpty() && onFindOnline != null) Button(onClick = onFindOnline) { Text("Find lyrics online") }
                         if (timed) FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = { onOffset((offsetMs - 200).coerceAtLeast(-60_000)) }) { Text("Later") }
                             TextButton(onClick = { onOffset(0) }) { Text("Offset ${offsetMs} ms") }

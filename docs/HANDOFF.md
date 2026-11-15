@@ -1,3 +1,27 @@
+# Functional batch: tags, lyrics online, CUE, library views (Claude, 2026-11-15)
+
+Branch `agent/m2-design`, written in one pass per the owner ("write it all, then check"). Status of
+each feature is in PRODUCT_SPEC.md. Added:
+
+- Tag editor (`ui/TagEditing.kt`, `core/tags/TagWriter.kt`): FLAC Vorbis comments and MP3 ID3v2.4,
+  one song (song actions, "Edit tags") or many (selection toolbar). One MediaStore write request per
+  batch; in place when the old padding fits, otherwise a temp copy that is read back before it
+  replaces the file. Cue tracks (`#` ids) are skipped. Covers, M4A, Ogg, rename by template: todo.
+- Online lyrics (`core/lyrics/OnlineLyrics.kt`, `KrcParser.kt`, `Json.kt`): Kugou KRC (word timing,
+  translation) first, then LRCLIB; length must match within 4 s; saved in `filesDir/lyrics`
+  (`ui/DownloadedLyrics.kt`), only on the owner's tap in the lyrics sheet. ID3 SYLT read as LRC.
+- Embedded CUESHEET (`core/model/CueSheet.kt`): one-file albums become tracks, played with Media3
+  clipping. Sidecar `.cue` is todo (needs the folder grant path used by sidecar lyrics).
+- Sleep timer "when this song ends", playback resumption from the system media card, USB DAC
+  bit-perfect switch (signal path sheet; unverified without a DAC).
+- Library: Years and Composers tabs, search shows matching artists and albums above songs, sorts by
+  date added, most played and rating (biggest first).
+- Not done on purpose: playlist duplicates (needs `playlist_entries` keyed by position, user.db v3
+  and position-based UI); per-output volume (Android already keeps it per device); widgets (next);
+  APE/WavPack/DSD (Media3 has no extractors; FFmpeg decoder alone is not enough).
+
+Verified locally: all unit and UI tests, `lintDebug`, `lintRelease`, `assembleRelease`. Not on the phone.
+
 # Design pass and merge of the Codex batch (Claude, 2026-11-15)
 
 Agents work in turns as their limits allow (owner): Codex ran out, Claude continues from

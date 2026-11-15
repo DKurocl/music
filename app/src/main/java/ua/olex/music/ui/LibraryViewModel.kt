@@ -84,11 +84,14 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private val lyricTrack = combine(library, playing.map { it.mediaId }.distinctUntilChanged()) { index, id ->
         id?.let { index?.byId?.get(ua.olex.music.model.TrackId(it)) }
     }.distinctUntilChanged()
-    val localLyrics = combine(lyricTrack, graph.musicFiles.revision) { track, revision -> track to revision }
+    val localLyrics = combine(lyricTrack, graph.musicFiles.revision, graph.downloadedLyrics.revision) { track, revision, _ -> track to revision }
         .mapLatest { (track, _) ->
             if (track == null) return@mapLatest LocalLyricsState()
             val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
-            val fallback = LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)
+            val downloaded = graph.downloadedLyrics.read(track)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
+            val fallback = if (downloaded != null && (embedded.lines.isEmpty() || downloaded.sync.ordinal >= embedded.sync.ordinal))
+                LocalLyricsState(downloaded, "Downloaded lyrics", mediaId = track.id.value)
+                else LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)
             try {
                 val sidecar = graph.musicFiles.lyrics(track.path)
                 if (sidecar.status == ua.olex.music.library.SidecarStatus.FOUND) {
@@ -107,6 +110,41 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
     fun reloadLyrics() = refreshLocalFiles(rescan = false)
+
+    /** The outcome of the last tag edit, shown once. */
+    var tagMessage by mutableStateOf<String?>(null); private set
+    fun dismissTagMessage() { tagMessage = null }
+
+    /** Writes the edited fields into the files (after Android's write permission), then rescans. */
+    fun writeTags(tracks: List<Track>, fields: Map<String, String>) {
+        val edits = tagEdits(fields)
+        if (edits.isEmpty()) return
+        tagMessage = "Writing tags…"
+        viewModelScope.launch {
+            val result = TagEditing.write(getApplication(), tracks.filter { '#' !in it.id.value }) { edits }
+            tagMessage = buildString {
+                append(if (result.written == 1) "Tags saved in 1 file." else "Tags saved in ${result.written} files.")
+                if (result.unsupported.isNotEmpty()) append(" ${result.unsupported.size} not supported yet (only FLAC and MP3).")
+                if (result.failed.isNotEmpty()) append(" ${result.failed.size} couldn't be written.")
+            }
+            refresh()
+        }
+    }
+
+    /** Null while idle; a short status while the internet lookup runs or after it ends. */
+    var onlineLyricsStatus by mutableStateOf<String?>(null); private set
+
+    /** Looks the playing song's lyrics up on the internet (Kugou word-timed, then LRCLIB) and keeps them. */
+    fun findLyricsOnline() {
+        val id = playing.value.mediaId ?: return
+        val track = library.value?.byId?.get(ua.olex.music.model.TrackId(id)) ?: return
+        onlineLyricsStatus = "Searching online…"
+        viewModelScope.launch {
+            onlineLyricsStatus = try { graph.downloadedLyrics.fetch(track)?.let { "Found on $it" } ?: "No lyrics found online for this song." }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { "Couldn't reach the lyrics services." }
+        }
+    }
     fun rescanManually() = refreshLocalFiles(rescan = true)
     private fun refreshLocalFiles(rescan: Boolean) { viewModelScope.launch {
         try { graph.musicFiles.refresh(); if (rescan) refresh() }
