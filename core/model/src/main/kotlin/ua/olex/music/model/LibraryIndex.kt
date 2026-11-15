@@ -10,7 +10,8 @@ data class MusicCollection(
     val subtitle: String?,
     val tracks: List<Track>,
 ) {
-    val artworkUri: String? = tracks.firstNotNullOfOrNull { it.artworkUri }
+    val artworkUri: String? = tracks.firstOrNull { it.artworkUri != null && (it.metadata?.coverLength ?: 0) > 0 }?.artworkUri
+        ?: tracks.firstNotNullOfOrNull { it.artworkUri }
     val durationMs: Long = tracks.sumOf { it.durationMs.coerceAtLeast(0) }
 }
 

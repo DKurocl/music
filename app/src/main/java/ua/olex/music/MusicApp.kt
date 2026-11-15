@@ -18,13 +18,15 @@ import ua.olex.music.user.UserRepository
 class AppGraph(context: Context) {
     private val app = context.applicationContext
     val musicFiles by lazy { ua.olex.music.library.LocalMusicFiles(app) }
-    val library by lazy { LibraryRepository(app, LibraryDatabase.open(app)) }
+    val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
+    val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles) }
     val player by lazy { PlayerConnection(app) }
     val output by lazy { OutputRouteMonitor(app) }
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
 }
 
-class MusicApp : Application(), PlaybackHistoryOwner {
+class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner {
+    override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
 }

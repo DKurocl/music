@@ -54,14 +54,18 @@ data class TrackEntity(
     val metadataJson: String? = null,
     val tagReaderVersion: Int = 0,
 ) {
-    fun toTrack() = Track(
+    fun toTrack(artworkPackage: String? = null, artworkRevision: Long = 0): Track {
+        val metadata = metadataJson?.let(FileMetadataCodec::decode)
+        return Track(
         id = TrackId(id), uri = uri, title = title, artist = artist, album = album, albumArtist = albumArtist,
-        durationMs = durationMs, trackNumber = trackNumber, discNumber = discNumber, year = year, artworkUri = artworkUri,
+        durationMs = durationMs, trackNumber = trackNumber, discNumber = discNumber, year = year, artworkUri = if (artworkPackage == null) artworkUri else ArtworkUris.create(artworkPackage,
+            ArtworkSource(uri, path, sizeBytes, modifiedAt, tagReaderVersion, metadata?.coverOffset, metadata?.coverLength, artworkUri), artworkRevision),
         format = codec?.let { AudioFormat(it, sampleRateHz, bitDepth, bitrateKbps, channels) }, path = path, genre = genre,
         artists = FileMetadataCodec.strings(artistsJson).ifEmpty { listOf(artist) },
         genres = FileMetadataCodec.strings(genresJson).ifEmpty { listOfNotNull(genre) },
-        metadata = metadataJson?.let(FileMetadataCodec::decode),
+        metadata = metadata,
     )
+    }
 }
 
 /** External-content FTS: Room's triggers index tracks without storing a second copy of their tags. */
