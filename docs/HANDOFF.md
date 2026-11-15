@@ -1,3 +1,25 @@
+# Current functional work: persisted library sorting (Codex, 2026-11-15)
+
+Active branch: `agent/m3-replaygain`. Source batch includes ReplayGain/parametric EQ/AutoEq, M3U8
+and now track sorting. Owner still requests functionality first: no new APK builds/releases or
+full CI per edit. Use [skip ci] source checkpoints, keep unverified UI out of main.
+
+Implemented sorting: Default, Title, Artist, Album, Year, Duration, File name and descending order.
+Preferences are independent for Songs, Search and album/artist/genre/folder track lists, retained
+across app restarts. Playlist order stays manual. Album grouping sort preserves disc/track order;
+unknown values stay last in either direction, ties are deterministic across input permutations.
+Keys are precomputed once per item. Non-default sorting runs off main. A source-identity/order guard
+hides pending old results; row taps, Play all and Add all use exactly the displayed ordered snapshot.
+Default collection ordering reuses the original list without asynchronous startup work.
+
+Verified: `python3 /workspace/toolchains/music-jvm/check.py` passed 107 tests, including 5 sort tests.
+The new Compose sorted-queue interaction test is authored but NOT compiled/run in AGP. No APK/full
+CI started. Existing focused M3U8 SQL evidence remains 9 passing tests; audio evidence 12 passing
+focused playback tests. No new phone measurements. Full UI/AGP/lint verification remains deferred.
+
+Next functional priorities: multiselect/batch actions; offline artwork/sidecar lyrics; queue drag.
+Before eventual main integration, run one coherent full verification batch when owner wants builds.
+
 # Current functional work: M3U8 playlists (Codex, 2026-11-15)
 
 Active branch remains `agent/m3-replaygain`, now carrying the coherent local-player functional batch.

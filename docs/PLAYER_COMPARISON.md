@@ -57,7 +57,7 @@ Quality labels are implementation descriptions, not numerical sound-quality scor
 | Listening history | Present | Present | Present: audible-start history; UI resolves recent distinct songs |
 | Play-count statistics | Present | Present | Partial: history events exist; no complete count/statistics interface |
 | Recently added | Present | Present | Missing dedicated persisted/import-date view |
-| Sort selection | Present | Present | Partial: deterministic defaults, no complete user-controlled sort choices |
+| Sort selection | Present | Present | Implemented on work branch: persistent per-scope track choices, off-main sorting, visible-order queues; pure tests pass, Compose checks pending |
 | Multiselect/batch actions | Present | Present | Missing |
 | Tag editing | Present | Verify supported fields/write operations | Missing; tag reader is not a writer |
 | CUE splitting | Present | Verify current support | Missing |
