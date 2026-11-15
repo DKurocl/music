@@ -149,11 +149,13 @@ fun MusicRoot(model: LibraryViewModel) {
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
     var openInLibrary by remember { mutableStateOf<Pair<String, String>?>(null) }
     var collectionTitle by remember { mutableStateOf<String?>(null) }
+    var openTile by remember { mutableStateOf<String?>(null) }
     var closeCollection by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val duplicates by model.duplicates.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val haptics = rememberHaptics()
-    fun go(to: Place) { if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    var focusSearch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    fun go(to: Place) { if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     BackHandler(page != null) { page = null }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
     fun openOf(track: Track, artist: Boolean) {
@@ -244,13 +246,16 @@ fun MusicRoot(model: LibraryViewModel) {
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
-                onSeeAll = { tab -> openInLibrary = tab to ""; place = Place.LIBRARY })
+                onSeeAll = { tab ->
+                    if (tab == "HISTORY" || tab == "SMART") { openTile = tab; place = Place.SEARCH }
+                    else { openInLibrary = tab to ""; place = Place.LIBRARY }
+                })
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
-                open = openInLibrary, onOpened = { openInLibrary = null },
-                onCollection = { collectionTitle = it }, closeCollection = closeCollection,
+                open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
+                onCollection = { collectionTitle = it }, closeCollection = closeCollection, focusSearch = focusSearch, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,

@@ -101,8 +101,15 @@ class DesignGalleryTest {
 
     @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     @Composable
-    private fun Images(content: @Composable () -> Unit) = CompositionLocalProvider(
-        androidx.compose.ui.platform.LocalInspectionMode provides true, coil3.compose.LocalAsyncImagePreviewHandler provides images, content = content)
+    private fun Images(content: @Composable () -> Unit) {
+        // A wallpaper-like palette (Material's baseline) instead of the emulator's grey default.
+        val dark = androidx.compose.foundation.isSystemInDarkTheme()
+        androidx.compose.material3.MaterialTheme(colorScheme = if (dark) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme(),
+            typography = MaterialTheme.typography, shapes = MaterialTheme.shapes) {
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
+                coil3.compose.LocalAsyncImagePreviewHandler provides images, content = content)
+        }
+    }
 
     @Composable
     private fun Shell(title: String, place: Place?, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
@@ -157,7 +164,7 @@ class DesignGalleryTest {
         compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
             Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 3, favourites = library.songs.take(5)) } }
         shot("01-home")
-        compose.onRoot().performTouchInput { swipeUp() }
+        compose.onAllNodes(hasScrollToIndexAction())[0].performScrollToIndex(5)
         shot("01b-home-lower")
     }
 
@@ -190,8 +197,10 @@ class DesignGalleryTest {
 
     @Test fun searchEmptyAndResults() {
         compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
-            recentSearches = listOf("radiohead", "teardrop", "moon safari")) } }
-        shot("07-search-empty")
+            recentSearches = listOf("radiohead", "teardrop")) } }
+        shot("07-search-browse")
+        compose.onNodeWithText("Genres").performClick()
+        shot("07b-search-genres")
     }
 
     @Test fun searchResults() {
