@@ -85,6 +85,25 @@ internal class YouTubeMusic {
         found.firstOrNull { sameSong(it, track) } ?: found.firstOrNull { TextFold.fold(it.artist).contains(TextFold.fold(track.artist.substringBefore(",").trim())) }
     }
 
+    /** A mood of YouTube Music's home ("Energize", "Sad", "Sleep"): its label and the filter that opens it. */
+    data class Mood(val label: String, val params: String?)
+    /** What a mood offers: curated playlists, and songs when the page lists any. */
+    data class MoodPage(val playlists: List<OnlineAlbum>, val songs: List<Track>)
+
+    @Volatile private var moodsCache: List<Mood>? = null
+
+    /** The moods as YouTube Music's home lists them; the usual set (without filters) when it can't be reached. */
+    suspend fun moods(): List<Mood> = moodsCache ?: withContext(Dispatchers.IO) {
+        (runCatching { post("browse", """"browseId":"FEmusic_home"""")?.let(::parseMoods) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@withContext DEFAULT_MOODS)
+            .also { moodsCache = it }
+    }
+
+    /** One mood's page: YouTube Music's home filtered by it. */
+    suspend fun mood(mood: Mood): MoodPage? = withContext(Dispatchers.IO) {
+        val params = mood.params ?: return@withContext null
+        post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage)
+    }
+
     /** One call to YouTube Music, as its web app makes it. */
     private fun post(endpoint: String, fields: String): String? {
         val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}},$fields}"""
@@ -248,6 +267,32 @@ internal class YouTubeMusic {
             if (split != null) return split.groupValues[1].trim() to split.groupValues[2].trim()
             val artist = channel.replace(Regex("""\s*-\s*Topic$|VEVO$|\s*\(official\)$|\s*Official$""", RegexOption.IGNORE_CASE), "").trim()
             return artist to clean
+        }
+
+        /** The usual moods, in YouTube Music's order, for when its home can't be read. */
+        val DEFAULT_MOODS = listOf("Energize", "Feel good", "Relax", "Party", "Workout", "Commute", "Romance", "Sad", "Focus", "Sleep").map { Mood(it, null) }
+
+        /** The home's mood chips (Podcasts left out: this is a music player). */
+        fun parseMoods(json: String): List<Mood> {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
+            return collect(root, "chipCloudChipRenderer").mapNotNull { chip ->
+                val label = text(chip["text"]).ifEmpty { return@mapNotNull null }
+                if (label.equals("Podcasts", true)) return@mapNotNull null
+                val params = Regex(""""params"\s*:\s*"([^"]+)"""").find(dump(chip["navigationEndpoint"]))?.groupValues?.get(1) ?: return@mapNotNull null
+                Mood(label, params)
+            }.distinctBy { it.label }
+        }
+
+        /** A mood page: every playlist card in its shelves, and any song rows. */
+        fun parseMoodPage(json: String): MoodPage {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return MoodPage(emptyList(), emptyList())
+            val playlists = collect(root, "musicTwoRowItemRenderer").mapNotNull { card ->
+                val nav = dump(card["navigationEndpoint"])
+                if (!nav.contains("MUSIC_PAGE_TYPE_PLAYLIST")) return@mapNotNull null
+                val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return@mapNotNull null
+                OnlineAlbum(id, text(card["title"]), text(card["subtitle"]).ifEmpty { null }, biggestImage(card["thumbnailRenderer"]))
+            }.distinctBy { it.id }
+            return MoodPage(playlists, parseSearch(json, keepOrder = true))
         }
 
         private fun dump(o: Any?): String = when (o) {

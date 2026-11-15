@@ -165,6 +165,11 @@ class DesignGalleryTest {
         shot("14c-downloads")
     }
 
+    @Test fun moodPage() {
+        compose.setContent { Shell("Home", Place.HOME) { pad -> MoodPage(OnlineTarget.Mood(YouTubeMusic.Mood("Sleep", null)), null, pad) {} } }
+        shot("41-mood")
+    }
+
     @Test fun songActions() {
         val t = library.songs[3]
         compose.setContent { Shell("Playlists", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
@@ -316,7 +321,7 @@ class DesignGalleryTest {
 
     @Test fun home() {
         compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 3, favourites = library.songs.take(5)) } }
+            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 3, favourites = library.songs.take(5), moods = YouTubeMusic.DEFAULT_MOODS) } }
         shot("01-home")
         compose.onAllNodes(hasScrollToIndexAction())[0].performScrollToIndex(5)
         shot("01b-home-lower")
@@ -398,7 +403,7 @@ class DesignGalleryTest {
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun homeDark() {
         compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 0) } }
+            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 0, moods = YouTubeMusic.DEFAULT_MOODS) } }
         shot("13-home-dark")
     }
 }
