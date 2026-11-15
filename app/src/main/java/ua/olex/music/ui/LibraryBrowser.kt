@@ -431,6 +431,8 @@ internal fun LibraryBrowser(
                                     albumArtist = selected.name) { onPlay(shown, index) }
                             }
                         }
+                        // What else the artist has on YouTube Music, beyond the owner's files.
+                        item(key = "artist-online") { MoreOnYouTubeMusic(selected.name, library, currentId) }
                     }
                 }
                 selected != null -> {
