@@ -65,6 +65,8 @@ dependencies {
     implementation(project(":core:library"))
     implementation(project(":core:user"))
     implementation(project(":core:playback"))
+    // Moving covers (a muted looping video beside the song) are drawn by their own small player.
+    implementation(libs.media3.exoplayer)
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.material3)
     implementation(libs.activity.compose)
