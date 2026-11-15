@@ -23,7 +23,8 @@ class AppGraph(context: Context) {
     val artistImages by lazy { ua.olex.music.ui.ArtistImages(app) }
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
-    internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic() }
+    val youTubeAccount by lazy { ua.olex.music.ui.YouTubeAccount(app) }
+    internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic { youTubeAccount.headers() } }
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
     val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {} }
     private val onlinePrefs by lazy { app.getSharedPreferences("online", Context.MODE_PRIVATE) }
