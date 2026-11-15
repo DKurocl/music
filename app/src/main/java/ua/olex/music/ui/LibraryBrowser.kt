@@ -54,7 +54,7 @@ import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.Track
 
 private enum class LibraryTab(val title: String) {
-    SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres")
+    SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres")
 }
 
 /** Browse one shared library snapshot or cancellable FTS results; taps play exactly the visible queue. */
@@ -71,6 +71,9 @@ internal fun LibraryBrowser(
     onRescan: () -> Unit,
     onRetrySearch: () -> Unit = {},
     onShuffle: (List<Track>) -> Unit = {},
+    smart: List<SmartPlaylistUi> = emptyList(),
+    onSaveSmart: (ua.olex.music.model.SmartPlaylist) -> Unit = {},
+    onDeleteSmart: (Long) -> Unit = {},
     personal: PersonalLibraryState = PersonalLibraryState(),
     personalActions: PersonalLibraryActions? = null,
     onTrackActions: (Track) -> Unit = {},
@@ -176,7 +179,10 @@ internal fun LibraryBrowser(
             onClose = { picking = false; picked = TrackSelection() }, onPlay = { batch { onPlay(it, 0) } },
             onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
             onPlaylist = { batch(onAddToPlaylist) })
-        if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
+        if (!searching && tab == LibraryTab.SMART) {
+            SmartPlaylistBrowser(smart, currentId, Modifier.weight(1f), onPlay = onPlay, onShuffle = onShuffle, onTrackActions = onTrackActions,
+                onSave = onSaveSmart, onDelete = onDeleteSmart)
+        } else if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
             PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library)
         } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
