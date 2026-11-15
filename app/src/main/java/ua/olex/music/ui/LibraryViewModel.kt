@@ -83,6 +83,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     var userError by mutableStateOf<String?>(null); private set
     val personalActions = PersonalLibraryActions(
         create = { name, tracks -> editUserData { createPlaylist(name, tracks) } },
+        importPlaylist = { name, songs -> editUserData { importPlaylist(name, songs) } },
         rename = { id, name -> editUserData { renamePlaylist(id, name) } },
         delete = { id -> editUserData { deletePlaylist(id) } },
         add = { id, tracks -> editUserData { addToPlaylist(id, tracks) } },

@@ -35,6 +35,17 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         id
     }
 
+    /** Imports complete durable references atomically, retaining unavailable files and first occurrence order. */
+    suspend fun importPlaylist(name: String, songs: List<SavedSong>): Long = database.withTransaction {
+        require(songs.size <= ua.olex.music.model.M3uPlaylist.MAX_ENTRIES)
+        val ordered = songs.distinctBy { it.id }
+        require(ordered.isNotEmpty() && ordered.all { it.id.isNotBlank() && it.path.isNotBlank() })
+        val id = dao.createPlaylist(PlaylistEntity(name = validName(name), createdAt = now()))
+        ordered.chunked(500).forEach { dao.saveSongs(it.map(UserSongEntity::from)) }
+        ordered.mapIndexed { position, song -> PlaylistEntryEntity(id, song.id, position) }.chunked(500).forEach { dao.insertEntries(it) }
+        id
+    }
+
     suspend fun renamePlaylist(id: Long, name: String) = dao.renamePlaylist(id, validName(name))
     suspend fun deletePlaylist(id: Long) = dao.deletePlaylist(id)
 

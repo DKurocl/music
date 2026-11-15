@@ -98,7 +98,7 @@ internal fun LibraryBrowser(
             }
         }
         if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
-            PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions)
+            PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library)
         } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
             when {

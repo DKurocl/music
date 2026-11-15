@@ -1,3 +1,46 @@
+# Current functional work: M3U8 playlists (Codex, 2026-11-15)
+
+Active branch remains `agent/m3-replaygain`, now carrying the coherent local-player functional batch.
+Owner requests functionality first with no unnecessary APK builds/releases. Preserve this instruction:
+commit/push source checkpoints with [skip ci], keep full AGP/UI gates deferred, do not merge to main.
+No environment configuration or publication action is needed.
+
+Implemented M3U8 import/export in code:
+- UTF-8-only, bounded 8 MB / 20000-entry codec, EXTINF/PLAYLIST, BOM and CRLF, local file URIs and
+  raw paths. HLS and unsupported URI schemes are reported/rejected without network access.
+- Exact path lookup first; relocated matches require a unique suffix of at least two segments.
+  Filename-only guessing is excluded. Missing/ambiguous paths become durable saved references that
+  resolve when a matching file becomes available. Normal saved-song identity rules remain unchanged.
+- Relative ../ paths require a known playlist folder. Android primary-storage document IDs supply
+  it where available; the preview has an editable folder field with explicit root choice (.).
+- Preview lists exact/relocated/missing/ambiguous/unsupported/repeated results. This schema stores
+  each file once per playlist, so repeats are explicitly shown as skipped. Repeated occurrences
+  still need a future user.db migration; do not claim full playlist parity.
+- One import transaction saves header/references/positions, including unavailable songs, in batches.
+  No user.db schema/lockfile change. No saved favourite/history/offset deletion.
+- Export captures a selected playlist, includes unavailable references and uses absolute file URIs
+  independent of destination folder. URI encoding preserves Unicode byte identity, including NFD;
+  java.net.URI.toASCIIString would normalize it and was removed after the test caught that error.
+- System OpenDocument/CreateDocument controls, cancellable preview resolution off main, strict UTF-8
+  input, bounded IO, per-line issues, meaningful errors, duplicate-click guard and rotation fallback
+  for the selected export playlist. Source audio and existing playlists are never rewritten.
+
+Verification:
+`python3 /workspace/toolchains/music-jvm/check.py`: 102 tests, zero failures, including 12 M3U8
+cases and a 10000-entry correctness case. This is not a target-device timing benchmark.
+Focused user repository harness from /workspace/toolchains/music-user-check:
+`GRADLE_USER_HOME=/workspace/.gradle-music /workspace/toolchains/gradle-9.9.1/bin/gradle test --tests ua.olex.music.user.UserRepositoryTest --no-daemon --console=plain`
+passed 9 tests, zero failures/errors/skips. Actual UserRepository, Room-generated DAO/database and
+model sources compiled; Robolectric exercised reopen, batched imports, order, missing references,
+validation/rollback and preservation of favourites. The harness explicitly includes pinned SQLite
+Android classes because the standalone JVM variant selection omits them. No SDK/APK build occurred.
+New Compose import/export/picker interaction test was authored but NOT compiled/run under AGP.
+The previous focused 12 playback tests remain the audio checkpoint evidence; no extra full CI run.
+`git diff --check` passed. Full Compose/AGP/lint/APK and physical Pixel checks are deferred by owner.
+
+Next functional priorities: library sorting and multiselect/batch actions; offline sidecar lyrics
+and artwork; queue drag editing. Before eventual integration run one deferred coherent full check.
+
 # Current functional work (Codex, 2026-11-15)
 
 Active branch: `agent/m3-replaygain`. Owner now requests functionality first and no unnecessary

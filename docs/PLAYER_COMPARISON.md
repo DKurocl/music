@@ -50,7 +50,7 @@ Quality labels are implementation descriptions, not numerical sound-quality scor
 | Manual playlists | Present | Present | Present: durable transactional storage, add/remove/reorder/rename |
 | Missing playlist files retained | Verify current behavior | Verify current behavior | Present: durable song records survive disappearance from library |
 | Duplicate playlist occurrences | Verify current behavior | Verify current behavior | Missing: playlist additions deduplicate saved song identity; queue occurrences are separate |
-| M3U/M3U8 interoperability | Present | Present | Missing import/export and unresolved-path reporting |
+| M3U/M3U8 interoperability | Present | Present | Implemented on work branch: UTF-8 import/export, per-line preview, unique path resolution and missing-file retention; pure/Room tests pass, Android picker/UI pending |
 | Smart playlists | Version-dependent category/rule features | Present | Missing rule engine and UI |
 | Favourites | Present through ratings/library features | Present | Present |
 | Star ratings | Present | Present | Missing |
