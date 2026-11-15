@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -43,6 +44,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.MusicCollection
@@ -126,16 +129,36 @@ internal fun LibraryBrowser(
     }
 
     Column(Modifier.fillMaxSize().padding(insets)) {
-        OutlinedTextField(
-            value = query, onValueChange = onQueryChange,
-            label = { Text("Search your music") }, singleLine = true,
-            trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { onQueryChange("") }) { Text("Clear") } },
+        // A search pill, as in Google's apps, and the library's sections as chips below it.
+        androidx.compose.material3.TextField(
+            value = query, onValueChange = onQueryChange, singleLine = true,
+            placeholder = { Text("Search your music") },
+            leadingIcon = { Symbol(Glyph.SEARCH, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            trailingIcon = {
+                if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { onQueryChange("") },
+                    modifier = Modifier.semantics { contentDescription = "Clear" }) { Symbol(Glyph.CLOSE) }
+            },
+            shape = androidx.compose.foundation.shape.CircleShape,
+            colors = androidx.compose.material3.TextFieldDefaults.colors(
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+            ),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
         )
         if (!searching) {
-            PrimaryScrollableTabRow(selectedTabIndex = tab.ordinal, edgePadding = 16.dp) {
-                LibraryTab.entries.forEach { item ->
-                    Tab(selected = item == tab, onClick = { tabName = item.name; selectedId = null }, text = { Text(item.title) })
+            androidx.compose.foundation.lazy.LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 4.dp),
+            ) {
+                items(LibraryTab.entries.size) { i ->
+                    val item = LibraryTab.entries[i]
+                    androidx.compose.material3.FilterChip(
+                        selected = item == tab, onClick = { tabName = item.name; selectedId = null },
+                        label = { Text(item.title) },
+                        leadingIcon = if (item == tab) ({ Symbol(Glyph.CHECK, size = 18.dp) }) else null,
+                    )
                 }
             }
         }
@@ -216,15 +239,30 @@ internal fun LibraryBrowser(
 
 @Composable
 private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true) {
-    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextButton(onClick = onBack) { Text("Back to collections") }
-        Text(collection.name, style = MaterialTheme.typography.headlineMedium)
-        collection.subtitle?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            Button(enabled = enabled, onClick = onPlay) { Text("Play all") }
-            Text(songCount(collection.tracks.size), style = MaterialTheme.typography.bodyMedium)
+    val cs = MaterialTheme.colorScheme
+    val minutes = collection.tracks.sumOf { it.durationMs } / 60_000
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Row(Modifier.fillMaxWidth()) {
+            androidx.compose.material3.IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
         }
-        TextButton(enabled = enabled, onClick = onAdd) { Text("Add all to playlist") }
+        Artwork(collection.artworkUri, Modifier.size(220.dp), 28.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
+        androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
+        Text(collection.name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        collection.subtitle?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        Text(
+            listOfNotNull(songCount(collection.tracks.size), if (minutes > 0) "$minutes min" else null,
+                collection.tracks.mapNotNull { it.format?.label }.distinct().singleOrNull()).joinToString(" · "),
+            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(enabled = enabled, onClick = onPlay, modifier = Modifier.height(52.dp)) {
+                Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play all")
+            }
+            androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onAdd,
+                modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { Symbol(Glyph.PLAYLIST_ADD) }
+        }
     }
 }
 
