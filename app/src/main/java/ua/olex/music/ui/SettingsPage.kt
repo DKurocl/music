@@ -77,6 +77,22 @@ internal fun SettingsPage(
         item { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
             lockLyrics = it; LockScreenLyrics.set(context, it) } }
 
+        // Moving covers from Apple Music, with the owner's own MusicKit key.
+        item { Group("Moving covers") }
+        item {
+            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
+            var key by remember { mutableStateOf(apple.key) }
+            var editing by remember { mutableStateOf(false) }
+            Row(Glyph.MOTION, "Apple Music moving covers", key?.let { "On · key ${it.keyId}. Each album is fetched once and kept as one file" }
+                ?: "Add your MusicKit key (Apple Developer: Team ID, Key ID and the .p8 file)", first = true) { editing = true }
+            if (editing) AppleKeyDialog(key, onDismiss = { editing = false }) { new -> apple.key = new; key = new; editing = false }
+        }
+        item {
+            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
+            var wifi by remember { mutableStateOf(apple.wifiOnly) }
+            Toggle(Glyph.SPEAKER, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
+        }
+
         // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
         item { Group("Storage") }
         item {
@@ -133,4 +149,41 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
 private fun Toggle(glyph: Glyph, title: String, subtitle: String, on: Boolean, first: Boolean = false, last: Boolean = false, onChange: (Boolean) -> Unit) {
     val haptics = rememberHaptics()
     Row(glyph, title, subtitle, first, last, trailing = { Switch(on, { haptics.toggle(it); onChange(it) }) }) { haptics.toggle(!on); onChange(!on) }
+}
+
+/** Team ID, Key ID and the .p8 private key of a MusicKit key; kept only in the app's private storage. */
+@Composable
+private fun AppleKeyDialog(current: AppleMotion.Key?, onDismiss: () -> Unit, onSave: (AppleMotion.Key?) -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var team by remember { mutableStateOf(current?.teamId.orEmpty()) }
+    var kid by remember { mutableStateOf(current?.keyId.orEmpty()) }
+    var p8 by remember { mutableStateOf(current?.p8) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val text = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readNBytes(4_096) }?.toString(Charsets.UTF_8) }.getOrNull()
+            if (text != null && text.contains("PRIVATE KEY")) { p8 = text; error = null
+                // The file is named AuthKey_<KEYID>.p8: the Key ID comes with it.
+                if (kid.isBlank()) Regex("AuthKey_([A-Z0-9]{10})").find(uri.lastPathSegment.orEmpty())?.let { kid = it.groupValues[1] }
+            } else error = "That is not a .p8 key file"
+        }
+    }
+    AppDialog(onDismissRequest = onDismiss, title = { Text("MusicKit key") },
+        text = {
+            androidx.compose.foundation.layout.Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                Text("developer.apple.com → Certificates, Identifiers & Profiles → Keys → + → MusicKit. Download the .p8 once.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                androidx.compose.material3.OutlinedTextField(team, { team = it.uppercase() }, label = { Text("Team ID") }, singleLine = true)
+                androidx.compose.material3.OutlinedTextField(kid, { kid = it.uppercase() }, label = { Text("Key ID") }, singleLine = true)
+                androidx.compose.material3.FilledTonalButton(onClick = { pick.launch(arrayOf("*/*")) }) { Text(if (p8 == null) "Choose the .p8 file" else "Key file loaded · change") }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = team.length == 10 && kid.length == 10 && p8 != null, onClick = {
+                val key = AppleMotion.Key(team, kid, p8!!)
+                if (runCatching { AppleMotion.sign(key, System.currentTimeMillis() / 1000) }.isSuccess) onSave(key) else error = "The key could not sign; check the file"
+            }) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = { if (current != null) onSave(null) else onDismiss() }) { Text(if (current != null) "Remove key" else "Cancel") } })
 }

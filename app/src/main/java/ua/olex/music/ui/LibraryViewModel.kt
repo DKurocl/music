@@ -119,11 +119,25 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** A moving cover for the playing song, when its folder has one. */
     val motionCover = combine(lyricTrack, graph.musicFiles.revision, graph.motionCovers.revision) { track, _, _ -> track }
         .mapLatest { track ->
-            // The album's attached file first, then a cover.mp4 beside the songs.
+            // The album's own file first, then a cover.mp4 beside the songs; with neither, Apple
+            // Music is asked once for the album (with the owner's key, on Wi-Fi unless allowed).
             track?.let { graph.motionCovers.file(it) }?.let { android.net.Uri.fromFile(it).toString() }
                 ?: runCatching { graph.musicFiles.motionCover(track?.path) }.getOrNull()
+                ?: run { if (track != null) fetchAppleMotion(track); null }
         }
         .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    private fun fetchAppleMotion(track: ua.olex.music.model.Track) {
+        val apple = graph.appleMotion
+        if (apple.key == null || !apple.enabled) return
+        val net = getApplication<android.app.Application>().getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = net?.getNetworkCapabilities(net.activeNetwork) ?: return
+        if (apple.wifiOnly && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val bytes = runCatching { apple.find(track) }.getOrNull() ?: return@launch
+            graph.motionCovers.attachBytes(track, bytes)
+        }
+    }
 
     fun reloadLyrics() = refreshLocalFiles(rescan = false)
 
