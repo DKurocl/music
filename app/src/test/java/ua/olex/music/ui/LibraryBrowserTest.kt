@@ -149,7 +149,7 @@ class LibraryBrowserTest {
         }
         compose.onNodeWithText("Search your music").performTextInput("Singer")
         compose.onNodeWithText("Searching…").assertIsDisplayed()
-        compose.onNodeWithText("Clear").performClick()
+        compose.onNodeWithContentDescription("Clear").performClick()
         compose.onNodeWithText("Z Opening").assertIsDisplayed()
         compose.onNodeWithText("A Finale").assertIsDisplayed()
     }
