@@ -57,6 +57,7 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
 import ua.olex.music.model.LibraryIndex
@@ -105,6 +106,10 @@ internal fun LibraryBrowser(
     recentSearches: List<String> = emptyList(), onSearchUsed: (String) -> Unit = {}, onClearRecent: () -> Unit = {},
     /** The open collection's name once its header has scrolled away (null when none is open), for the top bar. */
     onCollection: (String?) -> Unit = {}, closeCollection: Int = 0,
+    /** Bumped when the Search tab is tapped again: back to the tiles and the field focused (as Google Play does). */
+    focusSearch: Int = 0,
+    /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
+    openTile: String? = null,
 ) {
     val startTab = LocalStartTab.current
     var tabName by rememberSaveable { mutableStateOf(startTab) }
@@ -155,6 +160,7 @@ internal fun LibraryBrowser(
         else -> null
     }
     var filter by remember { mutableStateOf(ua.olex.music.model.TrackFilter()) }
+    var browsing by rememberSaveable { mutableStateOf<String?>(null) }
     val filterStats = if (filter.unplayed || filter.minRating > 0) stats else null
     val unsorted = remember(raw, filter, filterStats) { raw?.let { list -> filter.apply(list) { stats[it.key.value] } } }
     val order = sortOrders[sortScope] ?: TrackSortOrder()
@@ -178,6 +184,8 @@ internal fun LibraryBrowser(
         if (searching) onQueryChange("") else selectedId = null
     }
     BackHandler(picking) { picking = false; picked = TrackSelection() }
+    LaunchedEffect(openTile) { openTile?.let { t -> runCatching { BrowseTile.valueOf(t) }.getOrNull()?.let { tile -> browsing = tile.name; tabName = tile.tab.name; filter = tile.filter; onOpened() } } }
+    BackHandler(mode == BrowserMode.SEARCH && browsing != null && selected == null && !searching) { browsing = null; filter = ua.olex.music.model.TrackFilter() }
     missingFavourite?.let { id ->
         androidx.compose.material3.AlertDialog(onDismissRequest = { missingFavourite = null }, title = { Text("Remove unavailable favourite?") },
             text = { Text("The saved entry will be removed. Your music files are not changed.") },
@@ -188,7 +196,10 @@ internal fun LibraryBrowser(
     Column(Modifier.fillMaxSize().padding(insets)) {
         // A search pill, as in Google's apps, and the library's sections as chips below it.
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-        if (mode == BrowserMode.SEARCH) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+        LaunchedEffect(focusSearch) { if (focusSearch > 0) { browsing = null; selectedId = null; filter = ua.olex.music.model.TrackFilter(); runCatching { focus.requestFocus() } } }
+        val voice = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
+            r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(onQueryChange)
+        }
         if (mode != BrowserMode.LIBRARY) androidx.compose.material3.TextField(
             value = query, onValueChange = onQueryChange, singleLine = true,
             placeholder = { Text("Search your music") },
@@ -196,6 +207,11 @@ internal fun LibraryBrowser(
             trailingIcon = {
                 if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { onQueryChange("") },
                     modifier = Modifier.semantics { contentDescription = "Clear" }) { Symbol(Glyph.CLOSE) }
+                else if (mode == BrowserMode.SEARCH) androidx.compose.material3.IconButton(onClick = {
+                    runCatching { voice.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                        .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say a song, artist or album")) }
+                }, modifier = Modifier.semantics { contentDescription = "Search by voice" }) { Symbol(Glyph.MIC) }
             },
             shape = androidx.compose.foundation.shape.CircleShape,
             colors = androidx.compose.material3.TextFieldDefaults.colors(
@@ -206,21 +222,23 @@ internal fun LibraryBrowser(
             ),
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).focusRequester(focus),
         )
-        if (mode == BrowserMode.SEARCH && !searching && selected == null) {
-            Column(Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-                RecentSearches(recentSearches, onPick = onQueryChange, onClear = onClearRecent)
-                if (library.genres.size > 1) {
-                    Text("Genres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp))
-                    androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        library.genres.sortedByDescending { it.tracks.size }.take(16).forEach { g ->
-                            androidx.compose.material3.AssistChip(onClick = { tabName = LibraryTab.GENRES.name; selectedId = g.id }, label = { Text(g.name) })
-                        }
-                    }
-                }
+        if (mode == BrowserMode.SEARCH && !searching && selected == null && browsing == null) {
+            BrowseTiles(library, recentSearches, onPickRecent = onQueryChange, onClearRecent = onClearRecent) { tile ->
+                browsing = tile.name; tabName = tile.tab.name; filter = tile.filter
             }
             return@Column
         }
-        if (!searching && mode != BrowserMode.SEARCH && selected == null) {
+        // Inside a tile: its name with a way back to the tiles.
+        if (mode == BrowserMode.SEARCH && !searching && selected == null) browsing?.let { name ->
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                androidx.compose.material3.IconButton(onClick = { browsing = null; filter = ua.olex.music.model.TrackFilter() },
+                    modifier = Modifier.semantics { contentDescription = "Back to browse" }) { Symbol(Glyph.BACK) }
+                Text(BrowseTile.valueOf(name).title, style = MaterialTheme.typography.titleLarge)
+            }
+        }
+        // Library: the four main kinds as a connected button group (M3E); the rest live in Search's tiles.
+        if (!searching && mode == BrowserMode.LIBRARY && selected == null) KindSelector(tab) { tabName = it.name; selectedId = null }
+        if (!searching && mode == BrowserMode.ALL && selected == null) {
             androidx.compose.foundation.lazy.LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.padding(bottom = 4.dp),
@@ -237,7 +255,7 @@ internal fun LibraryBrowser(
         }
         // An album keeps its own order and a clean page; long press still selects.
         val tools = unsorted != null && !(selected != null && tab == LibraryTab.ALBUMS) && !picking
-        if (tools && mode != BrowserMode.SEARCH) {
+        if (tools && (mode != BrowserMode.SEARCH || (browsing != null && !searching))) {
             // One row: sort, then filters (song lists only), then select at the end.
             val sortChip: @Composable () -> Unit = { LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) } }
             val selectButton: @Composable () -> Unit = {
@@ -672,3 +690,74 @@ private enum class CollectionSort(val title: String) { NAME("A–Z"), NEWEST("Ne
 @Composable
 private fun SearchHeading(text: String) = Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp))
+
+/** Search's browse tiles: kinds of the library that are not in Library's four, and quick filters. */
+private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: LibraryTab, val filter: ua.olex.music.model.TrackFilter = ua.olex.music.model.TrackFilter()) {
+    GENRES("Genres", Glyph.GENRE, LibraryTab.GENRES), YEARS("Years", Glyph.CALENDAR, LibraryTab.YEARS),
+    FAVOURITES("Favourites", Glyph.FAVOURITE, LibraryTab.FAVOURITES), SMART("Smart playlists", Glyph.SMART, LibraryTab.SMART),
+    HISTORY("History", Glyph.HISTORY, LibraryTab.HISTORY), FOLDERS("Folders", Glyph.FOLDER, LibraryTab.FOLDERS),
+    COMPOSERS("Composers", Glyph.PIANO, LibraryTab.COMPOSERS),
+    LOSSLESS("Lossless", Glyph.WAVE, LibraryTab.SONGS, ua.olex.music.model.TrackFilter(lossless = true)),
+    HI_RES("Hi-res", Glyph.HI_RES, LibraryTab.SONGS, ua.olex.music.model.TrackFilter(hiRes = true)),
+    UNPLAYED("Never played", Glyph.UNPLAYED, LibraryTab.SONGS, ua.olex.music.model.TrackFilter(unplayed = true)),
+}
+
+/**
+ * The Search place before typing, as Google Play's: tiles in two columns (name left, a tonal icon
+ * right), recent searches above when there are any. Icon colours rotate through the wallpaper's
+ * three accent families, so the grid is lively without inventing colours.
+ */
+@Composable
+private fun BrowseTiles(library: LibraryIndex, recent: List<String>, onPickRecent: (String) -> Unit, onClearRecent: () -> Unit, onTile: (BrowseTile) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val tiles = BrowseTile.entries.filter { t ->
+        when (t) { BrowseTile.COMPOSERS -> library.composers.isNotEmpty(); BrowseTile.YEARS -> library.years.size > 1; BrowseTile.GENRES -> library.genres.size > 1
+            BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }; BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }; else -> true }
+    }
+    val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer, cs.secondaryContainer to cs.onSecondaryContainer)
+    androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (recent.isNotEmpty()) item { RecentSearches(recent.take(4), onPick = onPickRecent, onClear = onClearRecent) }
+        item { Text("Browse", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)) }
+        items(tiles.chunked(2).size) { r ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                tiles.chunked(2)[r].forEachIndexed { c, tile ->
+                    val (bg, fg) = accents[(r * 2 + c) % accents.size]
+                    androidx.compose.material3.Surface(onClick = { haptics.tick(); onTile(tile) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+                        color = cs.surfaceContainer, modifier = Modifier.weight(1f).height(72.dp)) {
+                        Row(Modifier.padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(tile.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, modifier = Modifier.weight(1f))
+                            Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {
+                                Symbol(tile.glyph, color = fg, filled = true)
+                            }
+                        }
+                    }
+                }
+                if (tiles.chunked(2)[r].size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** Library's kinds as a connected M3E button group: four equal targets, the selected one filled. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun KindSelector(tab: LibraryTab, onSelect: (LibraryTab) -> Unit) {
+    val haptics = rememberHaptics()
+    val kinds = listOf(LibraryTab.ALBUMS, LibraryTab.ARTISTS, LibraryTab.SONGS, LibraryTab.PLAYLISTS)
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
+        kinds.forEachIndexed { i, kind ->
+            androidx.compose.material3.ToggleButton(
+                checked = tab == kind, onCheckedChange = { if (tab != kind) { haptics.tick(); onSelect(kind) } },
+                shapes = when (i) {
+                    0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    kinds.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes()
+                },
+                contentPadding = PaddingValues(horizontal = 4.dp),
+                modifier = Modifier.weight(1f).semantics { contentDescription = kind.title },
+            ) { Text(kind.title, maxLines = 1, style = MaterialTheme.typography.labelLarge) }
+        }
+    }
+}

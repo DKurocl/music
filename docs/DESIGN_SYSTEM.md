@@ -34,24 +34,32 @@ YouTube Music, LastWave, PixelPlayer; taken further where they are vague. Review
 - **Pages over Home** (Settings, Your listening, Duplicates) have a back arrow and keep the
   navigation bar, so the player stays one tap away.
 
-## Home
+## Home (expressive)
 
-- **Greeting as title** ("Good evening"): personal, and replaces a redundant "Home" label.
-- **Three starts — Shuffle, Liked, New**: the three things people start most. A row of three is
-  quicker to scan than one huge button and leaves room for music below. Shuffle is filled (most
-  common); the others tonal. Liked/New are disabled, not hidden, when empty, so the row never jumps.
-- **Played lately / Your artists / Added lately / Smart playlists**: horizontal rows so more fits
-  above the fold; each heading is a full-width tap target with a chevron that opens the whole list.
-- **Album cards**: tap opens the album; the round play button on the cover plays it directly —
-  two intents, two targets, no long press needed.
-- **Artist circles**: round, unlike albums, so artists and albums never look alike.
-- **Cards — Your listening, Duplicates**: Duplicates only when there is something to tidy.
-- **Most played**: a plain list at the bottom, for quick access to favourites by habit.
+Why it changed: a list of grey rows read as plain Material 3. Material 3 Expressive asks for shape,
+colour, scale and motion with intent; Home is where that pays most, because it sets the mood.
+
+- **Greeting as title** ("Good evening").
+- **Bento** (one large, two small): the album to jump back into fills the large card (cover edge to
+  edge, name in white on a soft shade, a play button in the 9-sided cookie shape); beside it
+  **Shuffle all** (tertiary container, icon in the Sunny shape) and **Liked** (secondary container,
+  icon in the Heart shape). Different sizes say what matters most; colours come from the wallpaper's
+  three accent families.
+- **Play what's new**: a full-width pill below the bento, the third most common start.
+- **Your artists**: each photo in a different M3E shape (cookie, clover, arch, burst...): playful,
+  and artists can never be mistaken for album covers.
+- **Played lately / Added lately**: M3E multi-browse carousels: one large cover, smaller ones beside it
+  that grow as they come in; names show only on the large one.
+- **Made for you**: smart playlists as colourful pills.
+- **Listening card**: one big number ("16 h listened · 232 plays") with a soft shape in the corner;
+  Duplicates next to it only when there are any.
+- **On repeat**: the five most played with large ranks in the accent colour.
 
 ## Library
 
-- **Kind chips** in order of use: Albums, Artists, Songs, Playlists, Smart, Favourites, Genres,
-  Folders, Years, Composers, History. They scroll; the selected one shows a check (shape, not colour).
+- **Kind selector**: a connected M3E button group with the four main kinds — Albums, Artists,
+  Songs, Playlists. Four equal targets fit the width with no scrolling, the selected one fills and
+  rounds fully. The rest (genres, years, folders, history...) moved to Search's tiles.
 - **Album and artist order**: A–Z, Newest, Year (albums), Most played — one tap, kept per kind.
 - **Song lists**: one row of chips — Sort first, then filters (Lossless, Hi-res, Unplayed, 4+ stars,
   Decade, Genre), then a Select button at the end. One row instead of two keeps songs higher.
@@ -65,12 +73,16 @@ YouTube Music, LastWave, PixelPlayer; taken further where they are vague. Review
 - **Letter rail**: appears while the list moves or is held, ticks at each letter, then hides, so it
   never covers the rows' menu buttons.
 
-## Search
+## Search (as in Google Play)
 
-- Field focused on arrival (you came here to type). Empty state: Recent searches and Genres.
-- Results in sections — Artists (round photos), Albums (covers), Songs — in that order, because a
-  name typed is most often an artist or album. Opening a result remembers the search.
-- No sort or filters: results are in relevance order.
+- **First tap on Search** shows the field and browse tiles; **a second tap** focuses the field and
+  opens the keyboard (Google Play's behaviour: browsing first, typing when asked). A microphone in
+  the field searches by voice.
+- **Browse tiles** in two columns: Genres, Years, Favourites, Smart playlists, History, Folders,
+  Composers, Lossless, Hi-res, Never played. Name on the left, a tonal icon on the right (colours
+  rotate through the wallpaper's accents). A tile opens its list with a back arrow; tiles that would
+  be empty (no hi-res files, no composers) are not shown. Recent searches sit above the tiles.
+- **Results** in sections — Artists (photos), Albums (covers), Songs — in relevance order.
 
 ## Song rows (everywhere)
 
