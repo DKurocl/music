@@ -17,6 +17,8 @@
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true">
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+        <!-- Chromecast and Nest speakers through Android's output switcher (CastSupport.kt). -->
+        <meta-data android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME" android:value="ua.olex.music.playback.CastOptionsProvider" />
         <!-- Declared in :core:playback; repeated here so Android Auto's checks see the browser filter.
              Exported without a permission on purpose: the system, Android Auto and headset buttons
              bind to it; other apps' controllers get read-only commands (PlaybackService.onConnectAsync). -->
@@ -29,6 +31,13 @@
                 <action android:name="androidx.media3.session.MediaLibraryService" />
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
+        </service>
+        <!-- App Functions for Gemini (MusicFunctions.kt; the service and schema are generated). -->
+        <service android:name=".MusicFunctionService" android:exported="true"
+            android:permission="android.permission.BIND_APP_FUNCTION_SERVICE">
+            <property android:name="android.app.appfunctions.schema" android:value="app_functions_schema.xsd" />
+            <property android:name="android.app.appfunctions.v2" android:value="music_functions.xml" />
+            <intent-filter><action android:name="android.app.appfunctions.AppFunctionService" /></intent-filter>
         </service>
         <activity
             android:name=".MainActivity"

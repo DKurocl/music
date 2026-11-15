@@ -180,5 +180,5 @@ class LibraryBrowserTest {
 
 @Composable
 private fun BrowserTestTheme(content: @Composable () -> Unit) {
-    AppTheme { Surface(Modifier.fillMaxSize(), content = content) }
+    AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalStartTab provides "SONGS") { Surface(Modifier.fillMaxSize(), content = content) } }
 }

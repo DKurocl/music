@@ -40,7 +40,7 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
     }
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val tags = ReplayGainCodec.tags(mediaItem.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS))
-        val factory = DefaultMediaSourceFactory(app, ReplayGainExtractorsFactory(DefaultExtractorsFactory(), tags))
+        val factory = DefaultMediaSourceFactory(app, ReplayGainExtractorsFactory(WithDsd(DefaultExtractorsFactory()), tags))
         drm?.let(factory::setDrmSessionManagerProvider); errors?.let(factory::setLoadErrorHandlingPolicy)
         return factory.createMediaSource(mediaItem)
     }
@@ -65,4 +65,12 @@ internal class ReplayGainExtractorsFactory(private val delegate: ExtractorsFacto
             })
         }
     }.toTypedArray()
+}
+
+/** Android's extractors plus DSD (DSF, DFF), which Android cannot open on its own. */
+@OptIn(UnstableApi::class)
+internal class WithDsd(private val delegate: ExtractorsFactory) : ExtractorsFactory by delegate {
+    override fun createExtractors(): Array<Extractor> = arrayOf<Extractor>(DsdExtractor()) + delegate.createExtractors()
+    override fun createExtractors(uri: Uri, responseHeaders: Map<String, List<String>>): Array<Extractor> =
+        arrayOf<Extractor>(DsdExtractor()) + delegate.createExtractors(uri, responseHeaders)
 }

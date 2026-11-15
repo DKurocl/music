@@ -21,7 +21,7 @@ import java.io.FileOutputStream
 import java.nio.ByteBuffer
 
 /**
- * Writes tags into the owner's files (FLAC and MP3 for now). Android asks the owner once per batch
+ * Writes tags into the owner's files (FLAC, MP3, M4A, Ogg Vorbis and Opus). Android asks the owner once per batch
  * (MediaStore write request, launched by the screen); then each file is changed in place when the
  * new tags fit in its old header, otherwise rewritten through a temporary copy so a failure can
  * never leave half a file. The audio bytes are copied, never decoded.
@@ -69,7 +69,7 @@ object TagEditing {
         } ?: return false
         if (plan.inPlace) {
             resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
-                FileOutputStream(pfd.fileDescriptor).channel.use { out -> out.write(ByteBuffer.wrap(plan.head), 0) }
+                FileOutputStream(pfd.fileDescriptor).channel.use { out -> out.write(ByteBuffer.wrap(plan.head), plan.start) }
             }
             return true
         }
@@ -77,10 +77,12 @@ object TagEditing {
         val tmp = File.createTempFile("tags", ".tmp", context.cacheDir)
         try {
             FileOutputStream(tmp).channel.use { out ->
-                out.write(ByteBuffer.wrap(plan.head))
                 resolver.openFileDescriptor(uri, "r")!!.use { pfd ->
                     FileInputStream(pfd.fileDescriptor).channel.use { src ->
-                        var pos = plan.keepFrom
+                        var pos = 0L
+                        while (pos < plan.start) pos += src.transferTo(pos, plan.start - pos, out)
+                        out.write(ByteBuffer.wrap(plan.head))
+                        pos = plan.keepFrom
                         val size = src.size()
                         while (pos < size) pos += src.transferTo(pos, size - pos, out)
                     }
@@ -168,7 +170,7 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                 if (moveFiles) OutlinedTextField(folderTemplate, { folderTemplate = it }, label = { Text("Folder") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (rename || moveFiles) Text("Use %artist%, %albumartist%, %album%, %title%, %track%, %disc%, %year%, %genre%.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Written into the files (FLAC and MP3). Android asks once to allow changing them.",
+                Text("Written into the files (FLAC, MP3, M4A, Ogg and Opus). Android asks once to allow changing them.",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!android.provider.MediaStore.canManageMedia(context)) TextButton(onClick = {
                     runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA,
