@@ -292,7 +292,7 @@ internal fun LibraryBrowser(
         LaunchedEffect(selected?.id, headerGone) { onCollection(selected?.let { if (headerGone) it.name else "" }) }
         LaunchedEffect(selected?.id) { if (selected != null) listState.scrollToItem(0) }
         val railTracks = if (!searching && selected == null && tab == LibraryTab.SONGS && (order.mode == TrackSortMode.DEFAULT || order.mode == TrackSortMode.TITLE)) visible else null
-        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
             when {
                 searching -> {
@@ -433,7 +433,7 @@ internal fun LibraryBrowser(
         if (picking) SelectionActions(visible != null && picked.ids.isNotEmpty(),
             onPlay = { batch { onPlay(it, 0) } }, onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
             onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) },
-            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp + LocalPlayerInset.current))
         }
     }
 }
@@ -478,7 +478,7 @@ private fun CollectionHeader(collection: MusicCollection, artist: Boolean = fals
 private fun AlbumCard(album: MusicCollection, modifier: Modifier, onOpen: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(
-        modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+        modifier.squish(0.03f).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
             .clickable(onClickLabel = "Open ${album.name}", onClick = onOpen).padding(4.dp).padding(bottom = 12.dp),
     ) {
         Artwork(album.artworkUri, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
@@ -657,7 +657,7 @@ private fun SelectionActions(enabled: Boolean, onPlay: () -> Unit, onNext: () ->
     androidx.compose.material3.HorizontalFloatingToolbar(expanded = true, modifier = modifier,
         colors = androidx.compose.material3.FloatingToolbarDefaults.vibrantFloatingToolbarColors()) {
         listOf(Triple(Glyph.PLAY, "Play selected", onPlay), Triple(Glyph.NEXT, "Play next", onNext), Triple(Glyph.QUEUE, "Add to queue", onQueue),
-            Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags)).forEach { (glyph, label, action) ->
+            Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags)).forEachIndexed { i, (glyph, label, action) ->
             androidx.compose.material3.IconButton(enabled = enabled, onClick = { haptics.confirm(); action() },
                 modifier = Modifier.semantics { contentDescription = label }) { Symbol(glyph, filled = glyph == Glyph.PLAY) }
         }
@@ -716,7 +716,7 @@ private fun BrowseTiles(library: LibraryIndex, recent: List<String>, onPickRecen
             BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }; BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }; else -> true }
     }
     val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer, cs.secondaryContainer to cs.onSecondaryContainer)
-    androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (recent.isNotEmpty()) item { RecentSearches(recent.take(4), onPick = onPickRecent, onClear = onClearRecent) }
         item { Text("Browse", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)) }
         items(tiles.chunked(2).size) { r ->
@@ -724,7 +724,7 @@ private fun BrowseTiles(library: LibraryIndex, recent: List<String>, onPickRecen
                 tiles.chunked(2)[r].forEachIndexed { c, tile ->
                     val (bg, fg) = accents[(r * 2 + c) % accents.size]
                     androidx.compose.material3.Surface(onClick = { haptics.tick(); onTile(tile) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                        color = cs.surfaceContainer, modifier = Modifier.weight(1f).height(72.dp)) {
+                        color = cs.surfaceContainer, modifier = Modifier.weight(1f).height(72.dp).squish(0.03f)) {
                         Row(Modifier.padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(tile.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, modifier = Modifier.weight(1f))
                             Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {

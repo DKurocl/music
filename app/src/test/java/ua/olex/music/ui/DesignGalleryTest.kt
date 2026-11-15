@@ -9,6 +9,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.background
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -116,8 +119,18 @@ class DesignGalleryTest {
         CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
                 topBar = { TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) }) },
-                bottomBar = { Column { MiniPlayer(now, { 90_000 }, {}, {}, {}); PlacesBar(place) {} } },
-            ) { content(it) }
+                bottomBar = { PlacesBar(place) {} },
+            ) { pad ->
+                // Same frame as the app: the page runs under the floating mini player, with a fade behind it.
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalPlayerInset provides 84.dp) { content(pad) }
+                    androidx.compose.foundation.layout.Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = pad.calculateBottomPadding()).fillMaxWidth()
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent,
+                            0.55f to MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), 1f to MaterialTheme.colorScheme.surface))) {
+                        androidx.compose.foundation.layout.Box(Modifier.padding(top = 20.dp)) { MiniPlayer(now, { 90_000 }, {}, {}, {}) }
+                    }
+                }
+            }
         }
     } }
 

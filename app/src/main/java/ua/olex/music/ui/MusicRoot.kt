@@ -54,6 +54,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -208,12 +209,16 @@ fun MusicRoot(model: LibraryViewModel) {
                         TextButton(onClick = model::dismissQueueError) { Text("Dismiss") }
                     }
                 }
-                if (playing.hasTrack) MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous)
                 PlacesBar(place.takeIf { page == null }, ::go)
             }
         },
     ) { insets ->
         val list = tracks
+        // The mini player floats over the page: the page runs under it to the navigation bar, with a
+        // soft fade (not a solid band) so it reads as floating, as Google's own players do.
+        val playerInset = if (playing.hasTrack) 84.dp else 0.dp
+        Box(Modifier.fillMaxSize()) {
+        CompositionLocalProvider(LocalPlayerInset provides playerInset) {
         when {
             !model.allowed -> Notice(
                 insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow",
@@ -266,6 +271,15 @@ fun MusicRoot(model: LibraryViewModel) {
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             )
         }
+        }
+        if (playing.hasTrack) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = insets.calculateBottomPadding()).fillMaxWidth()
+            .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent,
+                0.55f to MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), 1f to MaterialTheme.colorScheme.surface))) {
+            Box(Modifier.padding(top = 20.dp)) {
+                MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous)
+            }
+        }
+        }
     }
     }
 
@@ -308,7 +322,8 @@ fun MusicRoot(model: LibraryViewModel) {
                 shape = RoundedCornerShape((backProgress * 40 + (dismiss.value / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
             }) {
         NowPlaying(
-            playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.label },
+            playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
+                listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") },
             position = { model.positionMs }, onClose = { expanded = false },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
@@ -383,6 +398,8 @@ private fun Notice(insets: PaddingValues, title: String, body: String, action: S
         Modifier.fillMaxSize().padding(insets).padding(32.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        // While nothing can be done yet, the M3E loading shape morphs instead of a static line of text.
+        if (action == null) @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class) androidx.compose.material3.LoadingIndicator(Modifier.size(64.dp))
         Text(title, style = MaterialTheme.typography.headlineSmall, textAlign = TextAlign.Center)
         Text(body, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
         if (action != null) Button(onClick = onAction) { Text(action) }
@@ -477,7 +494,12 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
             val selected = current == p
             androidx.compose.material3.ShortNavigationBarItem(
                 selected = selected, onClick = { onGo(p) },
-                icon = { Symbol(p.glyph, filled = selected, bold = selected) }, label = { Text(p.title) },
+                // The chosen place's icon fills and gives a little hop.
+                icon = {
+                    val hop = remember { androidx.compose.animation.core.Animatable(1f) }
+                    LaunchedEffect(selected) { if (selected) { hop.snapTo(0.82f); hop.animateTo(1f, androidx.compose.animation.core.spring(0.4f, 600f)) } }
+                    Symbol(p.glyph, filled = selected, bold = selected, modifier = Modifier.graphicsLayer { scaleX = hop.value; scaleY = hop.value })
+                }, label = { Text(p.title) },
             )
         }
     }

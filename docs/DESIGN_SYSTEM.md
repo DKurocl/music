@@ -99,10 +99,23 @@ Song on top (cover, title, artist · album), stars and play count, then actions 
 they are used: Play next, Add to queue, Go to album, Go to artist, Favourite, Add to playlist,
 Edit tags, Equalizer.
 
+## Feel: small things that make it breathe (used sparingly)
+
+- **Squish on press**: cards, tiles and covers give 3–6 % while pressed and spring back.
+- **Rubber band**: a thing dragged where it cannot go (the mini player downward, the cover when
+  there is no next song) follows a little with resistance and springs back, instead of ignoring the finger.
+- **One icon at a time**: only the icon just activated animates — the chosen navigation item hops
+  and fills; a switch that turns on (shuffle, repeat, timer) hops. Nothing animates in bulk.
+- **Rows as soft segments**: list rows are inset with rounded corners; the playing song is a light
+  tonal pill, selected songs a stronger one.
+- **Loading** uses the M3E morphing shape instead of a line of text.
+
 ## Mini player
 
-A floating card above the navigation bar: cover, title, artist, play/pause, next, and a thin
-progress line. Tap or swipe up opens the player; swipe sideways skips (the card follows the finger).
+A floating card above the navigation bar, with no solid band behind it: the page scrolls under it
+and fades softly toward the bottom (transparent to surface), so it reads as floating, as Google's
+players do; lists end with room so their last row can rise above it. Cover, title, artist,
+play/pause, next, and a thin progress line. Tap or swipe up opens the player; swipe sideways skips (the card follows the finger).
 It hides only when nothing is queued.
 
 ## Player
@@ -113,13 +126,22 @@ Top to bottom, in the order the eye and thumb need it:
   actions. It settles back slightly while paused (paused state you can see from across the room).
 - **Title** (marquee once if long), **artist** (opens the artist), **like** button.
 - **Seek bar**: Android 16's wave while playing, flat while paused or dragged; tap or drag anywhere.
-- **Signal path** ("FLAC 24/96 · Bluetooth"): opens the audio path; under it, while a sleep timer
+- **Signal path** ("FLAC 24/96 · 850 kbps · Bluetooth", parts divided by dots): opens the audio path; under it, while a sleep timer
   runs, "Stops in 23 min".
-- **Transport**: previous, play/pause, next. Play/pause is the biggest shape and morphs: circle when
-  paused, wide rounded square when playing.
-- **Actions**: shuffle, repeat, lyrics, sleep, output, more; on-state is a filled tonal container.
+- **Transport**: shuffle · previous · play/pause · next · repeat. Shuffle and repeat are small and at
+  the ends (they belong to playback, as on Google's media controls); play/pause is the biggest shape
+  and morphs: circle when paused, wide rounded square when playing.
+- **Actions pill**: lyrics, sleep timer, output, queue in one light rounded pill (M3E floating
+  toolbar style). Song actions moved to the top right (⋮), where Google's players keep them.
 - **Up next** card: the next song, one tap to the queue.
 - **Closing**: drag the page down (it follows the finger) or use predictive back (it shrinks).
+
+## Your listening
+
+One hero number (hours listened, with plays) on a primary card with a soft shape; three small facts
+(songs, albums, artists) each with its icon in its own shape; "How your library sounds" as one bar
+split by format with a legend; artists you play most in M3E shapes with rounded bars; songs on
+repeat with large ranks. Few numbers, large; the rest is shape and colour.
 
 ## Settings
 

@@ -104,7 +104,7 @@ internal fun PlaylistBrowser(
         }, confirmButton = { TextButton(onClick = { editingSong = null }) { Text("Close") } })
     }
 
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 16.dp)) {
+    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
             item {
