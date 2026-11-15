@@ -54,7 +54,7 @@ import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.Track
 
 private enum class LibraryTab(val title: String) {
-    SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres")
+    SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres"), YEARS("Years"), COMPOSERS("Composers")
 }
 
 /** Browse one shared library snapshot or cancellable FTS results; taps play exactly the visible queue. */
@@ -78,9 +78,11 @@ internal fun LibraryBrowser(
     personalActions: PersonalLibraryActions? = null,
     onTrackActions: (Track) -> Unit = {},
     onAddToPlaylist: (List<Track>) -> Unit = {},
+    onEditTags: (List<Track>) -> Unit = {},
     sortOrders: Map<TrackSortScope, TrackSortOrder> = emptyMap(),
     onSortOrder: (TrackSortScope, TrackSortOrder) -> Unit = { _, _ -> },
     onEnqueue: (List<Track>, Boolean) -> Unit = { _, _ -> },
+    stats: Map<String, ua.olex.music.model.SongStats> = emptyMap(),
 ) {
     var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -91,10 +93,21 @@ internal fun LibraryBrowser(
         LibraryTab.ARTISTS -> library.artists
         LibraryTab.GENRES -> library.genres
         LibraryTab.FOLDERS -> library.folders
+        LibraryTab.YEARS -> library.years
+        LibraryTab.COMPOSERS -> library.composers
         else -> emptyList()
     }
     val selected = groups.firstOrNull { it.id == selectedId }
     val searching = query.isNotBlank()
+    // Albums and artists that match every word of the search, shown above the songs.
+    val searchGroups = remember(library, query) {
+        val words = ua.olex.music.model.TextFold.fold(query).split(' ').filter { it.isNotBlank() }
+        if (words.isEmpty()) emptyList() else {
+            fun hit(c: MusicCollection, extra: String = "") = ua.olex.music.model.TextFold.fold(c.name + " " + extra).let { t -> words.all { t.contains(it) } }
+            library.artists.filter { hit(it) }.take(5).map { LibraryTab.ARTISTS to it } +
+                library.albums.filter { hit(it, it.subtitle.orEmpty()) }.take(8).map { LibraryTab.ALBUMS to it }
+        }
+    }
     val sortScope = when {
         searching -> TrackSortScope.SEARCH
         selected == null -> TrackSortScope.SONGS
@@ -111,9 +124,10 @@ internal fun LibraryBrowser(
     }
     val order = sortOrders[sortScope] ?: TrackSortOrder()
     val source = unsorted?.let(::SortSource)
-    val sorted by produceState<SortedTracks?>(null, source, order) {
+    val statsKey = if (order.mode == TrackSortMode.PLAYS || order.mode == TrackSortMode.RATING) stats else null
+    val sorted by produceState<SortedTracks?>(null, source, order, statsKey) {
         value = if (source == null || order == TrackSortOrder()) null else withContext(Dispatchers.Default) {
-            SortedTracks(source, order, order.sort(source.tracks))
+            SortedTracks(source, order, order.sort(source.tracks) { stats[it.key.value] })
         }
     }
     val visible = if (order == TrackSortOrder()) unsorted else sorted?.takeIf { it.source == source && it.order == order }?.tracks
@@ -178,7 +192,7 @@ internal fun LibraryBrowser(
             onAll = { visible?.let { picked = picked.all(it) } }, onClear = { picked = TrackSelection() },
             onClose = { picking = false; picked = TrackSelection() }, onPlay = { batch { onPlay(it, 0) } },
             onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
-            onPlaylist = { batch(onAddToPlaylist) })
+            onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) })
         if (!searching && tab == LibraryTab.SMART) {
             SmartPlaylistBrowser(smart, currentId, Modifier.weight(1f), onPlay = onPlay, onShuffle = onShuffle, onTrackActions = onTrackActions,
                 onSave = onSaveSmart, onDelete = onDeleteSmart)
@@ -191,9 +205,19 @@ internal fun LibraryBrowser(
                     when {
                         search == null || search.query != query -> item { BrowserMessage("Searching…") }
                         search.failed -> item { ErrorNotice("Couldn't search your library.", onRetrySearch) }
-                        search.tracks.isEmpty() -> item { BrowserMessage("No matching songs. Try a title, artist or album.") }
+                        search.tracks.isEmpty() && searchGroups.isEmpty() -> item { BrowserMessage("No matches. Try a title, artist or album.") }
                         else -> {
-                            item { BrowserMessage(songCount(search.tracks.size)) }
+                            searchGroups.forEach { (kind, collection) ->
+                                item(key = "group-$kind-${collection.id}") {
+                                    androidx.compose.material3.ListItem(
+                                        headlineContent = { Text(collection.name, maxLines = 1) },
+                                        supportingContent = { Text(listOfNotNull(kind.title.dropLast(1), collection.subtitle, songCount(collection.tracks.size)).joinToString(" · "), maxLines = 1) },
+                                        leadingContent = { Artwork(collection.artworkUri, Modifier.size(48.dp), corner = 8.dp) },
+                                        modifier = Modifier.clickable { tabName = kind.name; selectedId = collection.id; onQueryChange("") },
+                                    )
+                                }
+                            }
+                            if (search.tracks.isNotEmpty()) item { BrowserMessage(songCount(search.tracks.size)) }
                             if (visible == null) item { BrowserMessage("Sorting...") }
                             else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
                                 TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
@@ -331,6 +355,9 @@ private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onC
         TrackSortMode.YEAR -> "Year"
         TrackSortMode.DURATION -> "Duration"
         TrackSortMode.FILE_NAME -> "File name"
+        TrackSortMode.ADDED -> "Date added"
+        TrackSortMode.PLAYS -> "Most played"
+        TrackSortMode.RATING -> "Rating"
     }
     androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 16.dp)) {
         TextButton(onClick = { expanded = true }) { Text("Sort: ${label(order.mode)}${if (order.descending) " descending" else ""}") }
@@ -346,7 +373,7 @@ private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onC
 
 @Composable
 private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll: () -> Unit, onClear: () -> Unit,
-    onClose: () -> Unit, onPlay: () -> Unit, onNext: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit) {
+    onClose: () -> Unit, onPlay: () -> Unit, onNext: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onTags: () -> Unit = {}) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("$count selected", style = MaterialTheme.typography.titleMedium)
@@ -359,6 +386,7 @@ private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll:
             TextButton(enabled = ready && count > 0, onClick = onNext) { Text("Play next") }
             TextButton(enabled = ready && count > 0, onClick = onQueue) { Text("Add to queue") }
             TextButton(enabled = ready && count > 0, onClick = onPlaylist) { Text("Add to playlist") }
+            TextButton(enabled = ready && count > 0, onClick = onTags) { Text("Edit tags") }
         }
         if (total > TrackSelection.MAX_ITEMS || count >= TrackSelection.MAX_ITEMS)
             Text("Select up to ${TrackSelection.MAX_ITEMS} songs per batch.", style = MaterialTheme.typography.bodySmall)

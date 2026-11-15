@@ -95,6 +95,21 @@ internal object Id3 {
                 val (description, at) = terminated(b, 1, b[0].toInt())
                 text(b, at, b[0].toInt()).forEach { fields.add(description, it) }
             }
+            // Synchronised lyrics: turned into LRC text, which the lyrics module already reads.
+            id == "SYLT" -> if (b.size > 6 && b[4].toInt() == 2 && !fields.has("SYNCEDLYRICS")) {
+                val enc = b[0].toInt()
+                var (_, at) = terminated(b, 6, enc)
+                val lrc = StringBuilder()
+                while (at < b.size) {
+                    val (text, next) = terminated(b, at, enc)
+                    if (next + 4 > b.size) break
+                    val ms = b.u32be(next)
+                    lrc.append('[').append(String.format(java.util.Locale.ROOT, "%02d:%02d.%02d", ms / 60_000, ms / 1000 % 60, ms % 1000 / 10)).append(']')
+                        .append(text.trim('\n', '\r')).append('\n')
+                    at = next + 4
+                }
+                if (lrc.isNotEmpty()) fields.add("SYNCEDLYRICS", lrc.toString())
+            }
             id == "USLT" || id == "ULT" -> if (b.size > 4) {
                 val (_, at) = terminated(b, 4, b[0].toInt())
                 if (!fields.has("LYRICS")) fields.add("LYRICS", text(b, at, b[0].toInt()).joinToString("\n"))

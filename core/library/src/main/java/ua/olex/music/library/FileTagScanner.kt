@@ -53,7 +53,7 @@ internal object FileTagScanner {
             gain?.trackGainDb?.takeIf { it.isFinite() }, gain?.trackPeak?.takeIf { it.isFinite() && it > 0 },
             gain?.albumGainDb?.takeIf { it.isFinite() }, gain?.albumPeak?.takeIf { it.isFinite() && it > 0 },
             tags.encoderDelay?.takeIf { it >= 0 }, tags.encoderPadding?.takeIf { it >= 0 }, tags.lyrics,
-            tags.first("MUSICBRAINZ_TRACKID"), tags.first("MUSICBRAINZ_ALBUMID"), cover?.offset, cover?.length, cover?.mime)
+            tags.first("MUSICBRAINZ_TRACKID"), tags.first("MUSICBRAINZ_ALBUMID"), cover?.offset, cover?.length, cover?.mime, tags.cueSheet)
         return row.copy(
             title = title, artist = artist, album = tags.album.known() ?: row.album,
             albumArtist = tags.albumArtists.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: row.albumArtist,

@@ -9,6 +9,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import ua.olex.music.playback.AudioDiagnostics
 import ua.olex.music.playback.OutputRoute
 
@@ -27,6 +29,14 @@ internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDi
             if (route?.kind in listOf(OutputRoute.Kind.BLUETOOTH, OutputRoute.Kind.LE_AUDIO)) {
                 Text("Bluetooth codec and bitrate are not reported here. The system and connected device negotiate them.", style = MaterialTheme.typography.bodyMedium)
             }
+            // USB DACs only: the mixer runs at the song's own rate, other sounds are not mixed in.
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var bitPerfect by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ua.olex.music.playback.UsbBitPerfect.get(context)) }
+            androidx.compose.material3.ListItem(
+                headlineContent = { Text("Bit-perfect USB output") },
+                supportingContent = { Text("For a USB DAC: the song's own sample rate, unmixed. Other sounds are muted on the DAC while it plays.") },
+                trailingContent = { androidx.compose.material3.Switch(bitPerfect, { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }) },
+            )
             onEqualizer?.let { TextButton(onClick = it) { Text("Equalizer") } }
             Button(onClick = onOutput) { Text("Change output") }
         }

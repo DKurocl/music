@@ -72,11 +72,18 @@ internal class PlaybackStore(directory: File) {
         put("title", meta.title); put("artist", meta.artist); put("album", meta.albumTitle); put("albumArtist", meta.albumArtist)
         put("artwork", meta.artworkUri?.toString()); put("duration", meta.durationMs)
         put("track", meta.trackNumber); put("disc", meta.discNumber); put("path", meta.extras?.getString(PlayerConnection.PATH_KEY))
+        item.clippingConfiguration.takeIf { it.startPositionMs > 0 || it.endPositionMs != androidx.media3.common.C.TIME_END_OF_SOURCE }?.let {
+            put("clipStart", it.startPositionMs); put("clipEnd", it.endPositionMs)
+        }
     }
 
     private fun decode(row: JSONObject): MediaItem {
         val uri = Uri.parse(row.getString("uri"))
         return MediaItem.Builder().setMediaId(row.getString("id")).setUri(uri)
+            .apply {
+                if (row.has("clipStart")) setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
+                    .setStartPositionMs(row.getLong("clipStart")).setEndPositionMs(row.getLong("clipEnd")).build())
+            }
             .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
             .setMediaMetadata(MediaMetadata.Builder()
                 .setTitle(row.string("title")).setArtist(row.string("artist")).setAlbumTitle(row.string("album")).setAlbumArtist(row.string("albumArtist"))

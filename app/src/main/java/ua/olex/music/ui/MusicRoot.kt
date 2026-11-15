@@ -103,12 +103,20 @@ fun MusicRoot(model: LibraryViewModel) {
     val search by model.search.collectAsStateWithLifecycle()
     val personal by model.personal.collectAsStateWithLifecycle()
     val smart by model.smart.collectAsStateWithLifecycle()
+    val songStats by model.stats.collectAsStateWithLifecycle()
     val stats by model.stats.collectAsStateWithLifecycle()
     val sortOrders by model.sortOrders.collectAsStateWithLifecycle()
     val lyricsState by model.localLyrics.collectAsStateWithLifecycle()
     val musicFolders by model.musicFolders.collectAsStateWithLifecycle()
     val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
+    var editingTags by remember { mutableStateOf<List<Track>?>(null) }
+    var pendingTags by remember { mutableStateOf<Pair<List<Track>, Map<String, String>>?>(null) }
+    val writeRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val pending = pendingTags
+        pendingTags = null
+        if (result.resultCode == android.app.Activity.RESULT_OK && pending != null) model.writeTags(pending.first, pending.second)
+    }
     var equalizerOpen by rememberSaveable { mutableStateOf(false) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
@@ -172,9 +180,10 @@ fun MusicRoot(model: LibraryViewModel) {
                 query = query, search = search, onQueryChange = model::setQuery,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
+                onEditTags = { editingTags = it },
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
-                personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue,
+                personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = songStats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             )
         }
@@ -190,6 +199,7 @@ fun MusicRoot(model: LibraryViewModel) {
             lyricsState = lyricsState, lyricOffset = lyricOffset, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
             onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
+            onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
             favourite = playing.mediaId in personal.favouriteByTrackId,
             onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
@@ -208,8 +218,25 @@ fun MusicRoot(model: LibraryViewModel) {
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
+            TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
             TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
         ))
+    }
+    editingTags?.let { tracks ->
+        TagEditorDialog(tracks, onDismiss = { editingTags = null }) { fields ->
+            editingTags = null
+            val uris = tracks.filter { '#' !in it.id.value }.map { Uri.parse(it.uri) }.distinct()
+            if (uris.isNotEmpty()) {
+                // Android asks the owner once for the whole batch; the files are written after "Allow".
+                pendingTags = tracks to fields
+                val request = android.provider.MediaStore.createWriteRequest(context.contentResolver, uris)
+                writeRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build())
+            }
+        }
+    }
+    model.tagMessage?.let { message ->
+        AlertDialog(onDismissRequest = model::dismissTagMessage, title = { Text("Tags") }, text = { Text(message) },
+            confirmButton = { TextButton(onClick = model::dismissTagMessage) { Text("OK") } })
     }
     playlistTracks?.let { PlaylistPicker(personal.playlists, it, model.personalActions) { playlistTracks = null } }
     playing.queueError?.let { message ->
@@ -254,6 +281,7 @@ private fun NowPlaying(
     onMore: (() -> Unit)?,
     lyricsState: LocalLyricsState, lyricOffset: Long, onLyricOffset: (Long) -> Unit,
     musicFolders: List<String>, onChooseMusicFolder: () -> Unit, onClearMusicFolders: () -> Unit, onReloadLyrics: () -> Unit,
+    onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
     favourite: Boolean, onFavourite: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -265,7 +293,8 @@ private fun NowPlaying(
         state, lyricOffset, position, onSeek, onLyricOffset, onDismiss = { lyricsOpen = false },
         source = if (lyricsState.mediaId == state.mediaId) lyricsState.source else "Loading local lyrics...",
         note = lyricsState.note.takeIf { lyricsState.mediaId == state.mediaId }, folders = musicFolders,
-        onChooseFolder = onChooseMusicFolder, onClearFolders = onClearMusicFolders, onReload = onReloadLyrics)
+        onChooseFolder = onChooseMusicFolder, onClearFolders = onClearMusicFolders, onReload = onReloadLyrics,
+        onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus)
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var queueSheet by rememberSaveable { mutableStateOf(false) }
     var audioPath by rememberSaveable { mutableStateOf(false) }
@@ -298,6 +327,7 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("Pause music after:")
+                TextButton(onClick = { onSet(ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK) }, modifier = Modifier.fillMaxWidth()) { Text("When this song ends") }
                 listOf(5, 15, 30, 60, 90).forEach { minutes ->
                     TextButton(onClick = { onSet(minutes) }, modifier = Modifier.fillMaxWidth()) { Text("$minutes minutes") }
                 }
