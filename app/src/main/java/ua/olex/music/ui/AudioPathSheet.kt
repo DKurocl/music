@@ -19,7 +19,7 @@ import ua.olex.music.playback.OutputRoute
 /**
  * The path a song takes, as a chain (Poweramp's audio info, in M3E): File, Decoder, Processing,
  * App output, Device. Each step has its icon in a shape and what is known about it; a line joins
- * them. Above, one verdict — untouched or processed — and below, two plain answers: is it resampled,
+ * them. Above, one verdict (untouched or processed) and below, two plain answers: is it resampled,
  * is anything processing it. Only what Android reports is shown; the Bluetooth link is not measured.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

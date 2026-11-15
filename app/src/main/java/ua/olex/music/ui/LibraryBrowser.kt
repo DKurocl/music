@@ -481,7 +481,7 @@ private fun CollectionHeader(collection: MusicCollection, artist: Boolean = fals
         collection.subtitle?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         Text(
             listOfNotNull(
-                collection.tracks.mapNotNull { it.year?.takeIf { y -> y > 0 } }.distinct().sorted().let { ys -> when { ys.isEmpty() -> null; ys.size == 1 -> ys[0].toString(); else -> "${ys.first()}–${ys.last()}" } }
+                collection.tracks.mapNotNull { it.year?.takeIf { y -> y > 0 } }.distinct().sorted().let { ys -> when { ys.isEmpty() -> null; ys.size == 1 -> ys[0].toString(); else -> "${ys.first()}\u2013${ys.last()}" } }
                     .takeIf { !artist },
                 songCount(collection.tracks.size), if (minutes > 0) "$minutes min" else null,
                 collection.tracks.mapNotNull { it.format?.label }.distinct().singleOrNull()).joinToString(" · "),
@@ -711,7 +711,7 @@ private fun RecentSearches(recent: List<String>, onPick: (String) -> Unit, onCle
 }
 
 /** How the album and artist grids are ordered. */
-private enum class CollectionSort(val title: String) { NAME("A–Z"), NEWEST("Newest"), YEAR("Year"), PLAYED("Most played") }
+private enum class CollectionSort(val title: String) { NAME("A\u2013Z"), NEWEST("Newest"), YEAR("Year"), PLAYED("Most played") }
 
 @Composable
 private fun SearchHeading(text: String) = Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
