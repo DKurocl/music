@@ -115,4 +115,24 @@ internal object Mix {
         }
         return spaceArtists(out, seed)
     }
+
+    /** The genres that suit each mood, for a mood mix from the library when YouTube Music can't help. */
+    private val moodGenres = mapOf(
+        "energize" to listOf("dance", "electronic", "edm", "house", "techno", "drum and bass", "dnb", "rock", "punk", "hip hop", "electro"),
+        "feel good" to listOf("pop", "funk", "disco", "soul", "reggae", "indie pop", "motown", "synthpop"),
+        "relax" to listOf("chill", "lounge", "ambient", "downtempo", "jazz", "acoustic", "trip hop", "bossa", "lo-fi", "lofi"),
+        "party" to listOf("dance", "house", "disco", "hip hop", "edm", "reggaeton", "pop", "electro"),
+        "workout" to listOf("edm", "hip hop", "rap", "metal", "rock", "drum and bass", "trap", "hardstyle", "techno"),
+        "commute" to listOf("indie", "alternative", "pop", "rock", "hip hop", "electronic"),
+        "romance" to listOf("r&b", "rnb", "soul", "ballad", "jazz", "love"),
+        "sad" to listOf("blues", "folk", "singer-songwriter", "emo", "ballad", "post-rock", "slowcore", "sad", "indie folk"),
+        "focus" to listOf("ambient", "classical", "instrumental", "lo-fi", "lofi", "post-rock", "piano", "soundtrack", "minimal", "modern classical"),
+        "sleep" to listOf("ambient", "classical", "piano", "new age", "drone", "lo-fi", "lofi", "modern classical"),
+    )
+
+    /** Library songs whose genre suits [mood]; empty when the library's genres say nothing about it. */
+    fun moodSongs(mood: String, songs: List<Track>): List<Track> {
+        val wanted = moodGenres[TextFold.fold(mood)] ?: return emptyList()
+        return songs.filter { t -> t.genres.any { g -> val f = TextFold.fold(g); wanted.any { f.contains(it) } } }
+    }
 }

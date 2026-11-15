@@ -55,7 +55,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
             Column(Modifier.weight(1f)) {
                 Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)
                 Text(
-                    listOfNotNull(mixFrom?.let { "Mix from $it" }, "${state.queue.size} songs", if (state.shuffle) "shuffled" else null).joinToString(" · "),
+                    listOfNotNull(mixFrom, "${state.queue.size} songs", if (state.shuffle) "shuffled" else null).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
                 )
             }

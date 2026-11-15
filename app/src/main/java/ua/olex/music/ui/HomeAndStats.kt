@@ -42,6 +42,7 @@ internal fun HomePage(
     onOpenAlbum: (MusicCollection) -> Unit, onTrackActions: (Track) -> Unit,
     onOpenArtist: (MusicCollection) -> Unit = {}, duplicates: Int = 0, onStats: () -> Unit = {}, onDuplicates: () -> Unit = {},
     favourites: List<Track> = emptyList(), onSeeAll: (String) -> Unit = {},
+    moods: List<YouTubeMusic.Mood> = emptyList(),
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -77,6 +78,9 @@ internal fun HomePage(
 
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
         if (library.songs.isEmpty()) { item { Text("No music yet. Put music in the Music folder, then rescan.", Modifier.padding(16.dp)) }; return@LazyColumn }
+
+        // Moods first, as in YouTube Music: Energize, Relax, Sad, Sleep... one tap to their page.
+        if (moods.isNotEmpty()) item(key = "moods") { MoodRow(moods, Modifier.padding(top = 4.dp, bottom = 4.dp)) }
 
         // Bento: the album to jump back into, large; two bright one-tap starts beside it.
         item(key = "bento") {
