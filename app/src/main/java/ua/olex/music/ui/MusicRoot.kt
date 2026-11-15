@@ -171,7 +171,8 @@ fun MusicRoot(model: LibraryViewModel) {
     var focusSearch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by remember { mutableStateOf<Place?>(null) }
-    fun go(to: Place) { returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
+    fun go(to: Place) { onlineStack = emptyList(); returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     BackHandler(page != null) { page = null }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
     fun openOf(track: Track, artist: Boolean) {
@@ -193,7 +194,17 @@ fun MusicRoot(model: LibraryViewModel) {
 
     // In an open collection the bar shows a back arrow, and the name once the header has scrolled away.
     val inCollection = page == null && place != Place.HOME && collectionTitle != null
-    androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying) {
+    // YouTube Music pages (an artist, an album) open over the current place, one on another; Back closes the top one.
+    BackHandler(onlineStack.isNotEmpty() && !expanded) { onlineStack = onlineStack.dropLast(1) }
+    val onlineNav = remember(model) {
+        OnlineNav(
+            open = { target -> expanded = false; actionTrack = null; page = null; onlineStack = onlineStack + target },
+            play = model::play,
+            actions = { actionTrack = it },
+            openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
+        )
+    }
+    androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
@@ -249,6 +260,10 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
+            onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
+                is OnlineTarget.Artist -> OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
+                is OnlineTarget.Album -> OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
+            }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
                 onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders)
@@ -359,7 +374,8 @@ fun MusicRoot(model: LibraryViewModel) {
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
             onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } },
-            onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } },
+            onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } }
+                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } },
             fileRateHz = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.sampleRateHz },
         )
         }
@@ -379,7 +395,7 @@ fun MusicRoot(model: LibraryViewModel) {
             // An online song has no album or artist page here and no file to tag: those actions are not offered.
             if (online) null else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
             if (online) null else TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
-            if (online) TrackAction(Glyph.SEARCH, "Search this artist") { actionTrack = null; expanded = false; model.setQuery(track.artist); place = Place.SEARCH } else null,
+            if (online) TrackAction(Glyph.PERSON, "Go to artist") { onlineNav.open(OnlineTarget.Artist(track.artist.substringBefore(",").trim())) } else null,
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },

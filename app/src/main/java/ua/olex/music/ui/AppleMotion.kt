@@ -48,9 +48,9 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
         get() = prefs.getBoolean("enabled", true)
         set(value) { prefs.edit().putBoolean("enabled", value).apply() }
 
-    /** Cellular data is spared unless the owner allows it. */
+    /** Each album is a few megabytes once; the owner can keep it to Wi-Fi. */
     var wifiOnly: Boolean
-        get() = prefs.getBoolean("wifi_only", true)
+        get() = prefs.getBoolean("wifi_only", false)
         set(value) { prefs.edit().putBoolean("wifi_only", value).apply() }
 
     private var token: Pair<String, Long>? = null
@@ -79,8 +79,8 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
     private fun dropWebToken() { prefs.edit().remove("web_token").remove("web_token_exp").apply() }
 
     /** Whether this album was looked up lately and had no moving cover (asked again after two weeks). */
-    private fun missed(album: String): Boolean = System.currentTimeMillis() - prefs.getLong("miss:$album", 0) < 14L * 24 * 3600 * 1000
-    private fun miss(album: String) { prefs.edit().putLong("miss:$album", System.currentTimeMillis()).apply() }
+    private fun missed(album: String): Boolean = System.currentTimeMillis() - prefs.getLong("miss2:$album", 0) < 14L * 24 * 3600 * 1000
+    private fun miss(album: String) { prefs.edit().putLong("miss2:$album", System.currentTimeMillis()).apply() }
 
     /**
      * Finds the album's moving cover and returns it as one fragmented MP4 (video only), or null.
@@ -97,7 +97,8 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
         val body = get("$base/v1/catalog/$storefront/search?types=albums&limit=10&extend=editorialVideo&term=$term", headers)
             ?: run { if (base == WEB_API) dropWebToken(); return@withContext null }
         val video = pick(String(body, Charsets.UTF_8), album, artist) ?: run { miss(lookup); return@withContext null }
-        joinHls(video) { url -> get(url, emptyMap()) } ?: run { miss(lookup); null }
+        // A failed download is not a miss: the album has a moving cover, the network failed. Next play tries again.
+        joinHls(video) { url -> get(url, emptyMap()) }
     }
 
     companion object {
