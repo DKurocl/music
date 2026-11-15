@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.contentDescription
@@ -180,6 +181,13 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
 
 private fun Modifier.graphicsLayerAlpha(alpha: Float) = this.then(androidx.compose.ui.Modifier.graphicsLayer { this.alpha = alpha })
 
+/** Scrolling the lyrics past their end stays with the lyrics: it must not open the queue or close the player. */
+private val KeepScroll = object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+    override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset,
+        source: androidx.compose.ui.input.nestedscroll.NestedScrollSource) = available
+    override suspend fun onPostFling(consumed: androidx.compose.ui.unit.Velocity, available: androidx.compose.ui.unit.Velocity) = available
+}
+
 /**
  * Lyrics in place of the cover on the player page: the sung line follows in the middle, word by
  * word where the lyrics are word-timed; tap a line to jump there; scroll freely and a "Back to the
@@ -228,7 +236,7 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
                     androidx.compose.material3.OutlinedButton(onClick = onTools) { Text("More") }
                 }
             }
-        } else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = 56.dp, bottom = 160.dp),
+        } else LazyColumn(Modifier.fillMaxSize().nestedScroll(KeepScroll), state = list, contentPadding = PaddingValues(top = 56.dp, bottom = 160.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)) {
             itemsIndexed(lyrics.lines) { index, line ->
                 LyricLine(line, index, current, now, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }

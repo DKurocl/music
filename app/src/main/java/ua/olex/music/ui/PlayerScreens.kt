@@ -475,7 +475,7 @@ internal fun PlayerPage(
                                         launch { leave.animateTo(0f, androidx.compose.animation.core.tween(110)) }
                                         swipe.animateTo(if (next) -coverWidth * 0.45f else coverWidth * 0.45f, androidx.compose.animation.core.tween(110))
                                         if (next) onNext() else onPrevious()
-                                        delay(500); if (skipping) { skipping = false; swipe.snapTo(0f); leave.animateTo(1f, fastEffects) }
+                                        delay(300); if (skipping) { skipping = false; swipe.snapTo(0f); leave.animateTo(1f, fastEffects) }
                                     } else swipe.animateTo(0f, spatial)
                                 }
                             },
