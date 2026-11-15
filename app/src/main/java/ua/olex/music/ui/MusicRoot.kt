@@ -164,7 +164,9 @@ fun MusicRoot(model: LibraryViewModel) {
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val haptics = rememberHaptics()
     var focusSearch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    fun go(to: Place) { if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
+    var returnTo by remember { mutableStateOf<Place?>(null) }
+    fun go(to: Place) { returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     BackHandler(page != null) { page = null }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
     fun openOf(track: Track, artist: Boolean) {
@@ -174,7 +176,7 @@ fun MusicRoot(model: LibraryViewModel) {
             else index.albums.firstOrNull { a -> a.tracks.any { it.id == track.id } }
         target ?: return
         haptics.tick(); expanded = false; actionTrack = null; page = null
-        if (place == Place.SEARCH) model.setQuery("")
+        if (place == Place.SEARCH) model.setQuery("") else returnTo = place
         openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.SEARCH
     }
     BackHandler(page == null && place != Place.HOME && !expanded) { go(Place.HOME) }
@@ -256,20 +258,21 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             place == Place.HOME -> HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
                 Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
-                onOpenAlbum = { openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
-                onOpenArtist = { openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
+                onOpenAlbum = { returnTo = Place.HOME; openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
+                onOpenArtist = { returnTo = Place.HOME; openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
                 onSeeAll = { tab ->
                     // Smart playlists live in Playlists; albums, artists and history are Search tiles.
-                    if (tab == "SMART") { openInLibrary = tab to ""; place = Place.LIBRARY } else { openTile = tab; place = Place.SEARCH }
+                    if (tab == "SMART") { returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
                 })
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
+                onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, focusSearch = focusSearch, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
@@ -331,10 +334,11 @@ fun MusicRoot(model: LibraryViewModel) {
                 val s = 1f - backProgress * 0.08f; scaleX = s; scaleY = s
                 shape = RoundedCornerShape((backProgress * 40 + (dismiss.value / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
             }) {
+        val motionCover by model.motionCover.collectAsStateWithLifecycle()
         NowPlaying(
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
                 listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") },
-            position = { model.positionMs }, onClose = { expanded = false },
+            position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
             onEqualizer = { equalizerOpen = true },
@@ -426,7 +430,7 @@ private fun NowPlaying(
     onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
     onSaveLyricTiming: ((ua.olex.music.lyrics.Lyrics) -> Unit)? = null, onResetLyricTiming: () -> Unit = {},
     favourite: Boolean, onFavourite: (() -> Unit)?,
-    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null,
+    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null, motionCover: String? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
@@ -465,7 +469,7 @@ private fun NowPlaying(
     PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
         onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
         onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
-        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist,
+        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, motionCover = motionCover,
         inlineLyrics = { mod ->
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
                 onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus, modifier = mod)
@@ -561,13 +565,23 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
     androidx.compose.material3.ShortNavigationBar {
         Place.entries.forEach { p ->
             val selected = current == p
+            // Only a tap animates, and only the tapped icon (as Gboard does): each icon has its own small gesture.
+            var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
             androidx.compose.material3.ShortNavigationBarItem(
-                selected = selected, onClick = { onGo(p) },
-                // The chosen place's icon fills and gives a little hop.
+                selected = selected, onClick = { taps++; onGo(p) },
                 icon = {
-                    val hop = remember { androidx.compose.animation.core.Animatable(1f) }
-                    LaunchedEffect(selected) { if (selected) { hop.snapTo(0.82f); hop.animateTo(1f, androidx.compose.animation.core.spring(0.4f, 600f)) } }
-                    Symbol(p.glyph, filled = selected, bold = selected, modifier = Modifier.graphicsLayer { scaleX = hop.value; scaleY = hop.value })
+                    val motion = remember { androidx.compose.animation.core.Animatable(1f) }
+                    LaunchedEffect(taps) { if (taps > 0) { motion.snapTo(0f); motion.animateTo(1f, androidx.compose.animation.core.spring(0.45f, 450f)) } }
+                    Symbol(p.glyph, filled = selected, bold = selected, modifier = Modifier.graphicsLayer {
+                        val v = motion.value
+                        val k = 0.82f + 0.18f * v
+                        scaleX = k; scaleY = k
+                        when (p) {
+                            Place.HOME -> translationY = (1f - v) * -4.dp.toPx()          // the house settles down
+                            Place.LIBRARY -> translationX = (1f - v) * -4.dp.toPx()       // the list slides in
+                            Place.SEARCH -> rotationZ = (1f - v) * -28f                   // the lens swings and settles
+                        }
+                    })
                 }, label = { Text(p.title) },
             )
         }

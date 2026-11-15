@@ -2,6 +2,9 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -11,9 +14,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
@@ -94,7 +94,7 @@ import ua.olex.music.playback.RepeatMode
 
 /** A cover from the shared artwork cache, on a tonal placeholder with a note while it loads or when there is none. */
 @Composable
-internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ArtworkPlan.SMALL) {
+internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ArtworkPlan.SMALL, motion: String? = null, moving: Boolean = true) {
     val cs = MaterialTheme.colorScheme
     Box(modifier.clip(RoundedCornerShape(corner)).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
         Symbol(Glyph.NOTE, size = 24.dp, color = cs.onSurfaceVariant, filled = true)
@@ -102,7 +102,38 @@ internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int =
             model = ua.olex.music.library.ArtworkUris.variant(uri, LocalContext.current.packageName, pixels),
             contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
+        // A moving cover plays over the still one once its first frame is ready, so nothing flashes.
+        if (motion != null && !LocalInspectionMode.current) MotionCover(motion, moving, Modifier.fillMaxSize())
     }
+}
+
+/** A muted, looping video as the cover (as Apple Music's motion artwork), paused with the music and when the app is away. */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val started by lifecycle.currentStateFlow.collectAsState()
+    var ready by remember(uri) { mutableStateOf(false) }
+    val player = remember(uri) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            // No sound and no audio focus: the music keeps playing untouched.
+            setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, false)
+            trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true).build()
+            volume = 0f
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+            addListener(object : androidx.media3.common.Player.Listener { override fun onRenderedFirstFrame() { ready = true } })
+            prepare()
+        }
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+    LaunchedEffect(moving, started) { player.playWhenReady = moving && started.isAtLeast(Lifecycle.State.STARTED) }
+    val alpha by animateFloatAsState(if (ready) 1f else 0f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "motion")
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = { android.view.TextureView(it).also { view -> player.setVideoTextureView(view) } },
+        modifier = modifier.graphicsLayer { this.alpha = alpha },
+    )
 }
 
 /**
@@ -118,53 +149,75 @@ internal fun TrackRow(
     number: Int? = null, albumArtist: String? = null, showQuality: Boolean = true, onClick: () -> Unit,
 ) {
     if ((onPlayNext == null && onQueue == null) || selecting) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick); return }
-    // Swipe right: play next. Swipe left: add to queue. The row springs back; a tick marks the threshold.
+    // Swipe right: play next. Swipe left: add to queue. The row follows the finger with growing
+    // resistance (it never leaves the screen), the action shows underneath, a tick marks the point
+    // of no return, and on release the row springs back into place.
     val haptics = rememberHaptics()
     val snackbar = LocalSnackbar.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val swipe = rememberSwipeToDismissBoxState()
+    val offset = remember { androidx.compose.animation.core.Animatable(0f) }
+    var raw by remember { mutableFloatStateOf(0f) }
+    var width by remember { mutableIntStateOf(1) }
     var armed by remember { mutableStateOf(false) }
-    LaunchedEffect(swipe.progress, swipe.dismissDirection) {
-        val past = swipe.progress > 0.35f && swipe.dismissDirection != SwipeToDismissBoxValue.Settled
-        if (past && !armed) haptics.threshold()
-        armed = past
-    }
-    LaunchedEffect(swipe.currentValue) {
-        when (swipe.currentValue) {
-            SwipeToDismissBoxValue.StartToEnd -> { onPlayNext?.invoke(); haptics.confirm(); scope.launch { snackbar?.showSnackbar("Playing next: ${track.title}") } }
-            SwipeToDismissBoxValue.EndToStart -> { onQueue?.invoke(); haptics.confirm(); scope.launch { snackbar?.showSnackbar("Added to queue: ${track.title}") } }
-            SwipeToDismissBoxValue.Settled -> return@LaunchedEffect
-        }
-        swipe.reset()
-    }
     val cs = MaterialTheme.colorScheme
-    SwipeToDismissBox(
-        state = swipe, enableDismissFromStartToEnd = onPlayNext != null, enableDismissFromEndToStart = onQueue != null,
-        backgroundContent = {
-            // Drawn only while a swipe is under way: rows are see-through, so a resting background would show.
-            if (swipe.dismissDirection == SwipeToDismissBoxValue.Settled) return@SwipeToDismissBox
-            val next = swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd
-            val color = if (next) cs.secondaryContainer else cs.tertiaryContainer
-            Row(Modifier.fillMaxSize().padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
+    val back = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    Box(Modifier.fillMaxWidth().onSizeChanged { width = it.width.coerceAtLeast(1) }) {
+        val x = offset.value
+        if (x != 0f) {
+            val next = x > 0
+            val color by animateColorAsState(when { armed && next -> cs.primary; armed -> cs.tertiary; next -> cs.secondaryContainer; else -> cs.tertiaryContainer }, label = "swipe")
+            val ink = when { armed && next -> cs.onPrimary; armed -> cs.onTertiary; next -> cs.onSecondaryContainer; else -> cs.onTertiaryContainer }
+            val iconScale by androidx.compose.animation.core.animateFloatAsState(if (armed) 1.15f else 0.85f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "swipe-icon")
+            Row(Modifier.matchParentSize().padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
                 horizontalArrangement = if (next) Arrangement.Start else Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                Symbol(if (next) Glyph.NEXT else Glyph.QUEUE, filled = true, color = if (next) cs.onSecondaryContainer else cs.onTertiaryContainer)
-                Spacer(Modifier.width(8.dp))
-                Text(if (next) "Play next" else "Add to queue", style = MaterialTheme.typography.labelLarge, color = if (next) cs.onSecondaryContainer else cs.onTertiaryContainer)
+                Symbol(if (next) Glyph.NEXT else Glyph.QUEUE, filled = true, color = ink, modifier = Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale })
+                Spacer(Modifier.width(10.dp))
+                Text(if (next) "Play next" else "Add to queue", style = MaterialTheme.typography.labelLarge, color = ink)
             }
-        },
-    ) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick) }
+        }
+        Box(Modifier.graphicsLayer { translationX = offset.value }
+            .pointerInput(onPlayNext, onQueue) {
+                detectHorizontalDragGestures(
+                    onDragStart = { raw = offset.value },
+                    onDragEnd = {
+                        val dx = offset.value
+                        val fire = armed
+                        armed = false
+                        scope.launch { offset.animateTo(0f, back) }
+                        if (fire) {
+                            haptics.confirm()
+                            if (dx > 0) { onPlayNext?.invoke(); scope.launch { snackbar?.showSnackbar("Playing next: ${track.title}") } }
+                            else { onQueue?.invoke(); scope.launch { snackbar?.showSnackbar("Added to queue: ${track.title}") } }
+                        }
+                    },
+                    onDragCancel = { armed = false; scope.launch { offset.animateTo(0f, back) } },
+                ) { change, amount ->
+                    change.consume()
+                    raw += amount
+                    if (raw > 0 && onPlayNext == null || raw < 0 && onQueue == null) raw = 0f
+                    val shown = rubber(raw, width * 0.45f)
+                    val past = kotlin.math.abs(shown) > width * 0.22f
+                    if (past != armed) { if (past) haptics.threshold(); armed = past }
+                    scope.launch { offset.snapTo(shown) }
+                }
+            }) {
+            TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick, lifted = offset.value != 0f)
+        }
+    }
 }
 
 @Composable
 private fun TrackRowContent(
     track: Track, current: Boolean, onMore: (() -> Unit)?, selecting: Boolean, checked: Boolean, onSelect: (() -> Unit)?,
-    number: Int?, albumArtist: String?, showQuality: Boolean, onClick: () -> Unit,
+    number: Int?, albumArtist: String?, showQuality: Boolean, onClick: () -> Unit, lifted: Boolean = false,
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     // Rows sit as soft rounded segments; the playing one is a tonal pill, the selected ones stronger.
     val container by animateColorAsState(when {
         selecting && checked -> cs.secondaryContainer
+        // While swiped the row is solid, so the action underneath never shows through it.
+        lifted -> cs.surfaceContainerHigh
         current && !selecting -> cs.secondaryContainer.copy(alpha = 0.45f)
         else -> cs.surface.copy(alpha = 0f)
     }, label = "row")
@@ -194,7 +247,7 @@ private fun TrackRowContent(
                 Symbol(Glyph.MORE, color = cs.onSurfaceVariant)
             }
         },
-        colors = ListItemDefaults.colors(containerColor = container,
+        colors = ListItemDefaults.colors(containerColor = if (lifted) cs.surfaceContainerHigh else container,
             headlineColor = if (selecting && checked) cs.onSecondaryContainer else cs.onSurface,
             supportingColor = if (selecting && checked) cs.onSecondaryContainer else cs.onSurfaceVariant),
         modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).combinedClickable(
@@ -321,6 +374,8 @@ internal fun PlayerPage(
     onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null,
     /** Lyrics shown in place of the cover, toggled by the Lyrics button; null keeps the old sheet behaviour. */
     inlineLyrics: (@Composable (Modifier) -> Unit)? = null, startWithLyrics: Boolean = false,
+    /** A moving cover beside the song (cover.mp4 in its folder), played over the still cover. */
+    motionCover: String? = null,
 ) {
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val cs = MaterialTheme.colorScheme
@@ -379,6 +434,15 @@ internal fun PlayerPage(
             val arrive = remember { androidx.compose.animation.core.Animatable(1f) }
             var skipping by remember { mutableStateOf(false) }
             var seenId by remember { mutableStateOf(state.mediaId) }
+            // The next and previous covers are decoded ahead, so a skip shows its cover at once.
+            val context = LocalContext.current
+            LaunchedEffect(state.queueIndex, state.queue.size, coverWidth) {
+                if (coverWidth <= 1) return@LaunchedEffect
+                listOf(state.queueIndex + 1, state.queueIndex - 1).mapNotNull { state.queue.getOrNull(it)?.artworkUri }.forEach { uri ->
+                    coil3.SingletonImageLoader.get(context).enqueue(coil3.request.ImageRequest.Builder(context)
+                        .data(ua.olex.music.library.ArtworkUris.variant(uri, context.packageName, ArtworkPlan.LARGE)).size(coverWidth).build())
+                }
+            }
             LaunchedEffect(state.mediaId) {
                 if (state.mediaId == seenId) return@LaunchedEffect
                 seenId = state.mediaId
@@ -426,7 +490,7 @@ internal fun PlayerPage(
                         alpha = leave.value * arrive.value * (1f - (kotlin.math.abs(swipe.value) / coverWidth * 0.3f)).coerceIn(0f, 1f)
                     }
                     .shadow(24.dp, RoundedCornerShape(32.dp), clip = false, ambientColor = androidx.compose.ui.graphics.Color.Black, spotColor = androidx.compose.ui.graphics.Color.Black),
-                32.dp, pixels = ArtworkPlan.LARGE,
+                32.dp, pixels = ArtworkPlan.LARGE, motion = motionCover, moving = state.isPlaying,
             )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
                 modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })

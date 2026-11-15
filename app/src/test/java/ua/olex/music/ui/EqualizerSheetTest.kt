@@ -45,7 +45,9 @@ class EqualizerSheetTest {
         var applied: EqualizerSettings? = null
         compose.setContent { AppTheme { EqualizerSheet(EqualizerState("phone-speaker", "Phone speakers"), true, null,
             { _, settings -> applied = settings }, {}) } }
-        compose.onNodeWithText("31 Hz").performScrollTo().performClick()
+        // The band chips sit in a horizontal row: scroll the sheet itself to the text under them first.
+        compose.onNodeWithText("Headroom is kept automatically", substring = true).performScrollTo()
+        compose.onNodeWithText("31 Hz").performClick()
         compose.onNodeWithText("Frequency (Hz)").performTextReplacement("invalid")
         compose.onNodeWithText("Apply").assertIsNotEnabled()
         compose.onNodeWithText("Frequency (Hz)").performTextReplacement("80")

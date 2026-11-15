@@ -18,12 +18,35 @@ import kotlinx.coroutines.launch
 class FadingPlayer internal constructor(private val real: Player, private val scope: CoroutineScope, private val wanted: () -> Boolean = { true }) : ForwardingPlayer(real) {
     private var fade: Job? = null
     private val enabled get() = wanted()
+    /** True during the short fade before a pause: the player already reads as paused to everyone. */
+    private var pausing = false
+    private val wrappers = HashMap<Player.Listener, Player.Listener>()
+
+    // A pause is answered at once: controls flip immediately while the sound fades underneath.
+    override fun getPlayWhenReady(): Boolean = if (pausing) false else super.getPlayWhenReady()
+    override fun isPlaying(): Boolean = if (pausing) false else super.isPlaying()
+
+    // The fade's volume steps stay inside: without this, each 16 ms step sent the whole player
+    // state to the app (and the old "playing" with it), which made pause and play feel slow.
+    override fun addListener(listener: Player.Listener) {
+        val wrapper = object : Player.Listener by listener {
+            override fun onVolumeChanged(volume: Float) { if (fade?.isActive != true) listener.onVolumeChanged(volume) }
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (fade?.isActive == true && events.size() == 1 && events.contains(Player.EVENT_VOLUME_CHANGED)) return
+                listener.onEvents(player, events)
+            }
+        }
+        wrappers[listener] = wrapper
+        super.addListener(wrapper)
+    }
+    override fun removeListener(listener: Player.Listener) { super.removeListener(wrappers.remove(listener) ?: listener) }
 
     override fun play() = setPlayWhenReady(true)
     override fun pause() = setPlayWhenReady(false)
 
     override fun setPlayWhenReady(playWhenReady: Boolean) {
         fade?.cancel()
+        pausing = false
         if (!enabled) { real.volume = 1f; super.setPlayWhenReady(playWhenReady); return }
         if (playWhenReady) {
             if (!real.playWhenReady) real.volume = 0f
@@ -31,10 +54,14 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
             fade = ramp(real.volume, 1f, FADE_IN_MS)
         } else if (real.isPlaying) {
             val from = real.volume
+            pausing = true
             fade = scope.launch {
-                ramp(from, 0f, FADE_OUT_MS).join()
-                super.setPlayWhenReady(false)
-                real.volume = 1f
+                try {
+                    ramp(from, 0f, FADE_OUT_MS).join()
+                    pausing = false
+                    super.setPlayWhenReady(false)
+                    real.volume = 1f
+                } finally { pausing = false }
             }
         } else { super.setPlayWhenReady(false); real.volume = 1f }
     }
@@ -60,7 +87,7 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
     }
 
     companion object {
-        const val FADE_OUT_MS = 200L; const val FADE_IN_MS = 300L
+        const val FADE_OUT_MS = 150L; const val FADE_IN_MS = 250L
         const val PREFS = "playback"; const val KEY = "fades"
     }
 }

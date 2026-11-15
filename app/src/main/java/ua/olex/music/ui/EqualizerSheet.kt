@@ -2,6 +2,10 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -108,12 +112,28 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                 if (state.sony) Text("Sony correction is AutoEq from Rtings measurements; turn Sony's own EQ off first.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 BandSlider("Preamp", "${String.format(Locale.ROOT, "%.1f", draft.preampDb)} dB", draft.preampDb.toFloat(), -36f..12f, editable, "Equalizer preamp",
                     onLabel = null, onChange = { draft = draft.copy(preampDb = it.toDouble()) }, onDone = { onApply(state.routeKey, draft) })
-                draft.bands.forEachIndexed { index, band ->
-                    val label = if (band.frequencyHz >= 1_000) "${String.format(Locale.ROOT, "%.1f", band.frequencyHz / 1_000)} kHz" else "${band.frequencyHz.toInt()} Hz"
-                    BandSlider(label, "${String.format(Locale.ROOT, "%+.1f", band.gainDb)}", band.gainDb.toFloat(), -24f..24f, editable, "Gain at $label",
-                        onLabel = { editor = index },
-                        onChange = { value -> draft = draft.copy(profile = "Custom", bands = draft.bands.mapIndexed { i, item -> if (i == index) item.copy(gainDb = value.toDouble()) else item }) },
-                        onDone = { onApply(state.routeKey, draft) }, bipolar = true)
+                // The sound as a curve: drag a band's dot up or down; its chip below opens exact settings.
+                var held by remember { mutableStateOf<Int?>(null) }
+                EqCurve(draft, editable, held,
+                    onHold = { held = it },
+                    onGain = { index, value -> draft = draft.copy(profile = "Custom", bands = draft.bands.mapIndexed { i, item -> if (i == index) item.copy(gainDb = value) else item }) },
+                    onDone = { held = null; onApply(state.routeKey, draft) })
+                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Chips in order of frequency (imported profiles list bands in any order); each opens its own band.
+                    val order = draft.bands.indices.sortedBy { draft.bands[it].frequencyHz }
+                    items(order.size) { position ->
+                        val index = order[position]
+                        val band = draft.bands[index]
+                        val label = bandLabel(band.frequencyHz)
+                        Surface(onClick = { editor = index }, enabled = editable, shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                            color = if (held == index) cs.primaryContainer else cs.surfaceContainerHigh,
+                            modifier = Modifier.semantics { contentDescription = "$label, ${String.format(Locale.ROOT, "%+.1f", band.gainDb)} dB" }) {
+                            Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                Text(label, style = MaterialTheme.typography.labelMedium)
+                                Text(String.format(Locale.ROOT, "%+.1f", band.gainDb), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                            }
+                        }
+                    }
                 }
                 Text("Headroom is kept automatically so boosted bands never clip.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
@@ -140,6 +160,95 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                     Text("Swap left and right", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     Switch(checked = mix.swap, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(swap = it))) }, modifier = Modifier.semantics { contentDescription = "Swap left and right" })
                 }
+            }
+        }
+    }
+}
+
+private fun bandLabel(hz: Double) = if (hz >= 1_000) "${String.format(Locale.ROOT, "%.1f", hz / 1_000).removeSuffix(".0")} kHz" else "${hz.toInt()} Hz"
+
+/**
+ * The equalizer as its frequency response, 20 Hz to 20 kHz on a log scale, ±15 dB: the curve the
+ * bands make together, filled toward 0 dB, with each band as a dot at its frequency and gain.
+ * Dragging near a dot moves that band (with a tick at every whole dB); while held, its value shows.
+ */
+@Composable
+private fun EqCurve(settings: EqualizerSettings, enabled: Boolean, held: Int?, onHold: (Int?) -> Unit, onGain: (Int, Double) -> Unit, onDone: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(color = cs.onSurfaceVariant)
+    val valueStyle = MaterialTheme.typography.labelLarge.copy(color = cs.onPrimary)
+    val bands by androidx.compose.runtime.rememberUpdatedState(settings.bands)
+    val active = settings.enabled
+    val range = 15.0
+    fun xOf(hz: Double, w: Float) = (kotlin.math.log10(hz / 20.0) / 3.0).toFloat().coerceIn(0f, 1f) * w
+    androidx.compose.foundation.Canvas(
+        Modifier.fillMaxWidth().height(200.dp).semantics { contentDescription = "Equalizer curve" }
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                var index = -1
+                var lastDb = 0
+                var raw = 0.0
+                detectVerticalDragGestures(
+                    onDragStart = { at ->
+                        index = bands.indices.minByOrNull { kotlin.math.abs(xOf(bands[it].frequencyHz, size.width.toFloat()) - at.x) } ?: -1
+                        if (index >= 0) { onHold(index); raw = bands[index].gainDb; lastDb = raw.toInt(); haptics.tick() }
+                    },
+                    onDragEnd = { if (index >= 0) onDone(); index = -1 },
+                    onDragCancel = { if (index >= 0) onDone(); index = -1 },
+                ) { change, dy ->
+                    if (index < 0) return@detectVerticalDragGestures
+                    change.consume()
+                    val perDb = (size.height / 2f - 16.dp.toPx()) / range.toFloat()
+                    raw = (raw - dy / perDb).coerceIn(-range, range)
+                    val rounded = kotlin.math.round(raw * 2) / 2
+                    if (rounded.toInt() != lastDb) { lastDb = rounded.toInt(); haptics.tick() }
+                    onGain(index, rounded)
+                }
+            },
+    ) {
+        val w = size.width; val h = size.height
+        val mid = h / 2f
+        val perDb = (h / 2f - 16.dp.toPx()) / range.toFloat()
+        fun yOf(db: Double) = (mid - db * perDb).toFloat()
+        // Grid: 0 dB stronger, ±6 and ±12 dB faint; 100 Hz, 1 kHz, 10 kHz marks.
+        listOf(-12.0, -6.0, 6.0, 12.0).forEach { drawLine(cs.outlineVariant.copy(alpha = 0.35f), androidx.compose.ui.geometry.Offset(0f, yOf(it)), androidx.compose.ui.geometry.Offset(w, yOf(it)), 1.dp.toPx()) }
+        drawLine(cs.outlineVariant, androidx.compose.ui.geometry.Offset(0f, mid), androidx.compose.ui.geometry.Offset(w, mid), 1.5f.dp.toPx())
+        listOf(100.0 to "100", 1_000.0 to "1k", 10_000.0 to "10k").forEach { (hz, text) ->
+            val x = xOf(hz, w)
+            drawLine(cs.outlineVariant.copy(alpha = 0.25f), androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, h), 1.dp.toPx())
+            drawText(measurer, text, androidx.compose.ui.geometry.Offset(x + 4.dp.toPx(), h - 16.dp.toPx()), labelStyle)
+        }
+        // The response the bands make together.
+        val filters = settings.bands.filter { it.gainDb != 0.0 }.map { ua.olex.music.dsp.Biquad.of(it, 48_000) }
+        val steps = 160
+        val curve = androidx.compose.ui.graphics.Path()
+        val fill = androidx.compose.ui.graphics.Path().apply { moveTo(0f, mid) }
+        for (i in 0..steps) {
+            val hz = 20.0 * Math.pow(1000.0, i / steps.toDouble())
+            val db = filters.sumOf { 20 * kotlin.math.log10(it.magnitudeAt(hz, 48_000).coerceAtLeast(1e-6)) }.coerceIn(-range, range)
+            val x = xOf(hz, w); val y = yOf(db)
+            if (i == 0) curve.moveTo(x, y) else curve.lineTo(x, y)
+            fill.lineTo(x, y)
+        }
+        fill.lineTo(w, mid); fill.close()
+        val tone = if (active) cs.primary else cs.outline
+        drawPath(fill, tone.copy(alpha = 0.16f))
+        drawPath(curve, tone, style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
+        settings.bands.forEachIndexed { i, band ->
+            val c = androidx.compose.ui.geometry.Offset(xOf(band.frequencyHz, w), yOf(band.gainDb.coerceIn(-range, range)))
+            val r = if (held == i) 11.dp.toPx() else 7.dp.toPx()
+            drawCircle(cs.surfaceContainer, r + 3.dp.toPx(), c)
+            drawCircle(tone, r, c)
+            if (held == i) {
+                val text = "${String.format(Locale.ROOT, "%+.1f", band.gainDb)} dB · ${bandLabel(band.frequencyHz)}"
+                val layout = measurer.measure(text, valueStyle)
+                val bx = (c.x - layout.size.width / 2f - 10.dp.toPx()).coerceIn(0f, w - layout.size.width - 20.dp.toPx())
+                val by = if (c.y > h / 2) c.y - 52.dp.toPx() else c.y + 20.dp.toPx()
+                drawRoundRect(cs.primary, androidx.compose.ui.geometry.Offset(bx, by), androidx.compose.ui.geometry.Size(layout.size.width + 20.dp.toPx(), layout.size.height + 10.dp.toPx()),
+                    androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()))
+                drawText(layout, topLeft = androidx.compose.ui.geometry.Offset(bx + 10.dp.toPx(), by + 5.dp.toPx()))
             }
         }
     }
