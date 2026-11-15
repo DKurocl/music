@@ -58,3 +58,30 @@ class PcmEqualizerTest {
         assertThrows(IllegalArgumentException::class.java) { processor.render(floats(0.5f)) }
     }
 }
+
+class ChannelMixTest {
+    @org.junit.Test fun neutralLeavesTheFrameAlone() {
+        val f = floatArrayOf(0.25f, -0.5f); ChannelMix().apply(f)
+        org.junit.Assert.assertArrayEquals(floatArrayOf(0.25f, -0.5f), f, 0f)
+    }
+    @org.junit.Test fun monoSwapAndBalance() {
+        val f = floatArrayOf(1f, 0f); ChannelMix(mono = true).apply(f)
+        org.junit.Assert.assertArrayEquals(floatArrayOf(0.5f, 0.5f), f, 1e-6f)
+        val s = floatArrayOf(1f, 0.2f); ChannelMix(swap = true).apply(s)
+        org.junit.Assert.assertArrayEquals(floatArrayOf(0.2f, 1f), s, 1e-6f)
+        val l = floatArrayOf(1f, 1f); ChannelMix(balance = -1f).apply(l)
+        org.junit.Assert.assertEquals(1f, l[0], 1e-6f); org.junit.Assert.assertEquals(0f, l[1], 1e-6f)
+        val r = floatArrayOf(1f, 1f); ChannelMix(balance = 0.5f).apply(r)
+        org.junit.Assert.assertTrue(r[0] < 1f && r[1] == 1f)
+    }
+    @org.junit.Test fun monoWorksWithTheEqualizerOff() {
+        val eq = PcmEqualizer(PcmEncoding.FLOAT32, 48_000, 2) { EqualizerSettings(channels = ChannelMix(mono = true)) }
+        val input = java.nio.ByteBuffer.allocateDirect(8 * 4).order(java.nio.ByteOrder.nativeOrder())
+        repeat(4) { input.putFloat(1f); input.putFloat(0f) }; input.flip()
+        val out = eq.render(input).duplicate().order(java.nio.ByteOrder.nativeOrder())
+        org.junit.Assert.assertNotSame(input, out)
+        // Fading in from stereo: the left side already moves toward the mono level, the right up from silence.
+        val left = out.float; val right = out.float
+        org.junit.Assert.assertTrue(left < 1f && right > 0f)
+    }
+}

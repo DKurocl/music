@@ -200,6 +200,7 @@ fun MusicRoot(model: LibraryViewModel) {
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
             onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
             onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
+            onSaveLyricTiming = model::saveLyricTiming, onResetLyricTiming = model::resetLyricTiming,
             favourite = playing.mediaId in personal.favouriteByTrackId,
             onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
@@ -282,6 +283,7 @@ private fun NowPlaying(
     lyricsState: LocalLyricsState, lyricOffset: Long, onLyricOffset: (Long) -> Unit,
     musicFolders: List<String>, onChooseMusicFolder: () -> Unit, onClearMusicFolders: () -> Unit, onReloadLyrics: () -> Unit,
     onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
+    onSaveLyricTiming: ((ua.olex.music.lyrics.Lyrics) -> Unit)? = null, onResetLyricTiming: () -> Unit = {},
     favourite: Boolean, onFavourite: (() -> Unit)?,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -294,7 +296,8 @@ private fun NowPlaying(
         source = if (lyricsState.mediaId == state.mediaId) lyricsState.source else "Loading local lyrics...",
         note = lyricsState.note.takeIf { lyricsState.mediaId == state.mediaId }, folders = musicFolders,
         onChooseFolder = onChooseMusicFolder, onClearFolders = onClearMusicFolders, onReload = onReloadLyrics,
-        onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus)
+        onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,
+        onSaveTiming = onSaveLyricTiming, onResetTiming = if (lyricsState.edited && lyricsState.mediaId == state.mediaId) onResetLyricTiming else null)
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var queueSheet by rememberSaveable { mutableStateOf(false) }
     var audioPath by rememberSaveable { mutableStateOf(false) }

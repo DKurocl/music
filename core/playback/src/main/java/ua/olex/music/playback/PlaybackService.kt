@@ -57,16 +57,44 @@ class PlaybackService : MediaLibraryService() {
     private var persistence: PlaybackPersistence? = null
     private val usb by lazy { UsbBitPerfect(this) }
     private val routeCallback = object : android.media.AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) = usb.update(diagnostics.sampleRateHz)
+        override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
+            usb.update(diagnostics.sampleRateHz)
+            // Resume on connect, only for the headphones the owner chose (and not at service start).
+            val player = session?.player ?: return
+            if (!devicesSeen) return
+            val chosen = HeadsetRules.resumeDevices(this@PlaybackService)
+            if (addedDevices.orEmpty().any { it.isSink && HeadsetRules.isHeadset(it) && it.productName?.toString() in chosen } &&
+                !player.isPlaying && player.mediaItemCount > 0) player.play()
+        }
         override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) = usb.update(diagnostics.sampleRateHz)
     }
-    private val outputPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> usb.update(diagnostics.sampleRateHz) }
+    private val outputPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> usb.update(diagnostics.sampleRateHz); updateOffload() }
+
+    /**
+     * Battery saver: lets the phone's audio DSP decode while the screen is off. Only when nothing in
+     * the app processes the sound (EQ, channels, ReplayGain), so turning it on never changes what
+     * is heard; Media3 keeps gapless joins or does not offload.
+     */
+    private fun updateOffload() {
+        val player = session?.player ?: return
+        val wanted = getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).getBoolean(OFFLOAD_KEY, false) &&
+            !equalizer.active.active && replayGain.mode == ua.olex.music.dsp.ReplayGainMode.OFF && !usb.enabled
+        val mode = if (wanted) androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
+            else androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
+        if (player.trackSelectionParameters.audioOffloadPreferences.audioOffloadMode == mode) return
+        player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setAudioOffloadPreferences(
+            androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.Builder()
+                .setAudioOffloadMode(mode).setIsGaplessSupportRequired(true).build()).build()
+    }
     @Volatile private var replayGain = ua.olex.music.dsp.ReplayGainSettings()
+    /** The device callback reports every present device once at registration: not a "connect". */
+    private var devicesSeen = false
 
     override fun onCreate() {
         super.onCreate()
         equalizer = EqualizerController(this) { state -> session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply { putBundle(EqualizerCommand.KEY, EqualizerCommand.bundle(state)) })
+            scope.launch { updateOffload() }
         } }
         replayGain = getSharedPreferences("replaygain-v1", MODE_PRIVATE).getString("settings", null)?.let {
             runCatching { ReplayGainCodec.decode(it) }.getOrNull()
@@ -79,6 +107,7 @@ class PlaybackService : MediaLibraryService() {
         }
         session = builder.build()
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(routeCallback, null)
+        scope.launch { devicesSeen = true }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(outputPrefs)
         session?.setSessionExtras(Bundle().apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(replayGain)) })
         equalizerRoute = OutputRouteMonitor(this).also { monitor ->
@@ -87,6 +116,7 @@ class PlaybackService : MediaLibraryService() {
             scope.launch { monitor.route.collect(equalizer::routeChanged) }
         }
         persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope)
+        updateOffload()
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
                 diagnostics = diagnostics.copy(decoder = decoderName)
@@ -116,7 +146,8 @@ class PlaybackService : MediaLibraryService() {
                 historyGate.transition()
                 recordCurrentPlayback()
             }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback() }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback(); publishNowPlaying() }
+            override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) = publishNowPlaying()
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (endOfTrack && !playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
                     endOfTrack = false; (session?.player as? ExoPlayer)?.pauseAtEndOfMediaItems = false; publishSleepTimer()
@@ -126,6 +157,13 @@ class PlaybackService : MediaLibraryService() {
                 if (playbackState == Player.STATE_ENDED) historyGate.transition()
             }
         })
+    }
+
+    /** Widget and tile state; written only on a change of song or play state. */
+    private fun publishNowPlaying() {
+        val player = session?.player ?: return
+        val meta = player.mediaMetadata
+        NowPlaying.publish(this, meta.title?.toString(), meta.artist?.toString(), meta.artworkUri?.toString(), player.isPlaying)
     }
 
     private fun recordCurrentPlayback() {
@@ -319,6 +357,7 @@ class PlaybackService : MediaLibraryService() {
                     val settings = ReplayGainCodec.decode(text)
                     getSharedPreferences("replaygain-v1", MODE_PRIVATE).edit().putString("settings", ReplayGainCodec.encode(settings)).apply()
                     replayGain = settings
+                    updateOffload()
                     session.setSessionExtras(Bundle(session.sessionExtras).apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(settings)) })
                 }.isSuccess
                 return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
@@ -371,5 +410,10 @@ class PlaybackService : MediaLibraryService() {
             mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>,
         ): ListenableFuture<List<MediaItem>> =
             Futures.immediateFuture(mediaItems.map { item -> item.requestMetadata.mediaUri?.let { item.buildUpon().setUri(it).build() } ?: item })
+    }
+
+    companion object {
+        /** In [UsbBitPerfect.PREFS]: the owner's battery-saver offload switch. */
+        const val OFFLOAD_KEY = "offload"
     }
 }

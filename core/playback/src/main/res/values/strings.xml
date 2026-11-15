@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_idle">Nothing playing</string>
+    <string name="widget_play">Play</string>
+    <string name="widget_pause">Pause</string>
+    <string name="widget_next">Next</string>
+    <string name="widget_previous">Previous</string>
+    <string name="widget_description">The song that is playing, with play, pause, next and previous.</string>
+    <string name="tile_label">Music</string>
+</resources>

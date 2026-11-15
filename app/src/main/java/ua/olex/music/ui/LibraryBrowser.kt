@@ -48,13 +48,20 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.layout.*
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.unit.dp
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.Track
 
 private enum class LibraryTab(val title: String) {
-    SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres"), YEARS("Years"), COMPOSERS("Composers")
+    HOME("Home"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres"), YEARS("Years"), COMPOSERS("Composers"), STATS("Stats")
 }
 
 /** Browse one shared library snapshot or cancellable FTS results; taps play exactly the visible queue. */
@@ -84,7 +91,7 @@ internal fun LibraryBrowser(
     onEnqueue: (List<Track>, Boolean) -> Unit = { _, _ -> },
     stats: Map<String, ua.olex.music.model.SongStats> = emptyMap(),
 ) {
-    var tabName by rememberSaveable { mutableStateOf(LibraryTab.SONGS.name) }
+    var tabName by rememberSaveable { mutableStateOf(LibraryTab.HOME.name) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var missingFavourite by rememberSaveable { mutableStateOf<String?>(null) }
     val tab = LibraryTab.valueOf(tabName)
@@ -116,12 +123,15 @@ internal fun LibraryBrowser(
         tab == LibraryTab.GENRES -> TrackSortScope.GENRE_TRACKS
         else -> TrackSortScope.FOLDER_TRACKS
     }
-    val unsorted = when {
+    val raw = when {
         searching -> search?.takeIf { it.query == query && !it.failed }?.tracks
         selected != null -> selected.tracks
         tab == LibraryTab.SONGS -> library.songs
         else -> null
     }
+    var filter by remember { mutableStateOf(ua.olex.music.model.TrackFilter()) }
+    val filterStats = if (filter.unplayed || filter.minRating > 0) stats else null
+    val unsorted = remember(raw, filter, filterStats) { raw?.let { list -> filter.apply(list) { stats[it.key.value] } } }
     val order = sortOrders[sortScope] ?: TrackSortOrder()
     val source = unsorted?.let(::SortSource)
     val statsKey = if (order.mode == TrackSortMode.PLAYS || order.mode == TrackSortMode.RATING) stats else null
@@ -187,18 +197,27 @@ internal fun LibraryBrowser(
                 LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) }
                 if (!picking) TextButton(onClick = { picking = true }) { Text("Select") }
             }
+            TrackFilterRow(filter, raw.orEmpty()) { filter = it }
         }
         if (picking) TrackSelectionToolbar(picked.ids.size, visible?.size ?: 0, visible != null,
             onAll = { visible?.let { picked = picked.all(it) } }, onClear = { picked = TrackSelection() },
             onClose = { picking = false; picked = TrackSelection() }, onPlay = { batch { onPlay(it, 0) } },
             onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
             onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) })
-        if (!searching && tab == LibraryTab.SMART) {
+        if (!searching && tab == LibraryTab.HOME) {
+            HomePage(library, personal.history.mapNotNull { it.track }, stats, smart, currentId, Modifier.weight(1f), onPlay, onShuffle,
+                onOpenAlbum = { tabName = LibraryTab.ALBUMS.name; selectedId = it.id }, onTrackActions = onTrackActions)
+        } else if (!searching && tab == LibraryTab.STATS) {
+            StatsPage(library, stats, Modifier.weight(1f), onPlay)
+        } else if (!searching && tab == LibraryTab.SMART) {
             SmartPlaylistBrowser(smart, currentId, Modifier.weight(1f), onPlay = onPlay, onShuffle = onShuffle, onTrackActions = onTrackActions,
                 onSave = onSaveSmart, onDelete = onDeleteSmart)
         } else if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
             PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library)
-        } else LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 16.dp)) {
+        } else Box(Modifier.weight(1f)) {
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val railTracks = if (!searching && selected == null && tab == LibraryTab.SONGS && (order.mode == TrackSortMode.DEFAULT || order.mode == TrackSortMode.TITLE)) visible else null
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
             when {
                 searching -> {
@@ -231,9 +250,19 @@ internal fun LibraryBrowser(
                         CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
-                    else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
-                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
-                            checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }) { onPlay(visible, index) }
+                    else {
+                        // Disc headers in an album shown in its own order.
+                        val discs = if (tab == LibraryTab.ALBUMS && order == TrackSortOrder()) ua.olex.music.model.discStarts(visible) else emptyMap()
+                        visible.forEachIndexed { index, track ->
+                            discs[index]?.let { disc -> item(key = "disc-$disc") {
+                                Text("Disc $disc", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
+                            } }
+                            item(key = track.id.value) {
+                                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
+                                    checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }) { onPlay(visible, index) }
+                            }
+                        }
                     }
                 }
                 tab == LibraryTab.SONGS -> {
@@ -280,6 +309,9 @@ internal fun LibraryBrowser(
                     )
                 }
             }
+        }
+        // Items above the first song: the scan error notice and the shuffle button.
+        railTracks?.let { LetterRail(it, firstItem = (if (scanError != null) 1 else 0) + 1, listState, descending = order.descending, Modifier.align(Alignment.CenterEnd)) }
         }
     }
 }
@@ -390,5 +422,83 @@ private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll:
         }
         if (total > TrackSelection.MAX_ITEMS || count >= TrackSelection.MAX_ITEMS)
             Text("Select up to ${TrackSelection.MAX_ITEMS} songs per batch.", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Filter chips for any song list: quality, play state, rating, decade, genre. */
+@Composable
+private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List<Track>, onChange: (ua.olex.music.model.TrackFilter) -> Unit) {
+    val decades = remember(tracks) { ua.olex.music.model.TrackFilter.decades(tracks) }
+    val genres = remember(tracks) { tracks.flatMap { it.genres }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }.take(30) }
+    var decadeMenu by remember { mutableStateOf(false) }
+    var genreMenu by remember { mutableStateOf(false) }
+    androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { androidx.compose.material3.FilterChip(filter.lossless, { onChange(filter.copy(lossless = !filter.lossless)) }, { Text("Lossless") }) }
+        item { androidx.compose.material3.FilterChip(filter.hiRes, { onChange(filter.copy(hiRes = !filter.hiRes)) }, { Text("Hi-res") }) }
+        item { androidx.compose.material3.FilterChip(filter.unplayed, { onChange(filter.copy(unplayed = !filter.unplayed)) }, { Text("Unplayed") }) }
+        item { androidx.compose.material3.FilterChip(filter.minRating > 0, { onChange(filter.copy(minRating = if (filter.minRating > 0) 0 else 4)) }, { Text("4+ stars") }) }
+        if (decades.size > 1 || filter.decade != null) item {
+            Box {
+                androidx.compose.material3.FilterChip(filter.decade != null, { decadeMenu = true }, { Text(filter.decade?.let { "${it}s" } ?: "Decade") })
+                DropdownMenu(decadeMenu, { decadeMenu = false }) {
+                    DropdownMenuItem({ Text("Any decade") }, { onChange(filter.copy(decade = null)); decadeMenu = false })
+                    decades.forEach { d -> DropdownMenuItem({ Text("${d}s") }, { onChange(filter.copy(decade = d)); decadeMenu = false }) }
+                }
+            }
+        }
+        if (genres.size > 1 || filter.genre != null) item {
+            Box {
+                androidx.compose.material3.FilterChip(filter.genre != null, { genreMenu = true }, { Text(filter.genre ?: "Genre") })
+                DropdownMenu(genreMenu, { genreMenu = false }) {
+                    DropdownMenuItem({ Text("Any genre") }, { onChange(filter.copy(genre = null)); genreMenu = false })
+                    genres.forEach { g -> DropdownMenuItem({ Text(g) }, { onChange(filter.copy(genre = g)); genreMenu = false }) }
+                }
+            }
+        }
+    }
+}
+
+/** A letter rail beside a long song list sorted by title: drag or tap a letter to jump there. */
+@Composable
+private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.compose.foundation.lazy.LazyListState, descending: Boolean, modifier: Modifier) {
+    if (tracks.size < 50) return
+    val starts = remember(tracks) {
+        val map = LinkedHashMap<Char, Int>()
+        tracks.forEachIndexed { i, t ->
+            val c = ua.olex.music.model.LibraryOrder.name(t.title).firstOrNull()?.uppercaseChar()?.let { if (it.isLetter()) it else '#' } ?: '#'
+            map.putIfAbsent(c, i)
+        }
+        map.entries.toList()
+    }
+    if (starts.size < 3) return
+    val scope = rememberCoroutineScope()
+    var active by remember { mutableStateOf<Char?>(null) }
+    var height by remember { mutableStateOf(1) }
+    fun jump(y: Float) {
+        val i = (y / height * starts.size).toInt().coerceIn(0, starts.lastIndex)
+        val (letter, index) = starts[i]
+        if (active != letter) { active = letter; scope.launch { state.scrollToItem(firstItem + index) } }
+    }
+    Box(modifier.fillMaxHeight().padding(vertical = 24.dp)) {
+        Column(
+            Modifier.fillMaxHeight().width(28.dp)
+                .onSizeChanged { height = it.height.coerceAtLeast(1) }
+                .pointerInput(starts) {
+                    detectVerticalDragGestures(onDragStart = { jump(it.y) }, onDragEnd = { active = null }, onDragCancel = { active = null }) { change, _ -> jump(change.position.y) }
+                }
+                .pointerInput(starts) { detectTapGestures { jump(it.y); active = null } },
+            verticalArrangement = Arrangement.SpaceEvenly, horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            starts.forEach { (letter, _) ->
+                Text(letter.toString(), style = MaterialTheme.typography.labelSmall,
+                    color = if (letter == active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        active?.let { letter ->
+            androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.align(Alignment.Center).offset(x = (-56).dp).size(64.dp)) {
+                Box(contentAlignment = Alignment.Center) { Text(letter.toString(), style = MaterialTheme.typography.headlineMedium) }
+            }
+        }
     }
 }
