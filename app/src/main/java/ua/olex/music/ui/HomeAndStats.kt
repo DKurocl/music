@@ -62,14 +62,14 @@ internal fun HomePage(
     val listened = remember(library, stats) { LibraryStats.of(library) { stats[it.key.value] } }
     val hero = recentAlbums.firstOrNull() ?: addedAlbums.firstOrNull() ?: library.albums.firstOrNull()
 
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
         if (library.songs.isEmpty()) { item { Text("No music yet. Put music in the Music folder, then rescan.", Modifier.padding(16.dp)) }; return@LazyColumn }
 
         // Bento: the album to jump back into, large; two bright one-tap starts beside it.
         item(key = "bento") {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).height(264.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (hero != null) Surface(onClick = { onOpenAlbum(hero) }, shape = RoundedCornerShape(32.dp), color = cs.primaryContainer,
-                    modifier = Modifier.weight(1.45f).fillMaxHeight()) {
+                    modifier = Modifier.weight(1.45f).fillMaxHeight().squish(0.03f)) {
                     Box {
                         Artwork(hero.artworkUri, Modifier.fillMaxSize(), 0.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
                         Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.45f to androidx.compose.ui.graphics.Color.Transparent,
@@ -98,7 +98,7 @@ internal fun HomePage(
         }
         if (newest.isNotEmpty()) item(key = "new") {
             Surface(onClick = { haptics.confirm(); onPlay(newest, 0) }, shape = androidx.compose.foundation.shape.CircleShape, color = cs.surfaceContainerHigh,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).fillMaxWidth().height(56.dp)) {
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp).fillMaxWidth().height(56.dp).squish(0.02f)) {
                 Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(40.dp).clip(androidx.compose.material3.MaterialShapes.Cookie6Sided.toShape()).background(cs.primary), contentAlignment = Alignment.Center) {
                         Symbol(Glyph.ADD, color = cs.onPrimary, bold = true)
@@ -119,7 +119,7 @@ internal fun HomePage(
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(artists.size) { i ->
                         val artist = artists[i]
-                        Column(Modifier.width(112.dp).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel = "Open ${artist.name}") { onOpenArtist(artist) }
+                        Column(Modifier.width(112.dp).squish(0.06f).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel = "Open ${artist.name}") { onOpenArtist(artist) }
                             .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             ArtistImage(artist.name, Modifier.size(104.dp), 104.dp, shapes[i % shapes.size].toShape())
                             Text(artist.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -141,7 +141,7 @@ internal fun HomePage(
                 androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     lists.forEachIndexed { i, list ->
                         val (bg, fg) = accents[i % accents.size]
-                        Surface(onClick = { haptics.confirm(); onPlay(list.tracks, 0) }, shape = androidx.compose.foundation.shape.CircleShape, color = bg, contentColor = fg) {
+                        Surface(onClick = { haptics.confirm(); onPlay(list.tracks, 0) }, shape = androidx.compose.foundation.shape.CircleShape, color = bg, contentColor = fg, modifier = Modifier.squish()) {
                             Row(Modifier.padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(32.dp).clip(androidx.compose.material3.MaterialShapes.Cookie4Sided.toShape()).background(fg.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
                                     Symbol(Glyph.SMART, size = 18.dp, filled = true)
@@ -157,7 +157,7 @@ internal fun HomePage(
         // Listening as one big number, with a shape for character; Duplicates beside it only when needed.
         item(key = "cards") {
             Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(onClick = onStats, shape = RoundedCornerShape(32.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer, modifier = Modifier.weight(1f).height(150.dp)) {
+                Surface(onClick = onStats, shape = RoundedCornerShape(32.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer, modifier = Modifier.weight(1f).height(150.dp).squish(0.03f)) {
                     Box {
                         Box(Modifier.align(Alignment.TopEnd).offset(x = 24.dp, y = (-24).dp).size(120.dp)
                             .clip(androidx.compose.material3.MaterialShapes.Cookie12Sided.toShape()).background(cs.onTertiaryContainer.copy(alpha = 0.08f)))
@@ -208,7 +208,7 @@ internal fun HomePage(
 private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
     container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, accent: androidx.compose.ui.graphics.Color, onAccent: androidx.compose.ui.graphics.Color,
     modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
-    Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(28.dp), color = container, contentColor = content, modifier = modifier.fillMaxWidth()) {
+    Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(28.dp), color = container, contentColor = content, modifier = modifier.fillMaxWidth().squish()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.size(48.dp).clip(shape).background(accent), contentAlignment = Alignment.Center) { Symbol(glyph, color = onAccent, filled = true) }
             Column {
@@ -229,7 +229,7 @@ private fun AlbumCarousel(albums: List<MusicCollection>, onOpen: (MusicCollectio
         modifier = Modifier.fillMaxWidth().height(220.dp),
     ) { i ->
         val album = albums[i]
-        Box(Modifier.fillMaxSize().maskClip(RoundedCornerShape(28.dp)).clickable(onClickLabel = "Open ${album.name}") { onOpen(album) }) {
+        Box(Modifier.fillMaxSize().squish(0.03f).maskClip(RoundedCornerShape(28.dp)).clickable(onClickLabel = "Open ${album.name}") { onOpen(album) }) {
             Artwork(album.artworkUri, Modifier.fillMaxSize(), 0.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
             Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.55f to androidx.compose.ui.graphics.Color.Transparent,
                 1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.7f))))
@@ -263,7 +263,7 @@ private fun HomeCard(glyph: Glyph, title: String, subtitle: String, modifier: Mo
 @Composable
 internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit, onTrash: (List<Track>) -> Unit) {
     val extra = groups.flatMap { it.drop(1) }
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
         item {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (groups.isEmpty()) "No song is kept twice." else "${groups.size} songs are kept in more than one file. The best copy is kept; the others can go to the trash.",
@@ -324,35 +324,121 @@ private fun AlbumRow(albums: List<MusicCollection>, onOpen: (MusicCollection) ->
     }
 }
 
-/** Library and listening numbers: size, quality, time listened, top artists and songs. */
+/**
+ * Your listening, with room to breathe: one hero number, three small facts, the library's sound as a
+ * coloured bar, then the artists (in M3E shapes) and songs you play most. Numbers are large and few;
+ * the rest is shape and colour from the wallpaper.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit) {
     val s = remember(library, stats) { LibraryStats.of(library) { stats[it.key.value] } }
+    val cs = MaterialTheme.colorScheme
     fun hours(ms: Long) = if (ms >= 3_600_000) "${ms / 3_600_000} h ${ms / 60_000 % 60} min" else "${ms / 60_000} min"
-    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val byName = remember(library) { library.artists.associateBy { it.name } }
+    LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalPlayerInset.current),
+        verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            val tiles = listOf("Listened" to hours(s.listenedMs), "Plays" to s.plays.toString(), "Songs" to s.songs.toString(), "Total length" to hours(s.totalMs),
-                "Albums" to s.albums.toString(), "Artists" to s.artists.toString(), "Lossless" to s.lossless.toString(), "Hi-res" to s.hiRes.toString())
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                tiles.chunked(2).forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { row.forEach { (label, value) -> StatTile(label, value, Modifier.weight(1f)) } }
+            Surface(shape = RoundedCornerShape(36.dp), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, modifier = Modifier.fillMaxWidth().height(190.dp)) {
+                Box {
+                    Box(Modifier.align(Alignment.TopEnd).offset(x = 40.dp, y = (-30).dp).size(190.dp)
+                        .clip(androidx.compose.material3.MaterialShapes.Cookie12Sided.toShape()).background(cs.onPrimaryContainer.copy(alpha = 0.07f)))
+                    Box(Modifier.align(Alignment.TopEnd).padding(20.dp).size(52.dp).clip(androidx.compose.material3.MaterialShapes.Sunny.toShape()).background(cs.primary),
+                        contentAlignment = Alignment.Center) { Symbol(Glyph.HEADPHONES, color = cs.onPrimary, filled = true) }
+                    Column(Modifier.align(Alignment.BottomStart).padding(22.dp)) {
+                        Text("You've listened", style = MaterialTheme.typography.titleMedium)
+                        Text(hours(s.listenedMs), style = MaterialTheme.typography.displayMediumEmphasized)
+                        Text("${s.plays} plays", style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Fact(s.songs.toString(), "songs", Glyph.NOTE, androidx.compose.material3.MaterialShapes.Cookie6Sided.toShape(), cs.secondaryContainer, cs.onSecondaryContainer, Modifier.weight(1f))
+                Fact(s.albums.toString(), "albums", Glyph.ALBUM, androidx.compose.material3.MaterialShapes.Circle.toShape(), cs.tertiaryContainer, cs.onTertiaryContainer, Modifier.weight(1f))
+                Fact(s.artists.toString(), "artists", Glyph.PERSON, androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape(), cs.surfaceContainerHigh, cs.onSurface, Modifier.weight(1f))
+            }
+        }
+        // The library's sound: one bar split by format, lossless kinds in the accent families.
+        item {
+            Surface(shape = RoundedCornerShape(28.dp), color = cs.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("How your library sounds", style = MaterialTheme.typography.titleMediumEmphasized)
+                    Text("${hours(s.totalMs)} of music · ${s.lossless} lossless · ${s.hiRes} hi-res", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    val colors = listOf(cs.primary, cs.tertiary, cs.secondary, cs.primaryContainer, cs.tertiaryContainer, cs.outline)
+                    val total = s.formats.sumOf { it.second }.coerceAtLeast(1)
+                    Row(Modifier.fillMaxWidth().height(20.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        s.formats.take(colors.size).forEachIndexed { i, (_, n) ->
+                            Box(Modifier.weight(n.toFloat() / total).fillMaxHeight().clip(RoundedCornerShape(
+                                topStart = if (i == 0) 10.dp else 3.dp, bottomStart = if (i == 0) 10.dp else 3.dp,
+                                topEnd = if (i == minOf(s.formats.size, colors.size) - 1) 10.dp else 3.dp, bottomEnd = if (i == minOf(s.formats.size, colors.size) - 1) 10.dp else 3.dp))
+                                .background(colors[i]))
+                        }
+                    }
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        s.formats.take(colors.size).forEachIndexed { i, (name, n) ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(colors[i]))
+                                Text("  $name  ", style = MaterialTheme.typography.labelLarge)
+                                Text("${n * 100 / total}%", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                            }
+                        }
+                    }
                 }
             }
         }
         if (s.topArtists.isNotEmpty()) {
-            item { Text("Top artists", style = MaterialTheme.typography.titleLarge) }
-            items(s.topArtists) { (name, plays) -> BarRow(name, plays, s.topArtists.first().second) }
+            item { Text("Artists you play most", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.padding(top = 12.dp, start = 4.dp)) }
+            val shapes = listOf(androidx.compose.material3.MaterialShapes.Cookie9Sided, androidx.compose.material3.MaterialShapes.Clover4Leaf,
+                androidx.compose.material3.MaterialShapes.Arch, androidx.compose.material3.MaterialShapes.SoftBurst, androidx.compose.material3.MaterialShapes.Pill)
+            items(s.topArtists.size) { i ->
+                val (name, plays) = s.topArtists[i]
+                val max = s.topArtists.first().second.coerceAtLeast(1)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    ArtistImage(name, Modifier.size(52.dp), 52.dp, shapes[i % shapes.size].toShape())
+                    Column(Modifier.weight(1f).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Box(Modifier.fillMaxWidth().height(8.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.surfaceContainerHighest)) {
+                            Box(Modifier.fillMaxWidth(plays.toFloat() / max).fillMaxHeight().clip(androidx.compose.foundation.shape.CircleShape).background(if (i == 0) cs.primary else cs.primary.copy(alpha = 0.6f)))
+                        }
+                    }
+                    Text("$plays", style = MaterialTheme.typography.titleMediumEmphasized, color = cs.primary)
+                }
+            }
         }
         if (s.topSongs.isNotEmpty()) {
-            item { Text("Top songs", style = MaterialTheme.typography.titleLarge) }
+            item { Text("Songs on repeat", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.padding(top = 12.dp, start = 4.dp)) }
             val queue = s.topSongs.map { it.first }
             items(s.topSongs.size) { i ->
                 val (track, plays) = s.topSongs[i]
-                BarRow("${track.title} · ${track.artist}", plays, s.topSongs.first().second, Modifier.clickable { onPlay(queue, i) })
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onPlay(queue, i) }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${i + 1}", style = MaterialTheme.typography.headlineSmallEmphasized, color = cs.primary, modifier = Modifier.width(36.dp))
+                    Artwork(track.artworkUri, Modifier.size(48.dp), 14.dp)
+                    Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                        Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(track.artist, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1)
+                    }
+                    Text("$plays×", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                }
             }
         }
-        item { Text("Formats", style = MaterialTheme.typography.titleLarge) }
-        items(s.formats) { (codec, count) -> BarRow(codec, count, s.formats.first().second) }
+    }
+}
+
+/** A small fact: the icon in its own shape, a big number, a word. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun Fact(value: String, label: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
+    container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, modifier: Modifier) {
+    Surface(shape = RoundedCornerShape(28.dp), color = container, contentColor = content, modifier = modifier.height(128.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Box(Modifier.size(36.dp).clip(shape).background(content.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) { Symbol(glyph, size = 20.dp, filled = true) }
+            Column {
+                Text(value, style = MaterialTheme.typography.headlineMediumEmphasized)
+                Text(label, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
 }
 

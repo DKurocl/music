@@ -139,9 +139,11 @@ internal fun TrackRow(
     SwipeToDismissBox(
         state = swipe, enableDismissFromStartToEnd = onPlayNext != null, enableDismissFromEndToStart = onQueue != null,
         backgroundContent = {
+            // Drawn only while a swipe is under way: rows are see-through, so a resting background would show.
+            if (swipe.dismissDirection == SwipeToDismissBoxValue.Settled) return@SwipeToDismissBox
             val next = swipe.dismissDirection == SwipeToDismissBoxValue.StartToEnd
             val color = if (next) cs.secondaryContainer else cs.tertiaryContainer
-            Row(Modifier.fillMaxSize().background(color).padding(horizontal = 24.dp),
+            Row(Modifier.fillMaxSize().padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
                 horizontalArrangement = if (next) Arrangement.Start else Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 Symbol(if (next) Glyph.NEXT else Glyph.QUEUE, filled = true, color = if (next) cs.onSecondaryContainer else cs.onTertiaryContainer)
                 Spacer(Modifier.width(8.dp))
@@ -158,7 +160,12 @@ private fun TrackRowContent(
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val container by animateColorAsState(if (selecting && checked) cs.secondaryContainer else cs.surface, label = "row")
+    // Rows sit as soft rounded segments; the playing one is a tonal pill, the selected ones stronger.
+    val container by animateColorAsState(when {
+        selecting && checked -> cs.secondaryContainer
+        current && !selecting -> cs.secondaryContainer.copy(alpha = 0.45f)
+        else -> cs.surface.copy(alpha = 0f)
+    }, label = "row")
     ListItem(
         headlineContent = {
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface,
@@ -188,7 +195,7 @@ private fun TrackRowContent(
         colors = ListItemDefaults.colors(containerColor = container,
             headlineColor = if (selecting && checked) cs.onSecondaryContainer else cs.onSurface,
             supportingColor = if (selecting && checked) cs.onSecondaryContainer else cs.onSurfaceVariant),
-        modifier = Modifier.combinedClickable(
+        modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).combinedClickable(
             onLongClickLabel = if (onSelect != null) "Select song" else null, onLongClick = onSelect?.let { select -> { haptics.longPress(); select() } },
             onClick = { if (selecting) onSelect?.invoke() else onClick() },
         ).semantics { selected = if (selecting) checked else current },
@@ -229,7 +236,12 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
         color = cs.surfaceContainerHigh, shape = RoundedCornerShape(24.dp), tonalElevation = 2.dp, shadowElevation = 3.dp,
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp).fillMaxWidth()
             .onSizeChanged { cardWidth = it.width.coerceAtLeast(1) }
-            .graphicsLayer { translationX = dragX.value; translationY = -dragUp.coerceAtLeast(0f) * 0.3f; alpha = 1f - (kotlin.math.abs(dragX.value) / cardWidth) * 0.6f }
+            .graphicsLayer {
+                translationX = if (!state.hasNext && dragX.value < 0) rubber(dragX.value, 40.dp.toPx()) else dragX.value
+                // Up opens the player; down has nowhere to go, so it stretches a little and springs back.
+                translationY = if (dragUp >= 0f) -dragUp * 0.3f else -rubber(dragUp, 16.dp.toPx())
+                alpha = 1f - (kotlin.math.abs(dragX.value) / cardWidth) * 0.6f
+            }
             .pointerInput(state.hasNext) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
@@ -247,7 +259,8 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
             }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
-                    onDragEnd = { if (dragUp > 60.dp.toPx()) { haptics.threshold(); onOpen() }; dragUp = 0f },
+                    onDragEnd = { if (dragUp > 60.dp.toPx()) { haptics.threshold(); onOpen() }; val from = dragUp
+                        scope.launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = androidx.compose.animation.core.spring(0.5f, 400f)) { v, _ -> dragUp = v } } },
                     onDragCancel = { dragUp = 0f },
                 ) { change, amount -> change.consume(); dragUp -= amount }
             }
@@ -326,7 +339,8 @@ internal fun PlayerPage(
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     Text(state.album ?: "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(onClick = onQueue, modifier = Modifier.semantics { contentDescription = "Open queue" }) { Symbol(Glyph.QUEUE) }
+                // Song actions top right, where Google's players keep them; the queue moved to the pill below.
+                IconButton(enabled = onMore != null, onClick = { onMore?.invoke() }, modifier = Modifier.semantics { contentDescription = "Song actions" }) { Symbol(Glyph.MORE) }
             }
             Spacer(Modifier.height(16.dp))
             // Swipe the cover for the next or previous song; double tap for favourites; long press for actions.
@@ -365,7 +379,9 @@ internal fun PlayerPage(
                         ) { change, amount -> change.consume(); scope.launch { swipe.snapTo(swipe.value + amount) } }
                     }
                     .graphicsLayer {
-                        scaleX = coverScale; scaleY = coverScale; translationX = swipe.value
+                        // Nothing next: the cover still follows, but resists and springs back.
+                        val x = if (!state.hasNext && swipe.value < 0) rubber(swipe.value, 60.dp.toPx()) else swipe.value
+                        scaleX = coverScale; scaleY = coverScale; translationX = x
                         rotationZ = swipe.value / coverWidth * 6f; alpha = 1f - (kotlin.math.abs(swipe.value) / coverWidth * 0.5f)
                     }
                     .shadow(24.dp, RoundedCornerShape(32.dp), clip = false, ambientColor = androidx.compose.ui.graphics.Color.Black, spotColor = androidx.compose.ui.graphics.Color.Black),
@@ -393,18 +409,16 @@ internal fun PlayerPage(
             SignalPath(format, route, onAudioPath)
             state.sleepDeadlineMs?.let { deadline -> SleepCountdown(deadline, onTimer) }
             Spacer(Modifier.height(20.dp))
-            Transport(state, onToggle, onNext, onPrevious)
+            Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
             Spacer(Modifier.height(28.dp))
-            Row(Modifier.widthIn(max = 420.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                ToggleAction(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", onShuffle)
-                ToggleAction(
-                    if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
-                    when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onRepeat,
-                )
-                ToggleAction(Glyph.LYRICS, "Lyrics", false, true, null, onLyrics)
-                ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
-                ToggleAction(route.glyph(), "Change output", false, true, null, onOutput)
-                if (onMore != null) ToggleAction(Glyph.MORE, "Song actions", false, true, null, onMore)
+            // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
+            Surface(shape = CircleShape, color = cs.surfaceContainerHigh) {
+                Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    ToggleAction(Glyph.LYRICS, "Lyrics", false, true, null, onLyrics)
+                    ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
+                    ToggleAction(route.glyph(), "Change output", false, true, null, onOutput)
+                    ToggleAction(Glyph.QUEUE, "Open queue", false, true, null, onQueue)
+                }
             }
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
             // What comes next, one tap from the queue.
@@ -432,26 +446,33 @@ internal fun PlayerPage(
  * with the state, as in Google's players: round while paused, a wider rounded square while playing.
  */
 @Composable
-private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit) {
+private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onShuffle: () -> Unit = {}, onRepeat: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     val playing = state.playWhenReady
-    val width by animateDpAsState(if (playing) 128.dp else 96.dp, motion.fastSpatialSpec(), label = "width")
+    val width by animateDpAsState(if (playing) 112.dp else 84.dp, motion.fastSpatialSpec(), label = "width")
     val corner by animateDpAsState(if (playing) 28.dp else 48.dp, motion.fastSpatialSpec(), label = "corner")
     val haptics = rememberHaptics()
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        FilledTonalIconButton(onClick = { haptics.tick(); onPrevious() }, modifier = Modifier.size(72.dp).semantics { contentDescription = "Previous" }) {
+    // Shuffle and repeat flank the transport, small, as on Google's media controls: they belong to
+    // playback, and the row below stays for the rarer actions.
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    ToggleAction(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", onShuffle)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalIconButton(onClick = { haptics.tick(); onPrevious() }, modifier = Modifier.size(60.dp).semantics { contentDescription = "Previous" }) {
             Symbol(Glyph.PREVIOUS, size = 36.dp, filled = true)
         }
         Surface(
             onClick = { haptics.toggle(!playing); onToggle() }, enabled = state.connected, shape = RoundedCornerShape(corner), color = cs.primary, contentColor = cs.onPrimary,
-            modifier = Modifier.width(width).height(96.dp).semantics { contentDescription = if (playing) "Pause" else "Play" },
+            modifier = Modifier.width(width).height(84.dp).semantics { contentDescription = if (playing) "Pause" else "Play" },
         ) {
             Box(contentAlignment = Alignment.Center) { Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true) }
         }
-        FilledTonalIconButton(enabled = state.hasNext, onClick = { haptics.tick(); onNext() }, modifier = Modifier.size(72.dp).semantics { contentDescription = "Next" }) {
+        FilledTonalIconButton(enabled = state.hasNext, onClick = { haptics.tick(); onNext() }, modifier = Modifier.size(60.dp).semantics { contentDescription = "Next" }) {
             Symbol(Glyph.NEXT, size = 36.dp, filled = true)
         }
+    }
+    ToggleAction(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
+        when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onRepeat)
     }
 }
 
@@ -464,7 +485,7 @@ private fun ToggleAction(glyph: Glyph, label: String, on: Boolean, enabled: Bool
         onClick = onClick, enabled = enabled,
         colors = IconButtonDefaults.iconButtonColors(containerColor = container),
         modifier = Modifier.size(48.dp).semantics { contentDescription = label; if (state != null) { stateDescription = state; selected = on } },
-    ) { Symbol(glyph, filled = on, bold = on, color = if (on) cs.onSecondaryContainer else cs.onSurfaceVariant) }
+    ) { Symbol(glyph, filled = on, bold = on, color = if (on) cs.onSecondaryContainer else cs.onSurfaceVariant, modifier = Modifier.hopWhen(on)) }
 }
 
 /** What the file is and where it goes, as far as Android tells; a tap opens the full signal path. */
@@ -569,7 +590,7 @@ internal fun TrackActionsSheet(
                 androidx.compose.material3.Switch(ratingsToFiles, onRatingsToFiles)
             }
             androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = cs.outlineVariant)
-            actions.forEach { action ->
+            actions.forEachIndexed { actionIndex, action ->
                 ListItem(
                     headlineContent = { Text(action.label) },
                     leadingContent = { Symbol(action.glyph, filled = action.filled, color = cs.onSurfaceVariant) },

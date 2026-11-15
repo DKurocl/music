@@ -27,6 +27,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.composed
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -121,3 +126,41 @@ internal fun AppSheet(onDismiss: () -> Unit, containerColor: androidx.compose.ui
         }
     } else androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = containerColor, sheetGesturesEnabled = gestures, content = content)
 }
+
+/** Room the floating mini player takes at the bottom of a page, so lists can scroll under it to their end. */
+val LocalPlayerInset = staticCompositionLocalOf { 0.dp }
+
+/**
+ * A light squish while pressed (M3E's "press" feedback): things you tap give a little, then spring
+ * back. It only watches the touch, so clicks and scrolling are unaffected.
+ */
+fun Modifier.squish(amount: Float = 0.04f): Modifier = composed {
+    var pressed by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 1f - amount else 1f,
+        MaterialTheme.motionScheme.fastSpatialSpec(), label = "squish")
+    this.pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            pressed = true
+            waitForUpOrCancellation()
+            pressed = false
+        }
+    }.graphicsLayer { scaleX = scale; scaleY = scale }
+}
+
+/**
+ * The icon that was just switched on gives a little hop (as Gboard animates only the tab you chose):
+ * one icon at a time, only at the moment it becomes active.
+ */
+fun Modifier.hopWhen(active: Boolean): Modifier = composed {
+    val hop = remember { androidx.compose.animation.core.Animatable(1f) }
+    var first by remember { androidx.compose.runtime.mutableStateOf(true) }
+    androidx.compose.runtime.LaunchedEffect(active) {
+        if (first) { first = false; return@LaunchedEffect }
+        if (active) { hop.snapTo(0.8f); hop.animateTo(1f, androidx.compose.animation.core.spring(0.4f, 600f)) }
+    }
+    graphicsLayer { scaleX = hop.value; scaleY = hop.value }
+}
+
+/** Resistance for a drag that has nowhere to go: the element follows a little, never far. */
+fun rubber(offset: Float, limit: Float): Float = limit * (1f - 1f / (kotlin.math.abs(offset) / limit + 1f)) * kotlin.math.sign(offset)
