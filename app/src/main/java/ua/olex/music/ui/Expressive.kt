@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialShapes
@@ -51,6 +52,31 @@ internal fun PlaylistCover(tracks: List<Track>, size: Dp, corner: Dp = 16.dp) {
             }
             arts.isNotEmpty() -> Artwork(arts[0], Modifier.fillMaxSize(), 0.dp)
             else -> Symbol(Glyph.PLAYLIST, size = size * 0.4f, color = cs.onTertiaryContainer, filled = true)
+        }
+    }
+}
+
+/** Whether music is playing now: the playing row's bars move only then. Provided by the app's root. */
+internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { false }
+
+/**
+ * The playing song's mark, over its cover: a soft scrim and three rounded bars that dance while the
+ * music plays and rest, still, when it is paused.
+ */
+@Composable
+internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val playing = LocalIsPlaying.current
+    Box(modifier.background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.Bottom, modifier = Modifier.size(width = 18.dp, height = 16.dp)) {
+            val rest = listOf(0.45f, 0.85f, 0.6f)
+            rest.forEachIndexed { i, still ->
+                val level = if (playing) androidx.compose.animation.core.rememberInfiniteTransition(label = "bar$i").animateFloat(0.25f, 1f,
+                    androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(380 + i * 130, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                        androidx.compose.animation.core.RepeatMode.Reverse, androidx.compose.animation.core.StartOffset(i * 120)), label = "level$i").value else still
+                Box(Modifier.width(4.dp).fillMaxHeight(level).clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp)).background(androidx.compose.ui.graphics.Color.White))
+            }
         }
     }
 }

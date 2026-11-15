@@ -103,7 +103,9 @@ object LyricsCleanup {
         val heading = setOf(t + a, a + t)
         val firstSung = lyrics.lines.indexOfFirst { line ->
             val n = norm(line.text)
-            n.isNotEmpty() && !(t.isNotEmpty() && n in heading) && !credit.containsMatchIn(line.text)
+            // "Title - Artist" (often with "(Explicit)" or "(Remastered)" added) is a heading, not a sung line.
+            val titled = t.isNotEmpty() && a.isNotEmpty() && line.text.contains(" - ") && n.contains(a) && n.contains(t)
+            n.isNotEmpty() && !(t.isNotEmpty() && n in heading) && !titled && !credit.containsMatchIn(line.text)
         }.let { if (it < 0) 0 else it }
         val lines = lyrics.lines.drop(firstSung.coerceAtMost(8))
             .filterNot { credit.containsMatchIn(it.text) }

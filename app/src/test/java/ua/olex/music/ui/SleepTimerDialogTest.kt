@@ -2,6 +2,7 @@ package ua.olex.music.ui
 
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -18,7 +19,9 @@ class SleepTimerDialogTest {
     @Test fun choosingADurationSendsItToThePlayer() {
         var minutes = -1
         compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(false, {}, { minutes = it }) } } }
-        compose.onNodeWithText("15 minutes").performClick()
+        compose.onNodeWithContentDescription("15 minutes").performClick()
+        compose.runOnIdle { assertEquals(-1, minutes) }
+        compose.onNodeWithText("Start").performClick()
         compose.runOnIdle { assertEquals(15, minutes) }
     }
 
@@ -34,7 +37,7 @@ class SleepTimerDialogTest {
         compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(false, { dismissed = true }, { error("Timer changed on open") }) } } }
         // No running timer: nothing to turn off, and opening the sheet changes nothing.
         compose.onNodeWithText("Turn off").assertDoesNotExist()
-        compose.onNodeWithText("When this song ends").assertExists()
+        compose.onNodeWithContentDescription("When this song ends").assertExists()
         compose.runOnIdle { assertEquals(false, dismissed) }
     }
 }
