@@ -131,7 +131,10 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
         }
     }
     DisposableEffect(player) { onDispose { player.release() } }
-    LaunchedEffect(moving, started) { player.playWhenReady = moving && started.isAtLeast(Lifecycle.State.STARTED) }
+    val saving = LocalPowerSave.current
+    // Hardware video decoding is the moving cover's cost: it runs only while the music plays, the
+    // app is on screen and Battery Saver is off; otherwise the still first frame stays.
+    LaunchedEffect(moving, started, saving) { player.playWhenReady = moving && !saving && started.isAtLeast(Lifecycle.State.STARTED) }
     val alpha by animateFloatAsState(if (ready) 1f else 0f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "motion")
     androidx.compose.ui.viewinterop.AndroidView(
         factory = { android.view.TextureView(it).also { view -> player.setVideoTextureView(view) } },
@@ -662,31 +665,36 @@ private fun SignalPath(format: String?, onClick: () -> Unit) {
  * music plays; on pause or while dragging it flattens on a spring and stops.
  */
 @Composable
-private fun WaveTrack(fraction: Float, wave: Boolean) {
+private fun WaveTrack(fraction: () -> Float, wave: Boolean) {
     val cs = MaterialTheme.colorScheme
-    val amplitude by animateFloatAsState(if (wave) 1f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "wave")
-    // The wave travels only while it shows; once flat, nothing keeps running.
-    val phase = if (wave || amplitude > 0.01f) androidx.compose.animation.core.rememberInfiniteTransition(label = "wave-phase").animateFloat(0f, 1f,
-        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1_200, easing = androidx.compose.animation.core.LinearEasing)), label = "phase").value
-        else 0f
+    val amplitude = androidx.compose.animation.core.animateFloatAsState(if (wave) 1f else 0f, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "wave")
+    // The wave travels only while it shows; once flat, nothing keeps running. Position, phase and
+    // amplitude are read only while drawing: a frame redraws this line and nothing else.
+    val phase = if (wave || amplitude.value > 0.01f) androidx.compose.animation.core.rememberInfiniteTransition(label = "wave-phase").animateFloat(0f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(1_200, easing = androidx.compose.animation.core.LinearEasing)), label = "phase")
+        else null
+    val path = remember { androidx.compose.ui.graphics.Path() }
     androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(24.dp)) {
         val mid = size.height / 2
         // As thin as the system media player in the shade: a 3 dp line, a low wave, a short handle.
         val gap = 5.dp.toPx()
-        val end = (fraction.coerceIn(0f, 1f) * size.width)
+        val end = (fraction().coerceIn(0f, 1f) * size.width)
         val stroke = 3.dp.toPx()
         // The rest of the song: straight, muted, ending in a dot like Android's.
         if (end + gap < size.width) drawLine(cs.secondaryContainer, androidx.compose.ui.geometry.Offset(end + gap, mid), androidx.compose.ui.geometry.Offset(size.width, mid), stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-        // What has played: a sine that fades in from its start, so the line leaves the edge flat.
+        // What has played: a sine, one point every 2 dp (smooth to the eye, a third of the work of 2 px).
         val stop = (end - gap).coerceAtLeast(0f)
         if (stop > 0f) {
-            val length = 22.dp.toPx(); val height = 2.5.dp.toPx() * amplitude
-            val path = androidx.compose.ui.graphics.Path()
+            val length = 22.dp.toPx(); val height = 2.5.dp.toPx() * amplitude.value
+            val shift = phase?.value ?: 0f
+            val step = 2.dp.toPx()
+            path.reset()
             var x = 0f
-            while (x <= stop) {
-                val y = mid + height * kotlin.math.sin(((x / length) - phase) * 2 * Math.PI).toFloat()
+            while (true) {
+                val y = mid + height * kotlin.math.sin(((x / length) - shift) * 2 * Math.PI).toFloat()
                 if (x == 0f) path.moveTo(x, y) else path.lineTo(x, y)
-                x += 2f
+                if (x >= stop) break
+                x = minOf(x + step, stop)
             }
             drawPath(path, cs.primary, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round))
         }
@@ -699,30 +707,32 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     // Keep the frequent position updates out of artwork, metadata and controls. Composition may
     // survive screen-off, so the poller also follows lifecycle rather than only visibility.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var at by remember(state.mediaId) { mutableLongStateOf(position()) }
+    // Two clocks: [at] moves every frame but is read only by the handle's layout and the line's
+    // drawing; [seconds] changes once a second for the time label. A frame recomposes nothing.
+    val at = remember(state.mediaId) { androidx.compose.runtime.mutableLongStateOf(position()) }
+    var seconds by remember(state.mediaId) { mutableLongStateOf(position() / 1_000) }
     var dragged by remember(state.mediaId) { mutableStateOf<Float?>(null) }
+    val slider = remember { androidx.compose.material3.SliderState(0f, 0, 0f..1f) }
+    val duration = state.durationMs.coerceAtLeast(1)
+    fun show(ms: Long) { at.longValue = ms; if (dragged == null) slider.value = (ms.toFloat() / duration).coerceIn(0f, 1f); (ms / 1_000).let { if (it != seconds) seconds = it } }
     // Every display frame (120 a second on a 120 Hz screen) the position moves on from the last
     // reading by the time passed; the player itself is asked once a second to stay exact.
     LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            at = position()
+            show(position())
             if (!state.isPlaying) return@repeatOnLifecycle
-            var base = at; var baseAt = 0L; var lastRead = 0L
+            var base = at.longValue; var baseAt = 0L; var lastRead = 0L
             while (true) androidx.compose.animation.core.withInfiniteAnimationFrameMillis { now ->
                 if (baseAt == 0L || now - lastRead >= 1_000) { base = position(); baseAt = now; lastRead = now }
-                at = (base + (now - baseAt)).coerceAtMost(state.durationMs.coerceAtLeast(base))
+                show((base + (now - baseAt)).coerceAtMost(state.durationMs.coerceAtLeast(base)))
             }
         }
     }
-    val duration = state.durationMs.coerceAtLeast(1)
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     Column(modifier.fillMaxWidth()) {
         // Material's own slider: the expressive track with the handle in a gap, nothing imitated.
-        val slider = remember { androidx.compose.material3.SliderState(0f, 0, 0f..1f) }
         val touch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-        val shown = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f)
-        androidx.compose.runtime.SideEffect { if (dragged == null) slider.value = shown }
         androidx.compose.material3.Slider(
             state = slider, enabled = state.durationMs > 0, interactionSource = touch,
             // A detent every 2.5% (firmer when moving fast), a soft thud at either end.
@@ -735,15 +745,15 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
                 }
                 dragged = v; slider.value = v
             },
-            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null; haptics.confirm() },
-            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Position"; stateDescription = "${clock(at)} of ${clock(state.durationMs)}" },
+            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); dragged = null; show((it * duration).toLong()) }; dragged = null; haptics.confirm() },
+            modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Position"; stateDescription = "${clock(seconds * 1_000)} of ${clock(state.durationMs)}" },
             thumb = { _: androidx.compose.material3.SliderState ->
                 androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = state.durationMs > 0)
             },
-            track = { _: androidx.compose.material3.SliderState -> WaveTrack(shown, wave = state.isPlaying && dragged == null) },
+            track = { st: androidx.compose.material3.SliderState -> WaveTrack({ st.value }, wave = state.isPlaying && dragged == null) },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(clock(dragged?.let { (it * duration).toLong() } ?: at), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            Text(clock(dragged?.let { (it * duration).toLong() } ?: (seconds * 1_000)), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
             Text(clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
     }
