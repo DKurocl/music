@@ -33,4 +33,24 @@ class UserSchemaTest {
             assertEquals("Keep this playlist", playlist.name)
         } finally { database.close() }
     }
+
+    /** 1 -> 2 adds ratings and smart playlists; playlists and history from version 1 are kept. */
+    @Test fun versionOneUpgradesToTwoKeepingDataAndAddingRatings() = runBlocking {
+        helper.createDatabase("user-schema.db", 1).use { database ->
+            database.execSQL("INSERT INTO playlists (id, name, createdAt) VALUES (3, 'Old list', 1000)")
+            database.execSQL("INSERT INTO saved_songs (id, songKey, path, title, artist, album, durationMs, artworkUri) VALUES ('s1', 'radiohead|creep', 'Music/creep.flac', 'Creep', 'Radiohead', NULL, 238000, NULL)")
+            database.execSQL("INSERT INTO play_history (songId, playedAt) VALUES ('s1', 5000)")
+            database.execSQL("INSERT INTO play_history (songId, playedAt) VALUES ('s1', 9000)")
+        }
+        helper.runMigrationsAndValidate("user-schema.db", 2, true).close()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").build()
+        try {
+            val repository = UserRepository(database)
+            assertEquals("Old list", repository.playlists.first().single().name)
+            val stats = repository.stats.first().getValue("radiohead|creep")
+            assertEquals(2, stats.plays); assertEquals(9000L, stats.lastPlayedAt); assertEquals(0, stats.rating)
+            val id = repository.saveSmartPlaylist(ua.olex.music.model.SmartPlaylist("Loud", listOf(ua.olex.music.model.SmartRule(ua.olex.music.model.SmartField.PLAYS, ua.olex.music.model.SmartOp.AT_LEAST, "2"))))
+            assertEquals("Loud", repository.smartPlaylists.first().single { it.id == id }.name)
+        } finally { database.close() }
+    }
 }

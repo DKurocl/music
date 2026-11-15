@@ -390,7 +390,10 @@ internal class TrackAction(val glyph: Glyph, val label: String, val filled: Bool
 
 /** A song's actions as a bottom sheet: the song on top, then one row per action with its icon. */
 @Composable
-internal fun TrackActionsSheet(track: Track, favourite: Boolean, onDismiss: () -> Unit, actions: List<TrackAction>) {
+internal fun TrackActionsSheet(
+    track: Track, favourite: Boolean, onDismiss: () -> Unit, actions: List<TrackAction>,
+    rating: Int = 0, onRate: ((Int) -> Unit)? = null, plays: Int = 0,
+) {
     val cs = MaterialTheme.colorScheme
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = cs.surfaceContainerLow) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
@@ -401,6 +404,17 @@ internal fun TrackActionsSheet(track: Track, favourite: Boolean, onDismiss: () -
                 trailingContent = { if (favourite) Symbol(Glyph.FAVOURITE, filled = true, color = cs.primary) },
                 colors = ListItemDefaults.colors(containerColor = cs.surfaceContainerLow),
             )
+            if (onRate != null) Row(Modifier.padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                // Tapping the current rating again clears it.
+                (1..5).forEach { star ->
+                    IconButton(onClick = { onRate(if (star == rating) 0 else star) }, modifier = Modifier.semantics {
+                        contentDescription = "Rate $star of 5"; selected = star <= rating
+                    }) { Symbol(Glyph.STAR, size = 28.dp, filled = star <= rating, color = if (star <= rating) cs.primary else cs.onSurfaceVariant) }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(if (plays == 1) "1 play" else "$plays plays", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
+                    modifier = Modifier.padding(end = 12.dp))
+            }
             androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = cs.outlineVariant)
             actions.forEach { action ->
                 ListItem(

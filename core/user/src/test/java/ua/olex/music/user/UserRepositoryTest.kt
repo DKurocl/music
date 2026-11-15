@@ -122,7 +122,7 @@ class UserRepositoryTest {
     @Test fun unsupportedSchemaNeverDestructivelyRebuildsUserData() = runBlocking {
         repository.createPlaylist("Keep this", listOf(a))
         database.close()
-        SQLiteDatabase.openDatabase(context.getDatabasePath("user-test.db").path, null, SQLiteDatabase.OPEN_READWRITE).use { it.version = 2 }
+        SQLiteDatabase.openDatabase(context.getDatabasePath("user-test.db").path, null, SQLiteDatabase.OPEN_READWRITE).use { it.version = 99 } // a version from the future
         reopen()
         assertThrows(IllegalStateException::class.java) { runBlocking { repository.playlists.first() } }
         database.close()
@@ -136,4 +136,19 @@ class UserRepositoryTest {
 
     private suspend fun names() = repository.playlists.first().single().songs.map { it.title }
     private fun track(id: Int) = Track(TrackId("local:$id"), "content://$id", "Song $id", "Artist", path = "Music/$id.flac", durationMs = 120_000)
+
+    @Test fun ratingsAndPlayCountsFollowTheSongAcrossCopies() = runBlocking {
+        repository.recordPlay(a); repository.recordPlay(a); repository.recordPlay(b)
+        repository.setRating(a, 4)
+        var stats = repository.stats.first()
+        assertEquals(2, stats.getValue(a.key.value).plays)
+        assertEquals(4, stats.getValue(a.key.value).rating)
+        assertEquals(1, stats.getValue(b.key.value).plays)
+        repository.setRating(a, 2)
+        assertEquals("a new rating replaces the old one", 2, repository.stats.first().getValue(a.key.value).rating)
+        repository.setRating(a, 0)
+        stats = repository.stats.first()
+        assertEquals("0 clears it; plays stay", 0, stats.getValue(a.key.value).rating)
+        assertEquals(2, stats.getValue(a.key.value).plays)
+    }
 }

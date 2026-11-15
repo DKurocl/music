@@ -102,6 +102,8 @@ fun MusicRoot(model: LibraryViewModel) {
     val query by model.query.collectAsStateWithLifecycle()
     val search by model.search.collectAsStateWithLifecycle()
     val personal by model.personal.collectAsStateWithLifecycle()
+    val smart by model.smart.collectAsStateWithLifecycle()
+    val stats by model.stats.collectAsStateWithLifecycle()
     val sortOrders by model.sortOrders.collectAsStateWithLifecycle()
     val lyricsState by model.localLyrics.collectAsStateWithLifecycle()
     val musicFolders by model.musicFolders.collectAsStateWithLifecycle()
@@ -169,6 +171,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 library = requireNotNull(library), insets = insets,
                 query = query, search = search, onQueryChange = model::setQuery,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
+                smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
                 personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue,
@@ -199,7 +202,8 @@ fun MusicRoot(model: LibraryViewModel) {
         loudness = playing.replayGain, onLoudness = model::setReplayGain)
     actionTrack?.let { track ->
         val saved = track.id.value in personal.favouriteByTrackId
-        TrackActionsSheet(track, saved, onDismiss = { actionTrack = null }, actions = listOf(
+        TrackActionsSheet(track, saved, rating = stats[track.key.value]?.rating ?: 0, onRate = { model.setRating(track, it) },
+            plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOf(
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },

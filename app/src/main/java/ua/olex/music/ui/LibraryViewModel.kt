@@ -138,6 +138,24 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         editUserData { setLyricOffset(track, offsetMs.coerceIn(-60_000, 60_000)) }
     }
 
+    /** Plays and ratings per song identity (SongKey value). */
+    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = graph.userLibrary.stats
+        .catch { emit(emptyMap()) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /** Built-in and the owner's smart playlists, worked out off the main thread whenever their inputs change. */
+    val smart: StateFlow<List<SmartPlaylistUi>> = combine(library, stats, graph.userLibrary.smartPlaylists.catch { emit(emptyList()) }, personal) { index, stats, own, personal ->
+        val songs = index?.songs ?: return@combine emptyList()
+        val now = System.currentTimeMillis()
+        val seed = now / 86_400_000L // a shuffled list keeps its order for the day
+        (ua.olex.music.model.SmartPlaylist.BUILT_IN + own).map { p ->
+            SmartPlaylistUi(p, p.evaluate(songs, { stats[it.key.value] ?: ua.olex.music.model.SongStats.NONE }, { it.id.value in personal.favouriteByTrackId }, now, seed))
+        }
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun saveSmartPlaylist(p: ua.olex.music.model.SmartPlaylist) = editUserData { saveSmartPlaylist(p) }
+    fun deleteSmartPlaylist(id: Long) = editUserData { deleteSmartPlaylist(id) }
+    fun setRating(track: Track, stars: Int) = editUserData { setRating(track, stars) }
+
     var userError by mutableStateOf<String?>(null); private set
     val personalActions = PersonalLibraryActions(
         create = { name, tracks -> editUserData { createPlaylist(name, tracks) } },

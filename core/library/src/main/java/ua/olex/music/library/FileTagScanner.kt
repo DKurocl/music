@@ -31,7 +31,7 @@ internal object FileTagScanner {
             val old = previous[row.id]
             if (old != null && old.tagReaderVersion == READER_VERSION && old.uri == row.uri && old.path == row.path &&
                 old.modifiedAt == row.modifiedAt && old.sizeBytes == row.sizeBytes) {
-                old.copy(scanId = row.scanId, artworkUri = row.artworkUri)
+                old.copy(scanId = row.scanId, artworkUri = row.artworkUri, addedAt = row.addedAt)
             } else {
                 // Permission loss is a failed scan; per-file IO errors fall back and are retried next scan.
                 try { merge(row, read(row.uri)).copy(tagReaderVersion = READER_VERSION) }

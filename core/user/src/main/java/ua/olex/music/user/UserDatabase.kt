@@ -7,8 +7,11 @@ import ua.olex.music.model.SavedSong
 
 /** User data has an exported schema and no destructive migration fallback. */
 @Database(
-    entities = [UserSongEntity::class, FavouriteEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class, HistoryEntity::class, LyricOffsetEntity::class],
-    version = 1, exportSchema = true,
+    entities = [UserSongEntity::class, FavouriteEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class, HistoryEntity::class, LyricOffsetEntity::class,
+        RatingEntity::class, SmartPlaylistEntity::class],
+    version = 2, exportSchema = true,
+    // Version 2 only adds tables (ratings, smart playlists): Room migrates it from the exported schemas.
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 abstract class UserDatabase : RoomDatabase() {
     abstract fun userData(): UserDao
@@ -63,6 +66,17 @@ data class HistoryEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val 
 @Entity(tableName = "lyric_offsets", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
 data class LyricOffsetEntity(@PrimaryKey val songId: String, val offsetMs: Long)
 
+/** A song's star rating, 1 to 5; no row means unrated. Kept apart from metadata, like favourites. */
+@Entity(tableName = "ratings", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
+data class RatingEntity(@PrimaryKey val songId: String, val stars: Int, val ratedAt: Long)
+
+/** A user's smart playlist: its definition only (SmartPlaylistCodec); its songs are computed. */
+@Entity(tableName = "smart_playlists")
+data class SmartPlaylistEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val definition: String, val createdAt: Long)
+
+/** Listening per song identity (SongKey): plays, the last one, and the rating, for smart playlists. */
+data class SongKeyStats(val songKey: String, val plays: Int, val lastPlayedAt: Long?, val rating: Int?)
+
 /** Room loads both relations under the same transaction; entry order is applied by the repository. */
 data class PlaylistRelations(
     @Embedded val playlist: PlaylistEntity,
@@ -98,4 +112,23 @@ interface UserDao {
     @Insert suspend fun insertEntries(entries: List<PlaylistEntryEntity>)
     @Insert suspend fun addHistory(history: HistoryEntity)
     @Upsert suspend fun setOffset(offset: LyricOffsetEntity)
+
+    /**
+     * Plays and ratings grouped by song identity, so a moved or re-ripped file keeps its history.
+     * A song identity with several saved paths takes the sum of plays and the best rating.
+     */
+    @Query("""
+        SELECT s.songKey AS songKey,
+               (SELECT COUNT(*) FROM play_history h JOIN saved_songs s2 ON s2.id = h.songId WHERE s2.songKey = s.songKey) AS plays,
+               (SELECT MAX(h.playedAt) FROM play_history h JOIN saved_songs s2 ON s2.id = h.songId WHERE s2.songKey = s.songKey) AS lastPlayedAt,
+               (SELECT MAX(r.stars) FROM ratings r JOIN saved_songs s2 ON s2.id = r.songId WHERE s2.songKey = s.songKey) AS rating
+        FROM saved_songs s GROUP BY s.songKey
+    """)
+    fun stats(): Flow<List<SongKeyStats>>
+    @Upsert suspend fun setRating(rating: RatingEntity)
+    @Query("DELETE FROM ratings WHERE songId IN (SELECT id FROM saved_songs WHERE songKey = :songKey)") suspend fun clearRatings(songKey: String)
+    @Query("SELECT * FROM smart_playlists ORDER BY createdAt, id") fun smartPlaylists(): Flow<List<SmartPlaylistEntity>>
+    @Insert suspend fun addSmartPlaylist(p: SmartPlaylistEntity): Long
+    @Query("UPDATE smart_playlists SET definition = :definition WHERE id = :id") suspend fun updateSmartPlaylist(id: Long, definition: String)
+    @Query("DELETE FROM smart_playlists WHERE id = :id") suspend fun deleteSmartPlaylist(id: Long)
 }

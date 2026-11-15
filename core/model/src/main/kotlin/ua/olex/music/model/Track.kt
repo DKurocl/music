@@ -81,6 +81,8 @@ data class Track(
     val artists: List<String> = listOf(artist),
     val genres: List<String> = listOfNotNull(genre),
     val metadata: FileMetadata? = null,
+    /** When the file came into the library (epoch ms), for "Recently added"; null when unknown. */
+    val addedAt: Long? = null,
 ) {
     // Browsing does not need song matching; defer normalization until a source lookup asks for it.
     val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }

@@ -29,6 +29,29 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
 
     suspend fun removeFavourite(id: String) = dao.removeFavourite(id)
 
+    /** Plays, last play and rating per song identity (SongKey value). */
+    val stats = dao.stats().map { rows -> rows.associate { it.songKey to ua.olex.music.model.SongStats(it.plays, it.lastPlayedAt, it.rating ?: 0) } }
+
+    /** Rates a song 1 to 5 stars; 0 clears the rating for every saved copy of the song. */
+    suspend fun setRating(track: Track, stars: Int) = database.withTransaction {
+        val song = SavedSong.from(track)
+        dao.clearRatings(song.songKey)
+        if (stars in 1..5) {
+            dao.saveSongs(listOf(UserSongEntity.from(song)))
+            dao.setRating(RatingEntity(song.id, stars, now()))
+        }
+    }
+
+    val smartPlaylists = dao.smartPlaylists().map { rows -> rows.mapNotNull { ua.olex.music.model.SmartPlaylistCodec.decode(it.definition, it.id) } }
+    suspend fun saveSmartPlaylist(p: ua.olex.music.model.SmartPlaylist): Long {
+        require(p.name.isNotBlank()) { "Enter a playlist name" }
+        val definition = ua.olex.music.model.SmartPlaylistCodec.encode(p.copy(name = p.name.trim()))
+        val id = p.id
+        return if (id == null) dao.addSmartPlaylist(SmartPlaylistEntity(definition = definition, createdAt = now()))
+        else { dao.updateSmartPlaylist(id, definition); id }
+    }
+    suspend fun deleteSmartPlaylist(id: Long) = dao.deleteSmartPlaylist(id)
+
     suspend fun createPlaylist(name: String, tracks: List<Track> = emptyList()): Long = database.withTransaction {
         val id = dao.createPlaylist(PlaylistEntity(name = validName(name), createdAt = now()))
         addToPlaylist(id, tracks)
