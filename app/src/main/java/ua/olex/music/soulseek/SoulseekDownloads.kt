@@ -106,7 +106,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             resolver.openOutputStream(uri)!!.use { out ->
                 client.download(file, out, { got, size ->
                     val percent = (got * 100 / size.coerceAtLeast(1)).toInt()
-                    if (percent != shown) { shown = percent; update("${prefix}Downloading $percent%", got.toFloat() / size) }
+                    if (percent != shown) { shown = percent; update("${prefix}$percent% of ${megabytes(size)}", got.toFloat() / size) }
                 })
             }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
@@ -128,6 +128,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     companion object {
         const val CHANNEL = "downloads"
         const val NOTIFICATION_BASE = 4_000
+        fun megabytes(bytes: Long): String = if (bytes >= 1_000_000_000) String.format(java.util.Locale.ROOT, "%.1f GB", bytes / 1e9) else "${(bytes + 500_000) / 1_000_000} MB"
         fun songKey(artist: String, title: String) = "song:" + TextFold.fold(artist) + "\u0000" + TextFold.fold(title)
         fun albumKey(artist: String, album: String) = "album:" + TextFold.fold(artist) + "\u0000" + TextFold.fold(album)
         val LOSSLESS = setOf("flac", "wav", "aiff", "alac", "ape", "wv")

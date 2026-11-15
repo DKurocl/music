@@ -117,7 +117,8 @@ internal fun SettingsPage(
                 below = if (job.running) ({
                     androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
                     val p = job.progress
-                    if (p == null) androidx.compose.material3.LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+                    // A plain line while it waits, the wave once bytes flow, as Play Store does.
+                    if (p == null) androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
                     else androidx.compose.material3.LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
                 }) else null)
         }

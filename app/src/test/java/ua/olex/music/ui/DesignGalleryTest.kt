@@ -147,7 +147,7 @@ class DesignGalleryTest {
         app.graph.soulseek.show(listOf(
             ua.olex.music.soulseek.SoulseekDownloads.Job(1, J.albumKey("Radiohead", "Kid A"), "Radiohead · Kid A", "Couldn't reach anyone who has it", failed = true),
             ua.olex.music.soulseek.SoulseekDownloads.Job(2, J.songKey("Air", "Sexy Boy"), "Air · Sexy Boy", "Saved to Music/Soulseek", 1f, done = true),
-            ua.olex.music.soulseek.SoulseekDownloads.Job(3, J.albumKey("Moderat", "III"), "Moderat · III", "4 of 10 · Downloading 62%", 0.62f),
+            ua.olex.music.soulseek.SoulseekDownloads.Job(3, J.albumKey("Moderat", "III"), "Moderat · III", "4 of 10 · 62% of 31 MB", 0.62f),
             ua.olex.music.soulseek.SoulseekDownloads.Job(4, J.songKey("Björk", "Joga"), "Björk · Jóga", "Searching Soulseek…"),
         ))
         compose.setContent { Shell("Settings", null) { pad -> Column(Modifier.fillMaxSize().padding(pad)) {
@@ -158,6 +158,7 @@ class DesignGalleryTest {
                 DownloadButton(J.songKey("Air", "Sexy Boy"), owned = false, what = "it") {}
                 DownloadButton(J.albumKey("Radiohead", "Kid A"), owned = false, what = "it") {}
             }
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.Center) { DownloadStatus(J.albumKey("Moderat", "III")) }
             SettingsPage(Modifier.weight(1f), listOf("Music"), false, true, {}, {}, {}, {}, {})
         } } }
         compose.onNode(androidx.compose.ui.test.hasScrollAction()).performScrollToNode(androidx.compose.ui.test.hasText("Soulseek account"))
