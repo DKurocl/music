@@ -382,7 +382,11 @@ fun MusicRoot(model: LibraryViewModel) {
             onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
-            onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
+            onMore = playing.mediaId?.let { id ->
+                library?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) ua.olex.music.model.Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
+                    playing.title, playing.artist, album = playing.album, durationMs = playing.durationMs, artworkUri = playing.artworkUri) else null
+            }?.let { track -> { actionTrack = track } },
+            mixFrom = model.mixSeed?.title,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } },
             onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } }
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } },
@@ -401,6 +405,8 @@ fun MusicRoot(model: LibraryViewModel) {
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
         },
             plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
+            // A mix grown from this song, as YouTube Music's "Start radio", local files first.
+            TrackAction(Glyph.MIX, "Start mix") { model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             // An online song has no album or artist page here and no file to tag: those actions are not offered.
             if (online) null else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
@@ -477,6 +483,7 @@ private fun NowPlaying(
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
     onMore: (() -> Unit)?,
+    mixFrom: String? = null,
     lyricsState: LocalLyricsState, lyricOffset: Long, onLyricOffset: (Long) -> Unit,
     musicFolders: List<String>, onChooseMusicFolder: () -> Unit, onClearMusicFolders: () -> Unit, onReloadLyrics: () -> Unit,
     onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
@@ -508,7 +515,7 @@ private fun NowPlaying(
                 if (c.balance != 0f) "balance ${(c.balance * 100).toInt()}%" else null).joinToString(", ").replaceFirstChar(Char::uppercase) },
             state.replayGain.mode.takeIf { it != ua.olex.music.dsp.ReplayGainMode.OFF }?.let { "ReplayGain: ${it.name.lowercase()}" },
         ))
-    if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove)
+    if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove, mixFrom = mixFrom)
     if (timerDialog) {
         SleepTimerDialog(
             deadline = state.sleepDeadlineMs,
