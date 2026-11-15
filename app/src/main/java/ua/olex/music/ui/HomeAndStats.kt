@@ -137,17 +137,14 @@ internal fun HomePage(
         if (lists.isNotEmpty()) {
             item(key = "smart-h") { SectionTitle("Made for you") { onSeeAll("SMART") } }
             item(key = "smart") {
-                val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer, cs.secondaryContainer to cs.onSecondaryContainer)
-                androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    lists.forEachIndexed { i, list ->
-                        val (bg, fg) = accents[i % accents.size]
-                        Surface(onClick = { haptics.confirm(); onPlay(list.tracks, 0) }, shape = androidx.compose.foundation.shape.CircleShape, color = bg, contentColor = fg, modifier = Modifier.squish()) {
-                            Row(Modifier.padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.size(32.dp).clip(androidx.compose.material3.MaterialShapes.Cookie4Sided.toShape()).background(fg.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) {
-                                    Symbol(Glyph.SMART, size = 18.dp, filled = true)
-                                }
-                                Text(list.playlist.name, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp))
-                            }
+                // Each list as a cover mosaic with its name, like playlists everywhere else; a tap plays it.
+                androidx.compose.foundation.lazy.LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(lists.size) { i ->
+                        val list = lists[i]
+                        Column(Modifier.width(148.dp).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel = "Play ${list.playlist.name}") { haptics.confirm(); onPlay(list.tracks, 0) }.squish(0.03f)) {
+                            PlaylistCover(list.tracks, 148.dp, 20.dp)
+                            Text(list.playlist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 4.dp))
+                            Text(songCount(list.tracks.size), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, modifier = Modifier.padding(start = 4.dp))
                         }
                     }
                 }

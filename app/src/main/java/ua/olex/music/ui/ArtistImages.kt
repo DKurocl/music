@@ -67,6 +67,41 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
         }
     }
 
+    fun cachedBio(name: String): String? = if (!enabled) null else File(dir, key(name) + ".bio").takeIf { it.isFile }?.readText()?.ifBlank { null }
+
+    /**
+     * A short "about" for the artist page: Wikipedia's summary (no account, no key; only the name is
+     * sent), taken only when Wikipedia describes a musician or a band, so a namesake never shows.
+     * Kept on disk; a miss is remembered for a month.
+     */
+    suspend fun bio(name: String): String? {
+        if (!enabled || name.isBlank() || TextFold.fold(name) in NOT_ARTISTS) return null
+        cachedBio(name)?.let { return it }
+        val miss = File(dir, key(name) + ".nobio")
+        if (miss.isFile && System.currentTimeMillis() - miss.lastModified() < 30L * 24 * 3600 * 1000) return null
+        return gate.withPermit {
+            withContext(Dispatchers.IO) {
+                fetchBio(name)?.also { text ->
+                    val file = File(dir, key(name) + ".bio"); val tmp = File(dir, file.name + ".tmp")
+                    tmp.writeText(text); tmp.renameTo(file)
+                } ?: run { miss.writeText(""); null }
+            }
+        }
+    }
+
+    internal fun fetchBio(name: String): String? = runCatching {
+        val primary = name.split(';', ',', '&').first().trim()
+        val music = Regex("""\b(band|singer|rapper|musician|duo|trio|group|producer|dj|songwriter|composer|vocalist|guitarist|pianist|orchestra|artist|record)\b""", RegexOption.IGNORE_CASE)
+        listOf(primary, "$primary (band)", "$primary (musician)", "$primary (rapper)", "$primary (singer)").firstNotNullOfOrNull { title ->
+            val body = http("https://en.wikipedia.org/api/rest_v1/page/summary/" + URLEncoder.encode(title.replace(' ', '_'), "UTF-8").replace("+", "_")) ?: return@firstNotNullOfOrNull null
+            val page = Json.parse(String(body, Charsets.UTF_8)) as? Map<*, *> ?: return@firstNotNullOfOrNull null
+            if (page["type"] != "standard") return@firstNotNullOfOrNull null
+            val description = page["description"]?.toString().orEmpty()
+            val extract = page["extract"]?.toString().orEmpty().trim()
+            extract.takeIf { it.length > 40 && (music.containsMatchIn(description) || music.containsMatchIn(extract.take(200))) }
+        }
+    }.getOrNull()
+
     /** The first result whose name matches (ignoring case and accents); Deezer's empty placeholder is skipped. */
     internal fun fetch(name: String): ByteArray? = runCatching {
         val primary = name.split(';', ',', '&').first().trim().removeSuffix(" feat.").trim()

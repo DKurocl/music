@@ -111,6 +111,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: SecurityException) { fallback.copy(note = "Folder access was revoked. Choose the music folder again.") }
             catch (_: Exception) { fallback.copy(note = "Couldn't read the sidecar. Use UTF-8 lyrics up to 1 MB, then Reload.") }
+        }.map { state ->
+            val track = state.mediaId?.let { library.value?.byId?.get(ua.olex.music.model.TrackId(it)) }
+            state.copy(lyrics = ua.olex.music.lyrics.LyricsCleanup.clean(state.lyrics, track?.title, track?.artist))
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
     fun reloadLyrics() = refreshLocalFiles(rescan = false)
@@ -163,13 +166,23 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Null while idle; a short status while the internet lookup runs or after it ends. */
     var onlineLyricsStatus by mutableStateOf<String?>(null); private set
 
+    /** Lyrics just found online, waiting for Android's permission to be written into the song's file. */
+    var lyricsForFile by mutableStateOf<Pair<ua.olex.music.model.Track, String>?>(null); private set
+    fun lyricsForFileHandled() { lyricsForFile = null }
+
     /** Looks the playing song's lyrics up on the internet (Kugou word-timed, then LRCLIB) and keeps them. */
     fun findLyricsOnline() {
         val id = playing.value.mediaId ?: return
         val track = library.value?.byId?.get(ua.olex.music.model.TrackId(id)) ?: return
         onlineLyricsStatus = "Searching online…"
         viewModelScope.launch {
-            onlineLyricsStatus = try { graph.downloadedLyrics.fetch(track)?.let { "Found on $it" } ?: "No lyrics found online for this song." }
+            onlineLyricsStatus = try {
+                graph.downloadedLyrics.fetch(track)?.let { found ->
+                    // Kept in the file too, replacing what it had, so other players and a reinstall see them.
+                    if ('#' !in track.id.value) lyricsForFile = track to found.text
+                    "Found on ${found.source}"
+                } ?: "No lyrics found online for this song."
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { "Couldn't reach the lyrics services." }
         }

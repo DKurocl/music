@@ -25,15 +25,25 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
         File(dir, name(track, f)).takeIf { it.isFile }?.let { it.readText() to f.name }
     }
 
-    /** Looks the song up (Kugou, then LRCLIB) and saves what it finds; returns the source, or null. */
-    suspend fun fetch(track: Track): String? = withContext(Dispatchers.IO) {
+    /** What a lookup found: where from, and the cleaned lyrics as text to keep in the music file. */
+    data class Fetched(val source: String, val text: String)
+
+    /**
+     * Looks the song up (Kugou, then LRCLIB), drops translations and credit lines, and keeps the
+     * result as LRC (word-timed where the source is); returns it, or null when nothing matched.
+     */
+    suspend fun fetch(track: Track): Fetched? = withContext(Dispatchers.IO) {
         val found = online.find(track.artists.firstOrNull() ?: track.artist, track.title, track.album, track.durationMs) ?: return@withContext null
+        val clean = ua.olex.music.lyrics.LyricsCleanup.clean(found.lyrics, track.title, track.artist)
+        val plain = clean.sync == ua.olex.music.lyrics.Sync.NONE
+        val text = if (plain) clean.lines.joinToString("\n") { it.text } else ua.olex.music.lyrics.LrcWriter.write(clean)
+        val format = if (plain) FoundLyrics.Format.PLAIN else FoundLyrics.Format.LRC
         FoundLyrics.Format.entries.forEach { File(dir, name(track, it)).delete() }
-        val file = File(dir, name(track, found.format))
+        val file = File(dir, name(track, format))
         val tmp = File(dir, file.name + ".tmp")
-        tmp.writeText(found.text); tmp.renameTo(file)
+        tmp.writeText(text); tmp.renameTo(file)
         _revision.value++
-        found.source
+        Fetched(found.source, text)
     }
 
     /** Lyrics the owner retimed by hand; they win over every other source for this song. */

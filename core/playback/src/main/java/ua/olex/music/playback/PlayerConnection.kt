@@ -148,7 +148,9 @@ class PlayerConnection(context: Context) {
         controller?.removeListener(listener)
         controller = null
         if (future != null) MediaController.releaseFuture(future)
-        _state.value = PlayerState()
+        // Keep the last song on screen while the app is in the background: wiping it made the
+        // player and mini player slide in again on every return. The next connect refreshes it.
+        _state.value = _state.value.copy(connected = false, connecting = false)
         queueSnapshot = emptyList()
     }
 

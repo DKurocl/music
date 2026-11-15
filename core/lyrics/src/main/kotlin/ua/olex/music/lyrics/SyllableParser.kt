@@ -87,3 +87,27 @@ object LyricsTiming {
         return lyrics.copy(lines = lines.sortedBy { it.startMs })
     }
 }
+
+/**
+ * Online lyrics arrive with extras the owner does not want on the player: a translation under
+ * every line (Kugou adds Chinese) and credit lines at the start ("Song - Artist", "作词 : ...").
+ * Both are dropped; the sung lines and their timing stay as they are.
+ */
+object LyricsCleanup {
+    private val credit = Regex("""^\s*(作词|作曲|编曲|词|曲|制作人|制作|监制|混音|录音|出品|发行|lyrics by|lyricist|composer|composed by|written by|producer|produced by|arranged by)\s*[:：]""", RegexOption.IGNORE_CASE)
+
+    fun clean(lyrics: Lyrics, title: String?, artist: String?): Lyrics {
+        if (lyrics.lines.isEmpty()) return lyrics
+        fun norm(s: String?) = s.orEmpty().lowercase().filter { it.isLetterOrDigit() }
+        val t = norm(title); val a = norm(artist)
+        val heading = setOf(t + a, a + t)
+        val firstSung = lyrics.lines.indexOfFirst { line ->
+            val n = norm(line.text)
+            n.isNotEmpty() && !(t.isNotEmpty() && n in heading) && !credit.containsMatchIn(line.text)
+        }.let { if (it < 0) 0 else it }
+        val lines = lyrics.lines.drop(firstSung.coerceAtMost(8))
+            .filterNot { credit.containsMatchIn(it.text) }
+            .map { if (it.translation != null) it.copy(translation = null) else it }
+        return lyrics.copy(lines = lines)
+    }
+}

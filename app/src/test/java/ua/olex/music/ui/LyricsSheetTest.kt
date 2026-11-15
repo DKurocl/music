@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Assert.assertEquals
@@ -17,26 +18,30 @@ import ua.olex.music.playback.PlayerState
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class LyricsSheetTest {
     @get:Rule val compose = createComposeRule()
-    @Test fun timedLineSeeksWithTheSavedOffsetAndAdjustmentCanBeReset() {
+    @Test fun timedLineOnThePlayerSeeksWithTheSavedOffset() {
         var seek = -1L
-        var offset = -1L
         compose.setContent { AppTheme {
-            LyricsSheet(Lyrics.parse("[00:01]First line\n[00:10]Second line"), PlayerState(mediaId = "local:1"), 200, { 0 }, { seek = it }, { offset = it }, {})
+            InlineLyrics(Lyrics.parse("[00:01]First line\n[00:10]Second line"), PlayerState(mediaId = "local:1"), 200, { 0 }, { seek = it }, {}, null, null,
+                androidx.compose.ui.Modifier.fillMaxSize())
         } }
-        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Second line"))
         compose.onNodeWithText("Second line").performClick()
         compose.runOnIdle { assertEquals(9_800L, seek) }
-        compose.onNode(hasScrollToNodeAction()).performScrollToIndex(0)
+    }
+    @Test fun timingCanBeNudgedAndReset() {
+        var offset = -1L
+        compose.setContent { AppTheme {
+            LyricsSheet(Lyrics.parse("[00:01]First line\n[00:10]Second line"), PlayerState(mediaId = "local:1"), 200, { 0 }, {}, { offset = it }, {})
+        } }
         compose.onNodeWithText("Earlier").performClick()
         compose.runOnIdle { assertEquals(400L, offset) }
-        compose.onNodeWithText("Offset 200 ms").performClick()
+        compose.onNodeWithText("Moved 0.2 s earlier").performClick()
         compose.runOnIdle { assertEquals(0L, offset) }
     }
     @Test fun plainTextDoesNotOfferTimingControls() {
         compose.setContent { AppTheme {
             LyricsSheet(Lyrics.parse("Words without timing"), PlayerState(), 0, { 0 }, {}, {}, {})
         } }
-        compose.onNodeWithText("Words without timing").assertExists()
+        compose.onNodeWithText("Lyrics").assertExists()
         compose.onNodeWithText("Earlier").assertDoesNotExist()
     }
     @Test fun emptyLyricsOfferExplicitFolderSelectionWithoutStartingPlayback() {

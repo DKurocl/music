@@ -2,6 +2,11 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -180,9 +185,17 @@ internal fun LibraryBrowser(
     fun batch(action: (List<Track>) -> Unit) { visible?.let(picked::ordered)?.takeIf { it.isNotEmpty() }?.let(action) }
     LaunchedEffect(selectedId, groups) { if (selectedId != null && selected == null) selectedId = null }
     LaunchedEffect(open) { open?.let { (t, id) -> tabName = t; selectedId = id; onOpened() } }
-    LaunchedEffect(closeCollection) { if (closeCollection > 0) selectedId = null }
+    // An album opened from an artist's page goes back to that artist, not to the album grid.
+    var backToArtist by rememberSaveable { mutableStateOf<String?>(null) }
+    var allArtistSongs by rememberSaveable(selectedId) { mutableStateOf(false) }
+    fun closeSelected() {
+        val artist = backToArtist
+        backToArtist = null
+        if (artist != null && tab == LibraryTab.ALBUMS) { tabName = LibraryTab.ARTISTS.name; selectedId = artist } else selectedId = null
+    }
+    LaunchedEffect(closeCollection) { if (closeCollection > 0) closeSelected() }
     BackHandler(searching || selected != null) {
-        if (searching) onQueryChange("") else selectedId = null
+        if (searching) onQueryChange("") else closeSelected()
     }
     BackHandler(picking) { picking = false; picked = TrackSelection() }
     LaunchedEffect(openTile) { openTile?.let { t -> runCatching { BrowseTile.valueOf(t) }.getOrNull()?.let { tile -> browsing = tile.name; tabName = tile.tab.name; filter = tile.filter; onOpened() } } }
@@ -195,6 +208,7 @@ internal fun LibraryBrowser(
             dismissButton = { TextButton(onClick = { missingFavourite = null }) { Text("Cancel") } })
     }
 
+    var fieldFocused by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxSize().padding(insets)) {
         // A search pill, as in Google's apps, and the library's sections as chips below it.
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
@@ -225,10 +239,20 @@ internal fun LibraryBrowser(
                 focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                 unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
             ),
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).focusRequester(focus),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).focusRequester(focus)
+                .onFocusChanged { fieldFocused = it.isFocused },
         )
+        // Typing mode (a tap in the field, or a second tap on Search): only recent searches, nothing else.
+        if (mode == BrowserMode.SEARCH && !searching && selected == null && browsing == null && fieldFocused) {
+            val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+            BackHandler { focusManager.clearFocus() }
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxSize()) {
+                item { RecentSearches(recentSearches.take(10), onPick = onQueryChange, onClear = onClearRecent) }
+            }
+            return@Column
+        }
         if (mode == BrowserMode.SEARCH && !searching && selected == null && browsing == null) {
-            BrowseTiles(library, recentSearches, onPickRecent = onQueryChange, onClearRecent = onClearRecent) { tile ->
+            BrowseTiles(library, onGenre = { genre -> browsing = BrowseTile.GENRES.name; tabName = BrowseTile.GENRES.tab.name; filter = BrowseTile.GENRES.filter; selectedId = genre.id }) { tile ->
                 browsing = tile.name; tabName = tile.tab.name; filter = tile.filter
             }
             return@Column
@@ -345,9 +369,46 @@ internal fun LibraryBrowser(
                         }
                     }
                 }
+                selected != null && tab == LibraryTab.ARTISTS -> {
+                    // The artist's page: who they are, their albums, then their most played songs.
+                    val ids = selected.tracks.mapTo(HashSet()) { it.id }
+                    val albums = library.albums.filter { a -> a.tracks.any { it.id in ids } }
+                    item(key = "artist-header") {
+                        ArtistHeader(selected, albums.size, showBack = mode != BrowserMode.LIBRARY, onBack = ::closeSelected, onPlay = { visible?.let { onPlay(it, 0) } },
+                            onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
+                    }
+                    item(key = "artist-bio") { ArtistBio(selected.name) }
+                    if (albums.isNotEmpty()) {
+                        item(key = "artist-albums-title") { PageHeading(if (albums.size == 1) "Album" else "Albums") }
+                        item(key = "artist-albums") {
+                            androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 12.dp)) {
+                                items(albums, key = { it.id }) { album ->
+                                    AlbumCard(album, Modifier.width(156.dp)) { backToArtist = selected.id; tabName = LibraryTab.ALBUMS.name; selectedId = album.id }
+                                }
+                            }
+                        }
+                    }
+                    if (visible == null) item { BrowserMessage("Sorting...") }
+                    else {
+                        val shown = if (allArtistSongs || visible.size <= 5) visible else visible.sortedByDescending { stats[it.key.value]?.plays ?: 0 }.take(5)
+                        item(key = "artist-songs-title") {
+                            Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f)) { PageHeading(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played") }
+                                if (visible.size > 5) TextButton(onClick = { allArtistSongs = !allArtistSongs }) { Text(if (allArtistSongs) "Show less" else "All ${visible.size}") }
+                            }
+                        }
+                        shown.forEachIndexed { index, track ->
+                            item(key = "artist-" + track.id.value) {
+                                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
+                                    checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) },
+                                    albumArtist = selected.name) { onPlay(shown, index) }
+                            }
+                        }
+                    }
+                }
                 selected != null -> {
                     item(key = "collection-header") {
-                        CollectionHeader(selected, artist = tab == LibraryTab.ARTISTS, showBack = mode != BrowserMode.LIBRARY, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
+                        CollectionHeader(selected, artist = tab == LibraryTab.ARTISTS, showBack = mode != BrowserMode.LIBRARY, onBack = ::closeSelected, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else {
@@ -465,6 +526,54 @@ internal fun LibraryBrowser(
 }
 
 @Composable
+private fun PageHeading(text: String) = Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp))
+
+/** The artist's photo beside the name and counts, smaller than an album cover: the page is about the music below. */
+@Composable
+private fun ArtistHeader(artist: MusicCollection, albums: Int, showBack: Boolean, onBack: () -> Unit, onPlay: () -> Unit, onShuffle: () -> Unit, onAdd: () -> Unit, enabled: Boolean) {
+    val cs = MaterialTheme.colorScheme
+    val minutes = artist.tracks.sumOf { it.durationMs } / 60_000
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        if (showBack) androidx.compose.material3.IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ArtistImage(artist.name, Modifier.size(120.dp), 120.dp)
+            Column(Modifier.padding(start = 20.dp).weight(1f)) {
+                Text(artist.name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(songCount(artist.tracks.size), if (albums > 0) (if (albums == 1) "1 album" else "$albums albums") else null, if (minutes > 0) "$minutes min" else null).joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            }
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Button(enabled = enabled, onClick = onPlay, modifier = Modifier.height(52.dp)) {
+                Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play all")
+            }
+            androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onShuffle, modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
+            androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onAdd, modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { Symbol(Glyph.PLAYLIST_ADD) }
+        }
+    }
+}
+
+/** A few lines about the artist from Wikipedia, when it has them; a tap shows the rest. Nothing while there is none. */
+@Composable
+private fun ArtistBio(name: String) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val images = (context.applicationContext as? ua.olex.music.MusicApp)?.graph?.artistImages
+    val bio by androidx.compose.runtime.produceState(images?.cachedBio(name), name) { if (value == null && images != null) value = images.bio(name) }
+    val text = bio ?: return
+    var open by remember(name) { mutableStateOf(false) }
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.material3.Surface(onClick = { open = !open }, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = cs.surfaceContainer,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).animateContentSize()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("About", style = MaterialTheme.typography.titleMedium)
+            Text(text, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = if (open) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis)
+            Text("From Wikipedia", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
 private fun CollectionHeader(collection: MusicCollection, artist: Boolean = false, showBack: Boolean = true, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true, onShuffle: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val minutes = collection.tracks.sumOf { it.durationMs } / 60_000
@@ -520,7 +629,7 @@ private fun BrowserMessage(text: String) {
     Text(text, modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-private fun songCount(count: Int) = if (count == 1) "1 song" else "$count songs"
+internal fun songCount(count: Int) = if (count == 1) "1 song" else "$count songs"
 
 /** Reference identity prevents stale work when two collections contain structurally equal lists. */
 private class SortSource(val tracks: List<Track>) {
@@ -735,7 +844,7 @@ private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: Libr
  * three accent families, so the grid is lively without inventing colours.
  */
 @Composable
-private fun BrowseTiles(library: LibraryIndex, recent: List<String>, onPickRecent: (String) -> Unit, onClearRecent: () -> Unit, onTile: (BrowseTile) -> Unit) {
+private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Unit, onTile: (BrowseTile) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val tiles = BrowseTile.entries.filter { t ->
@@ -744,7 +853,6 @@ private fun BrowseTiles(library: LibraryIndex, recent: List<String>, onPickRecen
     }
     val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer, cs.secondaryContainer to cs.onSecondaryContainer)
     androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (recent.isNotEmpty()) item { RecentSearches(recent.take(4), onPick = onPickRecent, onClear = onClearRecent) }
         item { Text("Browse", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)) }
         items(tiles.chunked(2).size) { r ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -761,6 +869,37 @@ private fun BrowseTiles(library: LibraryIndex, recent: List<String>, onPickRecen
                     }
                 }
                 if (tiles.chunked(2)[r].size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
+        // Your genres as big cover cards, as Google Play and Spotify fill their browse pages.
+        val genres = library.genres.sortedByDescending { it.tracks.size }.take(6)
+        if (genres.size > 1) {
+            item { Text("Your genres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)) }
+            items(genres.chunked(2).size) { r ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    genres.chunked(2)[r].forEach { genre -> GenreCard(genre, Modifier.weight(1f)) { haptics.tick(); onGenre(genre) } }
+                    if (genres.chunked(2)[r].size == 1) Spacer(Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+/** A genre as a card: up to three covers fanned on the right, the name and size on the left. */
+@Composable
+private fun GenreCard(genre: MusicCollection, modifier: Modifier, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val arts = genre.tracks.mapNotNull { it.artworkUri }.distinct().take(3)
+    androidx.compose.material3.Surface(onClick = onClick, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = cs.secondaryContainer,
+        contentColor = cs.onSecondaryContainer, modifier = modifier.height(112.dp).squish(0.03f)) {
+        Box {
+            arts.forEachIndexed { i, art ->
+                Artwork(art, Modifier.align(Alignment.BottomEnd).offset(x = (12 - i * 22).dp, y = (14 - i * 4).dp)
+                    .graphicsLayer { rotationZ = 14f - i * 9f }.size(72.dp), 14.dp)
+            }
+            Column(Modifier.align(Alignment.TopStart).padding(16.dp).fillMaxWidth(0.62f)) {
+                Text(genre.name, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(songCount(genre.tracks.size), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
