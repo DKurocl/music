@@ -7,7 +7,7 @@ repository's releases.
 
 Any agent (Claude, Codex, others) continues the same work from these files. Read them in this order:
 
-1. `AGENTS.md` (this file): rules and how to work here.
+1. `AGENTS.md` (this file): rules and how to work here. The target app is `docs/PRODUCT_SPEC.md`.
 2. `docs/HANDOFF.md`: the state right now, what is verified and what is only on paper.
 3. `docs/ROADMAP.md`: the task board. Pick the first open task of the lowest open milestone.
 4. `docs/ARCHITECTURE.md`: modules, boundaries and the decisions already made (do not reopen them
