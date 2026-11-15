@@ -15,6 +15,7 @@ import java.nio.ByteBuffer
 internal class EqualizerAudioOutputProvider(
     private val delegate: AudioOutputProvider,
     private val settings: () -> EqualizerSettings,
+    private val context: android.content.Context? = null,
 ) : AudioOutputProvider by delegate {
     override fun getAudioOutput(config: AudioOutputProvider.OutputConfig): AudioOutput {
         val output = delegate.getAudioOutput(config)
@@ -25,7 +26,9 @@ internal class EqualizerAudioOutputProvider(
         }
         if (config.isOffload || config.isTunneling) return output
         val channels = Integer.bitCount(config.channelMask)
-        return EqualizerAudioOutput(output, PcmEqualizer(encoding, config.sampleRate, channels, settings))
+        val equalized = EqualizerAudioOutput(output, PcmEqualizer(encoding, config.sampleRate, channels, settings))
+        // Outermost: "Feel the music" sees each write as the player made it, and the output's position.
+        return context?.let { MusicHapticsOutput(equalized, it.applicationContext, encoding == PcmEncoding.FLOAT32, channels, config.sampleRate) } ?: equalized
     }
 }
 

@@ -67,6 +67,35 @@ internal fun SettingsPage(
                 HeadsetRules.setResume(context, name, false); headphones = HeadsetRules.resumeDevices(context).sorted() } }
         }
 
+        // The phone taps with the kick drum and the bass, timed to what is heard (MusicHaptics).
+        item { Group("Feel") }
+        item {
+            var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
+            var strength by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.strength(context)) }
+            val haptics = rememberHaptics()
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Toggle(Glyph.WAVE, "Feel the music", "The phone taps with the beat and the bass, in time with what you hear. Pauses in Battery Saver",
+                    feel, first = true, last = !feel) { feel = it; ua.olex.music.playback.MusicHaptics.set(context, it, strength) }
+                androidx.compose.animation.AnimatedVisibility(feel) {
+                    Surface(shape = RoundedCornerShape(4.dp, 4.dp, 24.dp, 24.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                        androidx.compose.foundation.layout.Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                            val all = ua.olex.music.playback.MusicHaptics.Strength.entries
+                            all.forEachIndexed { i, s ->
+                                androidx.compose.material3.ToggleButton(checked = strength == s, onCheckedChange = {
+                                    strength = s; ua.olex.music.playback.MusicHaptics.set(context, true, s)
+                                    // A sample of the new strength, so the difference is felt without a song.
+                                    if (s == ua.olex.music.playback.MusicHaptics.Strength.LIGHT) haptics.scrub(0f) else if (s == ua.olex.music.playback.MusicHaptics.Strength.MEDIUM) haptics.play() else haptics.edge()
+                                }, shapes = when (i) { 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
+                                    all.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
+                                    else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes() },
+                                    modifier = Modifier.weight(1f).height(44.dp)) { Text(s.label) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         item { Group("Library") }
         item { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
         item { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"

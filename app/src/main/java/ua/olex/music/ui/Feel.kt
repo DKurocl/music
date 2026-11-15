@@ -42,9 +42,49 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
+import android.os.VibrationEffect.Composition
 
-/** One haptic vocabulary for the whole app (docs/DESIGN_SYSTEM.md). */
+/**
+ * One haptic vocabulary for the whole app (docs/DESIGN_SYSTEM.md). Simple feedback uses Android's
+ * own constants; the player's actions are small compositions of the vibrator's primitives (the
+ * way Pixel's ringtones and system gestures are made), each shaped like what it does, falling back
+ * to the nearest constant on a phone without them. All of it honours the system's touch-feedback
+ * switch.
+ */
 class Haptics(private val view: View) {
+    private val vibrator = view.context.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator?.takeIf { it.hasVibrator() }
+    private val touch = android.os.VibrationAttributes.createForUsage(android.os.VibrationAttributes.USAGE_TOUCH)
+    // Only Composition.PRIMITIVE_* constants reach these two, from the calls below.
+    @android.annotation.SuppressLint("WrongConstant")
+    private fun supported(vararg p: Int) = vibrator?.areAllPrimitivesSupported(*p) == true
+
+    /** Plays a composition of (primitive, scale, delay ms) when the vibrator has them all; else [fallback]. */
+    @android.annotation.SuppressLint("WrongConstant")
+    private fun compose(fallback: Int, vararg parts: Triple<Int, Float, Int>) {
+        val v = vibrator
+        if (v == null || !supported(*parts.map { it.first }.toIntArray()) || !view.isHapticFeedbackEnabled) { perform(fallback); return }
+        val c = android.os.VibrationEffect.startComposition()
+        parts.forEach { (p, scale, delay) -> c.addPrimitive(p, scale, delay) }
+        runCatching { v.vibrate(c.compose(), touch) }
+    }
+
+    /** Play: a quick rise into a click, something starting. */
+    fun play() = compose(HapticFeedbackConstants.TOGGLE_ON, Triple(Composition.PRIMITIVE_QUICK_RISE, 0.45f, 0), Triple(Composition.PRIMITIVE_CLICK, 0.7f, 0))
+    /** Pause: a quick fall settling on a low tick. */
+    fun pause() = compose(HapticFeedbackConstants.TOGGLE_OFF, Triple(Composition.PRIMITIVE_QUICK_FALL, 0.45f, 0), Triple(Composition.PRIMITIVE_LOW_TICK, 0.7f, 20))
+    /** Skip: two taps leaning the way it goes, light then firm forward, firm then light back. */
+    fun skip(forward: Boolean) = if (forward) compose(HapticFeedbackConstants.SEGMENT_TICK, Triple(Composition.PRIMITIVE_TICK, 0.5f, 0), Triple(Composition.PRIMITIVE_CLICK, 0.85f, 35))
+        else compose(HapticFeedbackConstants.SEGMENT_TICK, Triple(Composition.PRIMITIVE_CLICK, 0.85f, 0), Triple(Composition.PRIMITIVE_TICK, 0.5f, 35))
+    /** Like: a slow bloom into a bright click; unlike: a soft fall. */
+    fun like(on: Boolean) = if (on) compose(HapticFeedbackConstants.CONFIRM, Triple(Composition.PRIMITIVE_SLOW_RISE, 0.3f, 0), Triple(Composition.PRIMITIVE_CLICK, 1f, 0))
+        else compose(HapticFeedbackConstants.TOGGLE_OFF, Triple(Composition.PRIMITIVE_QUICK_FALL, 0.3f, 0))
+    /** Something new spinning up: a mix, a cover swiped to the next song. */
+    fun spin() = compose(HapticFeedbackConstants.GESTURE_END, Triple(Composition.PRIMITIVE_SPIN, 0.5f, 0))
+    /** A detent while scrubbing; firmer when moving fast. */
+    fun scrub(speed: Float) = compose(HapticFeedbackConstants.SEGMENT_FREQUENT_TICK, Triple(Composition.PRIMITIVE_LOW_TICK, (0.3f + speed * 0.5f).coerceIn(0.3f, 0.8f), 0))
+    /** Reaching an end (start or end of the song): a soft thud. */
+    fun edge() = compose(HapticFeedbackConstants.GESTURE_THRESHOLD_DEACTIVATE, Triple(Composition.PRIMITIVE_THUD, 0.6f, 0))
+
     fun toggle(on: Boolean) = perform(if (on) HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.TOGGLE_OFF)
     fun threshold() = perform(HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE)
     fun tick() = perform(HapticFeedbackConstants.SEGMENT_TICK)

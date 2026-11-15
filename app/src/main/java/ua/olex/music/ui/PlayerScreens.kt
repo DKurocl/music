@@ -309,8 +309,8 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                         val x = dragX.value
                         scope.launch {
                             when {
-                                x < -cardWidth * 0.3f && state.hasNext -> { haptics.threshold(); onNext() }
-                                x > cardWidth * 0.3f -> { haptics.threshold(); onPrevious() }
+                                x < -cardWidth * 0.3f && state.hasNext -> { haptics.skip(true); onNext() }
+                                x > cardWidth * 0.3f -> { haptics.skip(false); onPrevious() }
                             }
                             dragX.animateTo(0f, spring)
                         }
@@ -337,7 +337,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(state.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(enabled = state.connected, onClick = { haptics.toggle(!state.playWhenReady); onToggle() }, modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
+                IconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() }, modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
                     Symbol(if (state.playWhenReady) Glyph.PAUSE else Glyph.PLAY, size = 28.dp, filled = true)
                 }
                 IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.semantics { contentDescription = "Next" }) {
@@ -495,7 +495,7 @@ internal fun PlayerPage(
                     .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
                     .pointerInput(onFavourite, onMore) {
                         detectTapGestures(
-                            onDoubleTap = { if (onFavourite != null) { if (!favourite) heart = true; haptics.confirm(); onFavourite() } },
+                            onDoubleTap = { if (onFavourite != null) { if (!favourite) heart = true; haptics.like(!favourite); onFavourite() } },
                             onLongPress = { if (onMore != null) { haptics.longPress(); onMore() } },
                         )
                     }
@@ -508,12 +508,12 @@ internal fun PlayerPage(
                                     // Past three seconds "previous" restarts this song: the cover springs back instead.
                                     val previous = x > coverWidth * 0.2f && previousArt != null && position() < 3_000
                                     if (next || previous) {
-                                        haptics.threshold(); skipping = true
+                                        haptics.spin(); skipping = true
                                         swipe.animateTo(if (next) -step else step, androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing))
                                         if (next) onNext() else onPrevious()
                                         delay(600); if (skipping) { skipping = false; swipe.animateTo(0f, spatial) }
                                     } else {
-                                        if (x > coverWidth * 0.2f) { haptics.threshold(); onPrevious() }
+                                        if (x > coverWidth * 0.2f) { haptics.skip(false); onPrevious() }
                                         swipe.animateTo(0f, spatial)
                                     }
                                 }
@@ -542,7 +542,7 @@ internal fun PlayerPage(
                     Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = if (onOpenArtist != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open artist", onClick = onOpenArtist) else Modifier)
                 }
-                IconButton(enabled = onFavourite != null, onClick = { onFavourite?.invoke() }, modifier = Modifier.semantics {
+                IconButton(enabled = onFavourite != null, onClick = { haptics.like(!favourite); onFavourite?.invoke() }, modifier = Modifier.semantics {
                     contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
                 }) { Symbol(Glyph.FAVOURITE, size = 28.dp, filled = favourite, color = if (favourite) cs.primary else cs.onSurfaceVariant) }
             }
@@ -586,15 +586,15 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
     val haptics = rememberHaptics()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", onShuffle)
-        SkipButton(Glyph.PREVIOUS, "Previous", true) { haptics.tick(); onPrevious() }
+        SkipButton(Glyph.PREVIOUS, "Previous", true) { haptics.skip(false); onPrevious() }
         androidx.compose.material3.FilledIconToggleButton(
-            checked = playing, onCheckedChange = { haptics.toggle(it); onToggle() }, enabled = state.connected,
+            checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
             shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
             colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
                 checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
             modifier = Modifier.padding(horizontal = 6.dp).width(width).height(88.dp).semantics { contentDescription = if (playing) "Pause" else "Play" },
         ) { Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true) }
-        SkipButton(Glyph.NEXT, "Next", state.hasNext) { haptics.tick(); onNext() }
+        SkipButton(Glyph.NEXT, "Next", state.hasNext) { haptics.skip(true); onNext() }
         ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
             when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onRepeat)
     }
@@ -725,8 +725,17 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
         androidx.compose.runtime.SideEffect { if (dragged == null) slider.value = shown }
         androidx.compose.material3.Slider(
             state = slider, enabled = state.durationMs > 0, interactionSource = touch,
-            onValueChange = { v: Float -> if (dragged == null) haptics.tick(); dragged = v; slider.value = v },
-            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null; haptics.tick() },
+            // A detent every 2.5% (firmer when moving fast), a soft thud at either end.
+            onValueChange = { v: Float ->
+                val before = dragged ?: slider.value
+                val step = (v * 40).toInt()
+                if (dragged == null) haptics.tick()
+                else if (step != (before * 40).toInt()) {
+                    if (v <= 0.001f || v >= 0.999f) haptics.edge() else haptics.scrub((kotlin.math.abs(v - before) * 40).coerceIn(0f, 1f))
+                }
+                dragged = v; slider.value = v
+            },
+            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null; haptics.confirm() },
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Position"; stateDescription = "${clock(at)} of ${clock(state.durationMs)}" },
             thumb = { _: androidx.compose.material3.SliderState ->
                 androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = state.durationMs > 0)
