@@ -38,8 +38,9 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
     override fun setLoadErrorHandlingPolicy(policy: LoadErrorHandlingPolicy): MediaSource.Factory {
         errors = policy; template.setLoadErrorHandlingPolicy(policy); return this
     }
-    // Local files and content URIs as before; ytm://<id> is asked of the app at open time.
-    private val data = androidx.media3.datasource.ResolvingDataSource.Factory(
+    // Local files and content URIs as before; ytm://<id> is asked of the app at open time, and a
+    // song played before comes from the stream cache (see CacheBudget) without asking at all.
+    private val data = OnlineCachingDataSource.Factory(app, androidx.media3.datasource.ResolvingDataSource.Factory(
         androidx.media3.datasource.DefaultDataSource.Factory(app, androidx.media3.datasource.DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").setAllowCrossProtocolRedirects(true)),
     ) { spec ->
@@ -47,7 +48,7 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
         val id = spec.uri.host ?: spec.uri.schemeSpecificPart.trimStart('/')
         val real = (app as? OnlineStreams)?.resolve(id) ?: throw java.io.IOException("This song is not available online right now")
         spec.withUri(real)
-    }
+    })
 
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val tags = ReplayGainCodec.tags(mediaItem.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS))

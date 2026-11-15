@@ -37,7 +37,14 @@ class AppGraph(context: Context) {
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
 }
 
-class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams {
+class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams,
+    coil3.SingletonImageLoader.Factory {
+    /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
+    override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
+        .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("image_cache").absolutePath.toPath() })
+            .maxSizeBytes(ua.olex.music.playback.CacheBudget.imageBytes(this)).build() }
+        .build()
+
     /** The audio stream of an online song, found when the player opens it. */
     override fun resolve(id: String): android.net.Uri? = graph.youTube.audio(id)
     override val localArtwork get() = graph.artwork
