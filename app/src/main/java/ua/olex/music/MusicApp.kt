@@ -22,6 +22,7 @@ class AppGraph(context: Context) {
     val downloadedLyrics by lazy { ua.olex.music.ui.DownloadedLyrics(app) }
     val artistImages by lazy { ua.olex.music.ui.ArtistImages(app) }
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
+    internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
     val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles) }
     val player by lazy { PlayerConnection(app) }
