@@ -174,6 +174,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                                 nav.download { graph.soulseek.album(artistName, album.title) }
                             }
                         }
+                        DownloadStatus(ua.olex.music.soulseek.SoulseekDownloads.albumKey(songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty(), album.title))
                     }
                 }
                 itemsIndexed(songs, key = { _, t -> "a-" + t.id.value }) { i, t ->
@@ -269,17 +270,39 @@ internal fun DownloadButton(key: String, owned: Boolean, what: String, onStart: 
             when (stage) {
                 0 -> Symbol(Glyph.CHECK)
                 1 -> Symbol(Glyph.REFRESH)
+                // As Play Store: a plain spinning ring while it waits, then a wave that fills with the percent.
                 2 -> Box(contentAlignment = Alignment.Center) {
                     val p = job?.progress
-                    if (p == null) androidx.compose.material3.CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
+                    // The track stays visible on the tonal button: a faint full ring the wave fills.
+                    val track = cs.onSecondaryContainer.copy(alpha = 0.16f)
+                    if (p == null) CircularProgressIndicator(Modifier.size(46.dp), strokeWidth = 3.dp, trackColor = track)
                     else {
-                        val shown by androidx.compose.animation.core.animateFloatAsState(p, label = "progress")
-                        androidx.compose.material3.CircularProgressIndicator(progress = { shown }, modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
+                        val shown by androidx.compose.animation.core.animateFloatAsState(p, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "progress")
+                        CircularWavyProgressIndicator(progress = { shown }, modifier = Modifier.size(46.dp), trackColor = track)
                     }
-                    Symbol(Glyph.DOWNLOAD, size = 14.dp)
+                    Symbol(Glyph.DOWNLOAD, size = 20.dp)
                 }
                 else -> Symbol(Glyph.DOWNLOAD)
             }
+        }
+    }
+}
+
+/** Under the buttons while a download runs or after it failed: what it is doing, in a small pill, as Play Store does. */
+@Composable
+internal fun DownloadStatus(key: String) {
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val jobs by graph.soulseek.jobs.collectAsState()
+    val job = jobs.lastOrNull { it.key == key }?.takeIf { !it.done }
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.animation.AnimatedVisibility(job != null,
+        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
+        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()) {
+        val shown = remember { mutableStateOf(job) }.apply { if (job != null) value = job }.value ?: return@AnimatedVisibility
+        Surface(shape = RoundedCornerShape(50), color = if (shown.failed) cs.errorContainer else cs.surfaceContainerHigh,
+            contentColor = if (shown.failed) cs.onErrorContainer else cs.onSurfaceVariant, modifier = Modifier.padding(top = 12.dp)) {
+            Text(shown.status, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).animateContentSize())
         }
     }
 }
