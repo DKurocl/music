@@ -46,6 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.MusicCollection
@@ -222,6 +224,13 @@ internal fun LibraryBrowser(
                         )
                     }
                 }
+                // Albums as a grid of covers, two to a row (four on a wide screen), as music apps show them.
+                tab == LibraryTab.ALBUMS -> items(groups.chunked(2), key = { row -> row.first().id }) { row ->
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        row.forEach { album -> AlbumCard(album, Modifier.weight(1f)) { selectedId = album.id } }
+                        if (row.size == 1) androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    }
+                }
                 else -> items(groups, key = { it.id }) { collection ->
                     ListItem(
                         headlineContent = { Text(collection.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -263,6 +272,21 @@ private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, on
             androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onAdd,
                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { Symbol(Glyph.PLAYLIST_ADD) }
         }
+    }
+}
+
+@Composable
+private fun AlbumCard(album: MusicCollection, modifier: Modifier, onOpen: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    Column(
+        modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
+            .clickable(onClickLabel = "Open ${album.name}", onClick = onOpen).padding(4.dp).padding(bottom = 12.dp),
+    ) {
+        Artwork(album.artworkUri, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
+        androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+        Text(album.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
+        Text(album.subtitle ?: songCount(album.tracks.size), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 
