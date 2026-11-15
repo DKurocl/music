@@ -153,24 +153,40 @@ internal fun SettingsPage(
         // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
         item { Group("Storage") }
         item {
-            var sizes by remember { mutableStateOf<List<Long>?>(null) }
+            // One budget for what the app keeps only to be quick; the owner's music, lyrics,
+            // downloads and own moving covers are never part of it.
             val motion = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.motionCovers }
+            var limit by remember { mutableStateOf(ua.olex.music.playback.CacheBudget.limitMb(context)) }
+            var editing by remember { mutableStateOf(false) }
             var cleared by remember { mutableStateOf(0) }
-            LaunchedEffect(cleared) {
+            var sizes by remember { mutableStateOf<List<Long>?>(null) }
+            LaunchedEffect(cleared, limit) {
                 sizes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     fun size(f: java.io.File): Long = if (f.isDirectory) f.listFiles()?.sumOf { size(it) } ?: 0L else f.length()
-                    listOf(size(context.cacheDir), images.bytes(), size(java.io.File(context.filesDir, "lyrics")), motion.bytes())
+                    val covers = context.cacheDir.listFiles { f -> f.name != "streams" }.orEmpty().sumOf { size(it) } + images.bytes()
+                    listOf(ua.olex.music.playback.CacheBudget.streamUse(context), covers, motion.bytes())
                 }
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
-            fun mb(b: Long) = if (b < 1024 * 1024) "${b / 1024} KB" else "${b / (1024 * 1024)} MB"
-            Row(Glyph.DELETE, "Clear covers and photos",
-                sizes?.let { (cache, photos, lyrics, moving) -> "Covers ${mb(cache)} · Artist photos ${mb(photos)}. Kept: lyrics ${mb(lyrics)}, moving covers ${mb(moving)}" } ?: "Counting…",
-                first = true, last = true) {
+            fun mb(b: Long) = when { b >= 1L shl 30 -> String.format(java.util.Locale.ROOT, "%.1f GB", b / 1073741824.0); b >= 1L shl 20 -> "${b shr 20} MB"; else -> "${b shr 10} KB" }
+            Row(Glyph.HISTORY, "Cache limit", ua.olex.music.playback.CacheBudget.label(limit) + (sizes?.let { (songs, covers, moving) ->
+                " · used ${mb(songs + covers + moving)}: songs ${mb(songs)}, covers ${mb(covers)}, moving covers ${mb(moving)}" } ?: ""),
+                first = true) { editing = true }
+            Spacer(Modifier.height(4.dp))
+            Row(Glyph.DELETE, "Clear cache", "Streamed songs, covers, photos and fetched moving covers. Your music, lyrics and own moving covers stay", last = true) {
                 scope.launch {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }; images.clear() }
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        // The stream cache is a live database: emptied through it, never deleted underneath.
+                        ua.olex.music.playback.CacheBudget.clearStreams(context)
+                        context.cacheDir.listFiles { f -> f.name != "streams" }?.forEach { it.deleteRecursively() }
+                        images.clear()
+                    }
                     cleared++
                 }
+            }
+            if (editing) CacheLimitDialog(limit, onDismiss = { editing = false }) { mb ->
+                ua.olex.music.playback.CacheBudget.setLimitMb(context, mb); limit = mb; editing = false
+                scope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { motion.trim() } }
             }
         }
 
@@ -264,4 +280,44 @@ internal fun SoulseekDialog(current: Pair<String, String>?, onDismiss: () -> Uni
         },
         confirmButton = { TextButton(enabled = user.isNotBlank() && password.isNotBlank(), onClick = { onSave(user to password) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = { if (current != null) onSave(null) else onDismiss() }) { Text(if (current != null) "Sign out" else "Cancel") } })
+}
+
+/**
+ * The cache budget: four common sizes as one connected group, or any size on a slider (log scale,
+ * 256 MB to 100 GB, snapping to round numbers).
+ */
+@Composable
+private fun CacheLimitDialog(current: Long, onDismiss: () -> Unit, onSave: (Long) -> Unit) {
+    val haptics = rememberHaptics()
+    var mb by remember { mutableStateOf(current) }
+    val presets = ua.olex.music.playback.CacheBudget.PRESETS_MB
+    val lo = kotlin.math.ln(256.0); val hi = kotlin.math.ln(102_400.0)
+    fun snap(v: Long): Long = when { v < 1_024 -> (v + 64) / 128 * 128; v < 10_240 -> (v + 256) / 512 * 512; else -> (v + 512) / 1_024 * 1_024 }
+    AppDialog(onDismissRequest = onDismiss, title = { Text("Cache limit") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text("Songs you streamed play again from here, without data. The oldest go first when it fills up.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                presets.forEachIndexed { i, p ->
+                    androidx.compose.material3.ToggleButton(checked = mb == p, onCheckedChange = { haptics.tick(); mb = p },
+                        shapes = when (i) { 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            presets.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes() },
+                        contentPadding = PaddingValues(0.dp), modifier = Modifier.weight(1f).height(48.dp)) {
+                        if (p == ua.olex.music.playback.CacheBudget.UNLIMITED) Text("\u221E", style = MaterialTheme.typography.titleMedium) else Text(ua.olex.music.playback.CacheBudget.label(p))
+                    }
+                }
+            }
+            Column {
+                Text(if (mb == ua.olex.music.playback.CacheBudget.UNLIMITED) "No limit" else ua.olex.music.playback.CacheBudget.label(mb),
+                    style = MaterialTheme.typography.titleLarge)
+                val position = if (mb == ua.olex.music.playback.CacheBudget.UNLIMITED) 1f else ((kotlin.math.ln(mb.toDouble()) - lo) / (hi - lo)).toFloat().coerceIn(0f, 1f)
+                androidx.compose.material3.Slider(position, onValueChange = { v ->
+                    val next = snap(kotlin.math.exp(lo + v * (hi - lo)).toLong())
+                    if (next != mb) { haptics.tick(); mb = next }
+                })
+                Text("Any size from 256 MB to 100 GB", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }, confirmButton = { TextButton(onClick = { onSave(mb) }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
