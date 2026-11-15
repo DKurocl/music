@@ -77,6 +77,15 @@ internal class OnlineTags(private val http: (String) -> ByteArray? = { ArtistIma
         return s
     }
 
+    private val thumbs = object : LinkedHashMap<String, ByteArray>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?) = size > 32
+    }
+
+    /** A small picture of a match for the list: fetched once, kept only in memory (nothing on disk). */
+    suspend fun thumb(url: String): ByteArray? = synchronized(thumbs) { thumbs[url] } ?: withContext(Dispatchers.IO) {
+        http(url.replace("1200x1200bb", "200x200bb"))?.takeIf { it.size in 100..(1 shl 20) }?.also { synchronized(thumbs) { thumbs[url] = it } }
+    }
+
     /** The cover as bytes for the file: a JPEG up to 8 MB, or null. */
     suspend fun cover(url: String): ByteArray? = withContext(Dispatchers.IO) {
         http(url)?.takeIf { it.size in 1_000..(8 shl 20) && it[0] == 0xFF.toByte() && it[1] == 0xD8.toByte() }
