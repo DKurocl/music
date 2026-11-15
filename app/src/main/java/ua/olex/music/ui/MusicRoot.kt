@@ -383,7 +383,9 @@ fun MusicRoot(model: LibraryViewModel) {
         val motionCover by model.motionCover.collectAsStateWithLifecycle()
         NowPlaying(
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
-                listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") },
+                listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") }
+                // A YouTube Music song: the stream's codec and bitrate, once the player picked it.
+                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { context.graph.youTube.format(it.removePrefix("yt:")) ?: "YouTube Music" },
             position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
@@ -436,7 +438,7 @@ fun MusicRoot(model: LibraryViewModel) {
                     job?.failed == true -> TrackAction(Glyph.REFRESH, "Try the download again") {
                         context.graph.soulseek.retry(job); scope.launch { snackbar.showSnackbar("Looking on Soulseek again") }
                     }
-                    else -> TrackAction(Glyph.DOWNLOAD, "Download in lossless") {
+                    else -> TrackAction(Glyph.DOWNLOAD, "Download") {
                         onlineNav.download {
                             context.graph.soulseek.song(artist, track.title, track.album, track.durationMs)
                             scope.launch { snackbar.showSnackbar("Looking for a lossless copy on Soulseek") }

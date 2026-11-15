@@ -32,6 +32,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import ua.olex.music.graph
 import ua.olex.music.model.Track
+import ua.olex.music.model.TrackId
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.TrackSortScope
 import ua.olex.music.model.TrackSortMode
@@ -97,14 +98,28 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
 
     val musicFolders = graph.musicFiles.folders
-    private val lyricTrack = combine(library, playing.map { it.mediaId }.distinctUntilChanged()) { index, id ->
-        id?.let { index?.byId?.get(ua.olex.music.model.TrackId(it)) }
+    /** The playing song: the library's file, or, for a YouTube Music song, what the player knows of it. */
+    private fun playingTrack(state: PlayerState = playing.value, index: LibraryIndex? = library.value): Track? {
+        val id = state.mediaId ?: return null
+        return index?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
+            state.title, state.artist, album = state.album, durationMs = state.durationMs, artworkUri = state.artworkUri) else null
+    }
+    private val lyricTrack = combine(library, playing.distinctUntilChanged { a, b -> a.mediaId == b.mediaId && a.title == b.title }) { index, state ->
+        playingTrack(state, index)
     }.distinctUntilChanged()
     val localLyrics = combine(lyricTrack, graph.musicFiles.revision, graph.downloadedLyrics.revision) { track, revision, _ -> track to revision }
         .mapLatest { (track, _) ->
             if (track == null) return@mapLatest LocalLyricsState()
             graph.downloadedLyrics.edited(track)?.let(ua.olex.music.lyrics.Lyrics::parse)?.takeIf { it.lines.isNotEmpty() }?.let {
                 return@mapLatest LocalLyricsState(it, "Your timing", mediaId = track.id.value, edited = true)
+            }
+            // A YouTube Music song has no file: its lyrics come from the internet, found by themselves
+            // and kept, so they show at once the next time.
+            if (YouTubeMusic.isOnline(track)) {
+                val kept = graph.downloadedLyrics.read(track)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
+                val found = kept ?: runCatching { graph.downloadedLyrics.fetch(track)?.let { ua.olex.music.lyrics.Lyrics.parse(it.text) } }.getOrNull()
+                return@mapLatest if (found != null && found.lines.isNotEmpty()) LocalLyricsState(found, "Found online", mediaId = track.id.value)
+                    else LocalLyricsState(ua.olex.music.lyrics.Lyrics.EMPTY, "No lyrics found online", mediaId = track.id.value)
             }
             val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
             val downloaded = graph.downloadedLyrics.read(track)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
@@ -127,7 +142,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             catch (_: SecurityException) { fallback.copy(note = "Folder access was revoked. Choose the music folder again.") }
             catch (_: Exception) { fallback.copy(note = "Couldn't read the sidecar. Use UTF-8 lyrics up to 1 MB, then Reload.") }
         }.map { state ->
-            val track = state.mediaId?.let { library.value?.byId?.get(ua.olex.music.model.TrackId(it)) }
+            val track = playingTrack()?.takeIf { it.id.value == state.mediaId }
             state.copy(lyrics = ua.olex.music.lyrics.LyricsCleanup.clean(state.lyrics, track?.title, track?.artist))
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
@@ -210,14 +225,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Looks the playing song's lyrics up on the internet (Kugou word-timed, then LRCLIB) and keeps them. */
     fun findLyricsOnline() {
-        val id = playing.value.mediaId ?: return
-        val track = library.value?.byId?.get(ua.olex.music.model.TrackId(id)) ?: return
+        val track = playingTrack() ?: return
         onlineLyricsStatus = "Searching online…"
         viewModelScope.launch {
             onlineLyricsStatus = try {
                 graph.downloadedLyrics.fetch(track)?.let { found ->
                     // Kept in the file too, replacing what it had, so other players and a reinstall see them.
-                    if ('#' !in track.id.value) lyricsForFile = track to found.text
+                    if ('#' !in track.id.value && !YouTubeMusic.isOnline(track)) lyricsForFile = track to found.text
                     "Found on ${found.source}"
                 } ?: "No lyrics found online for this song."
             }
@@ -376,8 +390,16 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     private fun localFirst(list: List<Track>): List<Track> {
         if (list.none(YouTubeMusic::isOnline)) return list
-        val index = library.value ?: return list
-        return list.map { if (YouTubeMusic.isOnline(it)) YouTubeMusic.localCopy(it, index) ?: it else it }
+        val index = localIndex() ?: return list
+        return list.map { if (YouTubeMusic.isOnline(it)) index.copyOf(it) ?: it else it }
+    }
+
+    // The library indexed by title and artist, rebuilt only when the library itself changes.
+    @Volatile private var indexed: Pair<LibraryIndex, YouTubeMusic.Companion.Index>? = null
+    private fun localIndex(): YouTubeMusic.Companion.Index? {
+        val lib = library.value ?: return null
+        indexed?.takeIf { it.first === lib }?.let { return it.second }
+        return YouTubeMusic.Companion.Index(lib.songs).also { indexed = lib to it }
     }
     // "Start mix": YouTube Music's radio for a song, cleaned (see Mix), endless while it plays.
     private class MixRun(val seed: Track, @Volatile var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>, @Volatile var startFrom: String? = null)
@@ -409,10 +431,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                     val id = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else yt.find(seed)?.id?.value?.removePrefix("yt:")
                     id?.let { yt.radio(it) }
                 }.getOrNull()
+                // Cleaning, matching against the library and the local fallback run off the main
+                // thread: with a large library they are the part that made the screen stall.
                 val seen = (recent + Mix.songKey(seed)).toMutableSet()
-                val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
-                val songs = library.value?.songs.orEmpty()
-                val upcoming = localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats.value, recent))
+                val stats = stats.value
+                val (online, upcoming) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
+                    val songs = library.value?.songs.orEmpty()
+                    online to localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats, recent))
+                }
                 if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return@launch }
                 seen += upcoming.map(Mix::songKey)
                 val state = playing.value
@@ -420,12 +447,37 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 val seedHere = localFirst(listOf(seed)).first()
                 if (current != null && (current == seedHere.id.value || current == seed.id.value)) {
                     // Keep the song playing; replace what follows it.
-                    state.queue.drop(state.queueIndex + 1).forEach { player.removeQueueItem(it.key) }
+                    player.clearUpcoming()
                     player.enqueue(upcoming, false)
                 } else player.play(listOf(seedHere) + upcoming, 0)
                 mixRun = if (online.size >= 5) MixRun(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seedHere.id.value + seed.id.value).toMutableSet()) else null
                 mixLabel = "Mix from ${seed.title}"
             } finally { mixLoading = false }
+        }
+    }
+
+    // Autoplay, as YouTube Music: when the last song of the queue plays (or a single online song
+    // was started), a mix from it is added after it, without stopping what plays.
+    private var autoplayedFor: String? = null
+    private fun autoplay(state: PlayerState) {
+        val id = state.mediaId ?: return
+        if (!graph.youTubeOn.value || state.queueSize == 0 || state.queueIndex != state.queueSize - 1 || autoplayedFor == id || mixMore?.isActive == true) return
+        autoplayedFor = id
+        val seed = library.value?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
+            state.title, state.artist, album = state.album, durationMs = state.durationMs, artworkUri = state.artworkUri) else return
+        mixMore = viewModelScope.launch {
+            val yt = graph.youTube
+            val page = runCatching {
+                val video = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else yt.find(seed)?.id?.value?.removePrefix("yt:")
+                video?.let { yt.radio(it) }
+            }.getOrNull() ?: return@launch
+            val seen = (recentKeys() + state.queue.map { Mix.songKey(Track(TrackId(it.mediaId), "", it.title, it.artist)) } + Mix.songKey(seed)).toMutableSet()
+            val more = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { localFirst(Mix.clean(page.tracks, seed, seen)) }
+            if (more.isEmpty() || playing.value.mediaId != id) return@launch
+            seen += more.map(Mix::songKey)
+            player.enqueue(more, false)
+            mixRun = MixRun(seed, page.continuation, seen, (more.map { it.id.value } + id).toMutableSet())
+            mixLabel = "Mix from ${seed.title}"
         }
     }
 
@@ -450,7 +502,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Called on every player change: tops the mix up near its end; ends it once something else plays. */
     private fun followMix(state: PlayerState) {
-        val run = mixRun ?: return
+        val run = mixRun ?: return autoplay(state)
         val id = state.mediaId ?: return
         if (id !in run.ids) { mixRun = null; mixLabel = null; return }
         val left = state.queueSize - state.queueIndex - 1
@@ -462,7 +514,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             if (mixRun !== run) return@launch
             run.startFrom = null
             run.token = page.continuation
-            val more = localFirst(Mix.clean(page.tracks, run.seed, run.seen))
+            val more = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { localFirst(Mix.clean(page.tracks, run.seed, run.seen)) }
             run.seen += more.map(Mix::songKey)
             run.ids += more.map { it.id.value }
             if (more.isNotEmpty()) player.enqueue(more, false)

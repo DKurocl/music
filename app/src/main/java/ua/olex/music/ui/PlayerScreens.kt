@@ -429,7 +429,7 @@ internal fun PlayerPage(
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = "Open album", onClick = onOpenAlbum) else Modifier)
                     .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                    Text(state.album ?: "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(state.album ?: if (state.mediaId?.startsWith("yt:") == true) "YouTube Music" else "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End) {
                     // With the lyrics on, their options (timing, sources, online) sit up here, clear of the text.

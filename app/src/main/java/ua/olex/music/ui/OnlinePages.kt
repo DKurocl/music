@@ -260,7 +260,7 @@ internal fun DownloadButton(key: String, owned: Boolean, what: String, onStart: 
         done -> "Already in your library"
         failed -> "Download failed: ${job?.status}. Try again"
         job?.running == true -> job.status
-        else -> "Download $what in lossless"
+        else -> "Download $what"
     }
     FilledTonalIconButton(onClick = {
         when {
@@ -417,7 +417,7 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>) {
                     YouTubeMusic.Card.Kind.ARTIST -> nav.open(OnlineTarget.Artist(card.title, card.id))
                     YouTubeMusic.Card.Kind.MIX -> { haptics.spin(); nav.playMix(card.id, card.title) }
                     YouTubeMusic.Card.Kind.SONG -> nav.play(listOf(Track(ua.olex.music.model.TrackId("yt:${card.id}"), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${card.id}",
-                        card.title, card.subtitle?.substringBefore(" \u2022").orEmpty(), artworkUri = card.cover)), 0)
+                        card.title, YouTubeMusic.artistOf(card.subtitle), artworkUri = card.cover)), 0)
                 }
             }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
                 if (round) Artwork(card.cover, Modifier.size(148.dp).clip(androidx.compose.foundation.shape.CircleShape), 74.dp)

@@ -17,7 +17,7 @@
         <TextView android:id="@+id/widget_artist" android:layout_width="match_parent" android:layout_height="wrap_content"
             android:textColor="@color/w_sub" android:textSize="13sp" android:fontFamily="google-sans-text" android:maxLines="1" android:ellipsize="end"
             android:includeFontPadding="false" android:layout_marginTop="2dp" />
-        <View android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+        <FrameLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
         <LinearLayout android:layout_width="wrap_content" android:layout_height="32dp" android:orientation="horizontal"
             android:gravity="center_vertical" android:layout_marginStart="-8dp">
             <ImageButton android:id="@+id/widget_previous" android:layout_width="40dp" android:layout_height="32dp" android:background="@null"
