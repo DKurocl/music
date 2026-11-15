@@ -159,7 +159,10 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
 ## M4 Lyrics (`:core:lyrics`, new `:core:lyrics-net`, `:app`)
 - [ ] KRC (Kugou), QRC and SYLT parsers with tests.
 - [ ] LRCLIB and Kugou clients; matching by SongKey and length; pure Kotlin with recorded-response tests.
-- [ ] Lyrics store: sidecar, embedded, fetched; save fetched as sidecar; per-track offset.
+- [~] Lyrics store (Codex, 2026-11-15, `agent/m3-replaygain`): local LRC/TTML/TXT sidecars
+      via explicitly chosen internal-storage folders, embedded fallback, reload and per-track offsets
+      implemented. 114 pure / 4 focused storage tests pass; source compiles, Android picker UI pending.
+      Fetching and writing sidecars remain open.
 - [ ] Lyrics page: word fill, spring scroll, blur, tap to seek, backing vocals, duets, gap dots;
       draw-phase only, no per-frame recomposition (check with the composition tracing).
 - [ ] Editor: offset nudge, tap-to-time lines, save.

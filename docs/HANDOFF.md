@@ -1,3 +1,44 @@
+# Current functional work: scoped local sidecar lyrics (Codex, 2026-11-15)
+
+Branch: `agent/m3-replaygain`. Owner instruction remains: functionality first, no unnecessary full
+APK builds/releases. Keep [skip ci] source checkpoints; do not merge this batch to main yet.
+
+Implemented:
+- Optional folder selection from Lyrics > Sources via Android OpenDocumentTree. Read-only persisted
+  grants to selected internal-storage primary subtrees; multiple roots, explicit clear access,
+  revoked-grant detection. No broad storage permission, manifest permission or network addition.
+- LRC, TTML and plain TXT sidecars beside the exact audio filename stem. Lowercase LRC opens
+  directly (no directory walk); otherwise only its folder is queried for supported extensions.
+  Exact case is retained, ambiguous matches are not chosen; strict UTF-8 and 1 MB bound.
+- Sidecar -> embedded fallback, source label and storage notices, Reload, configured-folder controls.
+  Reads/parsing run off main with cancellation. Old-track lyrics are hidden during async transition;
+  offset updates carry an expected mediaId. Controls share the scrollable lyric body at large fonts.
+  Plain/empty lyrics do not poll the clock. Timed loops remain lifecycle/playing-bound.
+- TTML refuses DTD/entity declarations and uses a non-fetching resolver.
+
+Verified: pure model/tag/lyrics/DSP/delta/selection suite now 114 tests, zero failures.
+Focused storage harness from /workspace/toolchains/music-room-check:
+`GRADLE_USER_HOME=/workspace/.gradle-music /workspace/toolchains/gradle-9.9.1/bin/gradle test --tests ua.olex.music.library.LocalMusicFilesTest --no-daemon --console=plain`
+passed 4 tests, zero failures/errors/skips. Uses real document URI construction, a registered local
+ContentProvider, file descriptors and Robolectric grant state. Covers persisted configuration,
+LRC fast path, extension fallback, scope boundaries, revocation, size and invalid UTF-8 handling.
+Fixture initially lacked attached provider Context, then host JDK denied FileDescriptor reflection;
+fixed fixture attachment and added the standard test-only java.io opens argument. Added matching
+unit-test JVM argument to core/library build.gradle.kts; no production permission/behavior bypass.
+
+All actual main Kotlin/Compose sources compiled successfully again in the standalone Android-variant
+UI harness (same command/toolchain described below), including the new lyric flow/source controls.
+A temporary font R ID is still a TYPE-CHECK stand-in only: no resource linking, real AGP build, R8,
+Android lint, rendered UI, Android system folder-picker flow or physical Pixel test was executed.
+The final removal of one unused import needs no separate compile. New folder-selection UI test was
+authored, not run. Existing focused SQL/playback/bulk evidence below is unchanged.
+
+Limitations: only internal primary-storage folder trees; exact stem names; UTF-8 sidecars; no fetched
+lyrics or sidecar writing, no word-fill rendering yet. Root selection is currently used for sidecars,
+not the future direct file scanner. Embedded and sidecar offsets remain in user.db.
+Next functional work: local artwork with the same chosen-folder access; queue drag / selection
+retention; then repeatable phone acceptance when the owner wants a coherent APK build.
+
 # Latest verification: standalone Android/Compose source type check (Codex, 2026-11-15)
 
 Owner still defers unnecessary full APK builds/releases. No APK, full CI or release was triggered.
