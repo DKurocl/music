@@ -55,6 +55,12 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var equalizer: EqualizerController
     private var equalizerRoute: OutputRouteMonitor? = null
     private var persistence: PlaybackPersistence? = null
+    private val usb by lazy { UsbBitPerfect(this) }
+    private val routeCallback = object : android.media.AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) = usb.update(diagnostics.sampleRateHz)
+        override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) = usb.update(diagnostics.sampleRateHz)
+    }
+    private val outputPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> usb.update(diagnostics.sampleRateHz) }
     @Volatile private var replayGain = ua.olex.music.dsp.ReplayGainSettings()
 
     override fun onCreate() {
@@ -72,6 +78,8 @@ class PlaybackService : MediaLibraryService() {
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
+        getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(routeCallback, null)
+        getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(outputPrefs)
         session?.setSessionExtras(Bundle().apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(replayGain)) })
         equalizerRoute = OutputRouteMonitor(this).also { monitor ->
             monitor.start()
@@ -89,6 +97,7 @@ class PlaybackService : MediaLibraryService() {
             }
             override fun onAudioTrackInitialized(eventTime: AnalyticsListener.EventTime, audioTrackConfig: AudioSink.AudioTrackConfig) {
                 audioTracks.initialized(audioTrackConfig.signature())
+                if (usb.enabled) usb.update(audioTrackConfig.sampleRate.takeIf { it > 0 })
                 diagnostics = diagnostics.copy(encoding = AudioDiagnostics.encodingLabel(audioTrackConfig.encoding),
                     sampleRateHz = audioTrackConfig.sampleRate.takeIf { it > 0 }, channels = Integer.bitCount(audioTrackConfig.channelConfig), offload = audioTrackConfig.offload)
                 publishDiagnostics()
@@ -108,6 +117,11 @@ class PlaybackService : MediaLibraryService() {
                 recordCurrentPlayback()
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback() }
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (endOfTrack && !playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                    endOfTrack = false; (session?.player as? ExoPlayer)?.pauseAtEndOfMediaItems = false; publishSleepTimer()
+                }
+            }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) historyGate.transition()
             }
@@ -147,6 +161,9 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
+        getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
+        usb.clear()
         equalizerRoute?.stop()
         equalizerRoute = null
         persistence?.close()
@@ -157,7 +174,13 @@ class PlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    private var endOfTrack = false
+
     private fun setSleepTimer(minutes: Int) {
+        // "End of track": ExoPlayer pauses right at the end of the current song, before the next starts.
+        endOfTrack = minutes == SleepTimerCommand.END_OF_TRACK
+        (session?.player as? ExoPlayer)?.pauseAtEndOfMediaItems = endOfTrack
+        if (endOfTrack) { sleepTimer.set(0, SystemClock.elapsedRealtime()); sleepJob?.cancel(); publishSleepTimer(); return }
         sleepTimer.set(minutes, SystemClock.elapsedRealtime())
         sleepJob?.cancel()
         sleepJob = null
@@ -175,7 +198,7 @@ class PlaybackService : MediaLibraryService() {
     private fun publishSleepTimer() {
         session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply {
-                putLong(SleepTimerCommand.DEADLINE, sleepTimer.deadlineMs ?: 0)
+                putLong(SleepTimerCommand.DEADLINE, if (endOfTrack) SleepTimerCommand.END_OF_TRACK_DEADLINE else sleepTimer.deadlineMs ?: 0)
             })
         }
     }
@@ -246,6 +269,15 @@ class PlaybackService : MediaLibraryService() {
          * a search: expand it to the collection it belongs to, starting at the chosen song. Items
          * from the app itself already carry their queue and URIs and pass through unchanged.
          */
+        /**
+         * "Resume" in the system media controls after a reboot or after the app was stopped: the
+         * saved queue, paused at its position, the same one the app restores.
+         */
+        override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, isForPlayback: Boolean) = future {
+            val saved = PlaybackJournal.get(filesDir).read() ?: throw UnsupportedOperationException("Nothing to resume")
+            MediaSession.MediaItemsWithStartPosition(saved.items, saved.index, saved.positionMs)
+        }
+
         override fun onSetMediaItems(
             mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
@@ -324,7 +356,7 @@ class PlaybackService : MediaLibraryService() {
             val minutes = args.getInt(SleepTimerCommand.MINUTES, -1)
             val code = when {
                 controller.uid != Process.myUid() -> SessionError.ERROR_PERMISSION_DENIED
-                minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
+                minutes != SleepTimerCommand.END_OF_TRACK && minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
                 else -> { setSleepTimer(minutes); SessionResult.RESULT_SUCCESS }
             }
             return Futures.immediateFuture(SessionResult(code))

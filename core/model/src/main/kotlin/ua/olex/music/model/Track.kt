@@ -83,6 +83,9 @@ data class Track(
     val metadata: FileMetadata? = null,
     /** When the file came into the library (epoch ms), for "Recently added"; null when unknown. */
     val addedAt: Long? = null,
+    /** A track cut from a longer file (a cue sheet): where it starts and ends in that file, in ms. */
+    val clipStartMs: Long? = null,
+    val clipEndMs: Long? = null,
 ) {
     // Browsing does not need song matching; defer normalization until a source lookup asks for it.
     val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }
@@ -98,4 +101,6 @@ data class FileMetadata(
     val lyrics: String? = null,
     val musicBrainzTrackId: String? = null, val musicBrainzAlbumId: String? = null,
     val coverOffset: Long? = null, val coverLength: Int? = null, val coverMime: String? = null,
+    /** An embedded cue sheet: the file is a whole album, split into tracks by [CueSheet]. */
+    val cueSheet: String? = null,
 )

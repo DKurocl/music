@@ -28,11 +28,31 @@ data class LibraryIndex(
 
     val playlistPaths: PlaylistPathIndex by lazy(LazyThreadSafetyMode.PUBLICATION) { PlaylistPathIndex(songs) }
 
+    /** Years, newest first; songs in album order (artist, album, disc, track). */
+    val years: List<MusicCollection> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        albums.flatMap { it.tracks }.filter { (it.year ?: 0) > 0 }.groupBy { it.year!! }.toSortedMap(reverseOrder())
+            .map { (year, tracks) -> MusicCollection("year$year", year.toString(), albumCount(tracks), tracks) }
+    }
+
+    /** Composers from the files' tags, by name; songs in album order. */
+    val composers: List<MusicCollection> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        albums.flatMap { it.tracks }
+            .flatMap { t -> t.metadata?.composers.orEmpty().filter(String::isNotBlank).distinctBy { it.trim().lowercase(Locale.ROOT) }.map { it.trim() to t } }
+            .groupBy({ it.first.lowercase(Locale.ROOT) }, { it })
+            .map { (key, rows) -> MusicCollection("composer${key.length}:$key", rows.first().first, null, rows.map { it.second }.distinctBy { it.id }) }
+            .sortedBy { LibraryOrder.name(it.name) }
+    }
+
     companion object {
         val EMPTY = LibraryIndex(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
 
         /** Album artist owns a compilation; disc and track numbers order its playback queue. */
         fun build(tracks: List<Track>): LibraryIndex {
+            // A one-file album with a cue sheet becomes its tracks; everything else stays as it is.
+            @Suppress("NAME_SHADOWING")
+            val tracks = if (tracks.none { it.metadata?.cueSheet != null }) tracks else tracks.flatMap { t ->
+                t.metadata?.cueSheet?.let(CueSheet::parse)?.split(t)?.takeIf { it.isNotEmpty() } ?: listOf(t)
+            }
             // Normalize once per track, rather than allocating strings in every sort comparison.
             val entries = tracks.map(::Entry)
             val songs = entries.sortedWith(songOrder).map { it.track }
@@ -91,6 +111,11 @@ data class LibraryIndex(
             .thenBy { it.albumId }.then(albumOrder)
         private fun identity(value: String) = Normalizer.normalize(value.trim(), Normalizer.Form.NFC).lowercase(Locale.ROOT)
     }
+}
+
+private fun albumCount(tracks: List<Track>): String {
+    val n = tracks.mapNotNull { it.album }.distinct().size
+    return if (n == 1) "1 album" else "$n albums"
 }
 
 /** Sort labels independent of device locale, ignoring leading English articles and accent marks. */

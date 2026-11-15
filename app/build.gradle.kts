@@ -58,6 +58,7 @@ android {
 dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:lyrics"))
+    implementation(project(":core:tags"))
     implementation(project(":core:library"))
     implementation(project(":core:user"))
     implementation(project(":core:playback"))

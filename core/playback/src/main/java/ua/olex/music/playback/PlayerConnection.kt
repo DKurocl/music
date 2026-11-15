@@ -344,6 +344,12 @@ class PlayerConnection(context: Context) {
             val uri = track.uri.takeIf { it.isNotEmpty() }?.let(Uri::parse)
             return MediaItem.Builder()
                 .setMediaId(track.id.value)
+                // A cue sheet track plays its part of the file.
+                .apply {
+                    val start = track.clipStartMs
+                    if (start != null) setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(start).apply { track.clipEndMs?.let(::setEndPositionMs) }.build())
+                }
                 .setUri(uri)
                 .setRequestMetadata(MediaItem.RequestMetadata.Builder().setMediaUri(uri).build())
                 .setMediaMetadata(

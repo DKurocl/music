@@ -51,7 +51,11 @@ data class Lyrics(val lines: List<Line>, val sync: Sync) {
         /** Picks the parser by what the text looks like: TTML is XML, everything else is LRC or plain. */
         fun parse(text: String): Lyrics {
             val head = text.trimStart('﻿', ' ', '\n', '\r', '\t').take(200)
-            return if (head.startsWith("<") && ("<tt" in head || "<?xml" in head)) TtmlParser.parse(text) else LrcParser.parse(text)
+            return when {
+                head.startsWith("<") && ("<tt" in head || "<?xml" in head) -> TtmlParser.parse(text)
+                Regex("""^\[\d+,\d+]""", RegexOption.MULTILINE).containsMatchIn(text.take(4000)) -> KrcParser.parse(text)
+                else -> LrcParser.parse(text)
+            }
         }
     }
 }

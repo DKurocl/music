@@ -19,6 +19,7 @@ import ua.olex.music.user.UserRepository
 class AppGraph(context: Context) {
     private val app = context.applicationContext
     val musicFiles by lazy { ua.olex.music.library.LocalMusicFiles(app) }
+    val downloadedLyrics by lazy { ua.olex.music.ui.DownloadedLyrics(app) }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
     val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles) }
     val player by lazy { PlayerConnection(app) }
