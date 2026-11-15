@@ -114,6 +114,8 @@ internal fun LibraryBrowser(
     onCollection: (String?) -> Unit = {}, closeCollection: Int = 0,
     /** Set when something here was opened from another place: Back from it goes there. */
     onLeave: (() -> Unit)? = null,
+    /** YouTube Music's songs for the query, shown under the library's (null while it looks). */
+    online: OnlineSearch? = null, onlineOn: Boolean = false,
     /** Bumped when the Search tab is tapped again: back to the tiles and the field focused (as Google Play does). */
     focusSearch: Int = 0,
     /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
@@ -351,8 +353,9 @@ internal fun LibraryBrowser(
                     when {
                         search == null || search.query != query -> item { BrowserMessage("Searching…") }
                         search.failed -> item { ErrorNotice("Couldn't search your library.", onRetrySearch) }
-                        search.tracks.isEmpty() && searchGroups.isEmpty() -> item {
-                            EmptyState(Glyph.SEARCH, "Nothing found", "Try fewer words, or part of a title, artist or album.",
+                        search.tracks.isEmpty() && searchGroups.isEmpty() && online?.tracks.isNullOrEmpty() -> item {
+                            if (online == null && onlineOn) BrowserMessage("Searching YouTube Music…")
+                            else EmptyState(Glyph.SEARCH, "Nothing found", "Try fewer words, or part of a title, artist or album.",
                                 shape = androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape())
                         }
                         else -> {
@@ -375,6 +378,20 @@ internal fun LibraryBrowser(
                             else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
                                 TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
                             checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) { onSearchUsed(query); onPlay(visible, index) }
+                            }
+                            // YouTube Music under the owner's own results: songs not in the library, played the same way.
+                            if (onlineOn) {
+                                item(key = "online-title") { SearchHeading("YouTube Music") }
+                                val found = online?.takeIf { it.query == query }
+                                when {
+                                    found == null -> item(key = "online-wait") { BrowserMessage("Searching YouTube Music…") }
+                                    found.failed -> item(key = "online-failed") { BrowserMessage("YouTube Music didn't answer. Check the connection.") }
+                                    found.tracks.isEmpty() -> item(key = "online-none") { BrowserMessage("Nothing more on YouTube Music.") }
+                                    else -> itemsIndexed(found.tracks, key = { _, t -> "online-" + t.id.value }) { i, t ->
+                                        TrackRow(t, current = t.id.value == currentId, onMore = { onTrackActions(t) },
+                                            onPlayNext = { onEnqueue(listOf(t), true) }, onQueue = { onEnqueue(listOf(t), false) }) { onSearchUsed(query); onPlay(found.tracks, i) }
+                                    }
+                                }
                             }
                         }
                     }

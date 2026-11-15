@@ -74,6 +74,10 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.coroutines.android)
     implementation(libs.coil.compose)
+    // Covers of online songs come over the network.
+    implementation(libs.coil.network)
+    // YouTube Music: search and the audio stream of a song, the way NewPipe does it (no account).
+    implementation(libs.newpipe.extractor)
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
     testImplementation(libs.compose.ui.test.junit4)

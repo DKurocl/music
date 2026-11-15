@@ -72,6 +72,21 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun setQuery(text: String) { savedState["search"] = text }
+
+    /**
+     * YouTube Music's songs for the same query, a moment after typing stops. Songs the owner already
+     * has are left out here (the library section above shows them, and they play from the file).
+     */
+    val online: StateFlow<OnlineSearch?> = query
+        .debounce { if (it.isBlank()) 0 else 450 }
+        .combine(graph.youTubeOn) { text, on -> text to on }
+        .mapLatest { (text, on) ->
+            if (!on || text.trim().length < 2) return@mapLatest null
+            val index = library.value ?: LibraryIndex.EMPTY
+            try { OnlineSearch(text, graph.youTube.search(text.trim()).filter { YouTubeMusic.localCopy(it, index) == null }) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { OnlineSearch(text, emptyList(), failed = true) }
+        }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
     val personal: StateFlow<PersonalLibraryState> = combine(library, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
@@ -356,7 +371,14 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun connectPlayer() = player.connect()
     fun disconnectPlayer() = player.disconnect()
 
-    fun play(list: List<Track>, index: Int) = player.play(list, index)
+    /** Plays a list; any online song the owner also has as a file plays from the file. */
+    fun play(list: List<Track>, index: Int) = player.play(localFirst(list), index)
+
+    private fun localFirst(list: List<Track>): List<Track> {
+        if (list.none(YouTubeMusic::isOnline)) return list
+        val index = library.value ?: return list
+        return list.map { if (YouTubeMusic.isOnline(it)) YouTubeMusic.localCopy(it, index) ?: it else it }
+    }
     /** Plays what a spoken or typed search finds; an empty query plays the library shuffled. */
     fun playSearch(query: String) {
         viewModelScope.launch {
@@ -382,7 +404,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun playQueueItem(key: String) = player.playQueueItem(key)
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
-    fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(tracks, next)
+    fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(localFirst(tracks), next)
     fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) = player.setEqualizer(routeKey, settings)
     fun setReplayGain(settings: ua.olex.music.dsp.ReplayGainSettings) = player.setReplayGain(settings)
     fun dismissQueueError() = player.dismissQueueError()
@@ -393,3 +415,6 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
 /** Results carry their query so the screen never labels old matches as a newer search. */
 data class LibrarySearchResult(val query: String, val tracks: List<Track>, val failed: Boolean = false)
+
+/** YouTube Music's answer to a search: songs not in the library. */
+data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false)
