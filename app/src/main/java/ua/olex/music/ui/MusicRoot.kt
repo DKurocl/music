@@ -412,7 +412,7 @@ fun MusicRoot(model: LibraryViewModel) {
         },
             plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
             // A mix grown from this song, as YouTube Music's "Start radio", local files first.
-            TrackAction(Glyph.MIX, "Start mix") { model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
+            TrackAction(Glyph.MIX, "Start mix") { haptics.spin(); model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             // An online song has no album or artist page here and no file to tag: those actions are not offered.
             if (online) null else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },

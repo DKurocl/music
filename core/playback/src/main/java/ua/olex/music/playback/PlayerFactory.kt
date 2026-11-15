@@ -22,7 +22,7 @@ internal object PlayerFactory {
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
                     .setAudioOutputProvider(EqualizerAudioOutputProvider(
-                        androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider.Builder(context).build(), equalizer,
+                        androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider.Builder(context).build(), equalizer, context,
                      )).build(), replayGain)
         }
             // Without this ExoPlayer cuts 24-bit and float PCM down to 16 bits before the mixer.

@@ -4,6 +4,8 @@
     <!-- Only for what the owner asks for: lyrics lookups now; streaming and downloads later. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The player's haptic compositions and "Feel the music" call the vibrator directly. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Optional special access the owner grants in Settings: tag edits without a prompt each time. -->
     <uses-permission android:name="android.permission.MANAGE_MEDIA" />
 
