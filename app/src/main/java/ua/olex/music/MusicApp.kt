@@ -8,6 +8,7 @@ import ua.olex.music.playback.OutputRouteMonitor
 import ua.olex.music.playback.PlayerConnection
 import ua.olex.music.playback.PlaybackHistoryOwner
 import ua.olex.music.model.Track
+import kotlinx.coroutines.flow.first
 import ua.olex.music.user.UserDatabase
 import ua.olex.music.user.UserRepository
 
@@ -25,10 +26,25 @@ class AppGraph(context: Context) {
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
 }
 
-class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner {
+class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner {
     override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
+
+    /** The library for Android Auto, Assistant and other browsers: songs, smart and own playlists. */
+    override suspend fun browseTree(): ua.olex.music.model.BrowseTree = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+        val index = graph.library.index.first()
+        val user = graph.userLibrary
+        val stats = runCatching { user.stats.first() }.getOrDefault(emptyMap())
+        val favourites = runCatching { user.favourites.first() }.getOrDefault(emptyList()).mapNotNull { it.resolve(index)?.id }.toSet()
+        val own = runCatching { user.smartPlaylists.first() }.getOrDefault(emptyList())
+        val now = System.currentTimeMillis()
+        val smart = (ua.olex.music.model.SmartPlaylist.BUILT_IN + own).map { p ->
+            p.name to p.evaluate(index.songs, { stats[it.key.value] ?: ua.olex.music.model.SongStats.NONE }, { it.id in favourites }, now, now / 86_400_000L)
+        }
+        val playlists = runCatching { user.playlists.first() }.getOrDefault(emptyList()).map { pl -> Triple(pl.id, pl.name, pl.songs.mapNotNull { it.resolve(index) }) }
+        ua.olex.music.model.BrowseTree(index, smart, playlists)
+    }
 }
 
 val Context.graph: AppGraph get() = (applicationContext as MusicApp).graph

@@ -245,6 +245,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun disconnectPlayer() = player.disconnect()
 
     fun play(list: List<Track>, index: Int) = player.play(list, index)
+    /** Plays what a spoken or typed search finds; an empty query plays the library shuffled. */
+    fun playSearch(query: String) {
+        viewModelScope.launch {
+            val tree = (getApplication<Application>() as ua.olex.music.MusicApp).browseTree()
+            val found = if (query.isBlank()) emptyList() else tree.search(query)
+            if (found.isNotEmpty()) play(found, 0) else library.value?.songs?.takeIf { it.isNotEmpty() }?.let(::playShuffled)
+        }
+    }
+
     /** Plays [list] with shuffle on, from a random song; the queue keeps its order for "shuffle off". */
     fun playShuffled(list: List<Track>) {
         if (list.isEmpty()) return
