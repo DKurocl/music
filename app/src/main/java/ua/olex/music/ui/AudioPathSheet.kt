@@ -17,7 +17,7 @@ import ua.olex.music.playback.OutputRoute
 /** Separates observed app output from the system mixer and Bluetooth link, which are not measured here. */
 @Composable
 internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDiagnostics, onDismiss: () -> Unit, onOutput: () -> Unit, onEqualizer: (() -> Unit)? = null) {
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    AppSheet(onDismiss, MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Audio path", style = MaterialTheme.typography.headlineSmall)
             PathDetail("File", format ?: "Format not reported")

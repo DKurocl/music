@@ -70,7 +70,7 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
             editor = null
         })
     } }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    AppSheet(onDismiss, MaterialTheme.colorScheme.surfaceContainerLow) {
         Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Equalizer", style = MaterialTheme.typography.headlineMedium)

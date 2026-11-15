@@ -103,6 +103,8 @@ internal fun LibraryBrowser(
     /** Open a collection from elsewhere (Home): section name and collection id; [onOpened] clears it. */
     open: Pair<String, String>? = null, onOpened: () -> Unit = {},
     recentSearches: List<String> = emptyList(), onSearchUsed: (String) -> Unit = {}, onClearRecent: () -> Unit = {},
+    /** The open collection's name once its header has scrolled away (null when none is open), for the top bar. */
+    onCollection: (String?) -> Unit = {}, closeCollection: Int = 0,
 ) {
     val startTab = LocalStartTab.current
     var tabName by rememberSaveable { mutableStateOf(startTab) }
@@ -119,6 +121,15 @@ internal fun LibraryBrowser(
         else -> emptyList()
     }
     val selected = groups.firstOrNull { it.id == selectedId }
+    var collectionSort by rememberSaveable(tabName) { mutableStateOf(CollectionSort.NAME) }
+    val shownGroups = remember(groups, collectionSort, stats) {
+        when (collectionSort) {
+            CollectionSort.NAME -> groups
+            CollectionSort.NEWEST -> groups.sortedByDescending { g -> g.tracks.maxOf { it.addedAt ?: 0 } }
+            CollectionSort.YEAR -> groups.sortedByDescending { g -> g.tracks.mapNotNull { it.year }.maxOrNull() ?: 0 }
+            CollectionSort.PLAYED -> groups.sortedByDescending { g -> g.tracks.sumOf { stats[it.key.value]?.plays ?: 0 } }
+        }
+    }
     val searching = query.isNotBlank()
     // Albums and artists that match every word of the search, shown above the songs.
     val searchGroups = remember(library, query) {
@@ -162,6 +173,7 @@ internal fun LibraryBrowser(
     fun batch(action: (List<Track>) -> Unit) { visible?.let(picked::ordered)?.takeIf { it.isNotEmpty() }?.let(action) }
     LaunchedEffect(selectedId, groups) { if (selectedId != null && selected == null) selectedId = null }
     LaunchedEffect(open) { open?.let { (t, id) -> tabName = t; selectedId = id; onOpened() } }
+    LaunchedEffect(closeCollection) { if (closeCollection > 0) selectedId = null }
     BackHandler(searching || selected != null) {
         if (searching) onQueryChange("") else selectedId = null
     }
@@ -225,12 +237,26 @@ internal fun LibraryBrowser(
         }
         // An album keeps its own order and a clean page; long press still selects.
         val tools = unsorted != null && !(selected != null && tab == LibraryTab.ALBUMS) && !picking
-        if (tools) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) }
-                if (!picking) TextButton(onClick = { picking = true }) { Text("Select") }
+        if (tools && mode != BrowserMode.SEARCH) {
+            // One row: sort, then filters (song lists only), then select at the end.
+            val sortChip: @Composable () -> Unit = { LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) } }
+            val selectButton: @Composable () -> Unit = {
+                androidx.compose.material3.IconButton(onClick = { picking = true }, modifier = Modifier.semantics { contentDescription = "Select" }) { Symbol(Glyph.CHECK) }
             }
-            if (mode != BrowserMode.SEARCH && selected == null) TrackFilterRow(filter, raw.orEmpty()) { filter = it }
+            if (selected == null) TrackFilterRow(filter, raw.orEmpty(), leading = sortChip, trailing = selectButton) { filter = it }
+            else Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                sortChip(); androidx.compose.foundation.layout.Spacer(Modifier.weight(1f)); selectButton()
+            }
+        }
+        // Albums and artists have their own order: A to Z, newest, year, most played.
+        if (!searching && selected == null && (tab == LibraryTab.ALBUMS || tab == LibraryTab.ARTISTS)) {
+            androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(CollectionSort.entries.filter { it != CollectionSort.YEAR || tab == LibraryTab.ALBUMS }.size) { i ->
+                    val option = CollectionSort.entries.filter { it != CollectionSort.YEAR || tab == LibraryTab.ALBUMS }[i]
+                    androidx.compose.material3.FilterChip(selected = collectionSort == option, onClick = { collectionSort = option },
+                        label = { Text(option.title) }, leadingIcon = if (collectionSort == option) ({ Symbol(Glyph.CHECK, size = 18.dp) }) else null)
+                }
+            }
         }
         if (picking) TrackSelectionToolbar(picked.ids.size, visible?.size ?: 0, visible != null,
             onAll = { visible?.let { picked = picked.all(it) } }, onClear = { picked = TrackSelection() },
@@ -244,6 +270,9 @@ internal fun LibraryBrowser(
             PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library)
         } else Box(Modifier.weight(1f)) {
         val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val headerGone by remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex > 0 } }
+        LaunchedEffect(selected?.id, headerGone) { onCollection(selected?.let { if (headerGone) it.name else "" }) }
+        LaunchedEffect(selected?.id) { if (selected != null) listState.scrollToItem(0) }
         val railTracks = if (!searching && selected == null && tab == LibraryTab.SONGS && (order.mode == TrackSortMode.DEFAULT || order.mode == TrackSortMode.TITLE)) visible else null
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp)) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
@@ -254,17 +283,20 @@ internal fun LibraryBrowser(
                         search.failed -> item { ErrorNotice("Couldn't search your library.", onRetrySearch) }
                         search.tracks.isEmpty() && searchGroups.isEmpty() -> item { BrowserMessage("No matches. Try a title, artist or album.") }
                         else -> {
-                            searchGroups.forEach { (kind, collection) ->
+                            searchGroups.groupBy { it.first }.forEach { (kind, hits) ->
+                                item(key = "group-title-$kind") { SearchHeading(if (kind == LibraryTab.ARTISTS) "Artists" else "Albums") }
+                            hits.forEach { (_, collection) ->
                                 item(key = "group-$kind-${collection.id}") {
                                     androidx.compose.material3.ListItem(
                                         headlineContent = { Text(collection.name, maxLines = 1) },
-                                        supportingContent = { Text(listOfNotNull(kind.title.dropLast(1), collection.subtitle, songCount(collection.tracks.size)).joinToString(" · "), maxLines = 1) },
+                                        supportingContent = { Text(listOfNotNull(collection.subtitle, songCount(collection.tracks.size)).joinToString(" · "), maxLines = 1) },
                                         leadingContent = { if (kind == LibraryTab.ARTISTS) ArtistImage(collection.name, Modifier.size(48.dp), 48.dp) else Artwork(collection.artworkUri, Modifier.size(48.dp), corner = 8.dp) },
                                         modifier = Modifier.clickable { onSearchUsed(query); tabName = kind.name; selectedId = collection.id; onQueryChange("") },
                                     )
                                 }
                             }
-                            if (search.tracks.isNotEmpty()) item { BrowserMessage(songCount(search.tracks.size)) }
+                            }
+                            if (search.tracks.isNotEmpty()) item { SearchHeading("Songs · ${search.tracks.size}") }
                             if (visible == null) item { BrowserMessage("Sorting...") }
                             else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
                                 TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
@@ -275,12 +307,14 @@ internal fun LibraryBrowser(
                 }
                 selected != null -> {
                     item(key = "collection-header") {
-                        CollectionHeader(selected, artist = tab == LibraryTab.ARTISTS, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
+                        CollectionHeader(selected, artist = tab == LibraryTab.ARTISTS, showBack = mode == BrowserMode.ALL, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else {
                         // Disc headers in an album shown in its own order.
                         val discs = if (tab == LibraryTab.ALBUMS && order == TrackSortOrder()) ua.olex.music.model.discStarts(visible) else emptyMap()
+                        // One quality for the whole album is said once, in the header.
+                        val uniformQuality = visible.mapNotNull { it.format?.label }.distinct().size <= 1
                         visible.forEachIndexed { index, track ->
                             discs[index]?.let { disc -> item(key = "disc-$disc") {
                                 Text("Disc $disc", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
@@ -290,7 +324,8 @@ internal fun LibraryBrowser(
                                 val inAlbum = tab == LibraryTab.ALBUMS && order == TrackSortOrder()
                                 TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
                                     checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) },
-                                    number = if (inAlbum) track.trackNumber ?: (index + 1) else null, albumArtist = selected.subtitle) { onPlay(visible, index) }
+                                    number = if (inAlbum) track.trackNumber ?: (index + 1) else null, albumArtist = selected.subtitle,
+                                    showQuality = !(inAlbum && uniformQuality)) { onPlay(visible, index) }
                             }
                         }
                     }
@@ -322,7 +357,7 @@ internal fun LibraryBrowser(
                     }
                 }
                 // Artists as round photos, three to a row.
-                tab == LibraryTab.ARTISTS -> items(groups.chunked(3), key = { row -> row.first().id }) { row ->
+                tab == LibraryTab.ARTISTS -> items(shownGroups.chunked(3), key = { row -> row.first().id }) { row ->
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { artist ->
                             Column(Modifier.weight(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
@@ -338,7 +373,7 @@ internal fun LibraryBrowser(
                     }
                 }
                 // Albums as a grid of covers, two to a row (four on a wide screen), as music apps show them.
-                tab == LibraryTab.ALBUMS -> items(groups.chunked(2), key = { row -> row.first().id }) { row ->
+                tab == LibraryTab.ALBUMS -> items(shownGroups.chunked(2), key = { row -> row.first().id }) { row ->
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         row.forEach { album -> AlbumCard(album, Modifier.weight(1f)) { selectedId = album.id } }
                         if (row.size == 1) androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
@@ -386,11 +421,12 @@ internal fun LibraryBrowser(
 }
 
 @Composable
-private fun CollectionHeader(collection: MusicCollection, artist: Boolean = false, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true, onShuffle: () -> Unit = {}) {
+private fun CollectionHeader(collection: MusicCollection, artist: Boolean = false, showBack: Boolean = true, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true, onShuffle: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val minutes = collection.tracks.sumOf { it.durationMs } / 60_000
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(Modifier.fillMaxWidth()) {
+        // In the app the top bar holds the back arrow; this one is for the standalone browser.
+        if (showBack) Row(Modifier.fillMaxWidth()) {
             androidx.compose.material3.IconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
         }
         if (artist) ArtistImage(collection.name, Modifier.size(200.dp), 200.dp)
@@ -400,7 +436,10 @@ private fun CollectionHeader(collection: MusicCollection, artist: Boolean = fals
             textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         collection.subtitle?.let { Text(it, style = MaterialTheme.typography.titleMedium, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         Text(
-            listOfNotNull(songCount(collection.tracks.size), if (minutes > 0) "$minutes min" else null,
+            listOfNotNull(
+                collection.tracks.mapNotNull { it.year?.takeIf { y -> y > 0 } }.distinct().sorted().let { ys -> when { ys.isEmpty() -> null; ys.size == 1 -> ys[0].toString(); else -> "${ys.first()}–${ys.last()}" } }
+                    .takeIf { !artist },
+                songCount(collection.tracks.size), if (minutes > 0) "$minutes min" else null,
                 collection.tracks.mapNotNull { it.format?.label }.distinct().singleOrNull()).joinToString(" · "),
             style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
         )
@@ -461,8 +500,11 @@ private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onC
         TrackSortMode.PLAYS -> "Most played"
         TrackSortMode.RATING -> "Rating"
     }
-    androidx.compose.foundation.layout.Box(Modifier.padding(horizontal = 16.dp)) {
-        TextButton(onClick = { expanded = true }) { Text("Sort: ${label(order.mode)}${if (order.descending) " descending" else ""}") }
+    androidx.compose.foundation.layout.Box {
+        // A chip like the filters beside it, so sort and filter read as one row of list options.
+        androidx.compose.material3.FilterChip(selected = order != TrackSortOrder(), onClick = { expanded = true },
+            leadingIcon = { Symbol(Glyph.SORT, size = 18.dp) },
+            label = { Text("Sort: ${label(order.mode)}${if (order.descending) " descending" else ""}") })
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             TrackSortMode.entries.forEach { mode ->
                 DropdownMenuItem(text = { Text(label(mode)) }, onClick = { onChange(order.copy(mode = mode)); expanded = false })
@@ -491,12 +533,15 @@ private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll:
 
 /** Filter chips for any song list: quality, play state, rating, decade, genre. */
 @Composable
-private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List<Track>, onChange: (ua.olex.music.model.TrackFilter) -> Unit) {
+private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List<Track>,
+    leading: (@Composable () -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, onChange: (ua.olex.music.model.TrackFilter) -> Unit) {
     val decades = remember(tracks) { ua.olex.music.model.TrackFilter.decades(tracks) }
     val genres = remember(tracks) { tracks.flatMap { it.genres }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }.take(30) }
     var decadeMenu by remember { mutableStateOf(false) }
     var genreMenu by remember { mutableStateOf(false) }
-    androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        leading?.let { item { it() } }
         item { androidx.compose.material3.FilterChip(filter.lossless, { onChange(filter.copy(lossless = !filter.lossless)) }, { Text("Lossless") }) }
         item { androidx.compose.material3.FilterChip(filter.hiRes, { onChange(filter.copy(hiRes = !filter.hiRes)) }, { Text("Hi-res") }) }
         item { androidx.compose.material3.FilterChip(filter.unplayed, { onChange(filter.copy(unplayed = !filter.unplayed)) }, { Text("Unplayed") }) }
@@ -519,6 +564,7 @@ private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List
                 }
             }
         }
+        trailing?.let { item { it() } }
     }
 }
 
@@ -619,3 +665,10 @@ private fun RecentSearches(recent: List<String>, onPick: (String) -> Unit, onCle
         }
     }
 }
+
+/** How the album and artist grids are ordered. */
+private enum class CollectionSort(val title: String) { NAME("A–Z"), NEWEST("Newest"), YEAR("Year"), PLAYED("Most played") }
+
+@Composable
+private fun SearchHeading(text: String) = Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
+    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp))

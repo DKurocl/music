@@ -113,9 +113,9 @@ internal fun TrackRow(
     selecting: Boolean = false, checked: Boolean = false, onSelect: (() -> Unit)? = null,
     onPlayNext: (() -> Unit)? = null, onQueue: (() -> Unit)? = null,
     /** In an album: the track number instead of the cover, and the artist only when it differs. */
-    number: Int? = null, albumArtist: String? = null, onClick: () -> Unit,
+    number: Int? = null, albumArtist: String? = null, showQuality: Boolean = true, onClick: () -> Unit,
 ) {
-    if ((onPlayNext == null && onQueue == null) || selecting) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, onClick); return }
+    if ((onPlayNext == null && onQueue == null) || selecting) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick); return }
     // Swipe right: play next. Swipe left: add to queue. The row springs back; a tick marks the threshold.
     val haptics = rememberHaptics()
     val snackbar = LocalSnackbar.current
@@ -148,13 +148,13 @@ internal fun TrackRow(
                 Text(if (next) "Play next" else "Add to queue", style = MaterialTheme.typography.labelLarge, color = if (next) cs.onSecondaryContainer else cs.onTertiaryContainer)
             }
         },
-    ) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, onClick) }
+    ) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick) }
 }
 
 @Composable
 private fun TrackRowContent(
     track: Track, current: Boolean, onMore: (() -> Unit)?, selecting: Boolean, checked: Boolean, onSelect: (() -> Unit)?,
-    number: Int?, albumArtist: String?, onClick: () -> Unit,
+    number: Int?, albumArtist: String?, showQuality: Boolean, onClick: () -> Unit,
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -169,7 +169,7 @@ private fun TrackRowContent(
                 if (current) Symbol(Glyph.WAVE, size = 16.dp, color = cs.primary, bold = true)
                 if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 else Text(clock(track.durationMs), maxLines = 1)
-                track.format?.let { QualityTag(it.label, it.lossless) }
+                if (showQuality) track.format?.let { QualityTag(it.label, it.lossless) }
             }
         },
         leadingContent = {
@@ -303,6 +303,7 @@ internal fun PlayerPage(
     onClose: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit, onFavourite: (() -> Unit)?, onMore: (() -> Unit)?,
     onOutput: () -> Unit, onQueue: () -> Unit, onLyrics: () -> Unit, onAudioPath: () -> Unit, onTimer: () -> Unit,
+    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
@@ -319,7 +320,9 @@ internal fun PlayerPage(
         ) {
             Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Symbol(Glyph.COLLAPSE, size = 28.dp) }
-                Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                // Where the music comes from; a tap opens that album.
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = "Open album", onClick = onOpenAlbum) else Modifier)
+                    .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     Text(state.album ?: "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
@@ -376,7 +379,8 @@ internal fun PlayerPage(
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 1,
                         modifier = Modifier.basicMarquee(iterations = 1, initialDelayMillis = 1_500))
-                    Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = if (onOpenArtist != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open artist", onClick = onOpenArtist) else Modifier)
                 }
                 IconButton(enabled = onFavourite != null, onClick = { onFavourite?.invoke() }, modifier = Modifier.semantics {
                     contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
@@ -387,6 +391,7 @@ internal fun PlayerPage(
             PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp))
             Spacer(Modifier.height(4.dp))
             SignalPath(format, route, onAudioPath)
+            state.sleepDeadlineMs?.let { deadline -> SleepCountdown(deadline, onTimer) }
             Spacer(Modifier.height(20.dp))
             Transport(state, onToggle, onNext, onPrevious)
             Spacer(Modifier.height(28.dp))
@@ -539,7 +544,7 @@ internal fun TrackActionsSheet(
     ratingsToFiles: Boolean = false, onRatingsToFiles: ((Boolean) -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
-    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = cs.surfaceContainerLow) {
+    AppSheet(onDismiss, cs.surfaceContainerLow) {
         Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
             ListItem(
                 headlineContent = { Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis) },
@@ -573,5 +578,20 @@ internal fun TrackActionsSheet(
                 )
             }
         }
+    }
+}
+
+/** "Stops in 23 min" under the signal path while a sleep timer runs; a tap changes it. Read once a minute. */
+@Composable
+private fun SleepCountdown(deadline: Long, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(deadline) { while (true) { now = android.os.SystemClock.elapsedRealtime(); delay(30_000) } }
+    val text = if (deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE) "Stops after this song"
+        else "Stops in ${((deadline - now).coerceAtLeast(0) + 59_999) / 60_000} min"
+    Row(Modifier.clip(CircleShape).clickable(onClickLabel = "Sleep timer", onClick = onClick).padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Symbol(Glyph.SLEEP, size = 16.dp, color = cs.tertiary, filled = true)
+        Text(text, style = MaterialTheme.typography.labelLarge, color = cs.tertiary)
     }
 }

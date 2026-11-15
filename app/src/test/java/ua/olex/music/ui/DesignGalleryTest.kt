@@ -106,13 +106,45 @@ class DesignGalleryTest {
 
     @Composable
     private fun Shell(title: String, place: Place?, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
-        CompositionLocalProvider(LocalStartTab provides "ALBUMS") {
+        CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
                 topBar = { TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) }) },
                 bottomBar = { Column { MiniPlayer(now, { 90_000 }, {}, {}, {}); PlacesBar(place) {} } },
             ) { content(it) }
         }
     } }
+
+    @Test fun settings() {
+        compose.setContent { Shell("Settings", null) { SettingsPage(Modifier.fillMaxSize().padding(it), listOf("Music"), false, true, {}, {}, {}, {}, {}) } }
+        shot("14-settings")
+        compose.onRoot().performTouchInput { swipeUp() }
+        shot("14b-settings-lower")
+    }
+
+    @Test fun songActions() {
+        val t = library.songs[3]
+        compose.setContent { Shell("Library", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
+            TrackActionsSheet(t, false, {}, listOf(TrackAction(Glyph.PLAY_NEXT, "Play next") {}, TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") {},
+                TrackAction(Glyph.ALBUM, "Go to album") {}, TrackAction(Glyph.PERSON, "Go to artist") {}, TrackAction(Glyph.FAVOURITE, "Add to favourites") {},
+                TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") {}, TrackAction(Glyph.EDIT, "Edit tags") {}), rating = 4, onRate = {}, plays = 12)
+        } } }
+        shot("15-song-actions")
+    }
+
+    @Test fun queue() {
+        val q = library.albums.first().tracks.map { ua.olex.music.playback.QueueItem(it.id.value, it.id.value, it.title, it.artist, it.artworkUri) }
+        compose.setContent { Shell("Library", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
+            QueueSheet(now.copy(queue = q, queueIndex = 1), {}, {}, { _, _ -> }, {}) } } }
+        shot("16-queue")
+    }
+
+    /** Sheets draw in their own window: capture the topmost one. */
+    private fun shotTop(name: String) {
+        repeat(10) { Thread.sleep(150); compose.mainClock.advanceTimeBy(100); compose.waitForIdle() }
+        val roots = compose.onAllNodes(isRoot())
+        val image = roots[roots.fetchSemanticsNodes().size - 1].captureToImage().asAndroidBitmap()
+        File("build/reports/ui-previews/gallery").apply { mkdirs() }.resolve("$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
 
     private fun shot(name: String) {
         // Covers load off the main thread: give them a moment, then draw.
@@ -123,8 +155,10 @@ class DesignGalleryTest {
 
     @Test fun home() {
         compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 3) } }
+            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 3, favourites = library.songs.take(5)) } }
         shot("01-home")
+        compose.onRoot().performTouchInput { swipeUp() }
+        shot("01b-home-lower")
     }
 
     @Test fun libraryAlbums() {

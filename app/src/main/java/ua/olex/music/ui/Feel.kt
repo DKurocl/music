@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -100,4 +101,23 @@ internal fun WavySeekBar(progress: () -> Float, playing: Boolean, enabled: Boole
         val x = with(density) { (shown() * width).toDp() } - 3.dp
         Box(Modifier.offset(x = x).size(width = 6.dp, height = (20 + 12 * thumb).dp).clip(RoundedCornerShape(3.dp)).background(cs.primary))
     }
+}
+
+/** Tests and the design gallery draw sheets inline (a real sheet opens its own window, which a capture misses). */
+val LocalInlineSheets = staticCompositionLocalOf { false }
+
+/** A modal bottom sheet, or its content on a plain surface when [LocalInlineSheets] is set. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun AppSheet(onDismiss: () -> Unit, containerColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.surfaceContainerLow,
+    gestures: Boolean = true, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    if (LocalInlineSheets.current) {
+        androidx.compose.material3.Surface(color = containerColor, shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)) {
+            androidx.compose.foundation.layout.Column(Modifier.padding(top = 22.dp)) {
+                Box(Modifier.align(Alignment.CenterHorizontally).size(width = 32.dp, height = 4.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)))
+                androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+                content()
+            }
+        }
+    } else androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = containerColor, sheetGesturesEnabled = gestures, content = content)
 }

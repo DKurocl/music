@@ -148,11 +148,24 @@ fun MusicRoot(model: LibraryViewModel) {
     var place by rememberSaveable { mutableStateOf(Place.HOME) }
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
     var openInLibrary by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var collectionTitle by remember { mutableStateOf<String?>(null) }
+    var closeCollection by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val duplicates by model.duplicates.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val haptics = rememberHaptics()
-    fun go(to: Place) { if (to != place) haptics.tick(); if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    fun go(to: Place) { if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     BackHandler(page != null) { page = null }
+    /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
+    fun openOf(track: Track, artist: Boolean) {
+        val index = library ?: return
+        val target = if (artist) index.artists.firstOrNull { a -> a.tracks.any { it.id == track.id } && a.name.equals(track.albumArtist ?: track.artist, true) }
+                ?: index.artists.firstOrNull { a -> a.tracks.any { it.id == track.id } }
+            else index.albums.firstOrNull { a -> a.tracks.any { it.id == track.id } }
+        target ?: return
+        haptics.tick(); expanded = false; actionTrack = null; page = null
+        if (place == Place.SEARCH) model.setQuery("")
+        openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.LIBRARY
+    }
     BackHandler(page == null && place != Place.HOME && !expanded) { go(Place.HOME) }
     var trashing by remember { mutableStateOf<List<Track>?>(null) }
     val trashRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -160,19 +173,25 @@ fun MusicRoot(model: LibraryViewModel) {
         trashing = null
     }
 
+    // In an open collection the bar shows a back arrow, and the name once the header has scrolled away.
+    val inCollection = page == null && place != Place.HOME && collectionTitle != null
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
             if (place != Place.SEARCH || page != null) TopAppBar(
-                title = { Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized) }, scrollBehavior = scroll,
-                navigationIcon = { if (page != null) IconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) } },
+                title = {
+                    if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    else Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
+                }, scrollBehavior = scroll,
+                navigationIcon = {
+                    if (page != null) IconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) }
+                    else if (inCollection) IconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
+                },
                 actions = {
-                    if (place == Place.LIBRARY && page == null) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
-                    IconButton(onClick = { equalizerOpen = true }, modifier = Modifier.semantics { contentDescription = "Audio" }) { Symbol(Glyph.TUNE) }
-                    if (model.allowed && place == Place.HOME) IconButton(onClick = model::rescanManually, enabled = !model.scanning,
-                        modifier = Modifier.semantics { contentDescription = if (model.scanning) "Scanning" else "Rescan" }) { Symbol(Glyph.REFRESH) }
+                    if (place == Place.LIBRARY && page == null && !inCollection) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
+                    if (place == Place.HOME && page == null) IconButton(onClick = { page = Page.SETTINGS }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS) }
                 },
             )
         },
@@ -206,6 +225,9 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
+            page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
+                onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
+                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders)
             page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 val uris = tracks.filter { '#' !in it.id.value }.map { Uri.parse(it.uri) }
@@ -220,12 +242,15 @@ fun MusicRoot(model: LibraryViewModel) {
                 onOpenAlbum = { openInLibrary = "ALBUMS" to it.id; place = Place.LIBRARY },
                 onOpenArtist = { openInLibrary = "ARTISTS" to it.id; place = Place.LIBRARY },
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
-                onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES })
+                onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
+                favourites = personal.favourites.mapNotNull { it.track },
+                onSeeAll = { tab -> openInLibrary = tab to ""; place = Place.LIBRARY })
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null },
+                onCollection = { collectionTitle = it }, closeCollection = closeCollection,
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
@@ -293,6 +318,8 @@ fun MusicRoot(model: LibraryViewModel) {
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
             onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
+            onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } },
+            onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } },
         )
         }
     }
@@ -304,9 +331,11 @@ fun MusicRoot(model: LibraryViewModel) {
         TrackActionsSheet(track, saved, rating = stats[track.key.value]?.rating ?: 0, onRate = { stars ->
             model.setRating(track, stars)
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
-        }, ratingsToFiles = model.ratingsToFiles, onRatingsToFiles = model::changeRatingsToFiles,
+        },
             plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOf(
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
+            TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
+            TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
@@ -369,6 +398,7 @@ private fun NowPlaying(
     onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
     onSaveLyricTiming: ((ua.olex.music.lyrics.Lyrics) -> Unit)? = null, onResetLyricTiming: () -> Unit = {},
     favourite: Boolean, onFavourite: (() -> Unit)?,
+    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val monitor = LocalContext.current.graph.output
@@ -399,7 +429,8 @@ private fun NowPlaying(
 
     PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
         onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
-        onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true })
+        onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
+        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist)
     if (outputUnavailable) AlertDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
         text = { Text("Open Android's media output controls to choose a device.") },
         confirmButton = { TextButton(onClick = { outputUnavailable = false }) { Text("OK") } })
@@ -430,7 +461,7 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
 internal enum class Place(val title: String, val glyph: Glyph) { HOME("Home", Glyph.HOME), LIBRARY("Library", Glyph.LIBRARY), SEARCH("Search", Glyph.SEARCH) }
 
 /** Pages opened over Home. */
-internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates") }
+internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates"), SETTINGS("Settings") }
 
 /** The navigation bar: Home, Library, Search (M3E short navigation bar). */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)

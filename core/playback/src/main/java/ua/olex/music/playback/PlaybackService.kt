@@ -109,7 +109,8 @@ class PlaybackService : MediaLibraryService() {
         val player = PlayerFactory.create(this, { equalizer.active }, { replayGain })
         exo = player
         // Cast: the session's player hands playback to a Chromecast chosen in the output switcher.
-        val faded = FadingPlayer(player, scope).also { fading = it }
+        val playbackPrefs = getSharedPreferences(FadingPlayer.PREFS, MODE_PRIVATE)
+        val faded = FadingPlayer(player, scope) { playbackPrefs.getBoolean(FadingPlayer.KEY, true) }.also { fading = it }
         val castable: Player = runCatching {
             com.google.android.gms.cast.framework.CastContext.getSharedInstance(this, java.util.concurrent.Executors.newSingleThreadExecutor())
             androidx.media3.cast.CastPlayer.Builder(this).setLocalPlayer(faded)
@@ -210,6 +211,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
 
+
     /** Swiped away from recents: keep playing if music is playing, otherwise stop for good. */
     override fun onTaskRemoved(rootIntent: Intent?) {
         val player = session?.player
@@ -261,6 +263,7 @@ class PlaybackService : MediaLibraryService() {
             }
         }
     }
+
 
     private fun publishSleepTimer() {
         session?.let { current ->
