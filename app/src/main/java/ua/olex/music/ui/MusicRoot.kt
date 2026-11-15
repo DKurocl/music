@@ -101,6 +101,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val query by model.query.collectAsStateWithLifecycle()
     val search by model.search.collectAsStateWithLifecycle()
     val personal by model.personal.collectAsStateWithLifecycle()
+    val sortOrders by model.sortOrders.collectAsStateWithLifecycle()
     val lyrics by model.embeddedLyrics.collectAsStateWithLifecycle()
     val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
@@ -156,7 +157,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 currentId = playing.mediaId, onPlay = model::play,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
-                personal = personal, personalActions = model.personalActions,
+                personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             )
         }
