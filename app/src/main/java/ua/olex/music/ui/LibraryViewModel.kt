@@ -429,6 +429,25 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
     }
 
+    /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, cleaned and endless like any mix. */
+    fun startPlaylistRadio(playlistId: String, label: String) {
+        viewModelScope.launch {
+            mixLoading = true
+            try {
+                val page = runCatching { graph.youTube.playlistRadio(playlistId) }.getOrNull()
+                val tracks = page?.tracks.orEmpty()
+                if (tracks.isEmpty()) { userError = "YouTube Music didn't answer. Check the connection."; return@launch }
+                val first = tracks.first()
+                val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
+                val queue = localFirst(listOf(first) + Mix.clean(tracks.drop(1), first, seen))
+                seen += queue.map(Mix::songKey)
+                player.play(queue, 0)
+                mixRun = MixRun(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
+                mixLabel = label
+            } finally { mixLoading = false }
+        }
+    }
+
     /** Called on every player change: tops the mix up near its end; ends it once something else plays. */
     private fun followMix(state: PlayerState) {
         val run = mixRun ?: return

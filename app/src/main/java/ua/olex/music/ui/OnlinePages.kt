@@ -43,6 +43,8 @@ internal class OnlineNav(
     val download: (() -> Unit) -> Unit = { it() },
     /** Plays a mood (its playlist, or a mix of the owner's songs of that mood). */
     val playMood: (YouTubeMusic.Mood, YouTubeMusic.MoodPage?) -> Unit = { _, _ -> },
+    /** Plays a YouTube Music mix ("My Mix 1") by its playlist id, endless like a mix. */
+    val playMix: (String, String) -> Unit = { _, _ -> },
 )
 
 internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
@@ -391,6 +393,39 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
                     item(key = "s-h") { OnlineHeading("Songs") }
                     itemsIndexed(page.songs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(page.songs, i) } }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Cards of a YouTube Music home shelf, each doing what it is: an album or playlist opens, an
+ * artist (round, as YouTube Music draws them) opens their page, a mix or a song plays at once.
+ */
+@Composable
+internal fun YouTubeCards(cards: List<YouTubeMusic.Card>) {
+    val nav = LocalOnlineNav.current
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(cards, key = { it.id }) { card ->
+            val round = card.kind == YouTubeMusic.Card.Kind.ARTIST
+            Column(Modifier.width(148.dp).clip(RoundedCornerShape(20.dp)).clickable {
+                when (card.kind) {
+                    YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title))
+                    YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true))
+                    YouTubeMusic.Card.Kind.ARTIST -> nav.open(OnlineTarget.Artist(card.title, card.id))
+                    YouTubeMusic.Card.Kind.MIX -> { haptics.spin(); nav.playMix(card.id, card.title) }
+                    YouTubeMusic.Card.Kind.SONG -> nav.play(listOf(Track(ua.olex.music.model.TrackId("yt:${card.id}"), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${card.id}",
+                        card.title, card.subtitle?.substringBefore(" \u2022").orEmpty(), artworkUri = card.cover)), 0)
+                }
+            }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
+                if (round) Artwork(card.cover, Modifier.size(148.dp).clip(androidx.compose.foundation.shape.CircleShape), 74.dp)
+                else Artwork(card.cover, Modifier.size(148.dp), 20.dp)
+                Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
+                card.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 4.dp)) }
             }
         }
     }

@@ -117,7 +117,20 @@ internal fun SettingsPage(
             val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
             val on by graph.youTubeOn.collectAsState()
             Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have appear under your own in Search. A song you have always plays from your file",
-                on, first = true, last = true) { graph.setYouTube(it) }
+                on, first = true, last = !on) { graph.setYouTube(it) }
+            if (on) {
+                val signedIn by graph.youTubeAccount.signedIn.collectAsState()
+                var confirm by remember { mutableStateOf(false) }
+                Spacer(Modifier.height(4.dp))
+                Row(Glyph.PERSON, "YouTube Music account", if (signedIn) "Signed in: your own home, mixes and radio. Tap to sign out"
+                    else "Sign in on Google's page for your own home, mixes and radio. The app never sees your password", last = true) {
+                    if (signedIn) confirm = true else context.startActivity(android.content.Intent(context, YouTubeLogin::class.java))
+                }
+                if (confirm) AppDialog(onDismissRequest = { confirm = false }, title = { Text("Sign out of YouTube Music?") },
+                    text = { Text("Home and mixes go back to everyone's. Your music stays as it is.") },
+                    confirmButton = { TextButton(onClick = { graph.youTubeAccount.signOut(); confirm = false }) { Text("Sign out") } },
+                    dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
+            }
         }
 
         // Soulseek: lossless copies of songs and albums found online, saved into the library.
