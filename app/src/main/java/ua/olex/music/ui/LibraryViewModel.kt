@@ -129,7 +129,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     private fun fetchAppleMotion(track: ua.olex.music.model.Track) {
         val apple = graph.appleMotion
-        if (apple.key == null || !apple.enabled) return
+        if (!apple.enabled) return
         val net = getApplication<android.app.Application>().getSystemService(android.net.ConnectivityManager::class.java)
         val caps = net?.getNetworkCapabilities(net.activeNetwork) ?: return
         if (apple.wifiOnly && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) return

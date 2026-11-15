@@ -81,10 +81,16 @@ internal fun SettingsPage(
         item { Group("Moving covers") }
         item {
             val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
+            var on by remember { mutableStateOf(apple.enabled) }
+            Toggle(Glyph.MOTION, "Moving covers from Apple Music", "Each album is fetched once (about 4 MB) and kept as one file. Unofficial: may stop working",
+                on, first = true) { on = it; apple.enabled = it }
+        }
+        item {
+            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
             var key by remember { mutableStateOf(apple.key) }
             var editing by remember { mutableStateOf(false) }
-            Row(Glyph.MOTION, "Apple Music moving covers", key?.let { "On · key ${it.keyId}. Each album is fetched once and kept as one file" }
-                ?: "Add your MusicKit key (Apple Developer: Team ID, Key ID and the .p8 file)", first = true) { editing = true }
+            Row(Glyph.LOCK, "Own MusicKit key", key?.let { "In use · key ${it.keyId}: the official Apple Music API" }
+                ?: "Optional. With an Apple Developer key the official API is used instead") { editing = true }
             if (editing) AppleKeyDialog(key, onDismiss = { editing = false }) { new -> apple.key = new; key = new; editing = false }
         }
         item {

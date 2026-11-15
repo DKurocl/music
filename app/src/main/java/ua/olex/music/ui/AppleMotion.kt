@@ -55,14 +55,28 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
 
     private var token: Pair<String, Long>? = null
 
-    private fun developerToken(): String? {
-        val k = key ?: return null
+    /**
+     * The token for the catalogue and where to send it: the owner's own MusicKit key when set
+     * (the official API), otherwise the token Apple's web player carries in its public script
+     * (as LastWave does), kept until it expires. Unofficial: Apple can change it at any time.
+     */
+    private fun access(): Pair<String, String>? {
         val now = System.currentTimeMillis() / 1000
-        token?.let { (t, exp) -> if (now < exp - 3_600) return t }
-        val signed = runCatching { sign(k, now) }.getOrNull() ?: return null
-        token = signed to now + TOKEN_SECONDS
-        return signed
+        key?.let { k ->
+            token?.let { (t, exp) -> if (now < exp - 3_600) return t to API }
+            val signed = runCatching { sign(k, now) }.getOrNull() ?: return null
+            token = signed to now + TOKEN_SECONDS
+            return signed to API
+        }
+        val cached = prefs.getString("web_token", null)
+        if (cached != null && now < prefs.getLong("web_token_exp", 0) - 3_600) return cached to WEB_API
+        val fresh = webToken(get) ?: return null
+        prefs.edit().putString("web_token", fresh.first).putLong("web_token_exp", fresh.second).apply()
+        return fresh.first to WEB_API
     }
+
+    /** Forgets the web token after the catalogue refuses it, so the next look fetches a new one. */
+    private fun dropWebToken() { prefs.edit().remove("web_token").remove("web_token_exp").apply() }
 
     /** Whether this album was looked up lately and had no moving cover (asked again after two weeks). */
     private fun missed(album: String): Boolean = System.currentTimeMillis() - prefs.getLong("miss:$album", 0) < 14L * 24 * 3600 * 1000
@@ -77,17 +91,37 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
         val artist = track.albumArtist?.takeIf { it.isNotBlank() } ?: track.artist
         val lookup = TextFold.fold("$artist\u0000$album")
         if (!enabled || missed(lookup)) return@withContext null
-        val bearer = developerToken() ?: return@withContext null
-        val headers = mapOf("Authorization" to "Bearer $bearer")
+        val (bearer, base) = access() ?: return@withContext null
+        val headers = mapOf("Authorization" to "Bearer $bearer", "Origin" to "https://music.apple.com")
         val term = URLEncoder.encode("$artist $album", "UTF-8")
-        val body = get("$API/v1/catalog/$storefront/search?types=albums&limit=10&extend=editorialVideo&term=$term", headers)
-            ?: return@withContext null
+        val body = get("$base/v1/catalog/$storefront/search?types=albums&limit=10&extend=editorialVideo&term=$term", headers)
+            ?: run { if (base == WEB_API) dropWebToken(); return@withContext null }
         val video = pick(String(body, Charsets.UTF_8), album, artist) ?: run { miss(lookup); return@withContext null }
         joinHls(video) { url -> get(url, emptyMap()) } ?: run { miss(lookup); null }
     }
 
     companion object {
         const val API = "https://api.music.apple.com"
+        const val WEB_API = "https://amp-api.music.apple.com"
+
+        /**
+         * The web player's token: its page names a script, the script holds a JWT in quotes.
+         * Returns the token and its expiry (seconds), read from the token itself.
+         */
+        fun webToken(get: (String, Map<String, String>) -> ByteArray?): Pair<String, Long>? {
+            val browser = mapOf("User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36")
+            val page = get("https://music.apple.com/us/new", browser)?.toString(Charsets.UTF_8) ?: return null
+            val script = Regex("""/assets/index[^"']*\.js""").find(page)?.value ?: return null
+            val js = get("https://music.apple.com$script", browser)?.toString(Charsets.UTF_8) ?: return null
+            return Regex(""""(eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)"""").findAll(js).map { it.groupValues[1] }
+                .mapNotNull { t -> expiry(t)?.let { t to it } }.maxByOrNull { it.second }
+        }
+
+        /** The "exp" of a JWT, or null when it is not one. */
+        fun expiry(jwt: String): Long? = runCatching {
+            val payload = String(Base64.getUrlDecoder().decode(jwt.split('.')[1]))
+            Regex(""""exp"\s*:\s*(\d+)""").find(payload)?.groupValues?.get(1)?.toLong()
+        }.getOrNull()
         /** Apple allows up to six months; a month keeps a leaked token short-lived. */
         const val TOKEN_SECONDS = 30L * 24 * 3600
         const val MAX_BYTES = MotionCovers.MAX_BYTES
@@ -145,15 +179,21 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
          */
         fun joinHls(master: String, get: (String) -> ByteArray?): ByteArray? {
             val masterText = get(master)?.toString(Charsets.UTF_8) ?: return null
+            data class Variant(val url: String, val height: Int, val hevc: Boolean, val bandwidth: Long)
             val variants = Regex("""#EXT-X-STREAM-INF:([^\n]*)\n([^\n#]+)""").findAll(masterText).map { m ->
                 val attrs = m.groupValues[1]
-                val height = Regex("""RESOLUTION=\d+x(\d+)""").find(attrs)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                val avc = attrs.contains("avc1")
-                Triple(resolve(master, m.groupValues[2].trim()), height, avc)
+                Variant(resolve(master, m.groupValues[2].trim()),
+                    Regex("""RESOLUTION=\d+x(\d+)""").find(attrs)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+                    attrs.contains("hvc1") || attrs.contains("hev1"),
+                    Regex("""(?<!AVERAGE-)BANDWIDTH=(\d+)""").find(attrs)?.groupValues?.get(1)?.toLongOrNull() ?: Long.MAX_VALUE)
             }.toList()
+            // A cover is about 1000 px on the phone: the leanest stream of 900 to 1080 px, HEVC first
+            // (Pixels decode it in hardware; about 4 MB for a 10 s loop instead of 19 MB).
             val media = if (variants.isEmpty()) master else {
-                val pool = variants.filter { it.third }.ifEmpty { variants }
-                (pool.filter { it.second in 1..1080 }.maxByOrNull { it.second } ?: pool.minByOrNull { it.second })?.first ?: return null
+                val sharp = variants.filter { it.height in 900..1080 }
+                val chosen = sharp.filter { it.hevc }.minByOrNull { it.bandwidth } ?: sharp.minByOrNull { it.bandwidth }
+                    ?: variants.filter { it.height <= 1080 }.maxByOrNull { it.height } ?: variants.minByOrNull { it.height }
+                chosen?.url ?: return null
             }
             val playlist = if (media == master) masterText else get(media)?.toString(Charsets.UTF_8) ?: return null
             if (playlist.contains("#EXT-X-KEY") && !playlist.contains("METHOD=NONE")) return null
