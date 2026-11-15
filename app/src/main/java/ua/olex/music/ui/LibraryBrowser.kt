@@ -419,8 +419,9 @@ internal fun LibraryBrowser(
                     else {
                         val shown = if (allArtistSongs || visible.size <= 5) visible else visible.sortedByDescending { stats[it.key.value]?.plays ?: 0 }.take(5)
                         item(key = "artist-songs-title") {
-                            Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.weight(1f)) { PageHeading(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played") }
+                            Row(Modifier.fillMaxWidth().padding(top = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played", style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.weight(1f).padding(start = 16.dp, top = 8.dp, bottom = 8.dp))
                                 if (visible.size > 5) TextButton(onClick = { allArtistSongs = !allArtistSongs }) { Text(if (allArtistSongs) "Show less" else "All ${visible.size}") }
                             }
                         }

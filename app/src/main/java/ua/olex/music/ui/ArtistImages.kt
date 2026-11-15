@@ -75,7 +75,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
         }
     }
 
-    fun cachedBio(name: String): String? = if (!enabled) null else File(dir, key(name) + ".bio").takeIf { it.isFile }?.readText()?.ifBlank { null }
+    fun cachedBio(name: String): String? = if (!enabled) null else File(dir, key(name) + ".bio").takeIf { it.isFile }?.readText()?.let(::tidyBio)?.ifBlank { null }
 
     /**
      * A short "about" for the artist page: Wikipedia's summary (no account, no key; only the name is
@@ -105,7 +105,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
             val page = Json.parse(String(body, Charsets.UTF_8)) as? Map<*, *> ?: return@firstNotNullOfOrNull null
             if (page["type"] != "standard") return@firstNotNullOfOrNull null
             val description = page["description"]?.toString().orEmpty()
-            val extract = page["extract"]?.toString().orEmpty().trim()
+            val extract = page["extract"]?.toString().orEmpty().trim().let(::tidyBio)
             extract.takeIf { it.length > 40 && (music.containsMatchIn(description) || music.containsMatchIn(extract.take(200))) }
         }
     }.getOrNull()
@@ -148,3 +148,7 @@ internal fun ArtistImage(name: String, modifier: Modifier, size: Dp, shape: andr
         file?.let { AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
     }
 }
+
+/** Wikipedia's plain extract keeps the spaces left by stripped pronunciations and notes: "Yorke ; brothers", "( )". */
+internal fun tidyBio(text: String) = text.replace(Regex("""\(\s*[;,]?\s*\)"""), "").replace(Regex("""\s+([;,.:)])"""), "$1")
+    .replace(Regex("""\(\s+"""), "(").replace(Regex(""" {2,}"""), " ").trim()

@@ -137,7 +137,7 @@ class DesignGalleryTest {
     @Test fun settings() {
         compose.setContent { Shell("Settings", null) { SettingsPage(Modifier.fillMaxSize().padding(it), listOf("Music"), false, true, {}, {}, {}, {}, {}) } }
         shot("14-settings")
-        compose.onRoot().performTouchInput { swipeUp() }
+        compose.onNode(androidx.compose.ui.test.hasScrollAction()).performScrollToNode(androidx.compose.ui.test.hasText("Soulseek account"))
         shot("14b-settings-lower")
     }
 
