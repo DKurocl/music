@@ -227,6 +227,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun disconnectPlayer() = player.disconnect()
 
     fun play(list: List<Track>, index: Int) = player.play(list, index)
+    /** Plays [list] with shuffle on, from a random song; the queue keeps its order for "shuffle off". */
+    fun playShuffled(list: List<Track>) {
+        if (list.isEmpty()) return
+        if (!playing.value.shuffle) player.toggleShuffle()
+        player.play(list, list.indices.random())
+    }
     fun toggle() = player.toggle()
     fun next() = player.next()
     fun previous() = player.previous()

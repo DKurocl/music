@@ -168,7 +168,7 @@ fun MusicRoot(model: LibraryViewModel) {
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = query, search = search, onQueryChange = model::setQuery,
-                currentId = playing.mediaId, onPlay = model::play,
+                currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
                 personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue,

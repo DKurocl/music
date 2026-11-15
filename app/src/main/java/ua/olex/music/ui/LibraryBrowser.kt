@@ -70,6 +70,7 @@ internal fun LibraryBrowser(
     scanError: String?,
     onRescan: () -> Unit,
     onRetrySearch: () -> Unit = {},
+    onShuffle: (List<Track>) -> Unit = {},
     personal: PersonalLibraryState = PersonalLibraryState(),
     personalActions: PersonalLibraryActions? = null,
     onTrackActions: (Track) -> Unit = {},
@@ -197,7 +198,7 @@ internal fun LibraryBrowser(
                 }
                 selected != null -> {
                     item(key = "collection-header") {
-                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
+                        CollectionHeader(selected, onBack = { selectedId = null }, onPlay = { visible?.let { onPlay(it, 0) } }, onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
@@ -207,6 +208,13 @@ internal fun LibraryBrowser(
                 }
                 tab == LibraryTab.SONGS -> {
                     if (library.songs.isEmpty()) item { BrowserMessage("No music yet. Put music in the Music folder, then rescan.") }
+                    else item(key = "shuffle-all") {
+                        androidx.compose.material3.FilledTonalButton(onClick = { visible?.let(onShuffle) }, enabled = visible != null,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).height(48.dp)) {
+                            Symbol(Glyph.SHUFFLE, size = 20.dp); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
+                            Text("Shuffle all ${songCount(library.songs.size)}")
+                        }
+                    }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
@@ -247,7 +255,7 @@ internal fun LibraryBrowser(
 }
 
 @Composable
-private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true) {
+private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, onPlay: () -> Unit, onAdd: () -> Unit, enabled: Boolean = true, onShuffle: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val minutes = collection.tracks.sumOf { it.durationMs } / 60_000
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -269,6 +277,8 @@ private fun CollectionHeader(collection: MusicCollection, onBack: () -> Unit, on
             Button(enabled = enabled, onClick = onPlay, modifier = Modifier.height(52.dp)) {
                 Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play all")
             }
+            androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onShuffle,
+                modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
             androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onAdd,
                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { Symbol(Glyph.PLAYLIST_ADD) }
         }
