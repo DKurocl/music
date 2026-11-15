@@ -1,3 +1,20 @@
+# Design pass and merge of the Codex batch (Claude, 2026-11-15)
+
+Agents work in turns as their limits allow (owner): Codex ran out, Claude continues from
+`agent/m3-replaygain` (`c9eb4cf`). Branch `agent/m2-design` = that batch + two commits:
+
+- `334d7eb`: LibraryBrowserTest lacked four imports, so the app's unit tests did not compile.
+- `ecb946c`: design pass. Material Symbols variable font (`ui/Symbols.kt`, `docs/design/symbols.py`)
+  replaces `AppIcons` (Icons.kt is now unused); Flex typography with opsz/ROND; player page,
+  mini player, track rows, album header, search pill, section chips, song-actions bottom sheet
+  (`ui/PlayerScreens.kt`). Wallpaper colors only, per DESIGN_DIRECTION.md.
+
+Verified locally (cloud sandbox, Gradle 9.9.1): all module tests pass (217 core/library/playback
+earlier in this session plus 27 app tests after the design pass), `lintDebug`, `lintRelease`,
+`assembleRelease` pass on the Codex batch. Renders from the UI tests reviewed by eye. Not run on the
+phone yet. Plan: when CI is green on `agent/m2-design`, fast-forward `main` to it (release for the
+phone), then delete `Icons.kt`, continue the M2 list and the owner's local-player list.
+
 # Current functional work: local artwork (Codex, 2026-11-15)
 
 Branch: `agent/m3-replaygain`. Owner still requests functionality first, no unnecessary APK builds
