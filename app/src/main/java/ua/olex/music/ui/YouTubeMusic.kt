@@ -64,6 +64,27 @@ internal class YouTubeMusic {
         post("browse", """"browseId":${quote(id)}""")?.let { parseAlbum(id, it) }
     }
 
+    /** A page of YouTube Music's radio for a song, and the token for the page after it. */
+    data class RadioPage(val tracks: List<Track>, val continuation: String?)
+
+    /**
+     * YouTube Music's own radio for a song ("Start radio"): the songs its recommender lines up,
+     * in its order, which keeps tempo and mood flowing from one song to the next.
+     */
+    suspend fun radio(videoId: String): RadioPage? = withContext(Dispatchers.IO) {
+        post("next", """"videoId":${quote(videoId)},"playlistId":${quote("RDAMVM$videoId")},"params":"wAEB","isAudioOnly":true""")?.let(::parseRadio)
+    }
+
+    /** The radio's next page. */
+    suspend fun radioMore(continuation: String): RadioPage? = withContext(Dispatchers.IO) {
+        post("next", """"continuation":${quote(continuation)}""")?.let(::parseRadio)
+    }
+
+    /** The song on YouTube Music for a file in the library: the best match of a search for artist and title. */
+    suspend fun find(track: Track): Track? = search("${track.artist.substringBefore(",")} ${track.title}").let { found ->
+        found.firstOrNull { sameSong(it, track) } ?: found.firstOrNull { TextFold.fold(it.artist).contains(TextFold.fold(track.artist.substringBefore(",").trim())) }
+    }
+
     /** One call to YouTube Music, as its web app makes it. */
     private fun post(endpoint: String, fields: String): String? {
         val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}},$fields}"""
@@ -187,6 +208,48 @@ internal class YouTubeMusic {
             return (if (keepOrder) ranked else ranked.sortedBy { it.first }).map { it.second }.distinctBy { it.id }.take(if (keepOrder) 200 else 20)
         }
 
+        /** A radio answer: each queued song (title, "Artist • Album • Year", length, cover) and the continuation. */
+        fun parseRadio(json: String): RadioPage? {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val tracks = collect(root, "playlistPanelVideoRenderer").mapNotNull { row ->
+                val id = row["videoId"] as? String ?: return@mapNotNull null
+                val title = text(row["title"]).ifEmpty { return@mapNotNull null }
+                val runs = ((row["longBylineText"] as? Map<*, *>)?.get("runs") as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+                fun page(run: Map<*, *>) = Regex(""""pageType"\s*:\s*"([A-Z_]+)"""").find(dump(run["navigationEndpoint"]))?.groupValues?.get(1)
+                val artists = runs.filter { page(it) == "MUSIC_PAGE_TYPE_ARTIST" || page(it) == "MUSIC_PAGE_TYPE_USER_CHANNEL" }.mapNotNull { it["text"] as? String }.distinct()
+                val parts = text(row["longBylineText"]).split("•").map { it.trim() }.filter { it.isNotEmpty() }
+                // A music video's line is "Channel • 1.8B views • 19M likes": the song is in its title.
+                val video = parts.any { it.endsWith(" views") || it.endsWith(" likes") }
+                val (artist, song) = if (video) songFromVideo(title, parts.firstOrNull().orEmpty())
+                    else (artists.joinToString(", ").ifEmpty { parts.firstOrNull() ?: return@mapNotNull null }) to title
+                val album = if (video) null else runs.firstOrNull { page(it) == "MUSIC_PAGE_TYPE_ALBUM" }?.get("text") as? String
+                val year = if (video) null else parts.lastOrNull()?.takeIf { it.matches(Regex("""\d{4}""")) }?.toInt()
+                val length = text(row["lengthText"]).split(':').mapNotNull { it.trim().toLongOrNull() }.fold(0L) { acc, p -> acc * 60 + p }
+                val cover = biggestImage(row["thumbnail"])
+                Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", song, artist, album = album, durationMs = length * 1000, year = year, artworkUri = cover)
+            }.distinctBy { it.id }
+            val token = Regex(""""nextRadioContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+                ?: Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+            return RadioPage(tracks, token)
+        }
+
+        private val videoNoise = Regex("""\s*[(\[][^)\]]*\b(official|video|audio|lyrics?|visuali[sz]er|hd|hq|4k|remaster(ed)?|m/?v)\b[^)\]]*[)\]]""", RegexOption.IGNORE_CASE)
+
+        /**
+         * Artist and song from a music video's title, "Artist - Song (Official Video) [4K Remaster]":
+         * the "official / HD / 4K" brackets go; the channel ("RHINO", "beegees - Topic") is used only
+         * when the title names no artist.
+         */
+        fun songFromVideo(title: String, channel: String): Pair<String, String> {
+            val clean = title.replace(videoNoise, "")
+                .replace(Regex("""\s+[-|\u2013]\s+(official|music video|video|audio|lyrics?|visuali[sz]er|hd|4k)\b.*$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\s{2,}"""), " ").trim()
+            val split = Regex("""^(.+?)\s+[-\u2013]\s+(.+)$""").find(clean)
+            if (split != null) return split.groupValues[1].trim() to split.groupValues[2].trim()
+            val artist = channel.replace(Regex("""\s*-\s*Topic$|VEVO$|\s*\(official\)$|\s*Official$""", RegexOption.IGNORE_CASE), "").trim()
+            return artist to clean
+        }
+
         private fun dump(o: Any?): String = when (o) {
             is Map<*, *> -> o.entries.joinToString(",", "{", "}") { "\"${it.key}\":${dump(it.value)}" }
             is List<*> -> o.joinToString(",", "[", "]") { dump(it) }
@@ -198,13 +261,15 @@ internal class YouTubeMusic {
          * The owner's own file for an online song: same artist and title (ignoring case, accents and
          * "(Remastered)"-style extras) and a length within three seconds when both are known.
          */
-        fun localCopy(online: Track, library: LibraryIndex): Track? {
-            fun clean(s: String) = TextFold.fold(s).replace(Regex("""\s*[(\[].*?[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "").trim()
-            val title = clean(online.title); val artist = clean(online.artist)
-            return library.songs.firstOrNull { song ->
-                clean(song.title) == title && (clean(song.artist) == artist || song.artists.any { clean(it) == artist }) &&
-                    (online.durationMs <= 0 || song.durationMs <= 0 || kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000)
-            }
+        fun localCopy(online: Track, library: LibraryIndex): Track? = library.songs.firstOrNull { sameSong(online, it) }
+
+        private fun clean(s: String) = TextFold.fold(s).replace(Regex("""\s*[(\[].*?[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "").trim()
+
+        /** The same recording: artist and title alike once extras are dropped, lengths within three seconds. */
+        fun sameSong(online: Track, song: Track): Boolean {
+            val title = clean(online.title); val artist = clean(online.artist.substringBefore(","))
+            return clean(song.title) == title && (clean(song.artist) == artist || song.artists.any { clean(it) == artist } || clean(song.artist.substringBefore(",")) == artist) &&
+                (online.durationMs <= 0 || song.durationMs <= 0 || kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000)
         }
     }
 

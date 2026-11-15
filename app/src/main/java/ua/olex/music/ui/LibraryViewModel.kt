@@ -379,6 +379,77 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         val index = library.value ?: return list
         return list.map { if (YouTubeMusic.isOnline(it)) YouTubeMusic.localCopy(it, index) ?: it else it }
     }
+    // "Start mix": YouTube Music's radio for a song, cleaned (see Mix), endless while it plays.
+    private class MixRun(val seed: Track, @Volatile var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>)
+    @Volatile private var mixRun: MixRun? = null
+    private var mixMore: kotlinx.coroutines.Job? = null
+    /** The song the running mix grew from, for "Mix from …" in the queue; null when no mix runs. */
+    var mixSeed by mutableStateOf<Track?>(null); private set
+    /** True while the first page of a mix is being found. */
+    var mixLoading by mutableStateOf(false); private set
+
+    /** Songs played lately, as mix keys, so a mix does not bring them straight back. */
+    private fun recentKeys(): Set<String> {
+        val byId = library.value?.songs?.associateBy { it.id.value }.orEmpty()
+        return stats.value.entries.filter { it.value.lastPlayedAt != null }.sortedByDescending { it.value.lastPlayedAt }.take(50)
+            .mapNotNull { byId[it.key]?.let(Mix::songKey) }.toSet()
+    }
+
+    /**
+     * Starts a mix from [seed]: YouTube Music's radio for it when online, else the library. A song
+     * already playing keeps playing and the mix replaces what comes after it.
+     */
+    fun startMix(seed: Track) {
+        viewModelScope.launch {
+            mixLoading = true
+            try {
+                val recent = recentKeys()
+                val yt = graph.youTube
+                val page = if (!graph.youTubeOn.value) null else runCatching {
+                    val id = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else yt.find(seed)?.id?.value?.removePrefix("yt:")
+                    id?.let { yt.radio(it) }
+                }.getOrNull()
+                val seen = (recent + Mix.songKey(seed)).toMutableSet()
+                val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
+                val songs = library.value?.songs.orEmpty()
+                val upcoming = localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats.value, recent))
+                if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return@launch }
+                seen += upcoming.map(Mix::songKey)
+                val state = playing.value
+                val current = state.mediaId
+                val seedHere = localFirst(listOf(seed)).first()
+                if (current != null && (current == seedHere.id.value || current == seed.id.value)) {
+                    // Keep the song playing; replace what follows it.
+                    state.queue.drop(state.queueIndex + 1).forEach { player.removeQueueItem(it.key) }
+                    player.enqueue(upcoming, false)
+                } else player.play(listOf(seedHere) + upcoming, 0)
+                mixRun = if (online.size >= 5) MixRun(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seedHere.id.value + seed.id.value).toMutableSet()) else null
+                mixSeed = seed
+            } finally { mixLoading = false }
+        }
+    }
+
+    /** Called on every player change: tops the mix up near its end; ends it once something else plays. */
+    private fun followMix(state: PlayerState) {
+        val run = mixRun ?: return
+        val id = state.mediaId ?: return
+        if (id !in run.ids) { mixRun = null; mixSeed = null; return }
+        val left = state.queueSize - state.queueIndex - 1
+        val token = run.token
+        if (left > 3 || token == null || mixMore?.isActive == true) return
+        mixMore = viewModelScope.launch {
+            val page = runCatching { graph.youTube.radioMore(token) }.getOrNull() ?: return@launch
+            if (mixRun !== run) return@launch
+            run.token = page.continuation
+            val more = localFirst(Mix.clean(page.tracks, run.seed, run.seen))
+            run.seen += more.map(Mix::songKey)
+            run.ids += more.map { it.id.value }
+            if (more.isNotEmpty()) player.enqueue(more, false)
+        }
+    }
+
+    init { viewModelScope.launch { player.state.collect(::followMix) } }
+
     /** Plays what a spoken or typed search finds; an empty query plays the library shuffled. */
     fun playSearch(query: String) {
         viewModelScope.launch {
