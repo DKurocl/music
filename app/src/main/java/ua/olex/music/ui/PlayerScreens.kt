@@ -2,6 +2,8 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -387,7 +389,8 @@ internal fun PlayerPage(
     val cs = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     // The cover settles back a little while paused and comes forward when the music plays.
-    val coverScale by animateFloatAsState(if (state.playWhenReady) 1f else 0.9f, motion.defaultSpatialSpec(), label = "cover")
+    // The cover keeps its size when paused: the play button says the state, the cover doesn't jump.
+    val coverScale = 1f
     // Text colours follow the theme (a page drawn outside a Surface would otherwise inherit black).
     // Swipe up anywhere on the page (once it has nowhere left to scroll) opens the queue.
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -407,8 +410,9 @@ internal fun PlayerPage(
     }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides cs.onSurface) {
     Box(
-        Modifier.fillMaxSize().nestedScroll(upToQueue).background(Brush.verticalGradient(0f to cs.surfaceContainerHigh, 0.55f to cs.surface, 1f to cs.surface)),
+        Modifier.fillMaxSize().nestedScroll(upToQueue),
     ) {
+        AmbientBackground(state.artworkUri, state.isPlaying)
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -562,26 +566,50 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
     val playing = state.playWhenReady
     val width by animateDpAsState(if (playing) 112.dp else 88.dp, MaterialTheme.motionScheme.fastSpatialSpec(), label = "width")
     val haptics = rememberHaptics()
-    val skipShapes = IconButtonDefaults.shapes(CircleShape, RoundedCornerShape(18.dp))
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        ToggleAction(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", onShuffle)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalIconButton(onClick = { haptics.tick(); onPrevious() }, shapes = skipShapes, modifier = Modifier.size(64.dp).semantics { contentDescription = "Previous" }) {
-                Symbol(Glyph.PREVIOUS, size = 32.dp, filled = true)
-            }
-            androidx.compose.material3.FilledIconToggleButton(
-                checked = playing, onCheckedChange = { haptics.toggle(it); onToggle() }, enabled = state.connected,
-                shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
-                colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
-                    checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
-                modifier = Modifier.width(width).height(88.dp).semantics { contentDescription = if (playing) "Pause" else "Play" },
-            ) { Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true) }
-            FilledTonalIconButton(enabled = state.hasNext, onClick = { haptics.tick(); onNext() }, shapes = skipShapes, modifier = Modifier.size(64.dp).semantics { contentDescription = "Next" }) {
-                Symbol(Glyph.NEXT, size = 32.dp, filled = true)
-            }
-        }
-        ToggleAction(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", onShuffle)
+        SkipButton(Glyph.PREVIOUS, "Previous", true) { haptics.tick(); onPrevious() }
+        androidx.compose.material3.FilledIconToggleButton(
+            checked = playing, onCheckedChange = { haptics.toggle(it); onToggle() }, enabled = state.connected,
+            shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
+            colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
+                checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
+            modifier = Modifier.padding(horizontal = 6.dp).width(width).height(88.dp).semantics { contentDescription = if (playing) "Pause" else "Play" },
+        ) { Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true) }
+        SkipButton(Glyph.NEXT, "Next", state.hasNext) { haptics.tick(); onNext() }
+        ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
             when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onRepeat)
+    }
+}
+
+/** Previous and next: big bare icons (no tile behind), that give a little under the finger. */
+@Composable
+private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, onClick: () -> Unit) {
+    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.82f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "skip")
+    IconButton(onClick = onClick, enabled = enabled, interactionSource = source,
+        modifier = Modifier.size(64.dp).graphicsLayer { scaleX = scale; scaleY = scale }.semantics { contentDescription = label }) {
+        Symbol(glyph, size = 40.dp, filled = true)
+    }
+}
+
+/**
+ * Shuffle and repeat, as Google's media controls show them: a bare icon, muted when off; when on,
+ * it takes the accent and a small dot appears under it. The change fades, nothing jumps.
+ */
+@Composable
+private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
+    val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
+    Box(Modifier.size(52.dp).clip(CircleShape)
+        .toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { haptics.toggle(it); onClick() }
+        .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
+        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on)
+        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp).size(5.dp).graphicsLayer { scaleX = dot; scaleY = dot; alpha = dot }
+            .clip(CircleShape).background(cs.primary))
     }
 }
 
