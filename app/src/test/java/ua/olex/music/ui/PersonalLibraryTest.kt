@@ -47,6 +47,19 @@ class PersonalLibraryTest {
         compose.runOnIdle { assertEquals(listOf(song), played) }
     }
 
+    @Test fun importPreviewRetainsMissingFilesAndShowsRepeatedEntries() {
+        val document = ua.olex.music.model.M3uPlaylist.parse("#EXTM3U\n#EXTINF:120,Artist - Missing\nMusic/missing.flac\nMusic/missing.flac")
+        var imported: List<SavedSong>? = null
+        compose.setContent { MaterialTheme { PlaylistImportDialog(PlaylistDocuments.Loaded(document, "Travel", null),
+            ua.olex.music.model.LibraryIndex.EMPTY, {}, { _, songs -> imported = songs }) } }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Missing, kept").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Import", substring = false).performClick()
+        compose.runOnIdle {
+            assertEquals(1, imported?.size)
+            assertEquals("Music/missing.flac", imported?.single()?.path)
+        }
+    }
+
     @Test fun playlistDeletionRequiresExplicitConfirmation() {
         var deleted: Long? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(listOf(playlist), actions(delete = { deleted = it }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }

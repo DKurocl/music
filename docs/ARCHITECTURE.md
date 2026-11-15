@@ -229,3 +229,16 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     boost with clipping protection enabled; untagged/legacy queue items remain neutral. Gain settings
     changes ramp over 10 ms within a stream. Stream boundaries use the next stream's gain immediately,
     without crossfading songs. Packed PCM8/16/24/32 and float preserve format, endianness and frame size.
+
+36. M3U8 parsing/path resolution is pure core:model logic, with an immutable preview and a lazy
+    path/suffix index per library snapshot. A match is exact or a unique multi-segment relocation;
+    ambiguous/missing files retain path-based import identities. Standard SavedSong matching remains
+    SongKey/path-based. No file URI or network stream is opened by the resolver.
+37. M3U8 imports use a single UserRepository transaction and the existing schema. Duplicate file
+    references are explicitly counted/skipped because playlist_entries currently permits one song
+    identity per playlist. Adding repeated occurrences requires a proper user.db migration, not
+    counterfeit song identities. Missing references are persisted and exported, never silently lost.
+38. Playlist document IO uses Android's user-selected documents, bounded strict UTF-8 reading and
+    UTF-8 export. The import preview supplies an editable base folder when a provider hides location.
+    URI encoding must preserve filesystem Unicode exactly; URI.toASCIIString NFC normalization is
+    unsuitable for NFD filenames. Compose/picker and full AGP checks remain deferred by the owner.

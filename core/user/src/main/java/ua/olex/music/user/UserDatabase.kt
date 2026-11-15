@@ -18,7 +18,7 @@ abstract class UserDatabase : RoomDatabase() {
     }
 }
 
-/** Metadata survives file deletion; identity is SongKey plus path, never a MediaStore row id. */
+/** Metadata survives deletion: normal identities use SongKey/path; unresolved imports use path identity. */
 @Entity(tableName = "saved_songs", indices = [Index("songKey")])
 data class UserSongEntity(
     @PrimaryKey val id: String,

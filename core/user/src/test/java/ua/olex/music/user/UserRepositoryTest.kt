@@ -90,6 +90,35 @@ class UserRepositoryTest {
         runBlocking { assertTrue(repository.playlists.first().isEmpty()) }
     }
 
+    @Test fun importedMissingReferencesAndOrderSurviveReopen() = runBlocking {
+        val missing = ua.olex.music.model.M3uPlaylist.resolve(
+            ua.olex.music.model.M3uPlaylist.parse("#EXTINF:120,Artist - Missing\nMusic/missing.flac"),
+            ua.olex.music.model.LibraryIndex.EMPTY).songs.single()
+        val saved = SavedSong.from(a)
+        repository.importPlaylist(" Imported ", listOf(missing, saved, missing))
+        database.close(); reopen()
+        val playlist = repository.playlists.first().single()
+        assertEquals("Imported", playlist.name)
+        assertEquals(listOf(missing, saved), playlist.songs)
+    }
+
+    @Test fun largeImportsAreBatchedWithoutLosingPositionsOrFavourites() = runBlocking {
+        repository.toggleFavourite(a)
+        val songs = (1..1201).map { SavedSong.from(track(it)) }
+        val id = repository.importPlaylist("Large", songs)
+        assertEquals(songs.map { it.id }, repository.playlists.first().single().songs.map { it.id })
+        assertEquals((0..1200).toList(), database.userData().entries(id).map { it.position })
+        assertEquals(listOf(SavedSong.from(a)), repository.favourites.first())
+    }
+
+    @Test fun invalidImportsDoNotLeaveEmptyPlaylistHeaders() {
+        for (songs in listOf(emptyList(), listOf(SavedSong.from(a).copy(path = "")))) {
+            assertThrows(IllegalArgumentException::class.java) { runBlocking { repository.importPlaylist("Invalid", songs) } }
+        }
+        assertThrows(IllegalArgumentException::class.java) { runBlocking { repository.importPlaylist(" ", listOf(SavedSong.from(a))) } }
+        runBlocking { assertTrue(repository.playlists.first().isEmpty()) }
+    }
+
     @Test fun unsupportedSchemaNeverDestructivelyRebuildsUserData() = runBlocking {
         repository.createPlaylist("Keep this", listOf(a))
         database.close()

@@ -13,6 +13,7 @@ data class SavedSong(
 ) {
     /** Prefer the saved file; after a move, accept the same recording with a matching duration. */
     fun resolve(library: LibraryIndex): Track? {
+        if (id.startsWith(M3uPlaylist.MISSING_ID_PREFIX)) return library.playlistPaths.resolve(path).track
         val candidates = library.bySongKey[songKey].orEmpty().filter {
             durationMs <= 0 || it.durationMs <= 0 || kotlin.math.abs(durationMs - it.durationMs) <= SongKey.LENGTH_TOLERANCE_MS
         }
