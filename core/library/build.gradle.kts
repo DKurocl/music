@@ -6,6 +6,10 @@ plugins {
 android {
     namespace = "ua.olex.music.library"
     compileSdk = 37
+    testOptions { unitTests.all {
+        // Robolectric bridges Android descriptors to host files for sidecar storage tests.
+        it.jvmArgs("--add-opens=java.base/java.io=ALL-UNNAMED")
+    } }
     defaultConfig { minSdk = providers.gradleProperty("minSdk").orNull?.toInt() ?: 37 }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

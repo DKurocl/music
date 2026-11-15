@@ -259,3 +259,18 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     remains required; legacy small-list arguments remain readable. The client waits for the response
     under its queue mutex so asynchronous decoding cannot reorder successive append requests. Service
     teardown completes/cancels outstanding replies. Rejected operations surface in the library UI.
+
+42. Optional LocalMusicFiles reads sidecar lyrics through read-only persisted Android document-tree
+    grants. Only selected primary internal-storage subtrees are supported in this phase. It does not
+    replace MediaStore enumeration or request broad storage access. The ordinary exact .lrc path
+    opens directly; extension-case/TTML/TXT fallback lists only the track's directory. Matching is
+    exact stem/case with explicit ambiguity, strict UTF-8 and a 1 MB bound. Permissions, missing data
+    and unsupported path scopes remain distinguishable. Folder updates are serialized; clear verifies
+    grant release. No idle watcher, recursive scan, network source or write-to-audio operation exists.
+43. Local lyric state is keyed to mediaId and produced off main with cancellable source loads.
+    Sidecar text wins, then embedded text; invalid/unreadable sidecars retain embedded fallback with
+    a source notice. The UI guards old-track snapshots, supports reload/folder selection/revocation,
+    and keeps source controls scrollable at large fonts. Offset commands carry the expected mediaId.
+    Plain/empty lyrics run no position poller; timed polling stops on pause/hidden lifecycle.
+44. TTML rejects document types/entity declarations and has a non-fetching entity resolver. External
+    DTD/entity IO is never part of rendering local lyrics, including on parsers lacking optional flags.

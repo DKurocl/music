@@ -15,13 +15,16 @@ import org.xml.sax.InputSource
  */
 object TtmlParser {
     fun parse(xml: String): Lyrics {
+        if (xml.contains("<!DOCTYPE", ignoreCase = true) || xml.contains("<!ENTITY", ignoreCase = true)) return Lyrics.EMPTY
         val factory = DocumentBuilderFactory.newInstance().apply {
             isNamespaceAware = false
             // No external entities or DTDs: lyrics come from the network and from other people's files.
             runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
             runCatching { isExpandEntityReferences = false }
         }
-        val document = runCatching { factory.newDocumentBuilder().parse(InputSource(StringReader(xml.trimStart('﻿')))) }.getOrNull()
+        val document = runCatching { factory.newDocumentBuilder().apply {
+            setEntityResolver { _, _ -> InputSource(StringReader("")) }
+        }.parse(InputSource(StringReader(xml.trimStart('﻿')))) }.getOrNull()
             ?: return Lyrics.EMPTY
         val paragraphs = document.getElementsByTagName("p")
         val lines = ArrayList<Line>()

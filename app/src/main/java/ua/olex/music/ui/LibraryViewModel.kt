@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,17 +80,54 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         emit(PersonalLibraryState())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PersonalLibraryState())
 
-    val embeddedLyrics = combine(library, playing) { index, state ->
-        state.mediaId?.let { index?.byId?.get(ua.olex.music.model.TrackId(it))?.metadata?.lyrics }
-    }.distinctUntilChanged().map { text -> text?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY }
-        .flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), ua.olex.music.lyrics.Lyrics.EMPTY)
+    val musicFolders = graph.musicFiles.folders
+    private val lyricsReload = MutableStateFlow(0)
+    private val lyricTrack = combine(library, playing.map { it.mediaId }.distinctUntilChanged()) { index, id ->
+        id?.let { index?.byId?.get(ua.olex.music.model.TrackId(it)) }
+    }.distinctUntilChanged()
+    val localLyrics = combine(lyricTrack, musicFolders, lyricsReload) { track, folders, revision -> Triple(track, folders, revision) }
+        .mapLatest { (track, _, _) ->
+            if (track == null) return@mapLatest LocalLyricsState()
+            val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
+            val fallback = LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)
+            try {
+                val sidecar = graph.musicFiles.lyrics(track.path)
+                if (sidecar.status == ua.olex.music.library.SidecarStatus.FOUND) {
+                    val parsed = sidecar.text?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
+                    if (parsed.lines.isNotEmpty()) fallback.copy(lyrics = parsed, source = "Sidecar: ${sidecar.name}")
+                    else fallback.copy(note = "The sidecar is empty or invalid. Showing embedded lyrics when available.")
+                } else fallback.copy(note = if (track.path.isNullOrBlank()) "This song has no library file path for sidecar lookup." else when (sidecar.status) {
+                    ua.olex.music.library.SidecarStatus.NO_FOLDER -> "Choose a music folder to read lyrics beside your files."
+                    ua.olex.music.library.SidecarStatus.OUTSIDE_FOLDER -> "Choose a folder containing this song to read its sidecar lyrics."
+                    ua.olex.music.library.SidecarStatus.AMBIGUOUS -> "Several sidecar files match. No file was chosen."
+                    else -> null
+                })
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: SecurityException) { fallback.copy(note = "Folder access was revoked. Choose the music folder again.") }
+            catch (_: Exception) { fallback.copy(note = "Couldn't read the sidecar. Use UTF-8 lyrics up to 1 MB, then Reload.") }
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
+
+    fun reloadLyrics() { lyricsReload.update { it + 1 } }
+    fun addMusicFolder(uri: android.net.Uri) {
+        viewModelScope.launch {
+            try { graph.musicFiles.addFolder(uri) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { userError = "Couldn't keep folder access. Choose a music folder on this phone's internal storage." }
+        }
+    }
+    fun clearMusicFolders() { viewModelScope.launch {
+        try { graph.musicFiles.clearFolders() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { userError = "Couldn't clear folder access. Try again." }
+    } }
 
     val lyricOffset = combine(library, playing) { index, state ->
         state.mediaId?.let { index?.byId?.get(ua.olex.music.model.TrackId(it)) }?.let(ua.olex.music.model.SavedSong::from)
     }.distinctUntilChanged().flatMapLatest { song -> song?.let(graph.userLibrary::lyricOffset) ?: flowOf(0L) }
         .catch { emit(0L) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
 
-    fun setLyricOffset(offsetMs: Long) {
+    fun setLyricOffset(mediaId: String, offsetMs: Long) {
+        if (playing.value.mediaId != mediaId) return
         val track = playing.value.mediaId?.let { library.value?.byId?.get(ua.olex.music.model.TrackId(it)) } ?: return
         editUserData { setLyricOffset(track, offsetMs.coerceIn(-60_000, 60_000)) }
     }
