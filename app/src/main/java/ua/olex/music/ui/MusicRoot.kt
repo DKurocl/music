@@ -66,6 +66,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -141,15 +144,34 @@ fun MusicRoot(model: LibraryViewModel) {
     val chooseMusicFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(model::addMusicFolder) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { model.refresh() }
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
+    // Three places (Home, Library, Search) and pages over Home (Stats, Duplicates): docs/DESIGN_SYSTEM.md.
+    var place by rememberSaveable { mutableStateOf(Place.HOME) }
+    var page by rememberSaveable { mutableStateOf<Page?>(null) }
+    var openInLibrary by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val duplicates by model.duplicates.collectAsStateWithLifecycle()
+    val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    val haptics = rememberHaptics()
+    fun go(to: Place) { if (to != place) haptics.tick(); if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    BackHandler(page != null) { page = null }
+    BackHandler(page == null && place != Place.HOME && !expanded) { go(Place.HOME) }
+    var trashing by remember { mutableStateOf<List<Track>?>(null) }
+    val trashRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) { haptics.confirm(); model.refresh() }
+        trashing = null
+    }
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
-                title = { Text("Library", style = MaterialTheme.typography.headlineMediumEmphasized) }, scrollBehavior = scroll,
+            if (place != Place.SEARCH || page != null) TopAppBar(
+                title = { Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized) }, scrollBehavior = scroll,
+                navigationIcon = { if (page != null) IconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) } },
                 actions = {
+                    if (place == Place.LIBRARY && page == null) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
                     IconButton(onClick = { equalizerOpen = true }, modifier = Modifier.semantics { contentDescription = "Audio" }) { Symbol(Glyph.TUNE) }
-                    if (model.allowed) IconButton(onClick = model::rescanManually, enabled = !model.scanning,
+                    if (model.allowed && place == Place.HOME) IconButton(onClick = model::rescanManually, enabled = !model.scanning,
                         modifier = Modifier.semantics { contentDescription = if (model.scanning) "Scanning" else "Rescan" }) { Symbol(Glyph.REFRESH) }
                 },
             )
@@ -165,7 +187,8 @@ fun MusicRoot(model: LibraryViewModel) {
                         TextButton(onClick = model::dismissQueueError) { Text("Dismiss") }
                     }
                 }
-                if (playing.hasTrack) MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next)
+                if (playing.hasTrack) MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous)
+                PlacesBar(place.takeIf { page == null }, ::go)
             }
         },
     ) { insets ->
@@ -183,9 +206,27 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
+            page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
+            page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
+                val uris = tracks.filter { '#' !in it.id.value }.map { Uri.parse(it.uri) }
+                if (uris.isNotEmpty()) {
+                    trashing = tracks
+                    val pending = android.provider.MediaStore.createTrashRequest(context.contentResolver, uris, true)
+                    trashRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build())
+                }
+            }
+            place == Place.HOME -> HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
+                Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
+                onOpenAlbum = { openInLibrary = "ALBUMS" to it.id; place = Place.LIBRARY },
+                onOpenArtist = { openInLibrary = "ARTISTS" to it.id; place = Place.LIBRARY },
+                onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
+                onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES })
             else -> LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
-                query = query, search = search, onQueryChange = model::setQuery,
+                query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
+                mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
+                open = openInLibrary, onOpened = { openInLibrary = null },
+                recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
                 onEditTags = { editingTags = it },
@@ -196,8 +237,46 @@ fun MusicRoot(model: LibraryViewModel) {
             )
         }
     }
+    }
 
-    AnimatedVisibility(expanded && playing.hasTrack, enter = slideInVertically { it }, exit = slideOutVertically { it }) {
+    // The player follows the finger down from the top of its page and closes past a quarter of the
+    // screen or on a quick flick; predictive back shrinks it toward the mini player.
+    val dismiss = remember { androidx.compose.animation.core.Animatable(0f) }
+    var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var pageHeight by remember { androidx.compose.runtime.mutableIntStateOf(1) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val settle = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    LaunchedEffect(expanded) { if (expanded) { dismiss.snapTo(0f); backProgress = 0f } }
+    androidx.activity.compose.PredictiveBackHandler(expanded) { events ->
+        try { events.collect { backProgress = it.progress }; haptics.threshold(); expanded = false }
+        catch (e: kotlin.coroutines.cancellation.CancellationException) { backProgress = 0f; throw e }
+    }
+    val dragToClose = remember {
+        object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (available.y < 0 && dismiss.value > 0f) { val used = maxOf(available.y, -dismiss.value); scope.launch { dismiss.snapTo(dismiss.value + used) }; return androidx.compose.ui.geometry.Offset(0f, used) }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
+                if (available.y > 0 && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) { scope.launch { dismiss.snapTo(dismiss.value + available.y) }; return available.copy(x = 0f) }
+                return androidx.compose.ui.geometry.Offset.Zero
+            }
+            override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                if (dismiss.value <= 0f) return androidx.compose.ui.unit.Velocity.Zero
+                if (dismiss.value > pageHeight * 0.25f || available.y > 2_500f) { haptics.threshold(); expanded = false }
+                else dismiss.animateTo(0f, settle)
+                return available
+            }
+        }
+    }
+    AnimatedVisibility(expanded && playing.hasTrack, enter = slideInVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { it },
+        exit = slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it }) {
+        Box(Modifier.fillMaxSize().onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
+            .graphicsLayer {
+                translationY = dismiss.value + backProgress * 120.dp.toPx()
+                val s = 1f - backProgress * 0.08f; scaleX = s; scaleY = s
+                shape = RoundedCornerShape((backProgress * 40 + (dismiss.value / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
+            }) {
         NowPlaying(
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.label },
             position = { model.positionMs }, onClose = { expanded = false },
@@ -215,6 +294,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
             onMore = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { actionTrack = track } },
         )
+        }
     }
     if (equalizerOpen) EqualizerSheet(playing.equalizer, playing.connected, playing.equalizerError,
         onApply = model::setEqualizer, onDismiss = { equalizerOpen = false },
@@ -253,7 +333,6 @@ fun MusicRoot(model: LibraryViewModel) {
         AlertDialog(onDismissRequest = model::dismissUserError, title = { Text("Couldn't save changes") }, text = { Text(message) },
             confirmButton = { TextButton(onClick = model::dismissUserError) { Text("OK") } })
     }
-    BackHandler(expanded) { expanded = false }
 }
 
 @Composable
@@ -346,3 +425,29 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
     )
 }
 
+
+/** The three places of the app, in the navigation bar. */
+internal enum class Place(val title: String, val glyph: Glyph) { HOME("Home", Glyph.HOME), LIBRARY("Library", Glyph.LIBRARY), SEARCH("Search", Glyph.SEARCH) }
+
+/** Pages opened over Home. */
+internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates") }
+
+/** The navigation bar: Home, Library, Search (M3E short navigation bar). */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
+    androidx.compose.material3.ShortNavigationBar {
+        Place.entries.forEach { p ->
+            val selected = current == p
+            androidx.compose.material3.ShortNavigationBarItem(
+                selected = selected, onClick = { onGo(p) },
+                icon = { Symbol(p.glyph, filled = selected, bold = selected) }, label = { Text(p.title) },
+            )
+        }
+    }
+}
+
+/** Home's title: a greeting for the time of day, as Google's apps greet. */
+internal fun greeting(hour: Int = java.time.LocalTime.now().hour) = when (hour) {
+    in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..22 -> "Good evening"; else -> "Late night"
+}
