@@ -18,6 +18,8 @@ import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionError
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.SettableFuture
+import kotlinx.coroutines.withContext
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -223,14 +225,21 @@ class PlaybackService : MediaLibraryService() {
             }
             if (customCommand.customAction == QueueCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
-                val bundles = args.getParcelableArrayList(QueueCommand.ITEMS, Bundle::class.java)
-                if (bundles.isNullOrEmpty() || bundles.size > 500) return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
-                val items = bundles.map { MediaItem.fromBundle(it) }.map { item ->
-                    val uri = item.requestMetadata.mediaUri ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
-                    item.buildUpon().setUri(uri).build()
+                val result = SettableFuture.create<SessionResult>()
+                val job = scope.launch {
+                    try {
+                        val items = withContext(Dispatchers.Default) { QueueCommand.items(args) }
+                        if (this@PlaybackService.session !== session) {
+                            result.set(SessionResult(SessionError.ERROR_SESSION_DISCONNECTED))
+                        } else {
+                            QueueCommand.enqueue(session.player as ExoPlayer, items, args.getBoolean(QueueCommand.NEXT))
+                            result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
+                    } catch (cancelled: CancellationException) { result.cancel(false); throw cancelled }
+                    catch (_: Exception) { result.set(SessionResult(SessionError.ERROR_BAD_VALUE)) }
                 }
-                QueueCommand.enqueue(session.player as ExoPlayer, items, args.getBoolean(QueueCommand.NEXT))
-                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                job.invokeOnCompletion { if (!result.isDone) result.cancel(false) }
+                return result
             }
             if (customCommand.customAction != SleepTimerCommand.ACTION) {
                 return super.onCustomCommand(session, controller, customCommand, args)

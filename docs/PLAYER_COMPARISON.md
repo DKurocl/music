@@ -58,7 +58,7 @@ Quality labels are implementation descriptions, not numerical sound-quality scor
 | Play-count statistics | Present | Present | Partial: history events exist; no complete count/statistics interface |
 | Recently added | Present | Present | Missing dedicated persisted/import-date view |
 | Sort selection | Present | Present | Implemented on work branch: persistent per-scope track choices, off-main sorting, visible-order queues; pure tests pass, Compose checks pending |
-| Multiselect/batch actions | Present | Present | Missing |
+| Multiselect/batch actions | Present | Present | Implemented on work branch for library/search/collection tracks: play, next, queue, playlist; visible order and 20000-item bound, pure/bulk-command tests pass; Compose and rotation refinement pending |
 | Tag editing | Present | Verify supported fields/write operations | Missing; tag reader is not a writer |
 | CUE splitting | Present | Verify current support | Missing |
 

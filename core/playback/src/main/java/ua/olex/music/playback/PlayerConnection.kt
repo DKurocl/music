@@ -24,6 +24,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.sync.Mutex
@@ -224,6 +225,10 @@ class PlayerConnection(context: Context) {
     fun enqueue(tracks: List<Track>, next: Boolean) {
         if (tracks.isEmpty()) return
         dismissQueueError()
+        if (tracks.size > ua.olex.music.model.TrackSelection.MAX_ITEMS) {
+            _state.value = _state.value.copy(queueError = "Add up to ${ua.olex.music.model.TrackSelection.MAX_ITEMS} songs per batch.")
+            return
+        }
         val player = controller ?: return play(tracks, 0)
         val snapshot = tracks.toList()
         scope.launch {
@@ -232,16 +237,11 @@ class PlayerConnection(context: Context) {
                     snapshot.map { currentCoroutineContext().ensureActive(); mediaItem(it) }
                 }
                 if (controller !== player) return@withLock
-                val result = player.sendCustomCommand(QueueCommand.command, Bundle().apply {
-                    putParcelableArrayList(QueueCommand.ITEMS, ArrayList(items.map { it.toBundle() }))
-                    putBoolean(QueueCommand.NEXT, next)
-                })
-                result.addListener({
-                    if (controller !== player) return@addListener
-                    val success = try { Futures.getDone(result).resultCode == SessionResult.RESULT_SUCCESS }
-                        catch (_: ExecutionException) { false } catch (_: CancellationException) { false }
-                    if (!success) _state.value = _state.value.copy(queueError = "Couldn't add to the queue. Use the song's actions to try again.")
-                }, app.mainExecutor)
+                val success = try {
+                    player.sendCustomCommand(QueueCommand.command, QueueCommand.arguments(items, next)).await().resultCode == SessionResult.RESULT_SUCCESS
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { false }
+                if (controller === player && !success) _state.value = _state.value.copy(queueError = "Couldn't add the selected songs. Try again.")
             }
         }
     }

@@ -92,6 +92,20 @@ class LibraryBrowserTest {
         }
     }
 
+    @Test fun selectedTracksQueueInVisibleOrderWithoutPlayingOnSelection() {
+        var queued = emptyList<Track>()
+        var next = false
+        compose.setContent { BrowserTestTheme {
+            LibraryBrowser(library, PaddingValues(), "", null, {}, null, { _, _ -> error("Selection started playback") }, null, {},
+                onEnqueue = { tracks, playNext -> queued = tracks; next = playNext })
+        } }
+        compose.onNodeWithText("Z Opening").performTouchInput { longClick() }
+        compose.onNodeWithContentDescription("Select A Finale").performClick()
+        compose.onNodeWithText("2 selected").assertExists()
+        compose.onNodeWithText("Play next", substring = false).performClick()
+        compose.runOnIdle { assertEquals(listOf(finale, opening), queued); assertEquals(true, next) }
+    }
+
     @Test fun staleSearchResultsCannotBePlayedUnderANewQuery() {
         compose.setContent {
             BrowserTestTheme {
