@@ -29,6 +29,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.guava.future
+import androidx.media3.session.LibraryResult
+import androidx.media3.session.MediaLibraryService.LibraryParams
 import android.util.Log
 import ua.olex.music.model.SleepTimer
 import ua.olex.music.model.PlaybackHistoryGate
@@ -185,7 +188,81 @@ class PlaybackService : MediaLibraryService() {
 
     private fun AudioSink.AudioTrackConfig.signature() = AudioTrackLifecycle.Configuration(encoding, sampleRate, channelConfig, offload)
 
+    private suspend fun tree(): ua.olex.music.model.BrowseTree? = (application as? MediaCatalogOwner)?.browseTree()
+
+    private fun ua.olex.music.model.BrowseNode.toMediaItem(): MediaItem {
+        track?.let { t -> return PlayerConnection.mediaItem(t).buildUpon().setMediaId(id).build() }
+        val type = when {
+            id == ua.olex.music.model.BrowseTree.ROOT -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
+            id.startsWith("section:albums") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS
+            id.startsWith("section:artists") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS
+            id.startsWith("section:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS
+            id.startsWith("album:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_ALBUM
+            id.startsWith("artist:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_ARTIST
+            id.startsWith("genre:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_GENRE
+            else -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_PLAYLIST
+        }
+        return MediaItem.Builder().setMediaId(id).setMediaMetadata(
+            androidx.media3.common.MediaMetadata.Builder().setTitle(title).setSubtitle(subtitle).setArtist(subtitle)
+                .setArtworkUri(artworkUri?.let(android.net.Uri::parse))
+                // Collections can be opened and also played whole; sections only opened.
+                .setIsBrowsable(true).setIsPlayable(!id.startsWith("section:") && id != ua.olex.music.model.BrowseTree.ROOT)
+                .setMediaType(type).build(),
+        ).build()
+    }
+
+    private fun <T> future(block: suspend () -> T): ListenableFuture<T> = scope.future { block() }
+
+    private fun page(items: List<MediaItem>, page: Int, size: Int): com.google.common.collect.ImmutableList<MediaItem> {
+        val from = (page.toLong() * size).coerceAtMost(items.size.toLong()).toInt()
+        return com.google.common.collect.ImmutableList.copyOf(items.subList(from, (from + size).coerceAtMost(items.size)))
+    }
+
     private inner class Callback : MediaLibrarySession.Callback {
+        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?) =
+            Futures.immediateFuture(LibraryResult.ofItem(ua.olex.music.model.BrowseNode(ua.olex.music.model.BrowseTree.ROOT, "Library").toMediaItem(), params))
+
+        override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
+            val nodes = tree()?.children(parentId) ?: return@future LibraryResult.ofError<com.google.common.collect.ImmutableList<MediaItem>>(SessionError.ERROR_BAD_VALUE)
+            LibraryResult.ofItemList(page(nodes.map { it.toMediaItem() }, page, pageSize.coerceAtLeast(1)), params)
+        }
+
+        override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String) = future {
+            tree()?.item(mediaId)?.let { LibraryResult.ofItem(it.toMediaItem(), null) } ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+        }
+
+        override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: LibraryParams?) = future {
+            session.notifySearchResultChanged(browser, query, tree()?.search(query)?.size ?: 0, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
+            val found = tree()?.search(query).orEmpty().map { PlayerConnection.mediaItem(it) }
+            LibraryResult.ofItemList(page(found, page, pageSize.coerceAtLeast(1)), params)
+        }
+
+        /**
+         * A browser chose one item (a song in an album, a whole playlist) or Assistant asked to play
+         * a search: expand it to the collection it belongs to, starting at the chosen song. Items
+         * from the app itself already carry their queue and URIs and pass through unchanged.
+         */
+        override fun onSetMediaItems(
+            mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val single = mediaItems.singleOrNull()
+            val needsResolving = single != null && single.requestMetadata.mediaUri == null && single.localConfiguration == null
+            if (!needsResolving) return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            return future {
+                val tree = tree()
+                val query = single.requestMetadata.searchQuery
+                val resolved = if (single.mediaId.isEmpty() && !query.isNullOrBlank()) tree?.search(query)?.takeIf { it.isNotEmpty() }?.let { it to 0 }
+                    else tree?.resolvePlay(single.mediaId)
+                if (resolved == null) MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs)
+                else MediaSession.MediaItemsWithStartPosition(resolved.first.map { PlayerConnection.mediaItem(it).let { item -> item.buildUpon().setUri(item.requestMetadata.mediaUri).build() } },
+                    resolved.second, if (resolved.second == 0 && startPositionMs > 0) startPositionMs else androidx.media3.common.C.TIME_UNSET)
+            }
+        }
+
         override fun onConnectAsync(
             session: MediaSession, controller: MediaSession.ControllerInfo,
         ): ListenableFuture<MediaSession.ConnectionResult> {

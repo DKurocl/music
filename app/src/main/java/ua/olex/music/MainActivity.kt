@@ -17,6 +17,19 @@ class MainActivity : ComponentActivity() {
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
         setContent { AppTheme { MusicRoot(model) } }
+        if (savedInstanceState == null) playFromSearch(intent)
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        playFromSearch(intent)
+    }
+
+    /** "Play Karma Police on Music": search the library the way Android Auto does and play the matches. */
+    private fun playFromSearch(intent: android.content.Intent?) {
+        if (intent?.action != android.provider.MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH) return
+        val query = intent.getStringExtra(android.app.SearchManager.QUERY).orEmpty()
+        model.playSearch(query)
     }
 
     override fun onStart() {
