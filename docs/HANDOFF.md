@@ -1,3 +1,23 @@
+# Latest verification: standalone Android/Compose source type check (Codex, 2026-11-15)
+
+Owner still defers unnecessary full APK builds/releases. No APK, full CI or release was triggered.
+Active functionality is on `agent/m3-replaygain`, code checkpoint b5c3c96.
+
+From /workspace/toolchains/music-ui-check:
+`GRADLE_USER_HOME=/workspace/.gradle-music /workspace/toolchains/gradle-9.9.1/bin/gradle compileKotlin --no-daemon --console=plain`
+succeeded for ALL actual application/core main Kotlin sources with pinned Kotlin/Compose plugin,
+KSP, Room, Compose BOM/Material3, lifecycle/activity, Media3 and Coil dependencies. Android variants
+were explicitly selected; default JVM resolution initially selected desktop variants missing
+LocalContext/dynamic colors/AndroidViewModel, which was corrected in the harness without changing
+production dependencies. One temporary R.font ID stand-in was used only for type checking; the
+actual google_sans_flex font resource exists. No resource linking, APK, R8, Android lint or device
+runtime was exercised. This is source/API compilation, not a real AGP application build or UI test.
+
+Thus the new ReplayGain/EQ/import, M3U8, sorting and multiselect Compose source is now type-checked.
+Authored Compose interaction tests still have NOT run. Existing point-test counts below remain valid.
+The user-facing ~50% local-feature estimate is qualitative, not a benchmark or a verified numerical
+parity score. No sound/speed/battery advantage over either competitor has been demonstrated.
+
 # Current functional work: multiselect and bulk queue (Codex, 2026-11-15)
 
 Active source branch: `agent/m3-replaygain`. Keep owner instruction: no unnecessary APK builds or
