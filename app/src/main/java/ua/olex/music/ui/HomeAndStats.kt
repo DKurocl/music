@@ -13,6 +13,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.LibraryStats
 import ua.olex.music.model.MusicCollection
@@ -28,7 +30,14 @@ internal fun HomePage(
     library: LibraryIndex, history: List<Track>, stats: Map<String, SongStats>, smart: List<SmartPlaylistUi>,
     currentId: String?, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit, onShuffle: (List<Track>) -> Unit,
     onOpenAlbum: (MusicCollection) -> Unit, onTrackActions: (Track) -> Unit,
+    onOpenArtist: (MusicCollection) -> Unit = {}, duplicates: Int = 0, onStats: () -> Unit = {}, onDuplicates: () -> Unit = {},
 ) {
+    // Your artists: the most played first, then those with the most songs.
+    val artists = remember(library, stats) {
+        library.artists.filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", true) }
+            .sortedWith(compareByDescending<MusicCollection> { a -> a.tracks.sumOf { stats[it.key.value]?.plays ?: 0 } }.thenByDescending { it.tracks.size })
+            .take(15)
+    }
     val albumOf = remember(library) { library.albums.flatMap { a -> a.tracks.map { it.id to a } }.toMap() }
     val recentAlbums = remember(history, albumOf) { history.mapNotNull { albumOf[it.id] }.distinctBy { it.id }.take(12) }
     val addedAlbums = remember(library) {
@@ -45,6 +54,21 @@ internal fun HomePage(
             }
         }
         if (recentAlbums.isNotEmpty()) { item(key = "recent-h") { SectionTitle("Played lately") }; item(key = "recent") { AlbumRow(recentAlbums, onOpenAlbum) { onPlay(it.tracks, 0) } } }
+        if (artists.size > 1) {
+            item(key = "artists-h") { SectionTitle("Your artists") }
+            item(key = "artists") {
+                LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    items(artists, key = { it.id }) { artist ->
+                        Column(Modifier.width(96.dp).clip(RoundedCornerShape(16.dp)).clickable(onClickLabel = "Open ${artist.name}") { onOpenArtist(artist) },
+                            horizontalAlignment = Alignment.CenterHorizontally) {
+                            ArtistImage(artist.name, Modifier.size(88.dp), 88.dp)
+                            Text(artist.name, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                }
+            }
+        }
         if (addedAlbums.isNotEmpty()) { item(key = "added-h") { SectionTitle("Added lately") }; item(key = "added") { AlbumRow(addedAlbums, onOpenAlbum) { onPlay(it.tracks, 0) } } }
         val lists = smart.filter { it.tracks.isNotEmpty() }
         if (lists.isNotEmpty()) {
@@ -58,11 +82,66 @@ internal fun HomePage(
                 }
             }
         }
+        item(key = "cards") {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                HomeCard(Glyph.STATS, "Your listening", "Plays, time, top artists", Modifier.weight(1f), onStats)
+                HomeCard(Glyph.DUPLICATES, "Duplicates", if (duplicates == 0) "None found" else "$duplicates songs kept twice", Modifier.weight(1f), onDuplicates)
+            }
+        }
         if (mostPlayed.isNotEmpty()) {
             item(key = "most-h") { SectionTitle("Most played") }
             mostPlayed.forEachIndexed { index, track ->
                 item(key = "most-${track.id.value}") {
                     TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(mostPlayed, index) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeCard(glyph: Glyph, title: String, subtitle: String, modifier: Modifier, onClick: () -> Unit) {
+    Surface(onClick = onClick, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Symbol(glyph, color = MaterialTheme.colorScheme.primary, filled = true)
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+        }
+    }
+}
+
+/**
+ * Songs kept twice: each group shows every copy, best first (marked "Keep"); the others can go to
+ * the trash (Android keeps them 30 days, so nothing is lost by a wrong tap).
+ */
+@Composable
+internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit, onTrash: (List<Track>) -> Unit) {
+    val extra = groups.flatMap { it.drop(1) }
+    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(if (groups.isEmpty()) "No song is kept twice." else "${groups.size} songs are kept in more than one file. The best copy is kept; the others can go to the trash.",
+                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (extra.isNotEmpty()) Button(onClick = { onTrash(extra) }) { Text("Move ${extra.size} extra copies to trash") }
+            }
+        }
+        groups.forEach { group ->
+            item(key = "h-" + group.first().id.value) {
+                Text("${group.first().title} · ${group.first().artist}", style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            group.forEachIndexed { i, track ->
+                item(key = track.id.value) {
+                    ListItem(
+                        headlineContent = { Text(track.format?.label ?: "Unknown format") },
+                        supportingContent = { Text(track.path ?: track.uri, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        leadingContent = { Artwork(track.artworkUri, Modifier.size(48.dp), 12.dp) },
+                        trailingContent = {
+                            if (i == 0) Text("Keep", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                            else IconButton(onClick = { onTrash(listOf(track)) }, modifier = Modifier.semantics { contentDescription = "Move this copy to trash" }) { Symbol(Glyph.DELETE) }
+                        },
+                        modifier = Modifier.clickable { onPlay(group, i) },
+                    )
                 }
             }
         }
@@ -98,10 +177,12 @@ internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, mod
     fun hours(ms: Long) = if (ms >= 3_600_000) "${ms / 3_600_000} h ${ms / 60_000 % 60} min" else "${ms / 60_000} min"
     LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatTile("Songs", s.songs.toString()); StatTile("Albums", s.albums.toString()); StatTile("Artists", s.artists.toString())
-                StatTile("Total length", hours(s.totalMs)); StatTile("Lossless", "${s.lossless}"); StatTile("Hi-res", "${s.hiRes}")
-                StatTile("Plays", s.plays.toString()); StatTile("Listened", hours(s.listenedMs))
+            val tiles = listOf("Listened" to hours(s.listenedMs), "Plays" to s.plays.toString(), "Songs" to s.songs.toString(), "Total length" to hours(s.totalMs),
+                "Albums" to s.albums.toString(), "Artists" to s.artists.toString(), "Lossless" to s.lossless.toString(), "Hi-res" to s.hiRes.toString())
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                tiles.chunked(2).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) { row.forEach { (label, value) -> StatTile(label, value, Modifier.weight(1f)) } }
+                }
             }
         }
         if (s.topArtists.isNotEmpty()) {
@@ -122,9 +203,9 @@ internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, mod
 }
 
 @Composable
-private fun StatTile(label: String, value: String) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(20.dp)) {
-        Column(Modifier.widthIn(min = 100.dp).padding(16.dp)) {
+private fun StatTile(label: String, value: String, modifier: Modifier = Modifier) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHigh, shape = RoundedCornerShape(24.dp), modifier = modifier) {
+        Column(Modifier.padding(20.dp)) {
             Text(value, style = MaterialTheme.typography.headlineSmall)
             Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }

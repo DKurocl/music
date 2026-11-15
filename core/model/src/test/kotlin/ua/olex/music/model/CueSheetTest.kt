@@ -111,3 +111,15 @@ class LibraryExtrasTest {
         assertEquals("X" to 3, s.topArtists.single())
     }
 }
+
+class DuplicatesTest {
+    @Test fun sameSongSimilarLengthBestFirst() {
+        fun t(id: String, title: String, ms: Long, codec: String, depth: Int? = null) =
+            Track(TrackId(id), "content://$id", title, "Artist", durationMs = ms, format = AudioFormat(codec, 44_100, depth, if (codec == "mp3") 320 else null, 2), path = "Music/$id")
+        val mp3 = t("a", "Song", 200_000, "mp3"); val flac = t("b", "song", 201_500, "flac", 24)
+        val live = t("c", "Song", 260_000, "flac", 16); val other = t("d", "Other", 200_000, "flac", 16)
+        val cut = t("e#1", "Song", 200_500, "flac", 16)
+        val groups = Duplicates.find(listOf(mp3, flac, live, other, cut))
+        assertEquals(listOf(listOf(flac, mp3)), groups)
+    }
+}

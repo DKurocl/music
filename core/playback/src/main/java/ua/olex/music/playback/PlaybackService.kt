@@ -93,6 +93,7 @@ class PlaybackService : MediaLibraryService() {
     private fun exoOrNull(): ExoPlayer? = if (::exo.isInitialized) exo else null
     private var lockLyrics: LockScreenLyrics? = null
     private val lanServer by lazy { LanMediaServer(this) }
+    private var fading: FadingPlayer? = null
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
     private val lyricPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> lockLyrics?.update() }
 
@@ -108,12 +109,13 @@ class PlaybackService : MediaLibraryService() {
         val player = PlayerFactory.create(this, { equalizer.active }, { replayGain })
         exo = player
         // Cast: the session's player hands playback to a Chromecast chosen in the output switcher.
+        val faded = FadingPlayer(player, scope).also { fading = it }
         val castable: Player = runCatching {
             com.google.android.gms.cast.framework.CastContext.getSharedInstance(this, java.util.concurrent.Executors.newSingleThreadExecutor())
-            androidx.media3.cast.CastPlayer.Builder(this).setLocalPlayer(player)
+            androidx.media3.cast.CastPlayer.Builder(this).setLocalPlayer(faded)
                 .setRemotePlayer(androidx.media3.cast.RemoteCastPlayer.Builder(this).setMediaItemConverter(LanMediaItemConverter(lanServer)).build())
                 .build()
-        }.getOrElse { player }
+        }.getOrElse { faded }
         val shown = LyricLinePlayer(castable)
         lockLyrics = LockScreenLyrics(this, player, shown, scope)
         getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
@@ -236,6 +238,7 @@ class PlaybackService : MediaLibraryService() {
     private fun setSleepTimer(minutes: Int) {
         // "End of track": ExoPlayer pauses right at the end of the current song, before the next starts.
         endOfTrack = minutes == SleepTimerCommand.END_OF_TRACK
+        if (sleepJob?.isActive == true) fading?.cancelFade()
         exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
         if (endOfTrack) { sleepTimer.set(0, SystemClock.elapsedRealtime()); sleepJob?.cancel(); publishSleepTimer(); return }
         sleepTimer.set(minutes, SystemClock.elapsedRealtime())
@@ -244,7 +247,14 @@ class PlaybackService : MediaLibraryService() {
         publishSleepTimer()
         val deadline = sleepTimer.deadlineMs ?: return
         sleepJob = scope.launch {
-            delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            // The last 30 seconds fade out, so sleep is not interrupted by a sudden stop.
+            val fadeMs = minOf(30_000L, minutes * 60_000L / 4)
+            delay((deadline - fadeMs - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            val player = session?.player
+            val fader = fading
+            if (fader != null && player?.isPlaying == true && exoOrNull()?.let { player.currentMediaItem == it.currentMediaItem } == true) {
+                fader.sleepFade((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)) { exoOrNull()?.playWhenReady = false }.join()
+            } else delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
             if (sleepTimer.expire(SystemClock.elapsedRealtime())) {
                 session?.player?.pause()
                 publishSleepTimer()

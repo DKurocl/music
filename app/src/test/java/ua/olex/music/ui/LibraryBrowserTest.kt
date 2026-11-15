@@ -106,7 +106,7 @@ class LibraryBrowserTest {
         compose.onNodeWithText("Z Opening").performTouchInput { longClick() }
         compose.onNodeWithContentDescription("Select A Finale").performClick()
         compose.onNodeWithText("2 selected").assertExists()
-        compose.onNodeWithText("Play next", substring = false).performClick()
+        compose.onNodeWithContentDescription("Play next").performClick()
         compose.runOnIdle { assertEquals(listOf(finale, opening), queued); assertEquals(true, next) }
     }
 
