@@ -39,9 +39,12 @@ data class PersonalLibraryActions(
     val create: (String, List<Track>) -> Unit,
     val rename: (Long, String) -> Unit,
     val delete: (Long) -> Unit,
-    val add: (Long, List<Track>) -> Unit,
-    val remove: (Long, String) -> Unit,
-    val move: (Long, String, Int) -> Unit,
+    /** Playlist, songs, and whether songs already in it are added again. */
+    val add: (Long, List<Track>, Boolean) -> Unit,
+    /** Playlist, song, and the song's position in the playlist (a song may appear twice). */
+    val remove: (Long, String, Int) -> Unit,
+    /** Playlist, song, step (-1 up, 1 down), position. */
+    val move: (Long, String, Int, Int) -> Unit,
     val removeFavourite: (String) -> Unit,
     val importPlaylist: (String, List<SavedSong>) -> Unit = { _, _ -> },
 )

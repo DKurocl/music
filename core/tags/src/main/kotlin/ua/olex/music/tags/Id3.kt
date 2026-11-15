@@ -110,6 +110,14 @@ internal object Id3 {
                 }
                 if (lrc.isNotEmpty()) fields.add("SYNCEDLYRICS", lrc.toString())
             }
+            // Popularimeter: email, then a 0-255 rating byte. Stored as RATING 0-100 like Vorbis.
+            id == "POPM" || id == "POP" -> {
+                val z = b.indexOfFirst { it.toInt() == 0 }
+                if (z >= 0 && z + 1 < b.size && !fields.has("RATING")) {
+                    val byte = b[z + 1].toInt() and 0xFF
+                    if (byte > 0) fields.add("RATING", (byte * 100 / 255).toString())
+                }
+            }
             id == "USLT" || id == "ULT" -> if (b.size > 4) {
                 val (_, at) = terminated(b, 4, b[0].toInt())
                 if (!fields.has("LYRICS")) fields.add("LYRICS", text(b, at, b[0].toInt()).joinToString("\n"))

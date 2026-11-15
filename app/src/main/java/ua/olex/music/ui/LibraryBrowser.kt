@@ -25,6 +25,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -124,7 +125,7 @@ internal fun LibraryBrowser(
         else -> TrackSortScope.FOLDER_TRACKS
     }
     val raw = when {
-        searching -> search?.takeIf { it.query == query && !it.failed }?.tracks
+        searching -> search?.takeIf { it.query == query && !it.failed }?.tracks?.filter { it.id in library.byId }
         selected != null -> selected.tracks
         tab == LibraryTab.SONGS -> library.songs
         else -> null
@@ -298,8 +299,14 @@ internal fun LibraryBrowser(
                         if (row.size == 1) androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                     }
                 }
-                else -> items(groups, key = { it.id }) { collection ->
+                else -> {
+                if (tab == LibraryTab.FOLDERS) item(key = "hidden-folders") { HiddenFolders() }
+                items(groups, key = { it.id }) { collection ->
+                    val context = androidx.compose.ui.platform.LocalContext.current
                     ListItem(
+                        trailingContent = if (tab == LibraryTab.FOLDERS && collection.subtitle != null) ({
+                            TextButton(onClick = { ua.olex.music.library.LibraryFolders.setExcluded(context, collection.subtitle!!, true) }) { Text("Hide") }
+                        }) else null,
                         headlineContent = { Text(collection.name, maxLines = 2, overflow = TextOverflow.Ellipsis) },
                         supportingContent = {
                             Text(listOfNotNull(collection.subtitle, songCount(collection.tracks.size)).joinToString(" · "), maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -307,6 +314,7 @@ internal fun LibraryBrowser(
                         leadingContent = { Artwork(collection.artworkUri, Modifier.size(56.dp), 12.dp) },
                         modifier = Modifier.clickable(onClickLabel = "Open ${collection.name}") { selectedId = collection.id },
                     )
+                }
                 }
             }
         }
@@ -498,6 +506,23 @@ private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.comp
             androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.CircleShape, color = MaterialTheme.colorScheme.primaryContainer,
                 modifier = Modifier.align(Alignment.Center).offset(x = (-56).dp).size(64.dp)) {
                 Box(contentAlignment = Alignment.Center) { Text(letter.toString(), style = MaterialTheme.typography.headlineMedium) }
+            }
+        }
+    }
+}
+
+/** Folders hidden from the library, each with a way back. */
+@Composable
+private fun HiddenFolders() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val hidden by remember { ua.olex.music.library.LibraryFolders.excluded(context) }.collectAsState(emptySet())
+    Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Text("Every folder on the phone is scanned. Hide the ones that are not music (recordings, ringtones).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        hidden.sorted().forEach { folder ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Hidden: ${folder.trimEnd('/')}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = { ua.olex.music.library.LibraryFolders.setExcluded(context, folder, false) }) { Text("Show") }
             }
         }
     }

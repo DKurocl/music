@@ -106,6 +106,14 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                             }
                             onResetTiming?.let { TextButton(onClick = it) { Text("Restore original") } }
                         }
+                        if (timed) {
+                            val context = androidx.compose.ui.platform.LocalContext.current
+                            var lock by remember { mutableStateOf(ua.olex.music.playback.LockScreenLyrics.get(context)) }
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Text("Line on the lock screen", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                Switch(lock, { lock = it; ua.olex.music.playback.LockScreenLyrics.set(context, it) })
+                            }
+                        }
                         if (editing) Text("Play the song and tap each line the moment it starts. Words move with their line.",
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }

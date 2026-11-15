@@ -88,3 +88,22 @@ class TagWriterTest {
         assertNull(TagWriter.plan(ByteArraySource(ByteArray(300)), mapOf("TITLE" to listOf("x"))))
     }
 }
+
+class TagWriterCoverAndRatingTest {
+    private fun apply(file: ByteArray, plan: TagRewrite) = plan.head + file.copyOfRange(plan.keepFrom.toInt(), file.size)
+    private val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 1, 2, 3, 0xFF.toByte(), 0xD9.toByte())
+    private fun mp3() = ByteArray(417 * 30).also { b -> for (f in 0 until 30) { b[f * 417] = 0xFF.toByte(); b[f * 417 + 1] = 0xFB.toByte(); b[f * 417 + 2] = 0x90.toByte() } }
+
+    @Test fun mp3CoverAndPopularimeter() {
+        val out = apply(mp3(), TagWriter.plan(ByteArraySource(mp3()), mapOf("RATING" to listOf("80")), CoverArt(jpeg, "image/jpeg"))!!)
+        val tags = TagReader.read(ByteArraySource(out))!!
+        assertEquals(4, tags.stars)
+        val pic = tags.frontCover!!
+        assertArrayEquals(jpeg, out.copyOfRange(pic.offset.toInt(), pic.offset.toInt() + pic.length))
+    }
+
+    @Test fun vorbisRatingScales() {
+        fun stars(v: String) = AudioTags("flac", "flac", fields = mapOf("RATING" to listOf(v))).stars
+        assertEquals(5, stars("100")); assertEquals(3, stars("60")); assertEquals(4, stars("4")); assertNull(stars("0"))
+    }
+}

@@ -393,6 +393,7 @@ internal class TrackAction(val glyph: Glyph, val label: String, val filled: Bool
 internal fun TrackActionsSheet(
     track: Track, favourite: Boolean, onDismiss: () -> Unit, actions: List<TrackAction>,
     rating: Int = 0, onRate: ((Int) -> Unit)? = null, plays: Int = 0,
+    ratingsToFiles: Boolean = false, onRatingsToFiles: ((Boolean) -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = cs.surfaceContainerLow) {
@@ -414,6 +415,10 @@ internal fun TrackActionsSheet(
                 Spacer(Modifier.weight(1f))
                 Text(if (plays == 1) "1 play" else "$plays plays", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(end = 12.dp))
+            }
+            if (onRate != null && onRatingsToFiles != null) Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Save ratings in the music files", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(ratingsToFiles, onRatingsToFiles)
             }
             androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = cs.outlineVariant)
             actions.forEach { action ->

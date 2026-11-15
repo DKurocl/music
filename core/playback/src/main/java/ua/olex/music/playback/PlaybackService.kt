@@ -89,6 +89,11 @@ class PlaybackService : MediaLibraryService() {
     @Volatile private var replayGain = ua.olex.music.dsp.ReplayGainSettings()
     /** The device callback reports every present device once at registration: not a "connect". */
     private var devicesSeen = false
+    private lateinit var exo: ExoPlayer
+    private fun exoOrNull(): ExoPlayer? = if (::exo.isInitialized) exo else null
+    private var lockLyrics: LockScreenLyrics? = null
+    private val appScreens = HashSet<MediaSession.ControllerInfo>()
+    private val lyricPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> lockLyrics?.update() }
 
     override fun onCreate() {
         super.onCreate()
@@ -100,7 +105,11 @@ class PlaybackService : MediaLibraryService() {
             runCatching { ReplayGainCodec.decode(it) }.getOrNull()
         } ?: ua.olex.music.dsp.ReplayGainSettings()
         val player = PlayerFactory.create(this, { equalizer.active }, { replayGain })
-        val builder = MediaLibrarySession.Builder(this, player, Callback())
+        exo = player
+        val shown = LyricLinePlayer(player)
+        lockLyrics = LockScreenLyrics(this, player, shown, scope)
+        getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
+        val builder = MediaLibrarySession.Builder(this, shown, Callback())
         // Tapping the notification opens the app.
         packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
@@ -141,16 +150,17 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         })
-        session?.player?.addListener(object : Player.Listener {
+        player.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                lockLyrics?.update()
                 historyGate.transition()
                 recordCurrentPlayback()
             }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback(); publishNowPlaying() }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback(); publishNowPlaying(); lockLyrics?.update() }
             override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) = publishNowPlaying()
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (endOfTrack && !playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
-                    endOfTrack = false; (session?.player as? ExoPlayer)?.pauseAtEndOfMediaItems = false; publishSleepTimer()
+                    endOfTrack = false; exoOrNull()?.pauseAtEndOfMediaItems = false; publishSleepTimer()
                 }
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
@@ -161,13 +171,13 @@ class PlaybackService : MediaLibraryService() {
 
     /** Widget and tile state; written only on a change of song or play state. */
     private fun publishNowPlaying() {
-        val player = session?.player ?: return
+        val player = exoOrNull() ?: return
         val meta = player.mediaMetadata
         NowPlaying.publish(this, meta.title?.toString(), meta.artist?.toString(), meta.artworkUri?.toString(), player.isPlaying)
     }
 
     private fun recordCurrentPlayback() {
-        val player = session?.player ?: return
+        val player = exoOrNull() ?: return
         if (!player.isPlaying) return
         val item = player.currentMediaItem ?: return
         val meta = item.mediaMetadata
@@ -217,7 +227,7 @@ class PlaybackService : MediaLibraryService() {
     private fun setSleepTimer(minutes: Int) {
         // "End of track": ExoPlayer pauses right at the end of the current song, before the next starts.
         endOfTrack = minutes == SleepTimerCommand.END_OF_TRACK
-        (session?.player as? ExoPlayer)?.pauseAtEndOfMediaItems = endOfTrack
+        exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
         if (endOfTrack) { sleepTimer.set(0, SystemClock.elapsedRealtime()); sleepJob?.cancel(); publishSleepTimer(); return }
         sleepTimer.set(minutes, SystemClock.elapsedRealtime())
         sleepJob?.cancel()
@@ -333,10 +343,17 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            if (appScreens.remove(controller)) lockLyrics?.appVisible = appScreens.isNotEmpty()
+        }
+
         override fun onConnectAsync(
             session: MediaSession, controller: MediaSession.ControllerInfo,
         ): ListenableFuture<MediaSession.ConnectionResult> {
             val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+            if (controller.uid == Process.myUid() && controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_HINT)) {
+                appScreens += controller; lockLyrics?.appVisible = true
+            }
             // Preserve Media3's default read-only permissions for untrusted controllers.
             if (controller.uid == Process.myUid()) {
                 result.setAvailableSessionCommands(
@@ -380,7 +397,7 @@ class PlaybackService : MediaLibraryService() {
                         if (this@PlaybackService.session !== session) {
                             result.set(SessionResult(SessionError.ERROR_SESSION_DISCONNECTED))
                         } else {
-                            QueueCommand.enqueue(session.player as ExoPlayer, items, args.getBoolean(QueueCommand.NEXT))
+                            QueueCommand.enqueue(exo, items, args.getBoolean(QueueCommand.NEXT))
                             result.set(SessionResult(SessionResult.RESULT_SUCCESS))
                         }
                     } catch (cancelled: CancellationException) { result.cancel(false); throw cancelled }

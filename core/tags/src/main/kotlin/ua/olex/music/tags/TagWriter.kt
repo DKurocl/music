@@ -8,6 +8,9 @@ import java.io.ByteArrayOutputStream
  * absorbed the change), so only the start of the file is overwritten and the audio never moves.
  * Otherwise the caller writes [head] plus the original tail to a new copy and replaces the file.
  */
+/** A front cover to embed: the image bytes as they are (JPEG or PNG), never re-encoded. */
+class CoverArt(val bytes: ByteArray, val mime: String) { init { require(bytes.size in 1..(8 shl 20)) } }
+
 class TagRewrite(val head: ByteArray, val keepFrom: Long) {
     val inPlace: Boolean get() = head.size.toLong() == keepFrom
 }
@@ -21,19 +24,20 @@ class TagRewrite(val head: ByteArray, val keepFrom: Long) {
 object TagWriter {
     private const val PADDING = 8 * 1024
 
-    fun plan(source: ByteSource, edits: Map<String, List<String>>): TagRewrite? = try {
+    /** [cover] replaces the embedded pictures with one front cover; null keeps the pictures as they are. */
+    fun plan(source: ByteSource, edits: Map<String, List<String>>, cover: CoverArt? = null): TagRewrite? = try {
         val r = Reader(source)
         val id3 = Id3.sizeAt(r, 0)
         when {
-            r.ascii(id3.coerceAtMost(r.size - 4), 4) == "fLaC" -> flac(r, id3, edits)
-            r.ascii(4, 4) != "ftyp" && r.ascii(0, 4) != "OggS" && r.ascii(0, 4) != "RIFF" -> mp3(r, id3, edits)
+            r.ascii(id3.coerceAtMost(r.size - 4), 4) == "fLaC" -> flac(r, id3, edits, cover)
+            r.ascii(4, 4) != "ftyp" && r.ascii(0, 4) != "OggS" && r.ascii(0, 4) != "RIFF" -> mp3(r, id3, edits, cover)
             else -> null
         }
     } catch (_: Truncated) { null }
 
     // ---- FLAC -----------------------------------------------------------------------------------
 
-    private fun flac(r: Reader, start: Long, edits: Map<String, List<String>>): TagRewrite? {
+    private fun flac(r: Reader, start: Long, edits: Map<String, List<String>>, cover: CoverArt?): TagRewrite? {
         val kept = ArrayList<ByteArray>()     // whole blocks (header + body) to keep, STREAMINFO first
         var comments: List<Pair<String, String>> = emptyList()
         var vendor = "Music"
@@ -45,6 +49,7 @@ object TagWriter {
             when (type) {
                 4 -> r.bytes(at + 4, length).let { b -> vendor = vendorOf(b) ?: vendor; comments = rawComments(b) }
                 1 -> Unit // padding: rebuilt below
+                6 -> if (cover == null) kept += r.bytes(at, 4 + length)
                 else -> kept += r.bytes(at, 4 + length)
             }
             at += 4 + length
@@ -60,6 +65,13 @@ object TagWriter {
             write("fLaC".toByteArray())
             for (block in kept) { write((block[0].toInt() and 0x7F)); write(block, 1, block.size - 1) }
             write(4); be24(vc.size); write(vc)
+            if (cover != null) {
+                val mime = cover.mime.toByteArray()
+                val pic = ByteArrayOutputStream().apply {
+                    be32(3); be32(mime.size); write(mime); be32(0); be32(0); be32(0); be32(0); be32(0); be32(cover.bytes.size); write(cover.bytes)
+                }.toByteArray()
+                write(6); be24(pic.size); write(pic)
+            }
             write(0x80 or 1); be24(padding); write(ByteArray(padding))
         }.toByteArray()
         val bare = build(0).size.toLong()
@@ -96,14 +108,15 @@ object TagWriter {
         "ISRC" to "TSRC", "COMPILATION" to "TCMP", "BPM" to "TBPM", "LABEL" to "TPUB", "GROUPING" to "TIT1",
     )
 
-    private fun mp3(r: Reader, oldSize: Long, edits: Map<String, List<String>>): TagRewrite? {
+    private fun mp3(r: Reader, oldSize: Long, edits: Map<String, List<String>>, cover: CoverArt?): TagRewrite? {
         // Only a file that really is MPEG audio (or already has a tag) is written.
         if (oldSize == 0L && TagReader.read(object : ByteSource {
                 override val size get() = r.size
                 override fun read(position: Long, into: ByteArray, offset: Int, length: Int) = r.bytes(position, minOf(length.toLong(), r.size - position).toInt()).also { it.copyInto(into, offset) }.size
             })?.codec?.startsWith("mp") != true) return null
         val edited = edits.keys.map { Fields.canonical(it) }.toSet()
-        val replacedIds = edited.mapNotNull { FRAMES[it] }.toSet() + (if ("LYRICS" in edited) setOf("USLT") else emptySet())
+        val replacedIds = edited.mapNotNull { FRAMES[it] }.toSet() + (if ("LYRICS" in edited) setOf("USLT") else emptySet()) +
+            (if ("RATING" in edited) setOf("POPM") else emptySet()) + (if (cover != null) setOf("APIC") else emptySet())
         val frames = ByteArrayOutputStream()
         if (oldSize > 0) keepOldFrames(r, oldSize, replacedIds, edited, frames)
         for ((name, values) in edits) {
@@ -112,10 +125,16 @@ object TagWriter {
             if (list.isEmpty()) continue
             when {
                 canonical == "LYRICS" -> frame(frames, "USLT", byteArrayOf(3) + "eng".toByteArray() + byteArrayOf(0) + list.joinToString("\n").toByteArray())
+                // Rating 0-100 as a popularimeter (the Windows Media Player scale most players read).
+                canonical == "RATING" -> list.first().toIntOrNull()?.let { r ->
+                    val byte = when { r <= 0 -> 0; r <= 20 -> 1; r <= 40 -> 64; r <= 60 -> 128; r <= 80 -> 196; else -> 255 }
+                    frame(frames, "POPM", "Windows Media Player 9 Series".toByteArray() + byteArrayOf(0, byte.toByte()))
+                }
                 FRAMES[canonical] != null -> frame(frames, FRAMES.getValue(canonical), byteArrayOf(3) + list.joinToString("\u0000").toByteArray())
                 else -> frame(frames, "TXXX", byteArrayOf(3) + canonical.toByteArray() + byteArrayOf(0) + list.joinToString("\u0000").toByteArray())
             }
         }
+        if (cover != null) frame(frames, "APIC", byteArrayOf(0) + cover.mime.toByteArray(Charsets.ISO_8859_1) + byteArrayOf(0, 3, 0) + cover.bytes)
         val body = frames.toByteArray()
         fun build(padding: Int) = ByteArrayOutputStream().apply {
             write("ID3".toByteArray()); write(4); write(0); write(0); syncsafe(body.size + padding); write(body); write(ByteArray(padding))
@@ -165,5 +184,6 @@ object TagWriter {
 
     private fun ByteArrayOutputStream.syncsafe(n: Int) { write(n shr 21 and 0x7F); write(n shr 14 and 0x7F); write(n shr 7 and 0x7F); write(n and 0x7F) }
     private fun ByteArrayOutputStream.le32(n: Int) { write(n and 0xFF); write(n shr 8 and 0xFF); write(n shr 16 and 0xFF); write(n shr 24 and 0xFF) }
+    private fun ByteArrayOutputStream.be32(n: Int) { write(n shr 24 and 0xFF); write(n shr 16 and 0xFF); write(n shr 8 and 0xFF); write(n and 0xFF) }
     private fun ByteArrayOutputStream.be24(n: Int) { write(n shr 16 and 0xFF); write(n shr 8 and 0xFF); write(n and 0xFF) }
 }

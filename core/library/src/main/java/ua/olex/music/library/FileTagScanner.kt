@@ -22,9 +22,10 @@ internal class AndroidTagSource(private val context: Context) {
 
 /** Incremental enrichment runs on the repository's IO dispatcher before its atomic cache replacement. */
 internal object FileTagScanner {
-    const val READER_VERSION = 1
+    const val READER_VERSION = 2
 
-    suspend fun enrich(rows: List<TrackEntity>, cached: List<TrackEntity>, read: (String) -> AudioTags?): List<TrackEntity> {
+    /** [cue] finds a .cue file beside a long single-file album (folder access needed); null when there is none. */
+    suspend fun enrich(rows: List<TrackEntity>, cached: List<TrackEntity>, cue: (String) -> String? = { null }, read: (String) -> AudioTags?): List<TrackEntity> {
         val previous = cached.associateBy { it.id }
         return rows.map { row ->
             currentCoroutineContext().ensureActive()
@@ -34,10 +35,20 @@ internal object FileTagScanner {
                 old.copy(scanId = row.scanId, artworkUri = row.artworkUri, addedAt = row.addedAt)
             } else {
                 // Permission loss is a failed scan; per-file IO errors fall back and are retried next scan.
-                try { merge(row, read(row.uri)).copy(tagReaderVersion = READER_VERSION) }
+                try { withSidecarCue(merge(row, read(row.uri)), cue).copy(tagReaderVersion = READER_VERSION) }
                 catch (_: IOException) { row }
             }
         }
+    }
+
+    /** Albums ripped to one file are usually longer than 10 minutes; shorter files are never looked at. */
+    internal fun withSidecarCue(row: TrackEntity, cue: (String) -> String?): TrackEntity {
+        val path = row.path ?: return row
+        if (row.durationMs < 10 * 60_000L) return row
+        val metadata = row.metadataJson?.let { runCatching { FileMetadataCodec.decode(it) }.getOrNull() } ?: FileMetadata()
+        if (metadata.cueSheet != null) return row
+        val text = runCatching { cue(path) }.getOrNull() ?: return row
+        return row.copy(metadataJson = FileMetadataCodec.encode(metadata.copy(cueSheet = text)))
     }
 
     internal fun merge(row: TrackEntity, tags: AudioTags?): TrackEntity {
@@ -53,7 +64,7 @@ internal object FileTagScanner {
             gain?.trackGainDb?.takeIf { it.isFinite() }, gain?.trackPeak?.takeIf { it.isFinite() && it > 0 },
             gain?.albumGainDb?.takeIf { it.isFinite() }, gain?.albumPeak?.takeIf { it.isFinite() && it > 0 },
             tags.encoderDelay?.takeIf { it >= 0 }, tags.encoderPadding?.takeIf { it >= 0 }, tags.lyrics,
-            tags.first("MUSICBRAINZ_TRACKID"), tags.first("MUSICBRAINZ_ALBUMID"), cover?.offset, cover?.length, cover?.mime, tags.cueSheet)
+            tags.first("MUSICBRAINZ_TRACKID"), tags.first("MUSICBRAINZ_ALBUMID"), cover?.offset, cover?.length, cover?.mime, tags.cueSheet, tags.stars)
         return row.copy(
             title = title, artist = artist, album = tags.album.known() ?: row.album,
             albumArtist = tags.albumArtists.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: row.albumArtist,

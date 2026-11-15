@@ -9,15 +9,30 @@ import ua.olex.music.model.SavedSong
 @Database(
     entities = [UserSongEntity::class, FavouriteEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class, HistoryEntity::class, LyricOffsetEntity::class,
         RatingEntity::class, SmartPlaylistEntity::class],
-    version = 2, exportSchema = true,
+    version = 3, exportSchema = true,
     // Version 2 only adds tables (ratings, smart playlists): Room migrates it from the exported schemas.
+    // Version 3 keys playlist entries by position so a song can be added twice (MIGRATION_2_3).
     autoMigrations = [AutoMigration(from = 1, to = 2)],
 )
 abstract class UserDatabase : RoomDatabase() {
     abstract fun userData(): UserDao
 
     companion object {
-        fun open(context: Context): UserDatabase = Room.databaseBuilder(context.applicationContext, UserDatabase::class.java, "user.db").build()
+        fun open(context: Context): UserDatabase = Room.databaseBuilder(context.applicationContext, UserDatabase::class.java, "user.db")
+            .addMigrations(MIGRATION_2_3).build()
+
+        /** Same rows, new primary key (playlistId, position); the old unique position index becomes the key. */
+        val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `playlist_entries_new` (`playlistId` INTEGER NOT NULL, `songId` TEXT NOT NULL, `position` INTEGER NOT NULL, " +
+                    "PRIMARY KEY(`playlistId`, `position`), FOREIGN KEY(`playlistId`) REFERENCES `playlists`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                    "FOREIGN KEY(`songId`) REFERENCES `saved_songs`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )")
+                db.execSQL("INSERT INTO `playlist_entries_new` (`playlistId`, `songId`, `position`) SELECT `playlistId`, `songId`, `position` FROM `playlist_entries`")
+                db.execSQL("DROP TABLE `playlist_entries`")
+                db.execSQL("ALTER TABLE `playlist_entries_new` RENAME TO `playlist_entries`")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_playlist_entries_songId` ON `playlist_entries` (`songId`)")
+            }
+        }
     }
 }
 
@@ -47,10 +62,10 @@ data class FavouriteEntity(@PrimaryKey val songId: String, val addedAt: Long)
 @Entity(tableName = "playlists")
 data class PlaylistEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val name: String, val createdAt: Long)
 
-/** Each song occurs once per playlist; position is rewritten atomically when moving entries. */
+/** One row per place in a playlist: a song may appear more than once; positions are rewritten atomically. */
 @Entity(
-    tableName = "playlist_entries", primaryKeys = ["playlistId", "songId"],
-    indices = [Index("songId"), Index(value = ["playlistId", "position"], unique = true)],
+    tableName = "playlist_entries", primaryKeys = ["playlistId", "position"],
+    indices = [Index("songId")],
     foreignKeys = [
         ForeignKey(entity = PlaylistEntity::class, parentColumns = ["id"], childColumns = ["playlistId"], onDelete = ForeignKey.CASCADE),
         ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE),

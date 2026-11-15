@@ -111,11 +111,20 @@ fun MusicRoot(model: LibraryViewModel) {
     val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
     var editingTags by remember { mutableStateOf<List<Track>?>(null) }
-    var pendingTags by remember { mutableStateOf<Pair<List<Track>, Map<String, String>>?>(null) }
+    var pendingTags by remember { mutableStateOf<Pair<List<Track>, TagEditRequest>?>(null) }
     val writeRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         val pending = pendingTags
         pendingTags = null
         if (result.resultCode == android.app.Activity.RESULT_OK && pending != null) model.writeTags(pending.first, pending.second)
+    }
+    val context = LocalContext.current
+    fun requestTagWrite(tracks: List<Track>, request: TagEditRequest) {
+        val uris = tracks.filter { '#' !in it.id.value }.map { Uri.parse(it.uri) }.distinct()
+        if (uris.isEmpty()) return
+        // Android asks the owner once for the whole batch (or not at all with "manage media"); written after "Allow".
+        pendingTags = tracks to request
+        val pending = android.provider.MediaStore.createWriteRequest(context.contentResolver, uris)
+        writeRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build())
     }
     var equalizerOpen by rememberSaveable { mutableStateOf(false) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
@@ -128,7 +137,6 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
-    val context = LocalContext.current
     val activity = LocalActivity.current
     val chooseMusicFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri -> uri?.let(model::addMusicFolder) }
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { model.refresh() }
@@ -213,7 +221,10 @@ fun MusicRoot(model: LibraryViewModel) {
         loudness = playing.replayGain, onLoudness = model::setReplayGain)
     actionTrack?.let { track ->
         val saved = track.id.value in personal.favouriteByTrackId
-        TrackActionsSheet(track, saved, rating = stats[track.key.value]?.rating ?: 0, onRate = { model.setRating(track, it) },
+        TrackActionsSheet(track, saved, rating = stats[track.key.value]?.rating ?: 0, onRate = { stars ->
+            model.setRating(track, stars)
+            if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
+        }, ratingsToFiles = model.ratingsToFiles, onRatingsToFiles = model::changeRatingsToFiles,
             plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOf(
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
@@ -224,15 +235,9 @@ fun MusicRoot(model: LibraryViewModel) {
         ))
     }
     editingTags?.let { tracks ->
-        TagEditorDialog(tracks, onDismiss = { editingTags = null }) { fields ->
+        TagEditorDialog(tracks, onDismiss = { editingTags = null }) { request ->
             editingTags = null
-            val uris = tracks.filter { '#' !in it.id.value }.map { Uri.parse(it.uri) }.distinct()
-            if (uris.isNotEmpty()) {
-                // Android asks the owner once for the whole batch; the files are written after "Allow".
-                pendingTags = tracks to fields
-                val request = android.provider.MediaStore.createWriteRequest(context.contentResolver, uris)
-                writeRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build())
-            }
+            requestTagWrite(tracks, request)
         }
     }
     model.tagMessage?.let { message ->

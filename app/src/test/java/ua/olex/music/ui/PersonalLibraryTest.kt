@@ -26,7 +26,7 @@ class PersonalLibraryTest {
     private val missing = SavedSong.from(song.copy(id = TrackId("local:2"), title = "Missing song", path = "Music/2.flac"))
     private val playlist = PlaylistUi(7, "Evening", listOf(SavedSongRow(missing, null), SavedSongRow(SavedSong.from(song), song)))
     private fun actions(create: (String, List<Track>) -> Unit = { _, _ -> }, delete: (Long) -> Unit = {}) =
-        PersonalLibraryActions(create, { _, _ -> }, delete, { _, _ -> }, { _, _ -> }, { _, _, _ -> }, {})
+        PersonalLibraryActions(create, { _, _ -> }, delete, { _, _, _ -> }, { _, _, _ -> }, { _, _, _, _ -> }, {})
 
     @Test fun playlistCreateRequiresANameAndTrimsIt() {
         var created: String? = null

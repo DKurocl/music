@@ -30,11 +30,14 @@ class LibraryRepository internal constructor(
     private val enrich: suspend (List<TrackEntity>) -> List<TrackEntity> = { it },
     private val artworkPackage: String? = null,
     private val artworkRevision: Flow<Long> = flowOf(0L),
+    /** Folders the owner hid from the library (relative path prefixes such as "Recordings/"). */
+    private val excluded: Flow<Set<String>> = flowOf(emptySet()),
 ) {
     constructor(context: Context, database: LibraryDatabase, files: LocalMusicFiles? = null) : this(
         database.tracks(), { scanId -> MediaStoreScanner.scan(context.applicationContext, scanId) },
         changes = context.applicationContext.contentResolver.musicChanges(),
-        enrich = { rows -> FileTagScanner.enrich(rows, database.tracks().observeAll().first(), AndroidTagSource(context.applicationContext)::read) },
+        enrich = { rows -> FileTagScanner.enrich(rows, database.tracks().observeAll().first(), cue = { path -> files?.sidecarCueBlocking(path) }, read = AndroidTagSource(context.applicationContext)::read) },
+        excluded = LibraryFolders.excluded(context.applicationContext),
         artworkPackage = context.applicationContext.packageName, artworkRevision = files?.revision ?: flowOf(0L),
     )
 
@@ -42,7 +45,9 @@ class LibraryRepository internal constructor(
     private var lastScanId = 0L
 
     val tracks: Flow<List<Track>> = combine(dao.observeAll(), artworkRevision) { rows, revision -> rows.map { it.toTrack(artworkPackage, revision) } }.flowOn(Dispatchers.Default)
-    val index: Flow<LibraryIndex> = tracks.map(LibraryIndex::build).flowOn(Dispatchers.Default)
+    val index: Flow<LibraryIndex> = combine(tracks, excluded) { all, hidden ->
+        LibraryIndex.build(if (hidden.isEmpty()) all else all.filter { t -> val p = t.path; p == null || hidden.none { p.startsWith(it) } })
+    }.flowOn(Dispatchers.Default)
 
     /** Prefix matches across title, artist, album and album artist; accents are handled by SQLite. */
     fun search(query: String): Flow<List<Track>> {
