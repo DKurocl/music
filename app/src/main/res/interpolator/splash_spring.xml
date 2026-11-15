@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Arrives with a small overshoot and settles, like an expressive spring (splash icon). -->
+<pathInterpolator xmlns:android="http://schemas.android.com/apk/res/android"
+    android:pathData="M0,0 C0.18,0 0.12,1.14 0.5,1.06 C0.74,1.01 0.82,1 1,1" />

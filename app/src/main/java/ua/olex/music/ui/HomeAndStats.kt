@@ -60,6 +60,19 @@ internal fun HomePage(
         library.songs.map { it to (stats[it.key.value]?.plays ?: 0) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
     }
     val listened = remember(library, stats) { LibraryStats.of(library) { stats[it.key.value] } }
+    // Quick picks (YouTube Music's opening shelf): today's mix of what the owner plays and likes,
+    // with a few unplayed songs by the artists they play; stable for the day. A second source
+    // (YouTube Music) will mix its songs into this same shelf.
+    val day = java.time.LocalDate.now().toEpochDay()
+    val quickPicks = remember(library, stats, favourites, day) {
+        val random = java.util.Random(day)
+        val liked = favourites.toSet()
+        val played = library.songs.filter { (stats[it.key.value]?.plays ?: 0) > 0 || it in liked }
+            .sortedByDescending { (stats[it.key.value]?.plays ?: 0) + if (it in liked) 5 else 0 }.take(60).shuffled(random).take(14)
+        val topArtists = artists.take(6).map { it.name }.toSet()
+        val fresh = library.songs.filter { it.artist in topArtists && (stats[it.key.value]?.plays ?: 0) == 0 }.shuffled(random).take(6)
+        (played + fresh).distinctBy { it.id }.ifEmpty { library.songs.shuffled(random).take(20) }.shuffled(random).take(20)
+    }
     val hero = recentAlbums.firstOrNull() ?: addedAlbums.firstOrNull() ?: library.albums.firstOrNull()
 
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
@@ -109,6 +122,11 @@ internal fun HomePage(
             }
         }
 
+        if (quickPicks.size >= 4) {
+            item(key = "picks-h") { SectionTitle("Quick picks") }
+            item(key = "picks") { QuickPicks(quickPicks, currentId, onPlay, onTrackActions) }
+        }
+
         if (artists.size > 1) {
             item(key = "artists-h") { SectionTitle("Your artists") { onSeeAll("ARTISTS") } }
             item(key = "artists") {
@@ -130,7 +148,7 @@ internal fun HomePage(
             }
         }
 
-        if (recentAlbums.size > 1) { item(key = "recent-h") { SectionTitle("Played lately") { onSeeAll("HISTORY") } }; item(key = "recent") { AlbumCarousel(recentAlbums.drop(1), onOpenAlbum) } }
+        if (recentAlbums.size > 1) { item(key = "recent-h") { SectionTitle("Listen again") { onSeeAll("HISTORY") } }; item(key = "recent") { AlbumCarousel(recentAlbums.drop(1), onOpenAlbum) } }
         if (addedAlbums.isNotEmpty()) { item(key = "added-h") { SectionTitle("Added lately") { onSeeAll("ALBUMS") } }; item(key = "added") { AlbumCarousel(addedAlbums, onOpenAlbum) } }
 
         val lists = smart.filter { it.tracks.isNotEmpty() }
@@ -298,6 +316,40 @@ internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modif
 
 /** A section heading; with [onSeeAll], the whole heading row opens the full list (a bigger target than a small link). */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+/**
+ * Songs in columns of four, swiped sideways a column at a time, the next column peeking in:
+ * many songs in little height, the way YouTube Music opens. A tap plays the shelf from that song.
+ */
+@Composable
+private fun QuickPicks(songs: List<Track>, currentId: String?, onPlay: (List<Track>, Int) -> Unit, onTrackActions: (Track) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val columns = songs.chunked(4)
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    val width = with(androidx.compose.ui.platform.LocalDensity.current) { androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp() } * 0.86f
+    LazyRow(state = state, flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(state),
+        contentPadding = PaddingValues(horizontal = 8.dp)) {
+        items(columns.size) { c ->
+            Column(Modifier.width(width)) {
+                columns[c].forEachIndexed { r, track ->
+                    val index = c * 4 + r
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onPlay(songs, index) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Artwork(track.artworkUri, Modifier.size(52.dp), 12.dp)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = if (track.id.value == currentId) cs.primary else cs.onSurface)
+                            Text(track.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onTrackActions(track) }, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) {
+                            Symbol(Glyph.MORE, color = cs.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp).clip(RoundedCornerShape(16.dp))
@@ -370,16 +422,18 @@ internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, mod
                     Text("${hours(s.totalMs)} of music · ${s.lossless} lossless · ${s.hiRes} hi-res", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                     val colors = listOf(cs.primary, cs.tertiary, cs.secondary, cs.primaryContainer, cs.tertiaryContainer, cs.outline)
                     val total = s.formats.sumOf { it.second }.coerceAtLeast(1)
+                    // Formats under 1 % would read "0%" and leave a hairline: they are left out.
+                    val formats = s.formats.filter { it.second * 100 / total >= 1 }.take(colors.size)
                     Row(Modifier.fillMaxWidth().height(20.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                        s.formats.take(colors.size).forEachIndexed { i, (_, n) ->
+                        formats.forEachIndexed { i, (_, n) ->
                             Box(Modifier.weight(n.toFloat() / total).fillMaxHeight().clip(RoundedCornerShape(
                                 topStart = if (i == 0) 10.dp else 3.dp, bottomStart = if (i == 0) 10.dp else 3.dp,
-                                topEnd = if (i == minOf(s.formats.size, colors.size) - 1) 10.dp else 3.dp, bottomEnd = if (i == minOf(s.formats.size, colors.size) - 1) 10.dp else 3.dp))
+                                topEnd = if (i == formats.lastIndex) 10.dp else 3.dp, bottomEnd = if (i == formats.lastIndex) 10.dp else 3.dp))
                                 .background(colors[i]))
                         }
                     }
                     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        s.formats.take(colors.size).forEachIndexed { i, (name, n) ->
+                        formats.forEachIndexed { i, (name, n) ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(colors[i]))
                                 Text("  $name  ", style = MaterialTheme.typography.labelLarge)

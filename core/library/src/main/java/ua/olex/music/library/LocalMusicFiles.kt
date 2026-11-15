@@ -146,6 +146,26 @@ class LocalMusicFiles(context: Context) {
         resolver.openInputStream(uri)?.use { decode(it, name) } ?: throw IOException("Sidecar could not be opened")
     }
 
+    /**
+     * A moving cover beside the song (cover.mp4, folder.mp4, animated.mp4 or cover.webm in its
+     * folder), as a content URI, or null. Looked up once per folder and remembered across restarts;
+     * Reload or a rescan looks again.
+     */
+    suspend fun motionCover(audioPath: String?): String? = withContext(Dispatchers.IO) {
+        if (audioPath == null) return@withContext null
+        val root = _folders.value.filter { SidecarLyrics.directory(audioPath, it.path) != null }.maxByOrNull { it.path.length } ?: return@withContext null
+        val directory = SidecarLyrics.directory(audioPath, root.path) ?: return@withContext null
+        val key = "motion:" + _revision.value + ":" + directory
+        preferences.getString(key, null)?.let { return@withContext it.ifEmpty { null } }
+        val tree = Uri.parse(root.uri)
+        val found = MOTION_NAMES.firstNotNullOfOrNull { name ->
+            val uri = DocumentsContract.buildDocumentUriUsingTree(tree, "primary:$directory/$name")
+            runCatching { resolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_SIZE), null, null, null)?.use { if (it.moveToFirst()) uri.toString() else null } }.getOrNull()
+        }
+        preferences.edit().putString(key, found.orEmpty()).apply()
+        found
+    }
+
     private fun decode(stream: InputStream, name: String): SidecarText {
         val bytes = stream.readNBytes(MAX_LYRICS_BYTES + 1)
         require(bytes.size <= MAX_LYRICS_BYTES) { "Lyrics file is too large" }
@@ -172,5 +192,8 @@ class LocalMusicFiles(context: Context) {
         if (SidecarLyrics.directory("$path/example.flac", path) == null) return null
         return MusicFolder(uri.toString(), path)
     }
-    companion object { const val MAX_LYRICS_BYTES = 1024 * 1024 }
+    companion object {
+        const val MAX_LYRICS_BYTES = 1024 * 1024
+        val MOTION_NAMES = listOf("cover.mp4", "folder.mp4", "animated.mp4", "cover.webm")
+    }
 }

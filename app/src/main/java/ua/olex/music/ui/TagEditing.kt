@@ -1,5 +1,15 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package ua.olex.music.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.launch
 import android.content.Context
 import android.net.Uri
 import androidx.compose.foundation.layout.*
@@ -140,6 +150,19 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
     val values = remember(tracks) { mutableStateMapOf<String, String>().apply { fields.forEach { (k, v) -> put(k, v.second) } } }
     val touched = remember(tracks) { mutableStateMapOf<String, Boolean>() }
     val cs = MaterialTheme.colorScheme
+    // Looking the song (or album) up online: candidates, then a before/after comparison to apply.
+    val online = remember { OnlineTags() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var lookup by remember(tracks) { mutableStateOf<Lookup?>(null) }
+    fun findOnline() {
+        lookup = Lookup.Searching
+        scope.launch {
+            val found = runCatching { online.search(tracks) }.getOrNull()
+            lookup = when { found == null -> Lookup.Failed("Couldn't reach the catalogue. Check the connection and try again.")
+                found.isEmpty() -> Lookup.Failed("Nothing matched. Fix the artist or title a little, then search again.")
+                else -> Lookup.Results(found) }
+        }
+    }
     // One field, filled and rounded (M3E), "Keep" when the chosen songs differ.
     @Composable
     fun field(key: String, modifier: Modifier = Modifier.fillMaxWidth()) {
@@ -168,6 +191,24 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     Text(if (single) "${tracks.first().title} · ${tracks.first().artist}" else "${tracks.size} songs · fields that differ say Keep",
                         style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
+                if (lookup == null) androidx.compose.material3.FilledTonalIconButton(onClick = { findOnline() },
+                    modifier = Modifier.semantics { contentDescription = if (single) "Find this song online" else "Find this album online" }) { Symbol(Glyph.SEARCH) }
+            }
+            lookup?.let { state ->
+                OnlineLookup(state, tracks, values, onBack = { lookup = if (state is Lookup.Compare) Lookup.Results(state.all) else null },
+                    onPick = { candidate, all ->
+                        lookup = Lookup.Compare(candidate, null, all, loadingCover = candidate.coverUrl != null)
+                        candidate.coverUrl?.let { url -> scope.launch {
+                            val bytes = runCatching { online.cover(url) }.getOrNull()
+                            (lookup as? Lookup.Compare)?.takeIf { it.candidate == candidate }?.let { lookup = it.copy(cover = bytes, loadingCover = false) }
+                        } }
+                    },
+                    onApply = { chosen, newCover ->
+                        chosen.forEach { (key, value) -> if (fields.any { it.first == key }) { values[key] = value; touched[key] = true } }
+                        newCover?.let { cover = CoverArt(it, "image/jpeg"); coverError = null }
+                        lookup = null
+                    }, onRetry = { findOnline() })
+                return@Column
             }
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 group("Song")
@@ -216,6 +257,108 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     val changed = fields.map { it.first }.filter { single || touched[it] == true }.associateWith { values[it].orEmpty() }
                     onSave(TagEditRequest(changed, cover, nameTemplate.takeIf { rename }, folderTemplate.takeIf { moveFiles }))
                 }, modifier = Modifier.height(48.dp)) { Text("Save") }
+            }
+        }
+    }
+}
+
+/** Where an online lookup in the tag editor is. */
+internal sealed interface Lookup {
+    data object Searching : Lookup
+    data class Failed(val message: String) : Lookup
+    data class Results(val candidates: List<OnlineTags.Candidate>) : Lookup
+    data class Compare(val candidate: OnlineTags.Candidate, val cover: ByteArray?, val all: List<OnlineTags.Candidate>, val loadingCover: Boolean) : Lookup
+}
+
+/**
+ * The lookup in place of the form: matches ranked by how well they fit the file (the best marked),
+ * then for the chosen one every field as "now -> found", each with its own tick (on where they
+ * differ), and the covers side by side. Apply fills the form; Save writes the files as usual.
+ */
+@Composable
+private fun androidx.compose.foundation.layout.ColumnScope.OnlineLookup(state: Lookup, tracks: List<Track>, values: Map<String, String>, onBack: () -> Unit,
+    onPick: (OnlineTags.Candidate, List<OnlineTags.Candidate>) -> Unit, onApply: (Map<String, String>, ByteArray?) -> Unit, onRetry: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val single = tracks.size == 1
+    Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        when (state) {
+            Lookup.Searching -> Row(Modifier.padding(vertical = 24.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                androidx.compose.material3.LoadingIndicator(Modifier.size(40.dp)); Text("Looking for matches…", modifier = Modifier.padding(start = 12.dp))
+            }
+            is Lookup.Failed -> {
+                Text(state.message, style = MaterialTheme.typography.bodyLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = onRetry) { Text("Search again") }; TextButton(onClick = onBack) { Text("Back to the form") } }
+            }
+            is Lookup.Results -> {
+                Text(if (single) "Matches for this song" else "Matches for this album", style = MaterialTheme.typography.titleMedium)
+                state.candidates.forEachIndexed { i, c ->
+                    Surface(onClick = { onPick(c, state.candidates) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(if (i == 0) 24.dp else 16.dp),
+                        color = if (i == 0) cs.secondaryContainer else cs.surfaceContainerHigh) {
+                        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            coil3.compose.AsyncImage(c.coverUrl?.replace("1200x1200bb", "200x200bb"), null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(56.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(cs.surfaceContainerHighest))
+                            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                                Text(c.title ?: c.album.orEmpty(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text(listOfNotNull(c.artist, c.album.takeIf { single }, c.year?.toString()).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                                    color = cs.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                if (i == 0) Text("Best match", style = MaterialTheme.typography.labelMedium, color = cs.primary)
+                            }
+                            c.durationMs?.takeIf { single }?.let { Text(clock(it), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant) }
+                        }
+                    }
+                }
+                TextButton(onClick = onBack) { Text("Back to the form") }
+            }
+            is Lookup.Compare -> {
+                val found = state.candidate.fields(single)
+                val labels = mapOf("TITLE" to "Title", "ARTIST" to "Artists", "ALBUM" to "Album", "ALBUMARTIST" to "Album artist", "DATE" to "Year",
+                    "TRACKNUMBER" to "Track", "DISCNUMBER" to "Disc", "GENRE" to "Genres")
+                val ticks = remember(state.candidate) { androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply {
+                    found.forEach { (k, v) -> put(k, v != values[k].orEmpty()) } } }
+                var takeCover by remember(state.candidate) { mutableStateOf(true) }
+                Text("Now → found", style = MaterialTheme.typography.titleMedium)
+                // Covers side by side, with their sizes, so the better picture is obvious.
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Artwork(tracks.first().artworkUri, Modifier.size(112.dp), 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
+                        Text("Now", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    }
+                    Symbol(Glyph.CHEVRON, color = cs.onSurfaceVariant)
+                    Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                        Box(Modifier.size(112.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).background(cs.surfaceContainerHighest), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                            if (state.loadingCover) androidx.compose.material3.LoadingIndicator(Modifier.size(36.dp))
+                            else if (state.cover != null) coil3.compose.AsyncImage(state.cover, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            else Text("None", style = MaterialTheme.typography.labelMedium)
+                        }
+                        Text(if (state.cover != null) "Found · 1200 px · ${state.cover.size / 1024} KB" else "Found", style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    androidx.compose.material3.Checkbox(takeCover && state.cover != null, { takeCover = it }, enabled = state.cover != null,
+                        modifier = Modifier.semantics { contentDescription = "Use the found cover" })
+                }
+                found.forEach { (key, value) ->
+                    val now = values[key].orEmpty()
+                    val differs = value != now
+                    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp), color = cs.surfaceContainerHigh) {
+                        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(labels[key] ?: key, style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+                                if (differs) {
+                                    Text(now.ifEmpty { "(empty)" }, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+                                        textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                    Text(value, style = MaterialTheme.typography.bodyLarge, color = cs.primary, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                } else Text("$value · same", style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            }
+                            androidx.compose.material3.Checkbox(ticks[key] == true, { ticks[key] = it }, enabled = differs,
+                                modifier = Modifier.semantics { contentDescription = "Use the found ${labels[key] ?: key}" })
+                        }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End), modifier = Modifier.fillMaxWidth()) {
+                    TextButton(onClick = onBack) { Text("Other matches") }
+                    Button(onClick = { onApply(found.filterKeys { ticks[it] == true }, state.cover.takeIf { takeCover }) }) { Text("Apply") }
+                }
+                Text("Apply fills the form; Save writes it into the files, so it stays with the songs.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
         }
     }

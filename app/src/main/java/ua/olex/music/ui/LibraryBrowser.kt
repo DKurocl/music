@@ -112,6 +112,8 @@ internal fun LibraryBrowser(
     recentSearches: List<String> = emptyList(), onSearchUsed: (String) -> Unit = {}, onClearRecent: () -> Unit = {},
     /** The open collection's name once its header has scrolled away (null when none is open), for the top bar. */
     onCollection: (String?) -> Unit = {}, closeCollection: Int = 0,
+    /** Set when something here was opened from another place: Back from it goes there. */
+    onLeave: (() -> Unit)? = null,
     /** Bumped when the Search tab is tapped again: back to the tiles and the field focused (as Google Play does). */
     focusSearch: Int = 0,
     /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
@@ -184,23 +186,31 @@ internal fun LibraryBrowser(
     LaunchedEffect(source) { if (unsorted != null && picked.ids.isNotEmpty()) picked = picked.retain(unsorted) }
     fun batch(action: (List<Track>) -> Unit) { visible?.let(picked::ordered)?.takeIf { it.isNotEmpty() }?.let(action) }
     LaunchedEffect(selectedId, groups) { if (selectedId != null && selected == null) selectedId = null }
-    LaunchedEffect(open) { open?.let { (t, id) -> tabName = t; selectedId = id; onOpened() } }
+    // What was opened from outside (Home, the player): Back from it leaves to where the owner came from.
+    var openedFromOutside by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(open) { open?.let { (t, id) -> tabName = t; selectedId = id; openedFromOutside = "collection"; onOpened() } }
     // An album opened from an artist's page goes back to that artist, not to the album grid.
     var backToArtist by rememberSaveable { mutableStateOf<String?>(null) }
     var allArtistSongs by rememberSaveable(selectedId) { mutableStateOf(false) }
     fun closeSelected() {
         val artist = backToArtist
         backToArtist = null
-        if (artist != null && tab == LibraryTab.ALBUMS) { tabName = LibraryTab.ARTISTS.name; selectedId = artist } else selectedId = null
+        if (artist != null && tab == LibraryTab.ALBUMS) { tabName = LibraryTab.ARTISTS.name; selectedId = artist; return }
+        if (openedFromOutside == "collection" && onLeave != null) { openedFromOutside = null; selectedId = null; browsing = null; onLeave(); return }
+        selectedId = null
     }
     LaunchedEffect(closeCollection) { if (closeCollection > 0) closeSelected() }
     BackHandler(searching || selected != null) {
         if (searching) onQueryChange("") else closeSelected()
     }
     BackHandler(picking) { picking = false; picked = TrackSelection() }
-    LaunchedEffect(openTile) { openTile?.let { t -> runCatching { BrowseTile.valueOf(t) }.getOrNull()?.let { tile -> browsing = tile.name; tabName = tile.tab.name; filter = tile.filter; onOpened() } } }
+    LaunchedEffect(openTile) { openTile?.let { t -> runCatching { BrowseTile.valueOf(t) }.getOrNull()?.let { tile -> browsing = tile.name; tabName = tile.tab.name; filter = tile.filter; openedFromOutside = "tile"; onOpened() } } }
     BackHandler(mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS && selected == null) { tabName = LibraryTab.PLAYLISTS.name }
-    BackHandler(mode == BrowserMode.SEARCH && browsing != null && selected == null && !searching) { browsing = null; filter = ua.olex.music.model.TrackFilter() }
+    fun closeTile() {
+        browsing = null; filter = ua.olex.music.model.TrackFilter()
+        if (openedFromOutside == "tile" && onLeave != null) { openedFromOutside = null; onLeave() }
+    }
+    BackHandler(mode == BrowserMode.SEARCH && browsing != null && selected == null && !searching) { closeTile() }
     missingFavourite?.let { id ->
         AppDialog(onDismissRequest = { missingFavourite = null }, title = { Text("Remove unavailable favourite?") },
             text = { Text("The saved entry will be removed. Your music files are not changed.") },
@@ -260,7 +270,7 @@ internal fun LibraryBrowser(
         // Inside a tile: its name with a way back to the tiles.
         if (mode == BrowserMode.SEARCH && !searching && selected == null) browsing?.let { name ->
             Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.material3.IconButton(onClick = { browsing = null; filter = ua.olex.music.model.TrackFilter() },
+                androidx.compose.material3.IconButton(onClick = { closeTile() },
                     modifier = Modifier.semantics { contentDescription = "Back to browse" }) { Symbol(Glyph.BACK) }
                 Text(BrowseTile.valueOf(name).title, style = MaterialTheme.typography.titleLarge)
             }
@@ -334,7 +344,7 @@ internal fun LibraryBrowser(
         LaunchedEffect(selected?.id, headerGone) { onCollection(selected?.let { if (headerGone) it.name else "" }) }
         LaunchedEffect(selected?.id) { if (selected != null) listState.scrollToItem(0) }
         val railTracks = if (!searching && selected == null && tab == LibraryTab.SONGS && (order.mode == TrackSortMode.DEFAULT || order.mode == TrackSortMode.TITLE)) visible else null
-        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current + (if (picking) 80.dp else 0.dp))) {
             scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
             when {
                 searching -> {

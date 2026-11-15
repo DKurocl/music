@@ -54,7 +54,7 @@ internal fun SettingsPage(
         item { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
 
         item { Group("Playback") }
-        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in 0.3 s and out 0.2 s instead of cutting", fades, first = true, last = headphones.isEmpty()) {
+        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in a quarter second and out faster, instead of cutting", fades, first = true, last = headphones.isEmpty()) {
             fades = it; prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, it).apply() } }
         headphones.forEachIndexed { i, name ->
             item(key = "hp-$name") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {

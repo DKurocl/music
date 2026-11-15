@@ -192,7 +192,7 @@ class DesignGalleryTest {
     }
 
     @Test fun equalizer() {
-        compose.setContent { Over { EqualizerSheet(ua.olex.music.playback.EqualizerState("bt", "WF-1000XM5", true), true, null, { _, _ -> }, {}) } }
+        compose.setContent { Over { EqualizerSheet(ua.olex.music.playback.EqualizerState("bt", "WF-1000XM5", true, ua.olex.music.dsp.SonyCorrection.settings.copy(enabled = true)), true, null, { _, _ -> }, {}) } }
         shot("25-equalizer")
     }
 

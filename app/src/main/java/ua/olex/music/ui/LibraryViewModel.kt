@@ -116,6 +116,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             state.copy(lyrics = ua.olex.music.lyrics.LyricsCleanup.clean(state.lyrics, track?.title, track?.artist))
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
+    /** A moving cover for the playing song, when its folder has one. */
+    val motionCover = combine(lyricTrack, graph.musicFiles.revision) { track, _ -> track }
+        .mapLatest { track -> runCatching { graph.musicFiles.motionCover(track?.path) }.getOrNull() }
+        .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     fun reloadLyrics() = refreshLocalFiles(rescan = false)
 
     /** Saves hand-fixed timing for the playing song (app storage, wins over other sources). */
