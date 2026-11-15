@@ -12,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.dp
@@ -36,6 +38,8 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     var follow by rememberSaveable(state.mediaId) { mutableStateOf(true) }
     var sourcesOpen by rememberSaveable(state.mediaId) { mutableStateOf(lyrics.lines.isEmpty()) }
     var current by remember(state.mediaId, lyrics) { mutableIntStateOf(-1) }
+    // The lyric clock: read every 50 ms for word-timed lyrics (the word fill), 100 ms for lines.
+    var now by remember(state.mediaId, lyrics) { mutableLongStateOf(0L) }
     val timed = lyrics.sync != Sync.NONE
     val hasSources = onChooseFolder != null || onReload != null || note != null || folders.isNotEmpty()
     LaunchedEffect(dragging) { if (dragging) follow = false }
@@ -44,8 +48,9 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
         if (!timed) { current = -1; return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             do {
-                current = lyrics.indexAt(position() + offsetMs)
-                if (state.isPlaying) delay(100)
+                now = position() + offsetMs
+                current = lyrics.indexAt(now)
+                if (state.isPlaying) delay(if (lyrics.sync == Sync.WORD) 50 else 100)
             } while (state.isPlaying)
         }
     }
@@ -86,13 +91,52 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                     }
                 }
                 itemsIndexed(lyrics.lines) { index, line ->
-                    Text(line.text, style = if (line.background) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
-                        color = if (index == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.fillMaxWidth().then(if (timed) Modifier.clickable(onClickLabel = "Seek to lyric") {
-                            onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true; sourcesOpen = false
-                        } else Modifier).semantics { selected = index == current })
+                    LyricLine(line, index, current, now, timed) {
+                        onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true; sourcesOpen = false
+                    }
                 }
             }
         }
     }
 }
+
+/**
+ * One lyric line. The line being sung is large and in the accent; with word timing its words fill
+ * in as they are sung (sung, then the current word blending in, then the rest dim). Lines already
+ * sung and lines to come are quieter, more so the further they are. Backing vocals are smaller;
+ * a second singer ("v2", "F") sits on the other side, as Apple Music shows duets.
+ */
+@Composable
+internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int, now: Long, timed: Boolean, onSeek: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val active = index == current
+    val distance = if (current < 0) 0 else kotlin.math.abs(index - current)
+    val alpha by androidx.compose.animation.core.animateFloatAsState(
+        when { !timed || active -> 1f; distance == 1 -> 0.55f; else -> 0.35f }, label = "lyric-alpha")
+    val dim = cs.onSurface.copy(alpha = 0.35f)
+    val style = when {
+        line.background -> MaterialTheme.typography.titleMedium
+        active -> MaterialTheme.typography.headlineMediumEmphasized
+        else -> MaterialTheme.typography.headlineSmallEmphasized
+    }
+    val text = if (active && line.words.isNotEmpty()) androidx.compose.ui.text.buildAnnotatedString {
+        for (word in line.words) {
+            val p = word.progress(now)
+            val color = when { p >= 1f -> cs.primary; p <= 0f -> dim; else -> androidx.compose.ui.graphics.lerp(dim, cs.primary, 0.35f + 0.65f * p) }
+            withStyle(androidx.compose.ui.text.SpanStyle(color = color)) { append(word.text) }
+        }
+    } else androidx.compose.ui.text.AnnotatedString(line.text)
+    val secondVoice = line.agent != null && line.agent !in setOf("v1", "M")
+    Column(
+        Modifier.fillMaxWidth().graphicsLayerAlpha(alpha)
+            .then(if (timed) Modifier.clickable(onClickLabel = "Seek to lyric", onClick = onSeek) else Modifier)
+            .semantics { selected = active },
+        horizontalAlignment = if (secondVoice) androidx.compose.ui.Alignment.End else androidx.compose.ui.Alignment.Start,
+    ) {
+        Text(text, style = style, color = if (active && line.words.isEmpty()) cs.primary else if (active) dim else cs.onSurface,
+            textAlign = if (secondVoice) androidx.compose.ui.text.style.TextAlign.End else androidx.compose.ui.text.style.TextAlign.Start)
+        line.translation?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = cs.onSurfaceVariant) }
+    }
+}
+
+private fun Modifier.graphicsLayerAlpha(alpha: Float) = this.then(androidx.compose.ui.Modifier.graphicsLayer { this.alpha = alpha })
