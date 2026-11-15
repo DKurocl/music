@@ -25,12 +25,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import ua.olex.music.playback.PlayerState
 import kotlin.math.roundToInt
 
 /**
- * The play queue. Each row can be dragged by its handle to a new place (one move is sent when it
- * is dropped), removed with its button, or played with a tap; screen readers get "Move up", "Move
+ * The play queue. Each row can be dragged by its handle: the other rows make way under the finger
+ * (a tick at each step) and one move is sent when it is dropped; removed with its button, or played with a tap; screen readers get "Move up", "Move
  * down" and "Remove" as actions. Edits address stable occurrences, so repeated copies of one song
  * stay independent.
  */
@@ -41,9 +43,14 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
     var draggingKey by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    val rowHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) { 72.dp.toPx() }
+    var rowHeightPx by remember { mutableFloatStateOf(1f) }
+    // The order on screen: changed live while dragging, sent to the player once on drop.
+    var order by remember(state.queue) { mutableStateOf(state.queue) }
+    var startIndex by remember { mutableIntStateOf(-1) }
+    val currentKey = state.queue.getOrNull(state.queueIndex)?.key
+    val latestOrder by rememberUpdatedState(order)
 
-    AppSheet(onDismiss, cs.surfaceContainerLow, gestures = draggingKey == null) {
+    AppSheet(onDismiss, cs.surfaceContainerLow, gestures = draggingKey == null) { CompositionLocalProvider(LocalIsPlaying provides state.isPlaying) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)
@@ -54,8 +61,8 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
             }
         }
         LazyColumn(state = list, modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            itemsIndexed(state.queue, key = { _, item -> item.key }) { position, item ->
-                val current = position == state.queueIndex
+            itemsIndexed(order, key = { _, item -> item.key }) { position, item ->
+                val current = item.key == currentKey
                 val dragging = draggingKey == item.key
                 ListItem(
                     headlineContent = {
@@ -64,27 +71,46 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     },
                     supportingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (current) Symbol(Glyph.WAVE, size = 16.dp, color = cs.primary, bold = true)
                             Text(item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     },
-                    leadingContent = { Artwork(item.artworkUri, Modifier.size(48.dp), 12.dp) },
+                    leadingContent = {
+                        Box(Modifier.size(48.dp).androidxClip()) {
+                            Artwork(item.artworkUri, Modifier.fillMaxSize(), 12.dp)
+                            if (current) NowPlayingOverlay(Modifier.matchParentSize())
+                        }
+                    },
                     trailingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (!current) IconButton(onClick = { onRemove(item.key) }, modifier = Modifier.semantics { contentDescription = "Remove ${item.title} from queue" }) {
                                 Symbol(Glyph.CLOSE, size = 20.dp, color = cs.onSurfaceVariant)
                             }
                             Box(
-                                Modifier.size(48.dp).pointerInput(item.key, state.queue.size) {
+                                Modifier.size(48.dp).pointerInput(item.key) {
                                     detectVerticalDragGestures(
-                                        onDragStart = { draggingKey = item.key; dragOffset = 0f; haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate) },
-                                        onVerticalDrag = { change, amount -> change.consume(); dragOffset += amount },
-                                        onDragEnd = {
-                                            val delta = (dragOffset / rowHeightPx).roundToInt().coerceIn(-position, state.queue.lastIndex - position)
-                                            if (delta != 0) { onMove(item.key, delta); haptics.performHapticFeedback(HapticFeedbackType.GestureEnd) }
-                                            draggingKey = null; dragOffset = 0f
+                                        onDragStart = {
+                                            draggingKey = item.key; dragOffset = 0f
+                                            startIndex = latestOrder.indexOfFirst { it.key == item.key }
+                                            haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                         },
-                                        onDragCancel = { draggingKey = null; dragOffset = 0f },
+                                        onVerticalDrag = { change, amount ->
+                                            change.consume()
+                                            dragOffset += amount
+                                            val now = latestOrder.indexOfFirst { it.key == item.key }
+                                            // Past half a row, the neighbour swaps places with the dragged row.
+                                            val step = when { dragOffset > rowHeightPx / 2 && now < latestOrder.lastIndex -> 1; dragOffset < -rowHeightPx / 2 && now > 0 -> -1; else -> 0 }
+                                            if (step != 0) {
+                                                order = latestOrder.toMutableList().apply { add(now + step, removeAt(now)) }
+                                                dragOffset -= step * rowHeightPx
+                                                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            val end = latestOrder.indexOfFirst { it.key == item.key }
+                                            if (startIndex >= 0 && end != startIndex) { onMove(item.key, end - startIndex); haptics.performHapticFeedback(HapticFeedbackType.GestureEnd) }
+                                            draggingKey = null; dragOffset = 0f; startIndex = -1
+                                        },
+                                        onDragCancel = { order = state.queue; draggingKey = null; dragOffset = 0f; startIndex = -1 },
                                     )
                                 },
                                 contentAlignment = Alignment.Center,
@@ -93,6 +119,8 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     },
                     colors = ListItemDefaults.colors(containerColor = if (dragging) cs.surfaceContainerHighest else cs.surfaceContainerLow),
                     modifier = Modifier
+                        .then(if (dragging) Modifier else Modifier.animateItem())
+                        .onSizeChanged { if (it.height > 0) rowHeightPx = it.height.toFloat() }
                         .zIndexWhen(dragging)
                         .graphicsLayer { if (dragging) { translationY = dragOffset; shadowElevation = 12f } }
                         .clickable { onPlay(item.key) }
@@ -101,14 +129,15 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                             selected = current
                             customActions = listOfNotNull(
                                 if (position > 0) CustomAccessibilityAction("Move up") { onMove(item.key, -1); true } else null,
-                                if (position < state.queue.lastIndex) CustomAccessibilityAction("Move down") { onMove(item.key, 1); true } else null,
+                                if (position < order.lastIndex) CustomAccessibilityAction("Move down") { onMove(item.key, 1); true } else null,
                                 CustomAccessibilityAction("Remove from queue") { onRemove(item.key); true },
                             )
                         },
                 )
             }
         }
-    }
+    } }
 }
 
+private fun Modifier.androidxClip() = this.then(androidx.compose.ui.Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)))
 private fun Modifier.zIndexWhen(on: Boolean) = if (on) this.zIndex(1f) else this

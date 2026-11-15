@@ -2,6 +2,9 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
@@ -152,29 +155,36 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
     val cs = MaterialTheme.colorScheme
     val active = index == current
     val distance = if (current < 0) 0 else kotlin.math.abs(index - current)
+    val motion = MaterialTheme.motionScheme
+    // As Apple Music shows lyrics: every line the same bold size; the sung one bright and full size,
+    // the rest quieter and a little smaller, the far ones softly out of focus. All on springs.
     val alpha by androidx.compose.animation.core.animateFloatAsState(
-        when { !timed || active -> 1f; distance == 1 -> 0.55f; else -> 0.35f }, label = "lyric-alpha")
-    val dim = cs.onSurface.copy(alpha = 0.35f)
-    val style = when {
-        line.background -> MaterialTheme.typography.titleMedium
-        active -> MaterialTheme.typography.headlineMediumEmphasized
-        else -> MaterialTheme.typography.headlineSmallEmphasized
-    }
+        when { !timed || active -> 1f; distance == 1 -> 0.42f; else -> 0.26f }, motion.defaultEffectsSpec(), label = "lyric-alpha")
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (!timed || active) 1f else 0.94f, motion.defaultSpatialSpec(), label = "lyric-scale")
+    val blur by androidx.compose.animation.core.animateDpAsState(if (timed && distance >= 2) 1.5.dp else 0.dp, motion.defaultEffectsSpec(), label = "lyric-blur")
+    val base = if (line.background) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium
+    val style = base.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = (-0.2).sp)
+    val dim = cs.onSurface.copy(alpha = 0.32f)
     val text = if (active && line.words.isNotEmpty()) androidx.compose.ui.text.buildAnnotatedString {
         for (word in line.words) {
             val p = word.progress(now)
-            val color = when { p >= 1f -> cs.primary; p <= 0f -> dim; else -> androidx.compose.ui.graphics.lerp(dim, cs.primary, 0.35f + 0.65f * p) }
+            val color = when { p >= 1f -> cs.onSurface; p <= 0f -> dim; else -> androidx.compose.ui.graphics.lerp(dim, cs.onSurface, 0.3f + 0.7f * p) }
             withStyle(androidx.compose.ui.text.SpanStyle(color = color)) { append(word.text) }
         }
     } else androidx.compose.ui.text.AnnotatedString(line.text)
     val secondVoice = line.agent != null && line.agent !in setOf("v1", "M")
     Column(
-        Modifier.fillMaxWidth().graphicsLayerAlpha(alpha)
-            .then(if (timed) Modifier.clickable(onClickLabel = "Seek to lyric", onClick = onSeek) else Modifier)
+        Modifier.fillMaxWidth()
+            .graphicsLayer {
+                this.alpha = alpha; scaleX = scale; scaleY = scale
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (secondVoice) 1f else 0f, 0.5f)
+            }
+            .then(if (blur > 0.dp) Modifier.blur(blur, androidx.compose.ui.draw.BlurredEdgeTreatment.Unbounded) else Modifier)
+            .then(if (timed) Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).clickable(onClickLabel = "Seek to lyric", onClick = onSeek) else Modifier)
             .semantics { selected = active },
         horizontalAlignment = if (secondVoice) androidx.compose.ui.Alignment.End else androidx.compose.ui.Alignment.Start,
     ) {
-        Text(text, style = style, color = if (active && line.words.isEmpty()) cs.primary else if (active) dim else cs.onSurface,
+        Text(text, style = style, color = if (line.words.isNotEmpty() && active) dim else cs.onSurface,
             textAlign = if (secondVoice) androidx.compose.ui.text.style.TextAlign.End else androidx.compose.ui.text.style.TextAlign.Start)
     }
 }
@@ -236,15 +246,12 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
                     androidx.compose.material3.OutlinedButton(onClick = onTools) { Text("More") }
                 }
             }
-        } else LazyColumn(Modifier.fillMaxSize().nestedScroll(KeepScroll), state = list, contentPadding = PaddingValues(top = 56.dp, bottom = 160.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        } else LazyColumn(Modifier.fillMaxSize().nestedScroll(KeepScroll), state = list, contentPadding = PaddingValues(top = 48.dp, bottom = 200.dp),
+            verticalArrangement = Arrangement.spacedBy(22.dp)) {
             itemsIndexed(lyrics.lines) { index, line ->
                 LyricLine(line, index, current, now, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
             }
         }
-        // Lyrics options (timing, sources, online), a plain icon so nothing frames the text.
-        if (lyrics.lines.isNotEmpty()) androidx.compose.material3.IconButton(onClick = onTools, modifier = Modifier.align(Alignment.TopEnd)
-            .semantics { contentDescription = "Lyrics options" }) { Symbol(Glyph.TUNE, color = cs.onSurfaceVariant) }
         if (!follow && timed) androidx.compose.material3.FilledTonalButton(onClick = { follow = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)) {
             Symbol(Glyph.DOWN, size = 18.dp); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Back to the song")
         }
