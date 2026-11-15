@@ -615,8 +615,39 @@ private fun CollectionHeader(collection: MusicCollection, artist: Boolean = fals
                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
             androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onAdd,
                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { Symbol(Glyph.PLAYLIST_ADD) }
+            if (!artist) collection.tracks.firstOrNull()?.let { MotionCoverButton(it) }
         }
     }
+}
+
+/**
+ * An album's moving cover: one short video for the whole album, attached here once and played in
+ * the player for every song of it. Lit when the album has one; then a tap offers to replace or remove it.
+ */
+@Composable
+private fun MotionCoverButton(track: Track) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val covers = (context.applicationContext as? ua.olex.music.MusicApp)?.graph?.motionCovers ?: return
+    val revision by covers.revision.collectAsState()
+    val has = remember(track.id, revision) { covers.file(track) != null }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val snackbar = LocalSnackbar.current
+    var asking by remember { mutableStateOf(false) }
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) scope.launch {
+            val ok = covers.attach(track, uri)
+            snackbar?.showSnackbar(if (ok) "Moving cover set for this album" else "Choose a video up to 40 MB")
+        }
+    }
+    fun choose() = pick.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.VideoOnly))
+    androidx.compose.material3.FilledTonalIconToggleButton(checked = has, onCheckedChange = { if (has) asking = true else choose() },
+        modifier = Modifier.size(52.dp).semantics { contentDescription = if (has) "Moving cover: change or remove" else "Add a moving cover" }) {
+        Symbol(Glyph.MOTION, filled = has)
+    }
+    if (asking) AppDialog(onDismissRequest = { asking = false }, title = { Text("Moving cover") },
+        text = { Text("This album plays its own short video in place of the cover.") },
+        confirmButton = { TextButton(onClick = { asking = false; choose() }) { Text("Replace") } },
+        dismissButton = { TextButton(onClick = { asking = false; covers.remove(track) }) { Text("Remove") } })
 }
 
 @Composable

@@ -117,8 +117,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
     /** A moving cover for the playing song, when its folder has one. */
-    val motionCover = combine(lyricTrack, graph.musicFiles.revision) { track, _ -> track }
-        .mapLatest { track -> runCatching { graph.musicFiles.motionCover(track?.path) }.getOrNull() }
+    val motionCover = combine(lyricTrack, graph.musicFiles.revision, graph.motionCovers.revision) { track, _, _ -> track }
+        .mapLatest { track ->
+            // The album's attached file first, then a cover.mp4 beside the songs.
+            track?.let { graph.motionCovers.file(it) }?.let { android.net.Uri.fromFile(it).toString() }
+                ?: runCatching { graph.musicFiles.motionCover(track?.path) }.getOrNull()
+        }
         .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     fun reloadLyrics() = refreshLocalFiles(rescan = false)
