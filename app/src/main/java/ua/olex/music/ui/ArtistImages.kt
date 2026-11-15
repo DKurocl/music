@@ -43,9 +43,8 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     internal fun put(name: String, bytes: ByteArray) { File(dir, key(name) + ".jpg").writeBytes(bytes) }
 
     fun cached(name: String): File? = if (!enabled) null else cachedFile(name)
-    // A photo seen is touched, so trimming drops the ones not seen for longest.
-    private fun cachedFile(name: String): File? = File(dir, key(name) + ".jpg").takeIf { it.isFile }?.also { touch(it) }
-    private fun touch(file: File) { if (System.currentTimeMillis() - file.lastModified() > 24L * 3600 * 1000) file.setLastModified(System.currentTimeMillis()) }
+    // Photos are kept for every artist in the library (they are small and fetched once); no limit.
+    private fun cachedFile(name: String): File? = File(dir, key(name) + ".jpg").takeIf { it.isFile }
 
     /** Space the photos and notes take. */
     fun bytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
@@ -53,12 +52,6 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     /** Removes every photo and note; they come back as artists are shown again. */
     fun clear() { dir.listFiles()?.forEach { it.delete() } }
 
-    /** Keeps photos under [MAX_BYTES]: the ones not seen for longest go first. */
-    private fun trim() {
-        val photos = dir.listFiles { f -> f.name.endsWith(".jpg") }?.sortedBy { it.lastModified() } ?: return
-        var total = photos.sumOf { it.length() }
-        for (f in photos) { if (total <= MAX_BYTES) break; total -= f.length(); f.delete() }
-    }
 
     /** The owner can turn photos off in Settings; cached photos stay until then cleared. */
     var enabled: Boolean
@@ -76,7 +69,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
             withContext(Dispatchers.IO) {
                 cachedFile(name) ?: fetch(name)?.let { bytes ->
                     val file = File(dir, key(name) + ".jpg"); val tmp = File(dir, file.name + ".tmp")
-                    tmp.writeBytes(bytes); tmp.renameTo(file); trim(); file
+                    tmp.writeBytes(bytes); tmp.renameTo(file); file
                 } ?: run { miss.writeText(""); null }
             }
         }
@@ -132,7 +125,6 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     private fun key(name: String) = MessageDigest.getInstance("SHA-256").digest(TextFold.fold(name).toByteArray()).take(12).joinToString("") { "%02x".format(it) }
 
     companion object {
-        const val MAX_BYTES = 80L * 1024 * 1024
         private val NOT_ARTISTS = setOf("unknown", "unknown artist", "various artists", "various", "<unknown>")
         fun get(url: String): ByteArray? = runCatching {
             val c = URL(url).openConnection() as HttpURLConnection
