@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import android.content.Context
@@ -75,6 +76,29 @@ internal fun SettingsPage(
         item { Group("Lyrics") }
         item { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
             lockLyrics = it; LockScreenLyrics.set(context, it) } }
+
+        // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
+        item { Group("Storage") }
+        item {
+            var sizes by remember { mutableStateOf<Triple<Long, Long, Long>?>(null) }
+            var cleared by remember { mutableStateOf(0) }
+            LaunchedEffect(cleared) {
+                sizes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    fun size(f: java.io.File): Long = if (f.isDirectory) f.listFiles()?.sumOf { size(it) } ?: 0L else f.length()
+                    Triple(size(context.cacheDir), images.bytes(), size(java.io.File(context.filesDir, "lyrics")))
+                }
+            }
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            fun mb(b: Long) = if (b < 1024 * 1024) "${b / 1024} KB" else "${b / (1024 * 1024)} MB"
+            Row(Glyph.DELETE, "Clear covers and photos",
+                sizes?.let { (cache, photos, lyrics) -> "Covers ${mb(cache)} · Artist photos ${mb(photos)} · Lyrics ${mb(lyrics)} (kept). Covers are capped at 128 MB, photos at 80 MB" } ?: "Counting…",
+                first = true, last = true) {
+                scope.launch {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.cacheDir.listFiles()?.forEach { it.deleteRecursively() }; images.clear() }
+                    cleared++
+                }
+            }
+        }
 
         item { Text("Music $version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp, start = 16.dp)) }
     }

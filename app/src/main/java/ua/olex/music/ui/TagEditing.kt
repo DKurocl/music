@@ -195,7 +195,7 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     modifier = Modifier.semantics { contentDescription = if (single) "Find this song online" else "Find this album online" }) { Symbol(Glyph.SEARCH) }
             }
             lookup?.let { state ->
-                OnlineLookup(state, tracks, values, onBack = { lookup = if (state is Lookup.Compare) Lookup.Results(state.all) else null },
+                OnlineLookup(state, tracks, values, online, onBack = { lookup = if (state is Lookup.Compare) Lookup.Results(state.all) else null },
                     onPick = { candidate, all ->
                         lookup = Lookup.Compare(candidate, null, all, loadingCover = candidate.coverUrl != null)
                         candidate.coverUrl?.let { url -> scope.launch {
@@ -280,7 +280,7 @@ internal sealed interface Lookup {
  * differ), and the covers side by side. Apply fills the form; Save writes the files as usual.
  */
 @Composable
-private fun androidx.compose.foundation.layout.ColumnScope.OnlineLookup(state: Lookup, tracks: List<Track>, values: Map<String, String>, onBack: () -> Unit,
+private fun androidx.compose.foundation.layout.ColumnScope.OnlineLookup(state: Lookup, tracks: List<Track>, values: Map<String, String>, online: OnlineTags, onBack: () -> Unit,
     onPick: (OnlineTags.Candidate, List<OnlineTags.Candidate>) -> Unit, onApply: (Map<String, String>, ByteArray?) -> Unit, onRetry: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val single = tracks.size == 1
@@ -299,7 +299,8 @@ private fun androidx.compose.foundation.layout.ColumnScope.OnlineLookup(state: L
                     Surface(onClick = { onPick(c, state.candidates) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(if (i == 0) 24.dp else 16.dp),
                         color = if (i == 0) cs.secondaryContainer else cs.surfaceContainerHigh) {
                         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            coil3.compose.AsyncImage(c.coverUrl?.replace("1200x1200bb", "200x200bb"), null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            val thumb by androidx.compose.runtime.produceState<ByteArray?>(null, c.coverUrl) { value = c.coverUrl?.let { runCatching { online.thumb(it) }.getOrNull() } }
+                            coil3.compose.AsyncImage(thumb, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                 modifier = Modifier.size(56.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).background(cs.surfaceContainerHighest))
                             Column(Modifier.weight(1f).padding(start = 12.dp)) {
                                 Text(c.title ?: c.album.orEmpty(), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
