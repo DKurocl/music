@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import ua.olex.music.playback.FadingPlayer
 import ua.olex.music.playback.HeadsetRules
 import ua.olex.music.playback.LockScreenLyrics
@@ -48,6 +50,8 @@ internal fun SettingsPage(
     val manage = remember { android.provider.MediaStore.canManageMedia(context) }
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
 
+    val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
+    val soulseekJobs by soulseek.jobs.collectAsState()
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item { Group("Sound") }
         item { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
@@ -89,17 +93,38 @@ internal fun SettingsPage(
 
         // Soulseek: lossless copies of songs and albums found online, saved into the library.
         item { Group("Soulseek") }
-        item {
+        item(key = "soulseek-account") {
             val downloads = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
             var account by remember { mutableStateOf(downloads.account) }
             var editing by remember { mutableStateOf(false) }
             val state by downloads.client.state.collectAsState()
-            Row(Glyph.DOWNLOAD, "Soulseek account", account?.let { (user, _) ->
+            Row(Glyph.PERSON, "Soulseek account", account?.let { (user, _) ->
                 "$user · " + when (val st = state) { is ua.olex.music.soulseek.SoulseekClient.State.Online -> "online"
                     is ua.olex.music.soulseek.SoulseekClient.State.Failed -> st.reason; ua.olex.music.soulseek.SoulseekClient.State.Connecting -> "signing in…"
                     else -> "signs in when you download" }
-            } ?: "Sign in to download songs and albums in lossless. A new name is created on first sign-in", first = true, last = true) { editing = true }
+            } ?: "Sign in to download songs and albums in lossless. A new name is created on first sign-in", first = true, last = soulseekJobs.isEmpty()) { editing = true }
             if (editing) SoulseekDialog(account, onDismiss = { editing = false }) { new -> downloads.account = new; account = new; editing = false }
+        }
+        // Recent downloads in the same group, newest first: where each one is, and a retry for a failed one.
+        val recent = soulseekJobs.asReversed()
+        items(recent.size, key = { "job-" + recent[it].id }) { i ->
+            val job = recent[i]
+            val haptics = rememberHaptics()
+            Row(when { job.done -> Glyph.CHECK; job.failed -> Glyph.INFO; else -> Glyph.DOWNLOAD }, job.title, job.status, last = i == recent.lastIndex,
+                trailing = if (job.failed) ({
+                    androidx.compose.material3.IconButton(onClick = { haptics.tick(); soulseek.retry(job) }, modifier = Modifier.semantics { contentDescription = "Try again" }) { Symbol(Glyph.REFRESH) }
+                }) else null,
+                below = if (job.running) ({
+                    androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
+                    val p = job.progress
+                    if (p == null) androidx.compose.material3.LinearWavyProgressIndicator(Modifier.fillMaxWidth())
+                    else androidx.compose.material3.LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+                }) else null)
+        }
+        if (soulseekJobs.any { !it.running }) item(key = "jobs-clear") {
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+                TextButton(onClick = { soulseek.clearFinished() }) { Text("Clear finished") }
+            }
         }
 
         // Moving covers from Apple Music, with the owner's own MusicKit key.
@@ -158,7 +183,8 @@ private fun Group(title: String) = Text(title, style = MaterialTheme.typography.
 
 /** A row in a group: the first and last rows round the group's outer corners. */
 @Composable
-private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = false, last: Boolean = false, trailing: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
+private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = false, last: Boolean = false, trailing: (@Composable () -> Unit)? = null,
+                below: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
     val big = 24.dp; val small = 4.dp
     val shape = RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, onClick = onClick ?: {}, enabled = onClick != null, modifier = Modifier.fillMaxWidth()) {
@@ -170,6 +196,7 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
             androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                below?.invoke()
             }
             if (trailing != null) { androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp)); trailing() }
         }
@@ -221,7 +248,7 @@ private fun AppleKeyDialog(current: AppleMotion.Key?, onDismiss: () -> Unit, onS
 
 /** Soulseek name and password, kept only in the app's private storage. */
 @Composable
-private fun SoulseekDialog(current: Pair<String, String>?, onDismiss: () -> Unit, onSave: (Pair<String, String>?) -> Unit) {
+internal fun SoulseekDialog(current: Pair<String, String>?, onDismiss: () -> Unit, onSave: (Pair<String, String>?) -> Unit) {
     var user by remember { mutableStateOf(current?.first.orEmpty()) }
     var password by remember { mutableStateOf(current?.second.orEmpty()) }
     AppDialog(onDismissRequest = onDismiss, title = { Text("Soulseek account") },
