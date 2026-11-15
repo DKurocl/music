@@ -70,9 +70,12 @@ internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
     Box(modifier.background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp),
             verticalAlignment = Alignment.Bottom, modifier = Modifier.size(width = 18.dp, height = 16.dp)) {
+            // Each bar keeps its own range and never drops to a square, so even a still frame reads as
+            // uneven bars (playing), never as three dots (a menu).
             val rest = listOf(0.45f, 0.85f, 0.6f)
+            val from = listOf(0.35f, 1f, 0.5f); val to = listOf(0.95f, 0.4f, 1f)
             rest.forEachIndexed { i, still ->
-                val level = if (playing) androidx.compose.animation.core.rememberInfiniteTransition(label = "bar$i").animateFloat(0.25f, 1f,
+                val level = if (playing) androidx.compose.animation.core.rememberInfiniteTransition(label = "bar$i").animateFloat(from[i], to[i],
                     androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(380 + i * 130, easing = androidx.compose.animation.core.FastOutSlowInEasing),
                         androidx.compose.animation.core.RepeatMode.Reverse, androidx.compose.animation.core.StartOffset(i * 120)), label = "level$i").value else still
                 Box(Modifier.width(4.dp).fillMaxHeight(level).clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp)).background(androidx.compose.ui.graphics.Color.White))
