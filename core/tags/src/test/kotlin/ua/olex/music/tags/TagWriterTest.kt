@@ -107,3 +107,63 @@ class TagWriterCoverAndRatingTest {
         assertEquals(5, stars("100")); assertEquals(3, stars("60")); assertEquals(4, stars("4")); assertNull(stars("0"))
     }
 }
+
+class Mp4AndOggWriterTest {
+    private fun apply(file: ByteArray, plan: TagRewrite) =
+        file.copyOfRange(0, plan.start.toInt()) + plan.head + file.copyOfRange(plan.keepFrom.toInt(), file.size)
+    private fun be(v: Long, n: Int) = ByteArray(n) { i -> (v shr (8 * (n - 1 - i))).toByte() }
+    private fun atom(type: String, vararg parts: ByteArray): ByteArray {
+        val body = parts.fold(ByteArray(0)) { a, b -> a + b }
+        return be(8L + body.size, 4) + type.toByteArray(Charsets.ISO_8859_1) + body
+    }
+    private val audio = ByteArray(3000) { (it % 251).toByte() }
+
+    /** ftyp, moov (mvhd, trak with stco pointing into mdat, udta/meta/ilst), mdat. */
+    private fun m4a(): ByteArray {
+        val ftyp = atom("ftyp", "M4A ".toByteArray(), be(0, 4))
+        fun moov(offset: Long) = atom("moov",
+            atom("mvhd", ByteArray(12), be(1000, 4), be(5000, 4), ByteArray(80)),
+            atom("trak", atom("mdia", atom("minf", atom("stbl",
+                atom("stsd", be(0, 4), be(1, 4), atom("mp4a", ByteArray(6), be(1, 2), ByteArray(8), be(2, 2), be(16, 2), ByteArray(4), be(44_100L shl 16, 4))),
+                atom("stco", be(0, 4), be(1, 4), be(offset, 4)))))),
+            atom("udta", atom("meta", be(0, 4), atom("ilst", atom("©nam", atom("data", be(1, 4), be(0, 4), "Old".toByteArray()))))))
+        val size = ftyp.size + moov(0).size
+        return ftyp + moov(size + 8L) + atom("mdat", audio)
+    }
+
+    @Test fun m4aTagsAndCoverMoveTheChunkOffsets() {
+        val file = m4a()
+        val out = apply(file, TagWriter.plan(ByteArraySource(file), mapOf("ARTIST" to listOf("A"), "TRACKNUMBER" to listOf("3/9"), "MOOD" to listOf("calm")),
+            CoverArt(byteArrayOf(1, 2, 3), "image/jpeg"))!!)
+        val tags = TagReader.read(ByteArraySource(out))!!
+        assertEquals("Old", tags.title); assertEquals(listOf("A"), tags.artists); assertEquals(3, tags.trackNumber)
+        assertEquals("calm", tags.first("MOOD")); assertEquals(3, tags.frontCover!!.length)
+        // The stco entry still points at the first audio byte.
+        val stco = (0 until out.size - 4).first { String(out, it, 4, Charsets.ISO_8859_1) == "stco" }
+        val offset = ((out[stco + 12].toLong() and 0xFF) shl 24) or ((out[stco + 13].toLong() and 0xFF) shl 16) or ((out[stco + 14].toLong() and 0xFF) shl 8) or (out[stco + 15].toLong() and 0xFF)
+        assertArrayEquals(audio.copyOfRange(0, 16), out.copyOfRange(offset.toInt(), offset.toInt() + 16))
+        // The padding left behind makes the next edit in place.
+        assertTrue(TagWriter.plan(ByteArraySource(out), mapOf("TITLE" to listOf("New")))!!.inPlace)
+    }
+
+    private fun oggPage(flags: Int, granule: Long, seq: Int, packets: List<ByteArray>): ByteArray {
+        val lacing = ArrayList<Int>()
+        packets.forEach { p -> var l = p.size; while (l >= 255) { lacing += 255; l -= 255 }; lacing += l }
+        val header = "OggS".toByteArray() + byteArrayOf(0, flags.toByte()) + ByteArray(8) { (granule shr (8 * it)).toByte() } +
+            byteArrayOf(7, 0, 0, 0) + ByteArray(4) { (seq shr (8 * it)).toByte() } + ByteArray(4) + byteArrayOf(lacing.size.toByte()) + lacing.map { it.toByte() }.toByteArray()
+        return header + packets.fold(ByteArray(0)) { a, b -> a + b }
+    }
+    private fun le(v: Int) = ByteArray(4) { (v shr (8 * it)).toByte() }
+
+    @Test fun opusCommentsKeepEveryAudioPage() {
+        val head = "OpusHead".toByteArray() + byteArrayOf(1, 2, 0x38, 1) + le(48_000) + byteArrayOf(0, 0, 0)
+        val tags = "OpusTags".toByteArray() + le(3) + "lib".toByteArray() + le(1) + le(9) + "TITLE=Old".toByteArray()
+        val audioPage = oggPage(0, 48_000, 2, listOf(ByteArray(300) { 5 }))
+        val file = oggPage(2, 0, 0, listOf(head)) + oggPage(0, 0, 1, listOf(tags)) + audioPage
+        val plan = TagWriter.plan(ByteArraySource(file), mapOf("TITLE" to listOf("New"), "ARTIST" to listOf("A")))!!
+        val out = apply(file, plan)
+        val read = TagReader.read(ByteArraySource(out))!!
+        assertEquals("New", read.title); assertEquals(listOf("A"), read.artists)
+        assertArrayEquals(audioPage, out.copyOfRange(out.size - audioPage.size, out.size))
+    }
+}

@@ -140,7 +140,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             if (!request.quiet || result.failed.isNotEmpty()) tagMessage = buildString {
                 append(if (result.written == 1) "Tags saved in 1 file." else "Tags saved in ${result.written} files.")
                 if (result.renamed > 0) append(" ${result.renamed} renamed or moved.")
-                if (result.unsupported.isNotEmpty()) append(" ${result.unsupported.size} not supported yet (only FLAC and MP3).")
+                if (result.unsupported.isNotEmpty()) append(" ${result.unsupported.size} not supported (FLAC, MP3, M4A, Ogg and Opus only).")
                 if (result.failed.isNotEmpty()) append(" ${result.failed.size} couldn't be written.")
             }
             refresh()

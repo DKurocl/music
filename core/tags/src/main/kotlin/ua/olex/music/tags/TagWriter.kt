@@ -11,8 +11,9 @@ import java.io.ByteArrayOutputStream
 /** A front cover to embed: the image bytes as they are (JPEG or PNG), never re-encoded. */
 class CoverArt(val bytes: ByteArray, val mime: String) { init { require(bytes.size in 1..(8 shl 20)) } }
 
-class TagRewrite(val head: ByteArray, val keepFrom: Long) {
-    val inPlace: Boolean get() = head.size.toLong() == keepFrom
+class TagRewrite(val head: ByteArray, val keepFrom: Long, val start: Long = 0) {
+    /** The new bytes replace [start, keepFrom) of the file; everything else stays byte for byte. */
+    val inPlace: Boolean get() = head.size.toLong() == keepFrom - start
 }
 
 /**
@@ -30,7 +31,9 @@ object TagWriter {
         val id3 = Id3.sizeAt(r, 0)
         when {
             r.ascii(id3.coerceAtMost(r.size - 4), 4) == "fLaC" -> flac(r, id3, edits, cover)
-            r.ascii(4, 4) != "ftyp" && r.ascii(0, 4) != "OggS" && r.ascii(0, 4) != "RIFF" -> mp3(r, id3, edits, cover)
+            r.ascii(4, 4) == "ftyp" -> Mp4Writer.plan(r, edits, cover)
+            r.ascii(0, 4) == "OggS" -> OggWriter.plan(r, edits)
+            r.ascii(0, 4) != "RIFF" -> mp3(r, id3, edits, cover)
             else -> null
         }
     } catch (_: Truncated) { null }
@@ -57,10 +60,7 @@ object TagWriter {
         }
         val audio = at
         val merged = merge(comments, edits)
-        val vc = ByteArrayOutputStream().apply {
-            val v = vendor.toByteArray(); le32(v.size); write(v); le32(merged.size)
-            for ((k, value) in merged) { val b = "$k=$value".toByteArray(); le32(b.size); write(b) }
-        }.toByteArray()
+        val vc = vorbisComments(vendor, merged)
         fun build(padding: Int): ByteArray = ByteArrayOutputStream().apply {
             write("fLaC".toByteArray())
             for (block in kept) { write((block[0].toInt() and 0x7F)); write(block, 1, block.size - 1) }
@@ -80,10 +80,16 @@ object TagWriter {
         else TagRewrite(build(PADDING), audio)
     }
 
-    private fun vendorOf(b: ByteArray): String? = runCatching { String(b, 4, b.u32le(0).toInt(), Charsets.UTF_8) }.getOrNull()
+    internal fun vendorOf(b: ByteArray, from: Int = 0): String? = runCatching { String(b, from + 4, b.u32le(from).toInt(), Charsets.UTF_8) }.getOrNull()
 
-    private fun rawComments(b: ByteArray): List<Pair<String, String>> = runCatching {
-        var p = 4 + b.u32le(0).toInt()
+    /** A Vorbis comment block (vendor, count, NAME=value entries), as Vorbis, Opus and FLAC store it. */
+    internal fun vorbisComments(vendor: String, comments: List<Pair<String, String>>): ByteArray = ByteArrayOutputStream().apply {
+        val v = vendor.toByteArray(); le32(v.size); write(v); le32(comments.size)
+        for ((k, value) in comments) { val b = "$k=$value".toByteArray(); le32(b.size); write(b) }
+    }.toByteArray()
+
+    internal fun rawComments(b: ByteArray, from: Int = 0): List<Pair<String, String>> = runCatching {
+        var p = from + 4 + b.u32le(from).toInt()
         val n = b.u32le(p).toInt(); p += 4
         (0 until n).mapNotNull {
             val len = b.u32le(p).toInt(); p += 4
@@ -93,7 +99,7 @@ object TagWriter {
     }.getOrDefault(emptyList())
 
     /** Old comments minus the edited names, then the edited values, in a stable order. */
-    private fun merge(old: List<Pair<String, String>>, edits: Map<String, List<String>>): List<Pair<String, String>> {
+    internal fun merge(old: List<Pair<String, String>>, edits: Map<String, List<String>>): List<Pair<String, String>> {
         val edited = edits.keys.map { Fields.canonical(it) }.toSet()
         val kept = old.filter { Fields.canonical(it.first) !in edited }
         val added = edits.flatMap { (name, values) -> values.filter { it.isNotBlank() }.map { Fields.canonical(name) to it.trim() } }

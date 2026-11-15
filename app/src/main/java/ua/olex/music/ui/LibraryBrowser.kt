@@ -65,6 +65,9 @@ private enum class LibraryTab(val title: String) {
     HOME("Home"), SONGS("Songs"), ALBUMS("Albums"), ARTISTS("Artists"), SMART("Smart"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), HISTORY("History"), FOLDERS("Folders"), GENRES("Genres"), YEARS("Years"), COMPOSERS("Composers"), STATS("Stats")
 }
 
+/** The section the library opens on: Home normally; tests start on Songs. */
+internal val LocalStartTab = androidx.compose.runtime.staticCompositionLocalOf { "HOME" }
+
 /** Browse one shared library snapshot or cancellable FTS results; taps play exactly the visible queue. */
 @Composable
 internal fun LibraryBrowser(
@@ -92,7 +95,8 @@ internal fun LibraryBrowser(
     onEnqueue: (List<Track>, Boolean) -> Unit = { _, _ -> },
     stats: Map<String, ua.olex.music.model.SongStats> = emptyMap(),
 ) {
-    var tabName by rememberSaveable { mutableStateOf(LibraryTab.HOME.name) }
+    val startTab = LocalStartTab.current
+    var tabName by rememberSaveable { mutableStateOf(startTab) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var missingFavourite by rememberSaveable { mutableStateOf<String?>(null) }
     val tab = LibraryTab.valueOf(tabName)

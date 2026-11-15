@@ -85,3 +85,33 @@ class ChannelMixTest {
         org.junit.Assert.assertTrue(left < 1f && right > 0f)
     }
 }
+
+class DsdToPcmTest {
+    @org.junit.Test fun silencePatternIsNearZeroAndAllOnesIsFullScale() {
+        val dsd = DsdToPcm(1, 2_822_400)
+        val silence = ByteArray(4096) { 0x69 }
+        val out = FloatArray(1024)
+        org.junit.Assert.assertEquals(1024, dsd.channel(0, silence, 0, silence.size, out, 0))
+        org.junit.Assert.assertTrue(out.drop(64).all { kotlin.math.abs(it) < 0.05f })
+        val ones = ByteArray(4096) { 0xFF.toByte() }
+        dsd.channel(0, ones, 0, ones.size, out, 0)
+        org.junit.Assert.assertEquals(1f, out.last(), 1e-3f)
+    }
+
+    @org.junit.Test fun aSineSurvivesTheDecimation() {
+        // 1 kHz sine as first-order delta-sigma at DSD64, LSB first.
+        val rate = 2_822_400
+        val bytes = ByteArray(rate / 8 / 10)
+        var integrator = 0.0
+        for (i in 0 until bytes.size * 8) {
+            val x = 0.5 * kotlin.math.sin(2 * Math.PI * 1000 * i / rate)
+            val bit = if (integrator >= 0) 1 else 0
+            integrator += x - (if (bit == 1) 1.0 else -1.0)
+            if (bit == 1) bytes[i / 8] = (bytes[i / 8].toInt() or (1 shl (i % 8))).toByte()
+        }
+        val out = FloatArray(bytes.size / 4)
+        DsdToPcm(1, rate).channel(0, bytes, 0, bytes.size, out, 0)
+        val peak = out.drop(200).maxOf { kotlin.math.abs(it) }
+        org.junit.Assert.assertEquals(0.5f, peak, 0.05f)
+    }
+}

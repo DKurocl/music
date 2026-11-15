@@ -1,3 +1,26 @@
+# Second functional batch: towards the full spec (Claude, 2026-11-15)
+
+Everything in PRODUCT_SPEC.md is now done in code except S6 (APE, WavPack, TTA, Musepack: need own
+extractors with an FFmpeg decoder) and S8 (real Bluetooth codec: only the Earbuds app knows it;
+the owner asked not to touch Earbuds). Nothing of this batch is phone-verified yet. New pieces:
+
+- Sound: balance/mono/swap (`dsp/ChannelMix.kt`, per output), Battery saver offload (only while no
+  processing is active), DSD (DSF/DFF) to 88.2 kHz PCM (`dsp/DsdToPcm.kt`, `playback/DsdExtractor.kt`;
+  shows up only if Android indexes the .dsf/.dff file), Cast (`playback/CastSupport.kt`: Media3
+  CastPlayer + a LAN file server started only while casting), resume on headphone connect.
+- Library: Home and Stats tabs, filter chips, letter rail, disc headers, compilations, hidden
+  folders (`library/LibraryFolders.kt`), sidecar .cue, playlist duplicates (user.db v3, MIGRATION_2_3).
+- Tags: writer for M4A (`Mp4Writer.kt`, moves stco/co64), Ogg/Opus (`OggWriter.kt`, same page count),
+  covers, ratings (RATING/POPM, read back), rename/move by template, MANAGE_MEDIA for no prompts.
+  `TagRewrite` gained `start` (a splice, not only a new file start). Tag reader version 2 re-reads
+  every file once.
+- Lyrics: QRC and Lyricify parsers, LRC writer, timing editor, lock-screen line (`LockScreenLyrics.kt`,
+  a ForwardingPlayer only the session sees; history and widget read the real ExoPlayer).
+- System: widget and QS tile (`NowPlayingWidget.kt`), MediaButtonReceiver, App Functions for Gemini
+  (`MusicFunctions.kt` + `playback/QuickControl.kt`).
+
+Verified locally: all unit and UI tests, lint debug/release, assembleRelease.
+
 # Functional batch: tags, lyrics online, CUE, library views (Claude, 2026-11-15)
 
 Branch `agent/m2-design`, written in one pass per the owner ("write it all, then check"). Status of

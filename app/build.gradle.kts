@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -59,6 +60,8 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:lyrics"))
     implementation(project(":core:tags"))
+    implementation(libs.appfunctions)
+    ksp(libs.appfunctions.compiler)
     implementation(project(":core:library"))
     implementation(project(":core:user"))
     implementation(project(":core:playback"))

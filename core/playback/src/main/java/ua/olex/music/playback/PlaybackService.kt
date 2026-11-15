@@ -92,6 +92,7 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var exo: ExoPlayer
     private fun exoOrNull(): ExoPlayer? = if (::exo.isInitialized) exo else null
     private var lockLyrics: LockScreenLyrics? = null
+    private val lanServer by lazy { LanMediaServer(this) }
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
     private val lyricPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> lockLyrics?.update() }
 
@@ -106,7 +107,14 @@ class PlaybackService : MediaLibraryService() {
         } ?: ua.olex.music.dsp.ReplayGainSettings()
         val player = PlayerFactory.create(this, { equalizer.active }, { replayGain })
         exo = player
-        val shown = LyricLinePlayer(player)
+        // Cast: the session's player hands playback to a Chromecast chosen in the output switcher.
+        val castable: Player = runCatching {
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(this, java.util.concurrent.Executors.newSingleThreadExecutor())
+            androidx.media3.cast.CastPlayer.Builder(this).setLocalPlayer(player)
+                .setRemotePlayer(androidx.media3.cast.RemoteCastPlayer.Builder(this).setMediaItemConverter(LanMediaItemConverter(lanServer)).build())
+                .build()
+        }.getOrElse { player }
+        val shown = LyricLinePlayer(castable)
         lockLyrics = LockScreenLyrics(this, player, shown, scope)
         getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
         val builder = MediaLibrarySession.Builder(this, shown, Callback())
@@ -212,6 +220,7 @@ class PlaybackService : MediaLibraryService() {
         runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
         usb.clear()
+        lanServer.stop()
         equalizerRoute?.stop()
         equalizerRoute = null
         persistence?.close()
