@@ -210,7 +210,11 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     }, onRetry = { findOnline() })
                 return@Column
             }
-            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // A hairline under the header once the form scrolls, so fields never butt against it.
+            val formScroll = rememberScrollState()
+            val scrolled by remember(formScroll) { androidx.compose.runtime.derivedStateOf { formScroll.value > 0 } }
+            if (scrolled) androidx.compose.material3.HorizontalDivider(color = cs.outlineVariant.copy(alpha = 0.5f))
+            Column(Modifier.weight(1f, fill = false).verticalScroll(formScroll).padding(horizontal = 24.dp).padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 group("Song")
                 field("TITLE")
                 field("ARTIST")
