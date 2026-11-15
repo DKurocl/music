@@ -58,7 +58,7 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                     AutoEqProfile.parse(bytes.toString(Charsets.UTF_8), "Imported AutoEq")
                 }
                 // The service also rejects a stale route if it changed during IO.
-                onApply(route, imported)
+                onApply(route, imported.copy(channels = draft.channels))
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { importError = "Couldn't import this profile. Use AutoEq parametric TXT with Preamp and PK/LSC/HSC filters." }
             finally { importing = false }
@@ -86,11 +86,11 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                     modifier = Modifier.semantics { contentDescription = "Enable equalizer" })
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = editable, onClick = { apply(EqualizerSettings(enabled = draft.enabled)) }) { Text("Flat") }
+                OutlinedButton(enabled = editable, onClick = { apply(EqualizerSettings(enabled = draft.enabled, channels = draft.channels)) }) { Text("Flat") }
                 OutlinedButton(enabled = editable && !importing, onClick = {
                     importRoute = state.routeKey; importProfile.launch(arrayOf("text/plain", "application/octet-stream"))
                 }) { Text(if (importing) "Importing..." else "Import AutoEq") }
-                if (state.sony) Button(enabled = editable, onClick = { apply(SonyCorrection.settings) }) { Text("Sony correction") }
+                if (state.sony) Button(enabled = editable, onClick = { apply(SonyCorrection.settings.copy(channels = draft.channels)) }) { Text("Sony correction") }
             }
             if (state.sony) Text("Sony correction uses AutoEq with Rtings B&K 5128 measurements. Fit and taste vary. Turn off Sony's own EQ first to avoid applying two corrections.", style = MaterialTheme.typography.bodySmall)
             Text(draft.profile, style = MaterialTheme.typography.labelLarge)
@@ -109,6 +109,24 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                     onValueChange = { value -> draft = draft.copy(profile = "Custom", bands = draft.bands.mapIndexed { i, item -> if (i == index) item.copy(gainDb = value.toDouble()) else item }) },
                     onValueChangeFinished = { onApply(state.routeKey, draft) }, modifier = Modifier.semantics { contentDescription = "Gain at $label" })
             }
+            HorizontalDivider()
+            Text("Channels", style = MaterialTheme.typography.titleLarge)
+            val mix = draft.channels
+            Text(when { mix.balance == 0f -> "Balance centre"; mix.balance < 0 -> "Balance ${(-mix.balance * 100).toInt()}% left"; else -> "Balance ${(mix.balance * 100).toInt()}% right" })
+            Slider(value = mix.balance, valueRange = -1f..1f, enabled = editable,
+                onValueChange = { v -> draft = draft.copy(channels = mix.copy(balance = if (kotlin.math.abs(v) < 0.04f) 0f else v)) },
+                onValueChangeFinished = { onApply(state.routeKey, draft) }, modifier = Modifier.semantics { contentDescription = "Balance" })
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Mono", style = MaterialTheme.typography.titleMedium)
+                Switch(checked = mix.mono, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(mono = it))) },
+                    modifier = Modifier.semantics { contentDescription = "Mono" })
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Swap left and right", style = MaterialTheme.typography.titleMedium)
+                Switch(checked = mix.swap, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(swap = it))) },
+                    modifier = Modifier.semantics { contentDescription = "Swap left and right" })
+            }
+            Text("Works with the equalizer on or off, for this output only. Centre, stereo and unswapped leave the sound untouched.", style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.height(16.dp))
         }
     }

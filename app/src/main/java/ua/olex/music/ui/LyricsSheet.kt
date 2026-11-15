@@ -32,7 +32,13 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     onSeek: (Long) -> Unit, onOffset: (Long) -> Unit, onDismiss: () -> Unit,
     source: String = "Embedded lyrics", note: String? = null, folders: List<String> = emptyList(),
     onChooseFolder: (() -> Unit)? = null, onClearFolders: (() -> Unit)? = null, onReload: (() -> Unit)? = null,
-    onFindOnline: (() -> Unit)? = null, onlineStatus: String? = null) {
+    onFindOnline: (() -> Unit)? = null, onlineStatus: String? = null,
+    onSaveTiming: ((Lyrics) -> Unit)? = null, onResetTiming: (() -> Unit)? = null) {
+    // Timing editor: tap a line while it is sung to move it there; Save keeps it for this song.
+    var editing by rememberSaveable(state.mediaId) { mutableStateOf(false) }
+    var draft by remember(state.mediaId, lyrics) { mutableStateOf(lyrics) }
+    val shown = if (editing) draft else lyrics
+    val shownNow by rememberUpdatedState(shown)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val list = rememberLazyListState()
     val dragging by list.interactionSource.collectIsDraggedAsState()
@@ -50,7 +56,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             do {
                 now = position() + offsetMs
-                current = lyrics.indexAt(now)
+                current = shownNow.indexAt(now)
                 if (state.isPlaying) delay(if (lyrics.sync == Sync.WORD) 50 else 100)
             } while (state.isPlaying)
         }
@@ -91,12 +97,23 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                             TextButton(onClick = { onOffset((offsetMs - 200).coerceAtLeast(-60_000)) }) { Text("Later") }
                             TextButton(onClick = { onOffset(0) }) { Text("Offset ${offsetMs} ms") }
                             TextButton(onClick = { onOffset((offsetMs + 200).coerceAtMost(60_000)) }) { Text("Earlier") }
+                            if (onSaveTiming != null) {
+                                if (!editing) TextButton(onClick = { editing = true; follow = false; draft = lyrics }) { Text("Fix timing") }
+                                else {
+                                    Button(onClick = { onSaveTiming(draft); editing = false }) { Text("Save timing") }
+                                    TextButton(onClick = { editing = false; draft = lyrics }) { Text("Cancel") }
+                                }
+                            }
+                            onResetTiming?.let { TextButton(onClick = it) { Text("Restore original") } }
                         }
+                        if (editing) Text("Play the song and tap each line the moment it starts. Words move with their line.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                     }
                 }
-                itemsIndexed(lyrics.lines) { index, line ->
+                itemsIndexed(shown.lines) { index, line ->
                     LyricLine(line, index, current, now, timed) {
-                        onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true; sourcesOpen = false
+                        if (editing) draft = ua.olex.music.lyrics.LyricsTiming.retime(draft, index, position() + offsetMs)
+                        else { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true; sourcesOpen = false }
                     }
                 }
             }

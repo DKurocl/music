@@ -16,8 +16,10 @@ data class EqualizerBand(val frequencyHz: Double, val gainDb: Double, val q: Dou
 
 /** Processing is opt-in; preamp is bounded by the combined response at the actual output sample rate. */
 data class EqualizerSettings(val enabled: Boolean = false, val preampDb: Double = 0.0,
-    val bands: List<EqualizerBand> = flatBands(), val profile: String = "Custom") {
+    val bands: List<EqualizerBand> = flatBands(), val profile: String = "Custom", val channels: ChannelMix = ChannelMix()) {
     init { require(preampDb.isFinite() && preampDb in -36.0..12.0); require(bands.size <= 20) }
+    /** Whether any processing runs: the EQ itself or a channel change (balance, mono, swap). */
+    val active: Boolean get() = enabled || !channels.neutral
     fun effectivePreampDb(sampleRateHz: Int): Double {
         val filters = bands.filter { it.gainDb != 0.0 }.map { Biquad.of(it, sampleRateHz) }
         if (filters.isEmpty()) return min(preampDb, 0.0)

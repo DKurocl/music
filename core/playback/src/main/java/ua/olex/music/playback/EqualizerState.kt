@@ -15,6 +15,7 @@ data class EqualizerState(val routeKey: String = "none", val routeName: String =
 internal object EqualizerCodec {
     fun encode(settings: EqualizerSettings): String = JSONObject().apply {
         put("version", 1); put("enabled", settings.enabled); put("preamp", settings.preampDb); put("profile", settings.profile)
+        put("balance", settings.channels.balance.toDouble()); put("mono", settings.channels.mono); put("swap", settings.channels.swap)
         put("bands", JSONArray().apply { settings.bands.forEach { band -> put(JSONObject().apply {
             put("hz", band.frequencyHz); put("db", band.gainDb); put("q", band.q); put("type", band.type.name)
         }) } })
@@ -30,7 +31,8 @@ internal object EqualizerCodec {
         return EqualizerSettings(row.getBoolean("enabled"), row.getDouble("preamp"), (0 until bands.length()).map { index ->
             val band = bands.getJSONObject(index)
             EqualizerBand(band.getDouble("hz"), band.getDouble("db"), band.getDouble("q"), FilterType.valueOf(band.getString("type")))
-        }, profile)
+        }, profile, ua.olex.music.dsp.ChannelMix(row.optDouble("balance", 0.0).toFloat().coerceIn(-1f, 1f),
+            row.optBoolean("mono", false), row.optBoolean("swap", false)))
     }
 }
 

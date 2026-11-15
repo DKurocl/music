@@ -52,6 +52,7 @@ data class Lyrics(val lines: List<Line>, val sync: Sync) {
         fun parse(text: String): Lyrics {
             val head = text.trimStart('﻿', ' ', '\n', '\r', '\t').take(200)
             return when {
+                SyllableParser.matches(text) -> SyllableParser.parse(text)
                 head.startsWith("<") && ("<tt" in head || "<?xml" in head) -> TtmlParser.parse(text)
                 Regex("""^\[\d+,\d+]""", RegexOption.MULTILINE).containsMatchIn(text.take(4000)) -> KrcParser.parse(text)
                 else -> LrcParser.parse(text)
