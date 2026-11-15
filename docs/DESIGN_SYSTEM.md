@@ -84,6 +84,9 @@ colour, scale and motion with intent; Home is where that pays most, because it s
 - **First tap on Search** shows the field and browse tiles; **a second tap** focuses the field and
   opens the keyboard (Google Play's behaviour: browsing first, typing when asked). A microphone in
   the field searches by voice.
+- **Typing**: a tap in the field (or a second tap on Search) shows only recent searches; the tiles
+  come back when the field is left.
+- **Your genres** under the tiles: big cards with a few covers fanned in the corner.
 - **Browse tiles** in two columns: Albums, Artists, Songs first (the main kinds), then Genres,
   Years, Folders, History, Composers, Lossless, Hi-res, Never played. Name on the left, a tonal icon on the right (colours
   rotate through the wallpaper's accents). A tile opens its list with a back arrow; tiles that would
@@ -128,20 +131,37 @@ It hides only when nothing is queued.
 ## Player
 
 Top to bottom, in the order the eye and thumb need it:
-- **Close · "Playing from <album>" · Queue.** Playing-from opens that album.
-- **Cover**, large: swipe sideways to skip, double tap to like (a heart blooms), long press for
-  actions. It settles back slightly while paused (paused state you can see from across the room).
-- **Title** (marquee once if long), **artist** (opens the artist), **like** button.
-- **Seek bar**: Android 16's wave while playing, flat while paused or dragged; tap or drag anywhere.
-- **Signal path** ("FLAC 24/96 · 850 kbps · Bluetooth", parts divided by dots): opens the audio path; under it, while a sleep timer
-  runs, "Stops in 23 min".
-- **Transport**: shuffle · previous · play/pause · next · repeat. Shuffle and repeat are small and at
-  the ends (they belong to playback, as on Google's media controls); play/pause is the biggest shape
-  and morphs: circle when paused, wide rounded square when playing.
-- **Actions pill**: lyrics, sleep timer, output, queue in one light rounded pill (M3E floating
-  toolbar style). Song actions moved to the top right (⋮), where Google's players keep them.
-- **Up next** card: the next song, one tap to the queue.
-- **Closing**: drag the page down (it follows the finger) or use predictive back (it shrinks).
+- **Close · "Playing from <album>" · song actions (⋮).** Playing-from opens that album.
+- **Cover**, large: swipe sideways to skip (the old cover leaves in about a tenth of a second, the
+  new one settles in place: no slide-in from the other edge), double tap to like, long press for
+  actions. A button skip settles the new cover the same way.
+- **Lyrics** take the cover's place when the Lyrics button is on: no card, no frame, the lines fade
+  out at the top and bottom edges; a plain options icon opens timing and sources. Translations and
+  credit lines from online sources are dropped; lyrics found online are also written into the file.
+- **Title**, **artist** (opens the artist), **like** button.
+- **Seek bar**: Material's own slider (expressive track, handle in a gap), not an imitation.
+- **Format** ("FLAC 24/96 · 962 kbps"), quiet grey text; a tap opens the audio path. The output is
+  not repeated here: the output button sits in the pill below.
+- **Transport**: shuffle · previous · play/pause · next · repeat, all Material's expressive buttons:
+  corners squeeze while pressed, play/pause goes from round (paused) to a wider rounded square
+  (playing). No extra pulses or hops on top.
+- **Actions pill**: lyrics, sleep timer, output, queue.
+- **Swipe up** on the page opens the queue (no "Up next" card taking room).
+- **Closing**: drag the page down or use predictive back. Leaving the app and coming back keeps the
+  player as it was (nothing slides in again).
+
+## Sleep timer
+
+One list, one tap: 15 / 30 / 45 minutes, 1 hour, When this song ends; each row starts the timer at
+once. "Other length" opens a slider with Start. A running timer shows first, with +10 min and Turn
+off.
+
+## Artist page
+
+Photo beside the name and counts (smaller than an album cover), Play all / Shuffle / Add, an About
+card from Wikipedia when it describes a musician (four lines, a tap shows the rest), the artist's
+albums in a row (an album opened here goes back to the artist), then the five most played songs
+with "All N" for the full list.
 
 ## Your listening
 

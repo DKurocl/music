@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 
 package ua.olex.music.ui
 
@@ -131,6 +131,13 @@ fun MusicRoot(model: LibraryViewModel) {
         val pending = android.provider.MediaStore.createWriteRequest(context.contentResolver, uris)
         writeRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build())
     }
+    // Lyrics found online go into the song's file as well, after Android asks once.
+    model.lyricsForFile?.let { (track, text) ->
+        LaunchedEffect(track.id, text) {
+            model.lyricsForFileHandled()
+            requestTagWrite(listOf(track), TagEditRequest(mapOf("LYRICS" to text), quiet = true))
+        }
+    }
     var equalizerOpen by rememberSaveable { mutableStateOf(false) }
     var playlistTracks by remember { mutableStateOf<List<Track>?>(null) }
     val playing by model.playing.collectAsStateWithLifecycle()
@@ -195,7 +202,9 @@ fun MusicRoot(model: LibraryViewModel) {
                 },
                 actions = {
                     if (place == Place.LIBRARY && page == null && !inCollection) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
-                    if (place == Place.HOME && page == null) IconButton(onClick = { page = Page.SETTINGS }, modifier = Modifier.semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS) }
+                    // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
+                    if (place == Place.HOME && page == null) androidx.compose.material3.FilledTonalIconButton(onClick = { page = Page.SETTINGS },
+                        shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp) }
                 },
             )
         },
@@ -500,38 +509,44 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                     }
                 }
             }
-            val choices = listOf(15, 30, 45, 60)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                choices.forEach { m ->
-                    Surface(onClick = { haptics.confirm(); onSet(m) }, shape = RoundedCornerShape(24.dp), color = cs.secondaryContainer, contentColor = cs.onSecondaryContainer,
-                        modifier = Modifier.weight(1f).height(84.dp).squish()) {
-                        Column(verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("$m", style = MaterialTheme.typography.headlineMediumEmphasized)
-                            Text("min", style = MaterialTheme.typography.labelLarge)
+            // One list, one tap: each row starts the timer at once. "Other length" opens a slider.
+            var otherOpen by rememberSaveable { mutableStateOf(false) }
+            val rows = listOf(15 to "15 minutes", 30 to "30 minutes", 45 to "45 minutes", 60 to "1 hour",
+                ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK to "When this song ends")
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                rows.forEachIndexed { i, (minutes, label) ->
+                    SleepRow(if (minutes < 0) Glyph.NOTE else Glyph.TIMER, label, first = i == 0, last = false) { haptics.confirm(); onSet(minutes) }
+                }
+                SleepRow(Glyph.TUNE, "Other length", first = false, last = !otherOpen, trailing = if (otherOpen) null else ({ Symbol(Glyph.CHEVRON, color = cs.onSurfaceVariant) })) { otherOpen = !otherOpen }
+                if (otherOpen) Surface(shape = RoundedCornerShape(4.dp, 4.dp, 24.dp, 24.dp), color = cs.surfaceContainer) {
+                    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)) {
+                        Slider(value = custom, onValueChange = { v -> val r = ((v / 5).toInt() * 5f).coerceIn(5f, 180f); if (r != custom) haptics.tick(); custom = r },
+                            valueRange = 5f..180f, modifier = Modifier.semantics { contentDescription = "Other length" })
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("${custom.toInt()} min", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                            Button(onClick = { haptics.confirm(); onSet(custom.toInt()) }) { Text("Start") }
                         }
                     }
                 }
-            }
-            Surface(onClick = { haptics.confirm(); onSet(ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK) }, shape = RoundedCornerShape(24.dp),
-                color = cs.surfaceContainerHigh, modifier = Modifier.fillMaxWidth().height(64.dp).squish(0.02f)) {
-                Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Symbol(Glyph.NOTE, filled = true, color = cs.primary)
-                    Text("When this song ends", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 14.dp))
-                }
-            }
-            // Any other length: drag, then set. Ticks every 5 minutes.
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Other: ${custom.toInt()} min", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    Button(onClick = { haptics.confirm(); onSet(custom.toInt()) }) { Text("Set") }
-                }
-                Slider(value = custom, onValueChange = { v -> val r = (v / 5).toInt() * 5f; if (r != custom) haptics.tick(); custom = r.coerceIn(5f, 180f) },
-                    valueRange = 5f..180f, modifier = Modifier.semantics { contentDescription = "Other length" })
             }
         }
     }
 }
 
+/** A row of the sleep timer list: the first and last round the group's corners. */
+@Composable
+private fun SleepRow(glyph: Glyph, label: String, first: Boolean, last: Boolean, trailing: (@Composable () -> Unit)? = null, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val big = 24.dp; val small = 4.dp
+    Surface(onClick = onClick, color = cs.surfaceContainer,
+        shape = RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 20.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Symbol(glyph, color = cs.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(start = 20.dp).weight(1f))
+            trailing?.invoke()
+        }
+    }
+}
 
 /** The three places of the app, in the navigation bar. */
 internal enum class Place(val title: String, val glyph: Glyph) { HOME("Home", Glyph.HOME), LIBRARY("Playlists", Glyph.PLAYLIST), SEARCH("Search", Glyph.SEARCH) }

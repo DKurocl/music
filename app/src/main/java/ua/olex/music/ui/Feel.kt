@@ -60,54 +60,6 @@ fun rememberHaptics(): Haptics { val view = LocalView.current; return remember(v
 /** Short messages after a gesture ("Playing next"); provided by the app's scaffold. */
 val LocalSnackbar = staticCompositionLocalOf<SnackbarHostState?> { null }
 
-/**
- * The seek bar: Android 16's media wave while the song plays, flat while paused or dragged. Drag
- * or tap anywhere on it to seek; spoken as a slider with the position.
- */
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-internal fun WavySeekBar(progress: () -> Float, playing: Boolean, enabled: Boolean, description: String,
-    onDrag: (Float?) -> Unit, onSeek: (Float) -> Unit, modifier: Modifier = Modifier) {
-    val cs = MaterialTheme.colorScheme
-    val haptics = rememberHaptics()
-    var width by remember { mutableIntStateOf(1) }
-    var dragging by remember { androidx.compose.runtime.mutableStateOf<Float?>(null) }
-    val amplitude by animateFloatAsState(if (playing && dragging == null) 1f else 0f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "wave")
-    val thumb by animateFloatAsState(if (dragging != null) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "thumb")
-    val shown = { dragging ?: progress() }
-    Box(
-        modifier.fillMaxWidth().height(40.dp).onSizeChanged { width = it.width.coerceAtLeast(1) }
-            .semantics {
-                contentDescription = "Position"; stateDescription = description
-                progressBarRangeInfo = ProgressBarRangeInfo(shown(), 0f..1f)
-                if (enabled) setProgress { onSeek(it.coerceIn(0f, 1f)); true }
-            }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                detectTapGestures { onSeek((it.x / width).coerceIn(0f, 1f)); haptics.tick() }
-            }
-            .pointerInput(enabled) {
-                if (!enabled) return@pointerInput
-                detectHorizontalDragGestures(
-                    onDragStart = { dragging = (it.x / width).coerceIn(0f, 1f); onDrag(dragging); haptics.tick() },
-                    onDragEnd = { dragging?.let(onSeek); dragging = null; onDrag(null); haptics.tick() },
-                    onDragCancel = { dragging = null; onDrag(null) },
-                ) { change, _ -> dragging = (change.position.x / width).coerceIn(0f, 1f); onDrag(dragging) }
-            },
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        LinearWavyProgressIndicator(
-            progress = shown, modifier = Modifier.fillMaxWidth().height(14.dp),
-            color = cs.primary, trackColor = cs.surfaceContainerHighest,
-            amplitude = { amplitude },
-        )
-        // The thumb: a tall pill like M3E sliders, grows while dragging.
-        val density = LocalDensity.current
-        val x = with(density) { (shown() * width).toDp() } - 3.dp
-        Box(Modifier.offset(x = x).size(width = 6.dp, height = (20 + 12 * thumb).dp).clip(RoundedCornerShape(3.dp)).background(cs.primary))
-    }
-}
-
 /** Tests and the design gallery draw sheets inline (a real sheet opens its own window, which a capture misses). */
 val LocalInlineSheets = staticCompositionLocalOf { false }
 
