@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
@@ -76,6 +77,15 @@ internal fun SettingsPage(
         item { Group("Lyrics") }
         item { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
             lockLyrics = it; LockScreenLyrics.set(context, it) } }
+
+        // YouTube Music as a second source, the owner's files always first.
+        item { Group("YouTube Music") }
+        item {
+            val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
+            val on by graph.youTubeOn.collectAsState()
+            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have appear under your own in Search. A song you have always plays from your file",
+                on, first = true, last = true) { graph.setYouTube(it) }
+        }
 
         // Moving covers from Apple Music, with the owner's own MusicKit key.
         item { Group("Moving covers") }

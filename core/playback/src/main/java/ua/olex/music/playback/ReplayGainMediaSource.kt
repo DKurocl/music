@@ -38,9 +38,20 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
     override fun setLoadErrorHandlingPolicy(policy: LoadErrorHandlingPolicy): MediaSource.Factory {
         errors = policy; template.setLoadErrorHandlingPolicy(policy); return this
     }
+    // Local files and content URIs as before; ytm://<id> is asked of the app at open time.
+    private val data = androidx.media3.datasource.ResolvingDataSource.Factory(
+        androidx.media3.datasource.DefaultDataSource.Factory(app, androidx.media3.datasource.DefaultHttpDataSource.Factory()
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").setAllowCrossProtocolRedirects(true)),
+    ) { spec ->
+        if (spec.uri.scheme != OnlineStreams.SCHEME) return@Factory spec
+        val id = spec.uri.host ?: spec.uri.schemeSpecificPart.trimStart('/')
+        val real = (app as? OnlineStreams)?.resolve(id) ?: throw java.io.IOException("This song is not available online right now")
+        spec.withUri(real)
+    }
+
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val tags = ReplayGainCodec.tags(mediaItem.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS))
-        val factory = DefaultMediaSourceFactory(app, ReplayGainExtractorsFactory(WithDsd(DefaultExtractorsFactory()), tags))
+        val factory = DefaultMediaSourceFactory(data, ReplayGainExtractorsFactory(WithDsd(DefaultExtractorsFactory()), tags))
         drm?.let(factory::setDrmSessionManagerProvider); errors?.let(factory::setLoadErrorHandlingPolicy)
         return factory.createMediaSource(mediaItem)
     }

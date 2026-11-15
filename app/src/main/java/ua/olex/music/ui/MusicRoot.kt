@@ -117,6 +117,8 @@ fun MusicRoot(model: LibraryViewModel) {
     val lyricsState by model.localLyrics.collectAsStateWithLifecycle()
     val musicFolders by model.musicFolders.collectAsStateWithLifecycle()
     val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
+    val onlineResults by model.online.collectAsStateWithLifecycle()
+    val youTubeOn by LocalContext.current.graph.youTubeOn.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
     var editingTags by remember { mutableStateOf<List<Track>?>(null) }
     var pendingTags by remember { mutableStateOf<Pair<List<Track>, TagEditRequest>?>(null) }
@@ -276,6 +278,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
+                online = onlineResults, onlineOn = youTubeOn && place == Place.SEARCH,
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, focusSearch = focusSearch, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
@@ -365,19 +368,22 @@ fun MusicRoot(model: LibraryViewModel) {
         onApply = model::setEqualizer, onDismiss = { equalizerOpen = false },
         loudness = playing.replayGain, onLoudness = model::setReplayGain)
     actionTrack?.let { track ->
+        val online = YouTubeMusic.isOnline(track)
         val saved = track.id.value in personal.favouriteByTrackId
         TrackActionsSheet(track, saved, rating = stats[track.key.value]?.rating ?: 0, onRate = { stars ->
             model.setRating(track, stars)
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
         },
-            plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOf(
+            plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
-            TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
-            TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
+            // An online song has no album or artist page here and no file to tag: those actions are not offered.
+            if (online) null else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
+            if (online) null else TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
+            if (online) TrackAction(Glyph.SEARCH, "Search this artist") { actionTrack = null; expanded = false; model.setQuery(track.artist); place = Place.SEARCH } else null,
             TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
-            TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
+            if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
             TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
         ))
     }

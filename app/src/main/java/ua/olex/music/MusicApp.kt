@@ -23,6 +23,11 @@ class AppGraph(context: Context) {
     val artistImages by lazy { ua.olex.music.ui.ArtistImages(app) }
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
+    internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic() }
+    private val onlinePrefs by lazy { app.getSharedPreferences("online", Context.MODE_PRIVATE) }
+    /** YouTube Music in search and playback; the owner can turn it off in Settings. */
+    val youTubeOn by lazy { kotlinx.coroutines.flow.MutableStateFlow(onlinePrefs.getBoolean("youtube", true)) }
+    fun setYouTube(on: Boolean) { onlinePrefs.edit().putBoolean("youtube", on).apply(); youTubeOn.value = on }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
     val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles) }
     val player by lazy { PlayerConnection(app) }
@@ -30,7 +35,9 @@ class AppGraph(context: Context) {
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
 }
 
-class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner {
+class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams {
+    /** The audio stream of an online song, found when the player opens it. */
+    override fun resolve(id: String): android.net.Uri? = graph.youTube.audio(id)
     override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
