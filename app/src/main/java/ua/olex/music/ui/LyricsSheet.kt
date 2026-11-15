@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -46,14 +47,11 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     val list = rememberLazyListState()
     val dragging by list.interactionSource.collectIsDraggedAsState()
     var follow by rememberSaveable(state.mediaId) { mutableStateOf(true) }
-    var sourcesOpen by rememberSaveable(state.mediaId) { mutableStateOf(lyrics.lines.isEmpty()) }
     var current by remember(state.mediaId, lyrics) { mutableIntStateOf(-1) }
     // The lyric clock: read every 50 ms for word-timed lyrics (the word fill), 100 ms for lines.
     var now by remember(state.mediaId, lyrics) { mutableLongStateOf(0L) }
     val timed = lyrics.sync != Sync.NONE
-    val hasSources = onChooseFolder != null || onReload != null || note != null || folders.isNotEmpty()
     LaunchedEffect(dragging) { if (dragging) follow = false }
-    LaunchedEffect(sourcesOpen) { if (sourcesOpen) follow = false }
     LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, lifecycle) {
         if (!timed) { current = -1; return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -64,82 +62,80 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
             } while (state.isPlaying)
         }
     }
-    // One metadata item precedes the lyrics, so current puts the preceding lyric above the active one.
-    LaunchedEffect(current, follow, sourcesOpen) {
-        if (follow && !sourcesOpen && current >= 0) list.animateScrollToItem(current)
+    // While fixing timing the list follows the song (the "editing" note comes first, so the line before stays visible).
+    LaunchedEffect(current, editing) {
+        if (editing && current >= 0) list.animateScrollToItem(current)
     }
     AppSheet(onDismiss, MaterialTheme.colorScheme.surfaceContainerLow) {
+        val cs = MaterialTheme.colorScheme
         Column(Modifier.fillMaxWidth().heightIn(max = 680.dp)) {
             Column(Modifier.padding(horizontal = 24.dp)) {
                 Text("Lyrics", style = MaterialTheme.typography.titleLargeEmphasized)
-                Text(source, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(source, onlineStatus).joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false), state = list,
-                contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item(key = "lyric-source-controls") {
-                    val cs = MaterialTheme.colorScheme
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        // Timing: nudge in 0.2 s steps, reset by tapping the value; fix lines one by one.
-                        if (timed) androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp, 24.dp, 4.dp, 4.dp), color = cs.surfaceContainer) {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Timing", style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    androidx.compose.material3.FilledTonalButton(onClick = { onOffset((offsetMs - 200).coerceAtLeast(-60_000)) }) { Text("Later") }
-                                    TextButton(onClick = { onOffset(0) }, modifier = Modifier.weight(1f)) { Text(if (offsetMs == 0L) "In sync" else "Offset ${offsetMs} ms") }
-                                    androidx.compose.material3.FilledTonalButton(onClick = { onOffset((offsetMs + 200).coerceAtMost(60_000)) }) { Text("Earlier") }
-                                }
-                                if (onSaveTiming != null) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    if (!editing) androidx.compose.material3.OutlinedButton(onClick = { editing = true; follow = false; draft = lyrics }) { Text("Fix timing") }
-                                    else {
-                                        Button(onClick = { onSaveTiming(draft); editing = false }) { Text("Save timing") }
-                                        TextButton(onClick = { editing = false; draft = lyrics }) { Text("Cancel") }
-                                    }
-                                    onResetTiming?.let { TextButton(onClick = it) { Text("Restore original") } }
-                                }
-                                if (editing) Text("Play the song and tap each line the moment it starts. Words move with their line.",
-                                    style = MaterialTheme.typography.bodySmall, color = cs.primary)
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (editing) {
+                    item(key = "editing") {
+                        Column(Modifier.padding(horizontal = 8.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Play the song and tap each line the moment it starts. Words move with their line.", style = MaterialTheme.typography.bodyMedium)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(onClick = { onSaveTiming?.invoke(draft); editing = false }) { Text("Save timing") }
+                                TextButton(onClick = { editing = false; draft = lyrics }) { Text("Cancel") }
                             }
                         }
-                        if (timed) {
+                    }
+                    itemsIndexed(shown.lines) { index, line ->
+                        Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                            LyricLine(line, index, current, now, timed) { draft = ua.olex.music.lyrics.LyricsTiming.retime(draft, index, position() + offsetMs) }
+                        }
+                    }
+                } else {
+                    // One group of plain rows, as in Settings: no colours, each row says what it does.
+                    val rows = buildList<@Composable (Boolean, Boolean) -> Unit> {
+                        if (timed) add { first, last ->
+                            ToolRow(Glyph.TIMER, "Timing", if (offsetMs == 0L) "In sync with the song" else "Moved ${kotlin.math.abs(offsetMs) / 100 / 10.0} s ${if (offsetMs > 0) "earlier" else "later"}", first, last, onClick = { onOffset(0) }) {
+                                TextButton(onClick = { onOffset((offsetMs - 200).coerceAtLeast(-60_000)) }) { Text("Later") }
+                                TextButton(onClick = { onOffset((offsetMs + 200).coerceAtMost(60_000)) }) { Text("Earlier") }
+                            }
+                        }
+                        if (timed && onSaveTiming != null) add { first, last -> ToolRow(Glyph.EDIT, "Fix timing", "Tap each line as it is sung", first, last, onClick = { editing = true; follow = false; draft = lyrics }) }
+                        if (onResetTiming != null) add { first, last -> ToolRow(Glyph.REFRESH, "Restore original", "Undo your timing", first, last, onClick = onResetTiming) }
+                        if (timed) add { first, last ->
                             val context = androidx.compose.ui.platform.LocalContext.current
                             var lock by remember { mutableStateOf(ua.olex.music.playback.LockScreenLyrics.get(context)) }
-                            androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp), color = cs.surfaceContainer) {
-                                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text("Line on the lock screen", style = MaterialTheme.typography.bodyLarge)
-                                        Text("While the app is closed", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                                    }
-                                    Switch(lock, { lock = it; ua.olex.music.playback.LockScreenLyrics.set(context, it) })
-                                }
+                            ToolRow(Glyph.LOCK, "Line on the lock screen", "While the app is closed", first, last, onClick = { lock = !lock; ua.olex.music.playback.LockScreenLyrics.set(context, lock) }) {
+                                Switch(lock, { lock = it; ua.olex.music.playback.LockScreenLyrics.set(context, it) })
                             }
                         }
-                        // Where the lyrics come from, and how to get others.
-                        androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(if (timed) 4.dp else 24.dp, if (timed) 4.dp else 24.dp, 24.dp, 24.dp), color = cs.surfaceContainer) {
-                            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("Sources", style = MaterialTheme.typography.titleSmall, color = cs.primary)
-                                Text(if (lyrics.lines.isEmpty()) "No lyrics found on the phone." else if (timed) "Synced lines: tap one to jump there." else "Plain lyrics, without timing.",
-                                    style = MaterialTheme.typography.bodyMedium)
-                                note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant) }
-                                onlineStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.primary) }
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    onFindOnline?.let { androidx.compose.material3.AssistChip(onClick = it, label = { Text("Find online") }, leadingIcon = { Symbol(Glyph.SEARCH, size = 18.dp) }) }
-                                    onChooseFolder?.let { androidx.compose.material3.AssistChip(onClick = it, label = { Text("Choose music folder") }, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }) }
-                                    onReload?.let { androidx.compose.material3.AssistChip(onClick = it, label = { Text("Reload") }, leadingIcon = { Symbol(Glyph.REFRESH, size = 18.dp) }) }
-                                    if (folders.isNotEmpty()) onClearFolders?.let { androidx.compose.material3.AssistChip(onClick = it, label = { Text("Clear folder access") }) }
-                                }
-                                if (folders.isNotEmpty()) Text(folders.take(3).joinToString(" · ") + if (folders.size > 3) " · +${folders.size - 3} folders" else "",
-                                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                            }
-                        }
+                        onFindOnline?.let { find -> add { first, last -> ToolRow(Glyph.SEARCH, "Find online", "Replaces these lyrics and saves them in the file", first, last, onClick = find) } }
+                        onChooseFolder?.let { choose -> add { first, last -> ToolRow(Glyph.FOLDER, "Choose music folder",
+                            note ?: if (folders.isEmpty()) "To read .lrc files beside your songs" else folders.take(2).joinToString(" · "), first, last, onClick = choose) } }
+                        onReload?.let { reload -> add { first, last -> ToolRow(Glyph.REFRESH, "Reload", "Read the lyrics files again", first, last, onClick = reload) } }
+                        if (folders.isNotEmpty()) onClearFolders?.let { clear -> add { first, last -> ToolRow(Glyph.HIDDEN, "Clear folder access", null, first, last, onClick = clear) } }
                     }
-                }
-                itemsIndexed(shown.lines) { index, line ->
-                    LyricLine(line, index, current, now, timed) {
-                        if (editing) draft = ua.olex.music.lyrics.LyricsTiming.retime(draft, index, position() + offsetMs)
-                        else { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true; sourcesOpen = false }
-                    }
+                    itemsIndexed(rows) { i, row -> row(i == 0, i == rows.lastIndex) }
                 }
             }
+        }
+    }
+}
+
+/** A row of the lyrics options group: the first and last round the group's corners. */
+@Composable
+private fun ToolRow(glyph: Glyph, title: String, subtitle: String?, first: Boolean, last: Boolean, onClick: () -> Unit, trailing: (@Composable () -> Unit)? = null) {
+    val cs = MaterialTheme.colorScheme
+    val big = 24.dp; val small = 4.dp
+    androidx.compose.material3.Surface(onClick = onClick, color = cs.surfaceContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Symbol(glyph, color = cs.onSurfaceVariant)
+            androidx.compose.foundation.layout.Spacer(Modifier.size(20.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.bodyLarge)
+                subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            }
+            trailing?.invoke()
         }
     }
 }
@@ -179,7 +175,6 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
     ) {
         Text(text, style = style, color = if (active && line.words.isEmpty()) cs.primary else if (active) dim else cs.onSurface,
             textAlign = if (secondVoice) androidx.compose.ui.text.style.TextAlign.End else androidx.compose.ui.text.style.TextAlign.Start)
-        line.translation?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = cs.onSurfaceVariant) }
     }
 }
 
@@ -215,26 +210,35 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
     }
     // Keep the sung line about a third from the top, with the previous line still visible above.
     LaunchedEffect(current, follow) { if (follow && current >= 0) list.animateScrollToItem((current - 1).coerceAtLeast(0)) }
-    androidx.compose.material3.Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(32.dp), color = cs.surfaceContainer, modifier = modifier) {
-        Box {
-            if (lyrics.lines.isEmpty()) {
-                Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Symbol(Glyph.LYRICS, size = 40.dp, color = cs.onSurfaceVariant)
-                    Text("No lyrics for this song yet", style = MaterialTheme.typography.titleMedium)
-                    onlineStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.primary) }
+    // No card: the lyrics take the cover's place and fade out at the top and bottom edges.
+    Box(modifier.graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(
+                0f to androidx.compose.ui.graphics.Color.Transparent, 0.12f to androidx.compose.ui.graphics.Color.Black,
+                0.82f to androidx.compose.ui.graphics.Color.Black, 1f to androidx.compose.ui.graphics.Color.Transparent),
+                blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+        }) {
+        if (lyrics.lines.isEmpty()) {
+            Column(Modifier.align(Alignment.Center).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("No lyrics for this song yet", style = MaterialTheme.typography.titleLarge)
+                onlineStatus?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (onFindOnline != null) Button(onClick = onFindOnline) { Text("Find online") }
-                }
-            } else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 120.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                itemsIndexed(lyrics.lines) { index, line ->
-                    LyricLine(line, index, current, now, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
+                    androidx.compose.material3.OutlinedButton(onClick = onTools) { Text("More") }
                 }
             }
-            // Tools, top right: sources, online search, timing.
-            androidx.compose.material3.FilledTonalIconButton(onClick = onTools, modifier = Modifier.align(Alignment.TopEnd).padding(10.dp).size(40.dp)
-                .semantics { contentDescription = "Lyrics tools" }) { Symbol(Glyph.TUNE, size = 20.dp) }
-            if (!follow && timed) androidx.compose.material3.AssistChip(onClick = { follow = true }, label = { Text("Back to the song") },
-                leadingIcon = { Symbol(Glyph.DOWN, size = 18.dp) }, modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp))
+        } else LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = 56.dp, bottom = 160.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            itemsIndexed(lyrics.lines) { index, line ->
+                LyricLine(line, index, current, now, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
+            }
+        }
+        // Lyrics options (timing, sources, online), a plain icon so nothing frames the text.
+        if (lyrics.lines.isNotEmpty()) androidx.compose.material3.IconButton(onClick = onTools, modifier = Modifier.align(Alignment.TopEnd)
+            .semantics { contentDescription = "Lyrics options" }) { Symbol(Glyph.TUNE, color = cs.onSurfaceVariant) }
+        if (!follow && timed) androidx.compose.material3.FilledTonalButton(onClick = { follow = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)) {
+            Symbol(Glyph.DOWN, size = 18.dp); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Back to the song")
         }
     }
 }

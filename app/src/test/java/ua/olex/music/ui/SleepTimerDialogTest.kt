@@ -18,7 +18,7 @@ class SleepTimerDialogTest {
     @Test fun choosingADurationSendsItToThePlayer() {
         var minutes = -1
         compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(false, {}, { minutes = it }) } } }
-        compose.onNodeWithText("15", substring = false).performClick()
+        compose.onNodeWithText("15 minutes").performClick()
         compose.runOnIdle { assertEquals(15, minutes) }
     }
 
