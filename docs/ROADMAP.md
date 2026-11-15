@@ -106,7 +106,10 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [x] Watch for file changes (`5aa0d92`, CI 43564927822) while the app is open (ContentObserver/FileObserver) instead of only
       on start.
 
-- [ ] Playlists: m3u/m3u8 import and export; smart playlists (rules over tags, play counts, dates).
+- [~] Playlists: m3u/m3u8 import and export (Codex, 2026-11-15, `agent/m3-replaygain`);
+      codec, preview, path resolution, missing-file retention and transactional save implemented.
+      102 JVM / 9 focused user-repository tests pass; Android picker/UI checks deferred by owner.
+      Repeated playlist occurrences and smart playlist rules remain open.
 - [ ] Ratings, play counts, recently added and recently played views.
 - [ ] Cue sheets (`.cue` beside a file and embedded CUESHEET): one file shown and played as its tracks.
 - Export/import backup of user.db excluded by the owner (2026-11-14); persistence across updates is sufficient.

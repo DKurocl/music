@@ -43,4 +43,5 @@ data class PersonalLibraryActions(
     val remove: (Long, String) -> Unit,
     val move: (Long, String, Int) -> Unit,
     val removeFavourite: (String) -> Unit,
+    val importPlaylist: (String, List<SavedSong>) -> Unit = { _, _ -> },
 )

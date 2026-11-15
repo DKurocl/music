@@ -1,6 +1,15 @@
 package ua.olex.music.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import ua.olex.music.model.LibraryIndex
+import ua.olex.music.model.SavedSong
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,12 +27,51 @@ import ua.olex.music.model.Track
 internal fun PlaylistBrowser(
     playlists: List<PlaylistUi>, actions: PersonalLibraryActions, modifier: Modifier = Modifier,
     currentId: String?, onPlay: (List<Track>, Int) -> Unit, onTrackActions: (Track) -> Unit,
+    library: LibraryIndex = LibraryIndex.EMPTY,
 ) {
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     var namingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var create by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingSong by rememberSaveable { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var loadingDocument by remember { mutableStateOf(false) }
+    var loaded by remember { mutableStateOf<PlaylistDocuments.Loaded?>(null) }
+    var documentMessage by remember { mutableStateOf<String?>(null) }
+    var exportSnapshot by remember { mutableStateOf<Pair<String, List<SavedSong>>?>(null) }
+    var exportPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            loadingDocument = true
+            try { loaded = withContext(Dispatchers.IO) { PlaylistDocuments.read(context, uri) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { documentMessage = "Couldn't read this playlist. Use a UTF-8 M3U8 file, up to 8 MB and 20000 entries. HLS streams are not local playlists." }
+            finally { loadingDocument = false }
+        }
+    }
+    val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri ->
+        val snapshot = exportSnapshot ?: playlists.firstOrNull { it.id == exportPlaylistId }?.let { playlist ->
+            playlist.name to playlist.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song }
+        }
+        exportSnapshot = null; exportPlaylistId = null
+        if (uri != null && snapshot == null) documentMessage = "The playlist is no longer available. Open it and try exporting again."
+        if (uri != null && snapshot != null) scope.launch {
+            loadingDocument = true
+            try {
+                val text = withContext(Dispatchers.Default) { PlaylistDocuments.export(snapshot.first, snapshot.second) }
+                withContext(Dispatchers.IO) { PlaylistDocuments.write(context, uri, text) }
+                documentMessage = "Exported ${snapshot.second.size} songs. Missing file references are included."
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { documentMessage = "Couldn't complete the export. Some songs may lack a file path, or the destination could not be written. The selected document may be incomplete." }
+            finally { loadingDocument = false }
+        }
+    }
+    loaded?.let { document -> PlaylistImportDialog(document, library, onDismiss = { loaded = null }, onImport = { name, songs ->
+        actions.importPlaylist(name, songs); loaded = null
+    }) }
+    documentMessage?.let { message -> AlertDialog(onDismissRequest = { documentMessage = null }, title = { Text("Playlist file") },
+        text = { Text(message) }, confirmButton = { TextButton(onClick = { documentMessage = null }) { Text("Close") } }) }
     val selected = playlists.firstOrNull { it.id == selectedId }
     BackHandler(selected != null) { selectedId = null }
 
@@ -56,8 +104,14 @@ internal fun PlaylistBrowser(
     }
 
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 16.dp)) {
+        if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
-            item { TextButton(onClick = { create = true }, modifier = Modifier.padding(16.dp)) { Text("New playlist") } }
+            item {
+                FlowRow(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { create = true }) { Text("New playlist") }
+                    TextButton(enabled = !loadingDocument, onClick = { importFile.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "application/octet-stream")) }) { Text("Import M3U8") }
+                }
+            }
             if (playlists.isEmpty()) item { Text("Create a playlist, then add songs or an entire album from their actions.", Modifier.padding(16.dp)) }
             items(playlists, key = { it.id }) { playlist ->
                 ListItem(
@@ -74,6 +128,11 @@ internal fun PlaylistBrowser(
                     Text("${selected.songs.size} songs · ${selected.songs.size - selected.playable.size} unavailable")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(enabled = selected.playable.isNotEmpty(), onClick = { onPlay(selected.playable, 0) }) { Text("Play all") }
+                        TextButton(enabled = !loadingDocument, onClick = {
+                            exportPlaylistId = selected.id
+                            exportSnapshot = selected.name to selected.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song }
+                            exportFile.launch(PlaylistDocuments.filename(selected.name))
+                        }) { Text("Export M3U8") }
                         TextButton(onClick = { namingId = selected.id }) { Text("Rename") }
                         TextButton(onClick = { deleting = selected.id }) { Text("Delete") }
                     }

@@ -25,6 +25,8 @@ data class LibraryIndex(
     val byId: Map<TrackId, Track> = songs.associateBy { it.id }
     val bySongKey: Map<String, List<Track>> by lazy(LazyThreadSafetyMode.PUBLICATION) { songs.groupBy { it.key.value } }
 
+    val playlistPaths: PlaylistPathIndex by lazy(LazyThreadSafetyMode.PUBLICATION) { PlaylistPathIndex(songs) }
+
     companion object {
         val EMPTY = LibraryIndex(emptyList(), emptyList(), emptyList(), emptyList(), emptyList())
 
