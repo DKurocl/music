@@ -23,8 +23,10 @@ class LyricsSheetTest {
         compose.setContent { AppTheme {
             LyricsSheet(Lyrics.parse("[00:01]First line\n[00:10]Second line"), PlayerState(mediaId = "local:1"), 200, { 0 }, { seek = it }, { offset = it }, {})
         } }
-        compose.onNodeWithText("Second line").performScrollTo().performClick()
+        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Second line"))
+        compose.onNodeWithText("Second line").performClick()
         compose.runOnIdle { assertEquals(9_800L, seek) }
+        compose.onNode(hasScrollToNodeAction()).performScrollToIndex(0)
         compose.onNodeWithText("Earlier").performClick()
         compose.runOnIdle { assertEquals(400L, offset) }
         compose.onNodeWithText("Offset 200 ms").performClick()

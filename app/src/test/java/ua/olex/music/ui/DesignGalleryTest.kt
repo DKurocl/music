@@ -118,7 +118,7 @@ class DesignGalleryTest {
     private fun Shell(title: String, place: Place?, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
         CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
-                topBar = { TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) }) },
+                topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) }) },
                 bottomBar = { PlacesBar(place) {} },
             ) { pad ->
                 // Same frame as the app: the page runs under the floating mini player, with a fade behind it.
@@ -143,7 +143,7 @@ class DesignGalleryTest {
 
     @Test fun songActions() {
         val t = library.songs[3]
-        compose.setContent { Shell("Library", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
+        compose.setContent { Shell("Playlists", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
             TrackActionsSheet(t, false, {}, listOf(TrackAction(Glyph.PLAY_NEXT, "Play next") {}, TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") {},
                 TrackAction(Glyph.ALBUM, "Go to album") {}, TrackAction(Glyph.PERSON, "Go to artist") {}, TrackAction(Glyph.FAVOURITE, "Add to favourites") {},
                 TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") {}, TrackAction(Glyph.EDIT, "Edit tags") {}), rating = 4, onRate = {}, plays = 12)
@@ -153,9 +153,126 @@ class DesignGalleryTest {
 
     @Test fun queue() {
         val q = library.albums.first().tracks.map { ua.olex.music.playback.QueueItem(it.id.value, it.id.value, it.title, it.artist, it.artworkUri) }
-        compose.setContent { Shell("Library", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
+        compose.setContent { Shell("Playlists", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {
             QueueSheet(now.copy(queue = q, queueIndex = 1), {}, {}, { _, _ -> }, {}) } } }
         shot("16-queue")
+    }
+
+    // ---- audit: every dialog, sheet and empty state -------------------------------------------
+
+    @Composable
+    private fun Over(content: @Composable () -> Unit) = Shell("", Place.LIBRARY) { pad ->
+        Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) { content() }
+    }
+
+    @Test fun sleepTimer() {
+        compose.setContent { Over { SleepTimerDialog(false, {}, {}) } }
+        shot("20-sleep")
+    }
+
+    @Test fun sleepTimerRunning() {
+        compose.setContent { Over { SleepTimerDialog(true, {}, {}, deadline = android.os.SystemClock.elapsedRealtime() + 23 * 60_000L) } }
+        shot("21-sleep-running")
+    }
+
+    @Test fun playlistPicker() {
+        val actions = PersonalLibraryActions({ _, _ -> }, { _, _ -> }, {}, { _, _, _ -> }, { _, _, _ -> }, { _, _, _, _ -> }, {})
+        compose.setContent { Over { PlaylistPicker(listOf(PlaylistUi(1, "Evening", emptyList()), PlaylistUi(2, "Running", emptyList())), library.songs.take(3), actions) {} } }
+        shot("22-playlist-picker")
+    }
+
+    @Test fun tagEditor() {
+        compose.setContent { Over { TagEditorDialog(library.songs.take(1), {}) {} } }
+        shot("23-tag-editor")
+    }
+
+    @Test fun smartEditor() {
+        compose.setContent { Over { SmartPlaylistEditor(ua.olex.music.model.SmartPlaylist.BUILT_IN.first(), {}) {} } }
+        shot("24-smart-editor")
+    }
+
+    @Test fun equalizer() {
+        compose.setContent { Over { EqualizerSheet(ua.olex.music.playback.EqualizerState("bt", "WF-1000XM5", true), true, null, { _, _ -> }, {}) } }
+        shot("25-equalizer")
+    }
+
+    @Test fun audioPath() {
+        compose.setContent { Over { AudioPathSheet("FLAC 24/96  ·  2116 kbps", null, ua.olex.music.playback.AudioDiagnostics("c2.android.flac.decoder", "PCM float", 96_000, 2), {}, {}, fileRateHz = 96_000) } }
+        shot("26-audio-path")
+    }
+
+    @Test fun lyrics() {
+        val l = ua.olex.music.lyrics.Lyrics.parse("[00:01.00]<00:01.00>Hello <00:01.50>darkness <00:02.20>my <00:02.50>old <00:02.90>friend<00:03.50>\n[00:04.00]I've come to talk with you again\n[00:08.00]Because a vision softly creeping\n[00:12.00]Left its seeds while I was sleeping")
+        compose.setContent { Over { LyricsSheet(l, now, 0, { 2_300 }, {}, {}, {}, source = "Embedded lyrics", onReload = {}) } }
+        shot("27-lyrics")
+    }
+
+    @Test fun playerLyrics() {
+        val l = ua.olex.music.lyrics.Lyrics.parse("[00:01.00]<00:01.00>Hello <00:01.50>darkness <00:02.20>my <00:02.50>old <00:02.90>friend<00:03.50>\n[00:04.00]I've come to talk with you again\n[00:08.00]Because a vision softly creeping\n[00:12.00]Left its seeds while I was sleeping\n[00:16.00]And the vision that was planted in my brain\n[00:20.00]Still remains")
+        compose.setContent { AppTheme { Images { PlayerPage(now, "FLAC 24/96  ·  2116 kbps", null, true, { 2_300 }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {},
+            inlineLyrics = { m -> InlineLyrics(l, now.copy(isPlaying = false), 0, { 2_300 }, {}, {}, null, null, m) }, startWithLyrics = true) } } }
+        shot("33-player-lyrics")
+    }
+
+    @Test fun artistPage() {
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
+            open = "ARTISTS" to library.artists.first { a -> a.name == "Radiohead" }.id) } }
+        shot("34-artist")
+    }
+
+    @Test fun homeFresh() {
+        compose.setContent { Shell(greeting(9), Place.HOME) { HomePage(library, emptyList(), emptyMap(), emptyList(), null, Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}) } }
+        shot("35-home-fresh")
+    }
+
+    @Test fun favouritesEmpty() {
+        compose.setContent { Shell("Playlists", Place.LIBRARY) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.LIBRARY,
+            personal = PersonalLibraryState(), open = "FAVOURITES" to "") } }
+        shot("36-favourites-empty")
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
+    fun settingsDark() {
+        compose.setContent { Shell("Settings", null) { SettingsPage(Modifier.fillMaxSize().padding(it), listOf("Music"), false, true, {}, {}, {}, {}, {}) } }
+        shot("37-settings-dark")
+    }
+
+    @Test fun tagEditorMany() {
+        compose.setContent { Over { TagEditorDialog(library.albums.first().tracks, {}) {} } }
+        shot("38-tag-editor-album")
+    }
+
+    @Test fun emptyLibrary() {
+        compose.setContent { Shell("Home", Place.HOME) { pad -> Notice(pad, "Your music", "Allow access to the audio files on this phone to play them.", "Allow") {} } }
+        shot("28-permission")
+    }
+
+    @Test fun loading() {
+        compose.setContent { Shell("Home", Place.HOME) { pad -> Notice(pad, "Your music", "Loading your library…", null) {} } }
+        shot("29-loading")
+    }
+
+    @Test fun searchNothing() {
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "zzzz", LibrarySearchResult("zzzz", emptyList()), {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH) } }
+        shot("30-search-nothing")
+    }
+
+    @Test fun playlistsTab() {
+        compose.setContent { Shell("Playlists", Place.LIBRARY) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.LIBRARY,
+            personal = PersonalLibraryState(), personalActions = PersonalLibraryActions({ _, _ -> }, { _, _ -> }, {}, { _, _, _ -> }, { _, _, _ -> }, { _, _, _, _ -> }, {}),
+            smart = ua.olex.music.model.SmartPlaylist.BUILT_IN.map { p -> SmartPlaylistUi(p, library.songs.take(5)) }) } }
+        shot("31-playlists-empty")
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
+    fun playerLargeFont() {
+        compose.setContent {
+            val d = androidx.compose.ui.platform.LocalDensity.current
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, 1.6f)) {
+                AppTheme { Images { PlayerPage(now, "FLAC 24/96  ·  2116 kbps", null, true, { 92_000 }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}) } }
+            }
+        }
+        shot("32-player-large-font")
     }
 
     /** Sheets draw in their own window: capture the topmost one. */
@@ -182,18 +299,17 @@ class DesignGalleryTest {
     }
 
     @Test fun libraryAlbums() {
-        compose.setContent { Shell("Library", Place.LIBRARY) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.LIBRARY) } }
-        shot("02-library-albums")
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH, openTile = "ALBUMS") } }
+        shot("02-albums")
     }
 
     @Test fun libraryArtists() {
-        compose.setContent { Shell("Library", Place.LIBRARY) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.LIBRARY) } }
-        compose.onNodeWithText("Artists").performClick()
-        shot("03-library-artists")
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH, openTile = "ARTISTS") } }
+        shot("03-artists")
     }
 
     @Test fun albumPage() {
-        compose.setContent { Shell("Library", Place.LIBRARY) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.LIBRARY,
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
             open = "ALBUMS" to library.albums.first { a -> a.name == "OK Computer" }.id) } }
         shot("04-album")
         compose.onRoot().performTouchInput { swipeUp() }
@@ -201,9 +317,8 @@ class DesignGalleryTest {
     }
 
     @Test fun songsSelecting() {
-        compose.setContent { Shell("Library", Place.LIBRARY) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.LIBRARY,
-            onEnqueue = { _, _ -> }) } }
-        compose.onNodeWithText("Songs").performClick()
+        compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
+            onEnqueue = { _, _ -> }, openTile = "SONGS") } }
         compose.onAllNodes(hasText(library.songs[1].title)).onFirst().performTouchInput { longClick() }
         shot("06-songs-selecting")
     }

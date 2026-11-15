@@ -42,6 +42,7 @@ class PersonalLibraryTest {
         var played = emptyList<Track>()
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(listOf(playlist), actions(), currentId = null, onPlay = { tracks, _ -> played = tracks }, onTrackActions = {}) } } }
         compose.onNodeWithText("Evening").performClick()
+        compose.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Missing song"))
         compose.onNodeWithText("Missing song").assertIsDisplayed()
         compose.onNodeWithText("Play all").performClick()
         compose.runOnIdle { assertEquals(listOf(song), played) }
@@ -64,11 +65,11 @@ class PersonalLibraryTest {
         var deleted: Long? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(listOf(playlist), actions(delete = { deleted = it }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }
         compose.onNodeWithText("Evening").performClick()
-        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Delete").performScrollTo().performClick()
         compose.runOnIdle { assertNull(deleted) }
         compose.onNodeWithText("Cancel").performClick()
         compose.runOnIdle { assertNull(deleted) }
-        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithText("Delete").performScrollTo().performClick()
         compose.onNode(hasText("Delete") and hasAnyAncestor(isDialog())).performClick()
         compose.runOnIdle { assertEquals(7L, deleted) }
     }

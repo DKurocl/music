@@ -70,92 +70,135 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
             editor = null
         })
     } }
-    AppSheet(onDismiss, MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 720.dp).verticalScroll(rememberScrollState()).padding(24.dp),
+    val cs = MaterialTheme.colorScheme
+    // Three cards — Equalizer, Loudness, Channels — each with its switch or choice in its header,
+    // one-line explanations, and the controls below. The output it belongs to is named on top.
+    AppSheet(onDismiss, cs.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 760.dp).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Equalizer", style = MaterialTheme.typography.headlineMedium)
-            ReplayGainControls(loudness, connected, onLoudness)
-            HorizontalDivider()
-            Text(state.routeName, style = MaterialTheme.typography.titleMedium)
-            Text("Saved separately for this output. Processing is off until you enable it.", style = MaterialTheme.typography.bodyMedium)
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            importError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(if (draft.enabled) "Processing on" else "Processing off", style = MaterialTheme.typography.titleMedium)
-                Switch(checked = draft.enabled, enabled = editable, onCheckedChange = { apply(draft.copy(enabled = it)) },
-                    modifier = Modifier.semantics { contentDescription = "Enable equalizer" })
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = editable, onClick = { apply(EqualizerSettings(enabled = draft.enabled, channels = draft.channels)) }) { Text("Flat") }
-                OutlinedButton(enabled = editable && !importing, onClick = {
-                    importRoute = state.routeKey; importProfile.launch(arrayOf("text/plain", "application/octet-stream"))
-                }) { Text(if (importing) "Importing..." else "Import AutoEq") }
-                if (state.sony) Button(enabled = editable, onClick = { apply(SonyCorrection.settings.copy(channels = draft.channels)) }) { Text("Sony correction") }
-            }
-            if (state.sony) Text("Sony correction uses AutoEq with Rtings B&K 5128 measurements. Fit and taste vary. Turn off Sony's own EQ first to avoid applying two corrections.", style = MaterialTheme.typography.bodySmall)
-            Text(draft.profile, style = MaterialTheme.typography.labelLarge)
-            Text("Preamp ${String.format(Locale.ROOT, "%.1f", draft.preampDb)} dB")
-            Slider(value = draft.preampDb.toFloat(), valueRange = -36f..12f, enabled = editable,
-                onValueChange = { draft = draft.copy(preampDb = it.toDouble()) }, onValueChangeFinished = { onApply(state.routeKey, draft) },
-                modifier = Modifier.semantics { contentDescription = "Equalizer preamp" })
-            Text("Automatic headroom prevents boosted bands from overloading the output. This can make playback quieter.", style = MaterialTheme.typography.bodySmall)
-            draft.bands.forEachIndexed { index, band ->
-                val label = if (band.frequencyHz >= 1_000) "${String.format(Locale.ROOT, "%.1f", band.frequencyHz / 1_000)} kHz" else "${band.frequencyHz.toInt()} Hz"
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    TextButton(enabled = editable, onClick = { editor = index }) { Text(label) }
-                    Text("${String.format(Locale.ROOT, "%+.1f", band.gainDb)} dB")
+            Row(Modifier.padding(horizontal = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Sound", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
+                Surface(shape = androidx.compose.foundation.shape.CircleShape, color = cs.secondaryContainer) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Symbol(Glyph.HEADPHONES, size = 18.dp, filled = true); Text("  ${state.routeName}", style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
                 }
-                Slider(value = band.gainDb.toFloat(), valueRange = -24f..24f, enabled = editable,
-                    onValueChange = { value -> draft = draft.copy(profile = "Custom", bands = draft.bands.mapIndexed { i, item -> if (i == index) item.copy(gainDb = value.toDouble()) else item }) },
-                    onValueChangeFinished = { onApply(state.routeKey, draft) }, modifier = Modifier.semantics { contentDescription = "Gain at $label" })
             }
-            HorizontalDivider()
-            Text("Channels", style = MaterialTheme.typography.titleLarge)
-            val mix = draft.channels
-            Text(when { mix.balance == 0f -> "Balance centre"; mix.balance < 0 -> "Balance ${(-mix.balance * 100).toInt()}% left"; else -> "Balance ${(mix.balance * 100).toInt()}% right" })
-            Slider(value = mix.balance, valueRange = -1f..1f, enabled = editable,
-                onValueChange = { v -> draft = draft.copy(channels = mix.copy(balance = if (kotlin.math.abs(v) < 0.04f) 0f else v)) },
-                onValueChangeFinished = { onApply(state.routeKey, draft) }, modifier = Modifier.semantics { contentDescription = "Balance" })
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Mono", style = MaterialTheme.typography.titleMedium)
-                Switch(checked = mix.mono, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(mono = it))) },
-                    modifier = Modifier.semantics { contentDescription = "Mono" })
+            error?.let { Text(it, color = cs.error, modifier = Modifier.padding(horizontal = 8.dp)) }
+            importError?.let { Text(it, color = cs.error, modifier = Modifier.padding(horizontal = 8.dp)) }
+
+            SoundCard {
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Equalizer", style = MaterialTheme.typography.titleMediumEmphasized)
+                        Text(if (draft.enabled) draft.profile else "Off · saved for this output", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    }
+                    Switch(checked = draft.enabled, enabled = editable, onCheckedChange = { apply(draft.copy(enabled = it)) },
+                        modifier = Modifier.semantics { contentDescription = "Enable equalizer" })
+                }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (state.sony) FilterChip(selected = draft.profile == SonyCorrection.settings.profile, enabled = editable,
+                        onClick = { apply(SonyCorrection.settings.copy(channels = draft.channels)) }, label = { Text("Sony correction") })
+                    FilterChip(selected = draft.bands.all { it.gainDb == 0.0 }, enabled = editable,
+                        onClick = { apply(EqualizerSettings(enabled = draft.enabled, channels = draft.channels)) }, label = { Text("Flat") })
+                    AssistChip(enabled = editable && !importing, onClick = {
+                        importRoute = state.routeKey; importProfile.launch(arrayOf("text/plain", "application/octet-stream"))
+                    }, label = { Text(if (importing) "Importing..." else "Import AutoEq") }, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) })
+                }
+                if (state.sony) Text("Sony correction is AutoEq from Rtings measurements; turn Sony's own EQ off first.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                BandSlider("Preamp", "${String.format(Locale.ROOT, "%.1f", draft.preampDb)} dB", draft.preampDb.toFloat(), -36f..12f, editable, "Equalizer preamp",
+                    onLabel = null, onChange = { draft = draft.copy(preampDb = it.toDouble()) }, onDone = { onApply(state.routeKey, draft) })
+                draft.bands.forEachIndexed { index, band ->
+                    val label = if (band.frequencyHz >= 1_000) "${String.format(Locale.ROOT, "%.1f", band.frequencyHz / 1_000)} kHz" else "${band.frequencyHz.toInt()} Hz"
+                    BandSlider(label, "${String.format(Locale.ROOT, "%+.1f", band.gainDb)}", band.gainDb.toFloat(), -24f..24f, editable, "Gain at $label",
+                        onLabel = { editor = index },
+                        onChange = { value -> draft = draft.copy(profile = "Custom", bands = draft.bands.mapIndexed { i, item -> if (i == index) item.copy(gainDb = value.toDouble()) else item }) },
+                        onDone = { onApply(state.routeKey, draft) }, bipolar = true)
+                }
+                Text("Headroom is kept automatically so boosted bands never clip.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Swap left and right", style = MaterialTheme.typography.titleMedium)
-                Switch(checked = mix.swap, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(swap = it))) },
-                    modifier = Modifier.semantics { contentDescription = "Swap left and right" })
+
+            SoundCard { ReplayGainControls(loudness, connected, onLoudness) }
+
+            SoundCard {
+                Text("Channels", style = MaterialTheme.typography.titleMediumEmphasized)
+                val mix = draft.channels
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("L", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                    Slider(value = mix.balance, valueRange = -1f..1f, enabled = editable,
+                        onValueChange = { v -> draft = draft.copy(channels = mix.copy(balance = if (kotlin.math.abs(v) < 0.04f) 0f else v)) },
+                        onValueChangeFinished = { onApply(state.routeKey, draft) }, modifier = Modifier.weight(1f).padding(horizontal = 8.dp).semantics { contentDescription = "Balance" })
+                    Text("R", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                }
+                Text(when { mix.balance == 0f -> "Centred"; mix.balance < 0 -> "${(-mix.balance * 100).toInt()}% to the left"; else -> "${(mix.balance * 100).toInt()}% to the right" },
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Mono", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Switch(checked = mix.mono, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(mono = it))) }, modifier = Modifier.semantics { contentDescription = "Mono" })
+                }
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Swap left and right", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Switch(checked = mix.swap, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(swap = it))) }, modifier = Modifier.semantics { contentDescription = "Swap left and right" })
+                }
             }
-            Text("Works with the equalizer on or off, for this output only. Centre, stereo and unswapped leave the sound untouched.", style = MaterialTheme.typography.bodySmall)
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
+/** A rounded card for one part of the sound. */
+@Composable
+private fun SoundCard(content: @Composable ColumnScope.() -> Unit) {
+    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+    }
+}
+
+/** One band in one line: its frequency (tap to edit exactly), the slider, the value. */
+@Composable
+private fun BandSlider(label: String, value: String, current: Float, range: ClosedFloatingPointRange<Float>, enabled: Boolean, description: String,
+    onLabel: (() -> Unit)?, onChange: (Float) -> Unit, onDone: () -> Unit, bipolar: Boolean = false) {
+    // A boost or cut is measured from 0, not from the left end: bands show one even track and the thumb.
+    val colors = if (bipolar) SliderDefaults.colors(activeTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest) else SliderDefaults.colors()
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        if (onLabel != null) TextButton(enabled = enabled, onClick = onLabel, modifier = Modifier.width(84.dp), contentPadding = PaddingValues(horizontal = 4.dp)) { Text(label, maxLines = 1) }
+        else Text(label, style = MaterialTheme.typography.labelLarge, modifier = Modifier.width(84.dp).padding(start = 12.dp))
+        Slider(value = current, valueRange = range, enabled = enabled, onValueChange = onChange, onValueChangeFinished = onDone, colors = colors,
+            modifier = Modifier.weight(1f).semantics { contentDescription = description })
+        Text(value, style = MaterialTheme.typography.labelLarge, textAlign = androidx.compose.ui.text.style.TextAlign.End, modifier = Modifier.width(64.dp))
+    }
+}
+
 /** Normalization is global, independent of per-output headphone correction. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ReplayGainControls(settings: ReplayGainSettings, enabled: Boolean, onApply: (ReplayGainSettings) -> Unit) {
     var draft by remember(settings) { mutableStateOf(settings) }
     fun apply(value: ReplayGainSettings) { draft = value; onApply(value) }
-    Text("ReplayGain", style = MaterialTheme.typography.titleLarge)
-    Text("Uses file loudness tags. Album keeps the intended level differences within an album; Track suits shuffled listening. Untagged files keep their original level.", style = MaterialTheme.typography.bodySmall)
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        ReplayGainMode.entries.forEach { mode ->
-            FilterChip(selected = draft.mode == mode, enabled = enabled, onClick = { apply(draft.copy(mode = mode)) },
-                label = { Text(mode.name.lowercase().replaceFirstChar(Char::uppercase)) })
+    Text("Loudness", style = MaterialTheme.typography.titleMediumEmphasized)
+    Text("ReplayGain from the files' tags: Track for shuffle, Album keeps an album's dynamics.", style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
+        ReplayGainMode.entries.forEachIndexed { i, mode ->
+            androidx.compose.material3.ToggleButton(checked = draft.mode == mode, enabled = enabled, onCheckedChange = { apply(draft.copy(mode = mode)) },
+                shapes = when (i) { 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
+                    ReplayGainMode.entries.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
+                    else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes() },
+                modifier = Modifier.weight(1f)) { Text(mode.name.lowercase().replaceFirstChar(Char::uppercase)) }
         }
     }
-    Text("ReplayGain preamp ${String.format(Locale.ROOT, "%+.1f", draft.preampDb)} dB")
-    Slider(value = draft.preampDb.toFloat(), valueRange = -24f..12f, enabled = enabled && draft.mode != ReplayGainMode.OFF,
-        onValueChange = { draft = draft.copy(preampDb = it.toDouble()) }, onValueChangeFinished = { onApply(draft) },
-        modifier = Modifier.semantics { contentDescription = "ReplayGain preamp" })
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("Prevent clipping", style = MaterialTheme.typography.titleMedium)
-        Switch(checked = draft.preventClipping, enabled = enabled && draft.mode != ReplayGainMode.OFF,
-            onCheckedChange = { apply(draft.copy(preventClipping = it)) },
-            modifier = Modifier.semantics { contentDescription = "Prevent ReplayGain clipping" })
+    if (draft.mode != ReplayGainMode.OFF) {
+        BandSlider("Preamp", "${String.format(Locale.ROOT, "%+.1f", draft.preampDb)} dB", draft.preampDb.toFloat(), -24f..12f, enabled, "ReplayGain preamp",
+            onLabel = null, onChange = { draft = draft.copy(preampDb = it.toDouble()) }, onDone = { onApply(draft) })
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Prevent clipping", style = MaterialTheme.typography.bodyLarge)
+                Text("Never boosts past a song's peak", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = draft.preventClipping, enabled = enabled, onCheckedChange = { apply(draft.copy(preventClipping = it)) },
+                modifier = Modifier.semantics { contentDescription = "Prevent ReplayGain clipping" })
+        }
     }
-    Text("Without a known peak, clipping protection prevents positive gain. EQ can reserve additional headroom.", style = MaterialTheme.typography.bodySmall)
 }
 
 /** Validates the complete filter before replacing it; changing output closes the enclosing editor. */
@@ -166,7 +209,7 @@ private fun EqualizerBandDialog(band: EqualizerBand, onDismiss: () -> Unit, onAp
     var type by remember(band) { mutableStateOf(band.type) }
     val hz = frequency.toDoubleOrNull()?.takeIf { it.isFinite() && it in 10.0..24_000.0 }
     val quality = q.toDoubleOrNull()?.takeIf { it.isFinite() && it in 0.1..12.0 }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Edit filter") }, text = {
+    AppDialog(onDismissRequest = onDismiss, title = { Text("Edit filter") }, text = {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             OutlinedTextField(value = frequency, onValueChange = { frequency = it }, label = { Text("Frequency (Hz)") },
                 supportingText = { Text("10 to 24000 Hz") }, isError = hz == null, singleLine = true,

@@ -127,66 +127,98 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
     val fields = remember(tracks) {
         listOfNotNull(
             if (single) "TITLE" to ("Title" to common { it.title }) else null,
-            "ARTIST" to ("Artists (separate with ;)" to common { it.artists.joinToString("; ") }),
+            "ARTIST" to ("Artists (a; b)" to common { it.artists.joinToString("; ") }),
             "ALBUM" to ("Album" to common { it.album }),
             "ALBUMARTIST" to ("Album artist" to common { it.albumArtist }),
             "DATE" to ("Year" to common { it.year?.toString() }),
-            "GENRE" to ("Genres (separate with ;)" to common { it.genres.joinToString("; ") }),
-            if (single) "TRACKNUMBER" to ("Track number" to common { it.trackNumber?.toString() }) else null,
-            "DISCNUMBER" to ("Disc number" to common { it.discNumber?.toString() }),
-            "COMPOSER" to ("Composers (separate with ;)" to common { it.metadata?.composers?.joinToString("; ") }),
+            "GENRE" to ("Genres (a; b)" to common { it.genres.joinToString("; ") }),
+            if (single) "TRACKNUMBER" to ("Track" to common { it.trackNumber?.toString() }) else null,
+            "DISCNUMBER" to ("Disc" to common { it.discNumber?.toString() }),
+            "COMPOSER" to ("Composers (a; b)" to common { it.metadata?.composers?.joinToString("; ") }),
         )
     }
     val values = remember(tracks) { mutableStateMapOf<String, String>().apply { fields.forEach { (k, v) -> put(k, v.second) } } }
     val touched = remember(tracks) { mutableStateMapOf<String, Boolean>() }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (single) "Edit tags" else "Edit tags of ${tracks.size} songs") },
-        text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                fields.forEach { (key, labelAndValue) ->
-                    val varied = !single && labelAndValue.second.isEmpty() && touched[key] != true
-                    OutlinedTextField(
-                        value = values[key].orEmpty(), onValueChange = { values[key] = it; touched[key] = true },
-                        label = { Text(labelAndValue.first) }, singleLine = true,
-                        placeholder = if (varied) ({ Text("Keep") }) else null,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+    val cs = MaterialTheme.colorScheme
+    // One field, filled and rounded (M3E), "Keep" when the chosen songs differ.
+    @Composable
+    fun field(key: String, modifier: Modifier = Modifier.fillMaxWidth()) {
+        val (label, initial) = fields.firstOrNull { it.first == key }?.second ?: return
+        val varied = !single && initial.isEmpty() && touched[key] != true
+        androidx.compose.material3.TextField(
+            value = values[key].orEmpty(), onValueChange = { values[key] = it; touched[key] = true },
+            label = { Text(label, maxLines = 1) }, singleLine = true, placeholder = if (varied) ({ Text("Keep") }) else null,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+            colors = androidx.compose.material3.TextFieldDefaults.colors(
+                focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                focusedContainerColor = cs.surfaceContainerHighest, unfocusedContainerColor = cs.surfaceContainerHighest),
+            modifier = modifier,
+        )
+    }
+    @Composable
+    fun group(title: String) = Text(title, style = MaterialTheme.typography.titleSmall, color = cs.primary, modifier = Modifier.padding(top = 12.dp, start = 4.dp))
+
+    AppSheet(onDismiss) {
+        Column(Modifier.fillMaxWidth().heightIn(max = 760.dp)) {
+            // The songs being edited, so it is clear what changes.
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 4.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                if (single) Artwork(tracks.first().artworkUri, Modifier.size(56.dp), 14.dp) else PlaylistCover(tracks, 56.dp, 14.dp)
+                Column(Modifier.weight(1f).padding(start = 14.dp)) {
+                    Text("Edit tags", style = MaterialTheme.typography.titleLargeEmphasized)
+                    Text(if (single) "${tracks.first().title} · ${tracks.first().artist}" else "${tracks.size} songs · fields that differ say Keep",
+                        style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { pickCover.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
-                        Text(if (cover == null) "Choose cover" else "Cover chosen (${cover!!.bytes.size / 1024} KB)")
+            }
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                group("Song")
+                field("TITLE")
+                field("ARTIST")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    field("DATE", Modifier.weight(1f))
+                    field("TRACKNUMBER", Modifier.weight(1f))
+                    field("DISCNUMBER", Modifier.weight(1f))
+                }
+                field("GENRE")
+                field("COMPOSER")
+                group("Album")
+                field("ALBUM")
+                field("ALBUMARTIST")
+                group("Cover")
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    androidx.compose.material3.FilledTonalButton(onClick = { pickCover.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
+                        Symbol(Glyph.PHOTO, size = 18.dp); Spacer(Modifier.width(8.dp)); Text(if (cover == null) "Choose cover" else "New cover · ${cover!!.bytes.size / 1024} KB")
                     }
                     if (cover != null) TextButton(onClick = { cover = null }) { Text("Keep old") }
                 }
-                coverError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+                coverError?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodySmall) }
+                group("Files")
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Checkbox(rename, { rename = it }); Text("Rename files")
+                    Text("Rename by tags", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); androidx.compose.material3.Switch(rename, { rename = it })
                 }
                 if (rename) OutlinedTextField(nameTemplate, { nameTemplate = it }, label = { Text("File name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Checkbox(moveFiles, { moveFiles = it }); Text("Move into folders")
+                    Text("Move into folders", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); androidx.compose.material3.Switch(moveFiles, { moveFiles = it })
                 }
                 if (moveFiles) OutlinedTextField(folderTemplate, { folderTemplate = it }, label = { Text("Folder") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (rename || moveFiles) Text("Use %artist%, %albumartist%, %album%, %title%, %track%, %disc%, %year%, %genre%.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("Written into the files (FLAC, MP3, M4A, Ogg and Opus). Android asks once to allow changing them.",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                Text("Written into the files (FLAC, MP3, M4A, Ogg, Opus).", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 if (!android.provider.MediaStore.canManageMedia(context)) TextButton(onClick = {
                     runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA,
                         android.net.Uri.parse("package:" + context.packageName))) }
-                }) { Text("Allow changing music files without asking") }
+                }) { Text("Let Music change files without asking") }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                // Only fields the owner changed (or, for one song, every field) are written.
-                val changed = fields.map { it.first }.filter { single || touched[it] == true }.associateWith { values[it].orEmpty() }
-                onSave(TagEditRequest(changed, cover, nameTemplate.takeIf { rename }, folderTemplate.takeIf { moveFiles }))
-            }) { Text("Save") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+            // Save stays in reach at the bottom, however long the form.
+            Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                Button(onClick = {
+                    // Only fields the owner changed (or, for one song, every field) are written.
+                    val changed = fields.map { it.first }.filter { single || touched[it] == true }.associateWith { values[it].orEmpty() }
+                    onSave(TagEditRequest(changed, cover, nameTemplate.takeIf { rename }, folderTemplate.takeIf { moveFiles }))
+                }, modifier = Modifier.height(48.dp)) { Text("Save") }
+            }
+        }
+    }
 }
 
 /** Turns editor text into tag values: lists split on ';', empty text removes the tag. */

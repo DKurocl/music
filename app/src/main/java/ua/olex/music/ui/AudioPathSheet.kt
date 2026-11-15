@@ -1,4 +1,4 @@
-@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 
 package ua.olex.music.ui
 
@@ -9,60 +9,134 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import ua.olex.music.playback.AudioDiagnostics
 import ua.olex.music.playback.OutputRoute
 
-/** Separates observed app output from the system mixer and Bluetooth link, which are not measured here. */
+/**
+ * The path a song takes, as a chain (Poweramp's audio info, in M3E): File, Decoder, Processing,
+ * App output, Device. Each step has its icon in a shape and what is known about it; a line joins
+ * them. Above, one verdict — untouched or processed — and below, two plain answers: is it resampled,
+ * is anything processing it. Only what Android reports is shown; the Bluetooth link is not measured.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDiagnostics, onDismiss: () -> Unit, onOutput: () -> Unit, onEqualizer: (() -> Unit)? = null) {
-    AppSheet(onDismiss, MaterialTheme.colorScheme.surfaceContainerLow) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Audio path", style = MaterialTheme.typography.headlineSmall)
-            PathDetail("File", format ?: "Format not reported")
-            PathDetail("Decoder", audio.decoder ?: "No active decoder reported")
-            PathDetail("App audio output", listOfNotNull(audio.encoding, audio.sampleRateHz?.let { "$it Hz" }, audio.channels?.let { "$it channels" }).joinToString(" · ").ifEmpty { "No active AudioTrack reported" })
-            if (audio.offload) Text("Hardware audio offload is active.")
-            PathDetail("Android output device", route?.name?.takeIf { it.isNotBlank() } ?: route?.kind?.name?.lowercase()?.replace('_', ' ') ?: "Not reported")
-            Text("AudioTrack describes the app's output. Android may resample or process it before it reaches the device.", style = MaterialTheme.typography.bodyMedium)
-            if (route?.kind in listOf(OutputRoute.Kind.BLUETOOTH, OutputRoute.Kind.LE_AUDIO)) {
-                Text("Bluetooth codec and bitrate are not reported here. The system and connected device negotiate them.", style = MaterialTheme.typography.bodyMedium)
+internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDiagnostics, onDismiss: () -> Unit, onOutput: () -> Unit,
+    onEqualizer: (() -> Unit)? = null, fileRateHz: Int? = null, processing: List<String> = emptyList()) {
+    val cs = MaterialTheme.colorScheme
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun khz(hz: Int) = if (hz % 1000 == 0) "${hz / 1000} kHz" else "${"%.1f".format(java.util.Locale.ROOT, hz / 1000.0)} kHz"
+    val resampled = fileRateHz != null && audio.sampleRateHz != null && fileRateHz != audio.sampleRateHz
+    val untouched = processing.isEmpty() && !resampled && audio.encoding != null
+    AppSheet(onDismiss, cs.surfaceContainerLow) {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Audio path", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
+                Surface(shape = androidx.compose.foundation.shape.CircleShape, color = if (untouched) cs.primaryContainer else cs.tertiaryContainer,
+                    contentColor = if (untouched) cs.onPrimaryContainer else cs.onTertiaryContainer) {
+                    Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Symbol(if (untouched) Glyph.CHECK else Glyph.TUNE, size = 18.dp, bold = true)
+                        Text(if (untouched) "  Untouched" else if (audio.encoding == null) "  Not playing" else "  Processed", style = MaterialTheme.typography.labelLarge)
+                    }
+                }
             }
-            // USB DACs only: the mixer runs at the song's own rate, other sounds are not mixed in.
-            val context = androidx.compose.ui.platform.LocalContext.current
+            Column {
+                Step(Glyph.NOTE, "File", listOfNotNull(format ?: "Format not reported"), MaterialShapes.Cookie6Sided, cs.primaryContainer, cs.onPrimaryContainer)
+                Step(Glyph.WAVE, "Decoder", listOf(audio.decoder?.let(::decoderName) ?: "Not active"), MaterialShapes.Circle, cs.secondaryContainer, cs.onSecondaryContainer)
+                Step(Glyph.TUNE, "Processing", processing.ifEmpty { listOf("None: the sound is passed as decoded") }, MaterialShapes.Clover4Leaf,
+                    if (processing.isEmpty()) cs.surfaceContainerHighest else cs.tertiaryContainer, if (processing.isEmpty()) cs.onSurfaceVariant else cs.onTertiaryContainer)
+                Step(Glyph.SPEAKER, "App output", listOfNotNull(
+                    listOfNotNull(audio.encoding, audio.sampleRateHz?.let(::khz), audio.channels?.let { "$it channels" }).joinToString(" · ").ifEmpty { "No audio stream right now" },
+                    when { resampled -> "Resampled ${khz(fileRateHz!!)} → ${khz(audio.sampleRateHz!!)}"; fileRateHz != null && audio.sampleRateHz != null -> "No resampling"; else -> null },
+                    if (audio.offload) "Decoded by the phone's audio chip (battery saver)" else null,
+                ), MaterialShapes.Pill, cs.secondaryContainer, cs.onSecondaryContainer)
+                Step(route.glyphForPath(), "Device", listOfNotNull(
+                    route?.name?.takeIf { it.isNotBlank() } ?: route?.kind?.name?.lowercase()?.replace('_', ' ') ?: "Not reported",
+                    if (route?.kind in listOf(OutputRoute.Kind.BLUETOOTH, OutputRoute.Kind.LE_AUDIO)) "Bluetooth codec is chosen by Android and the earbuds" else null,
+                    "Android's mixer may still convert the stream before the device",
+                ), MaterialShapes.Sunny, cs.primaryContainer, cs.onPrimaryContainer, last = true)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Verdict("Resampling", if (audio.sampleRateHz == null || fileRateHz == null) "Unknown" else if (resampled) "Yes" else "None", Modifier.weight(1f))
+                Verdict("Processing", if (processing.isEmpty()) "Off" else "${processing.size} on", Modifier.weight(1f))
+            }
+            // Options in one rounded group: rows touch, the group breathes.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             val deviceName = route?.name?.takeIf { it.isNotBlank() && route.kind != OutputRoute.Kind.SPEAKER }
             if (deviceName != null) {
                 var resume by androidx.compose.runtime.remember(deviceName) { androidx.compose.runtime.mutableStateOf(deviceName in ua.olex.music.playback.HeadsetRules.resumeDevices(context)) }
-                androidx.compose.material3.ListItem(
-                    headlineContent = { Text("Play when $deviceName connects") },
-                    supportingContent = { Text("Continues the queue as soon as these headphones connect. Disconnecting always pauses.") },
-                    trailingContent = { androidx.compose.material3.Switch(resume, { resume = it; ua.olex.music.playback.HeadsetRules.setResume(context, deviceName, it) }) },
-                )
+                OptionRow("Play when $deviceName connects", "Disconnecting always pauses", resume, first = true) { resume = it; ua.olex.music.playback.HeadsetRules.setResume(context, deviceName, it) }
             }
             var bitPerfect by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ua.olex.music.playback.UsbBitPerfect.get(context)) }
-            androidx.compose.material3.ListItem(
-                headlineContent = { Text("Bit-perfect USB output") },
-                supportingContent = { Text("For a USB DAC: the song's own sample rate, unmixed. Other sounds are muted on the DAC while it plays.") },
-                trailingContent = { androidx.compose.material3.Switch(bitPerfect, { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }) },
-            )
+            OptionRow("Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, first = deviceName == null) { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }
             val prefs = androidx.compose.runtime.remember { context.getSharedPreferences(ua.olex.music.playback.UsbBitPerfect.PREFS, android.content.Context.MODE_PRIVATE) }
             var offload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, false)) }
-            androidx.compose.material3.ListItem(
-                headlineContent = { Text("Battery saver") },
-                supportingContent = { Text("The phone's audio chip decodes with the screen off. Used only while EQ, channel changes and ReplayGain are off, so the sound stays the same.") },
-                trailingContent = { androidx.compose.material3.Switch(offload, { offload = it; prefs.edit().putBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, it).apply() }) },
-            )
-            onEqualizer?.let { TextButton(onClick = it) { Text("Equalizer") } }
-            Button(onClick = onOutput) { Text("Change output") }
+            OptionRow("Battery saver", "Audio chip decodes with the screen off, only when nothing processes", offload, last = true) {
+                offload = it; prefs.edit().putBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, it).apply() }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onOutput, modifier = Modifier.height(48.dp)) { Text("Change output") }
+                onEqualizer?.let { FilledTonalButton(onClick = it, modifier = Modifier.height(48.dp)) { Text("Equalizer") } }
+            }
+        }
+    }
+}
+
+/** "c2.android.flac.decoder" → "Android FLAC decoder"; vendor codecs keep their name. */
+private fun decoderName(raw: String): String {
+    val m = Regex("""c2\.android\.(\w+)\.decoder""").find(raw) ?: return raw
+    return "Android ${m.groupValues[1].uppercase()} decoder"
+}
+
+private fun OutputRoute?.glyphForPath(): Glyph = when (this?.kind) {
+    OutputRoute.Kind.BLUETOOTH, OutputRoute.Kind.LE_AUDIO -> Glyph.BLUETOOTH
+    OutputRoute.Kind.USB -> Glyph.USB
+    OutputRoute.Kind.WIRED -> Glyph.HEADPHONES
+    else -> Glyph.SPEAKER
+}
+
+/** One step of the chain: icon in its shape, a line down to the next step, title and facts. */
+@Composable
+private fun Step(glyph: Glyph, title: String, lines: List<String>, shape: androidx.graphics.shapes.RoundedPolygon,
+    container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, last: Boolean = false) {
+    val cs = MaterialTheme.colorScheme
+    Row(Modifier.height(IntrinsicSize.Min)) {
+        Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally, modifier = Modifier.width(44.dp)) {
+            androidx.compose.foundation.layout.Box(Modifier.size(44.dp).clip(shape.toShape()).background(container), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                Symbol(glyph, size = 22.dp, color = content, filled = true)
+            }
+            if (!last) androidx.compose.foundation.layout.Box(Modifier.width(2.dp).weight(1f).padding(vertical = 4.dp).clip(androidx.compose.foundation.shape.CircleShape).background(cs.outlineVariant))
+        }
+        Column(Modifier.padding(start = 16.dp, bottom = if (last) 0.dp else 18.dp).weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMediumEmphasized, modifier = Modifier.padding(top = 10.dp))
+            lines.forEachIndexed { i, line ->
+                Text(line, style = if (i == 0) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.bodyMedium,
+                    color = if (i == 0) cs.onSurface else cs.onSurfaceVariant)
+            }
         }
     }
 }
 
 @Composable
-private fun PathDetail(title: String, value: String) {
-    Column {
-        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
+private fun Verdict(label: String, value: String, modifier: Modifier) {
+    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = modifier) {
+        Column(Modifier.padding(18.dp)) {
+            Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.headlineMediumEmphasized)
+        }
+    }
+}
+
+/** A switch row in a rounded group, as in Settings. */
+@Composable
+private fun OptionRow(title: String, subtitle: String, on: Boolean, first: Boolean = false, last: Boolean = false, onChange: (Boolean) -> Unit) {
+    val big = 24.dp; val small = 4.dp
+    Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small),
+        color = MaterialTheme.colorScheme.surfaceContainer, onClick = { onChange(!on) }, modifier = Modifier.fillMaxWidth()) {
+        ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) },
+            trailingContent = { Switch(on, onChange) }, colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent))
     }
 }
