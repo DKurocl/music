@@ -39,6 +39,16 @@ class YouTubeMusicTest {
         assertEquals("yt:UGCVIDEO001", songs[1].id.value)
     }
 
+    @Test fun aRealArtistPageGivesNamePhotoAboutAndVideos() {
+        val json = javaClass.classLoader!!.getResource("ytm-artist.json")!!.readText()
+        val artist = YouTubeMusic.parseArtist("UCGz", json)!!
+        assertEquals("Tame Impala", artist.name)
+        assertTrue(artist.photo?.startsWith("https://") == true)
+        assertTrue(!artist.about.isNullOrBlank())
+        assertTrue(artist.videos.isNotEmpty())
+        assertTrue(artist.videos.all { it.artist == "Tame Impala" && it.uri.startsWith("ytm://") })
+    }
+
     @Test fun theOwnersFileIsFoundForAnOnlineSong() {
         val file = Track(TrackId("local:1"), "content://1", "Eventually", "Tame Impala", album = "Currents", durationMs = 318_500)
         val library = LibraryIndex.EMPTY.copy(songs = listOf(file))
