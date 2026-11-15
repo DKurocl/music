@@ -31,11 +31,27 @@ internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDi
             }
             // USB DACs only: the mixer runs at the song's own rate, other sounds are not mixed in.
             val context = androidx.compose.ui.platform.LocalContext.current
+            val deviceName = route?.name?.takeIf { it.isNotBlank() && route.kind != OutputRoute.Kind.SPEAKER }
+            if (deviceName != null) {
+                var resume by androidx.compose.runtime.remember(deviceName) { androidx.compose.runtime.mutableStateOf(deviceName in ua.olex.music.playback.HeadsetRules.resumeDevices(context)) }
+                androidx.compose.material3.ListItem(
+                    headlineContent = { Text("Play when $deviceName connects") },
+                    supportingContent = { Text("Continues the queue as soon as these headphones connect. Disconnecting always pauses.") },
+                    trailingContent = { androidx.compose.material3.Switch(resume, { resume = it; ua.olex.music.playback.HeadsetRules.setResume(context, deviceName, it) }) },
+                )
+            }
             var bitPerfect by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ua.olex.music.playback.UsbBitPerfect.get(context)) }
             androidx.compose.material3.ListItem(
                 headlineContent = { Text("Bit-perfect USB output") },
                 supportingContent = { Text("For a USB DAC: the song's own sample rate, unmixed. Other sounds are muted on the DAC while it plays.") },
                 trailingContent = { androidx.compose.material3.Switch(bitPerfect, { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }) },
+            )
+            val prefs = androidx.compose.runtime.remember { context.getSharedPreferences(ua.olex.music.playback.UsbBitPerfect.PREFS, android.content.Context.MODE_PRIVATE) }
+            var offload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, false)) }
+            androidx.compose.material3.ListItem(
+                headlineContent = { Text("Battery saver") },
+                supportingContent = { Text("The phone's audio chip decodes with the screen off. Used only while EQ, channel changes and ReplayGain are off, so the sound stays the same.") },
+                trailingContent = { androidx.compose.material3.Switch(offload, { offload = it; prefs.edit().putBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, it).apply() }) },
             )
             onEqualizer?.let { TextButton(onClick = it) { Text("Equalizer") } }
             Button(onClick = onOutput) { Text("Change output") }

@@ -36,6 +36,18 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
         found.source
     }
 
+    /** Lyrics the owner retimed by hand; they win over every other source for this song. */
+    fun edited(track: Track): String? = File(dir, editedName(track)).takeIf { it.isFile }?.readText()
+
+    fun saveEdited(track: Track, lrc: String) {
+        val file = File(dir, editedName(track)); val tmp = File(dir, file.name + ".tmp")
+        tmp.writeText(lrc); tmp.renameTo(file); _revision.value++
+    }
+
+    fun deleteEdited(track: Track) { File(dir, editedName(track)).delete(); _revision.value++ }
+
+    private fun editedName(track: Track) = name(track, FoundLyrics.Format.LRC).removeSuffix(".lrc") + ".edited.lrc"
+
     fun delete(track: Track) { FoundLyrics.Format.entries.forEach { File(dir, name(track, it)).delete() }; _revision.value++ }
 
     private fun name(track: Track, f: FoundLyrics.Format): String {

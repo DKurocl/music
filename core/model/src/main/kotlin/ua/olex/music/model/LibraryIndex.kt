@@ -56,6 +56,10 @@ data class LibraryIndex(
             // Normalize once per track, rather than allocating strings in every sort comparison.
             val entries = tracks.map(::Entry)
             val songs = entries.sortedWith(songOrder).map { it.track }
+            // An album in one folder whose songs have different artists and no album artist is a
+            // compilation: one album under "Various artists", not one album per artist.
+            val compilations = entries.filter { it.track.albumArtist.isNullOrBlank() && it.track.album?.isNotBlank() == true && it.track.metadata?.albumArtists.isNullOrEmpty() }
+                .groupBy { it.albumId to it.folder }.filterValues { rows -> rows.map { it.artistId }.distinct().size > 1 }.keys
             fun groups(
                 kind: String,
                 key: (Entry) -> List<String>,
@@ -76,7 +80,8 @@ data class LibraryIndex(
 
             return LibraryIndex(
                 songs = songs,
-                albums = groups("album", { listOf(it.artistId, it.albumId) }, { it.album }, { it.artist }, albumOrder),
+                albums = groups("album", { if (it.compilation(compilations)) listOf(VARIOUS_ID, it.albumId, it.folder) else listOf(it.artistId, it.albumId) },
+                    { it.album }, { if (it.compilation(compilations)) VARIOUS else it.artist }, albumOrder),
                 artists = groups("artist", { listOf(it.artistId) }, { it.artist }, order = collectionOrder,
                     source = tracks.flatMap { track ->
                         val names = track.metadata?.albumArtists?.takeIf { it.isNotEmpty() }
@@ -101,6 +106,7 @@ data class LibraryIndex(
             val albumId = identity(album)
             val artistOrder = LibraryOrder.name(artist)
             val albumOrder = LibraryOrder.name(album)
+            fun compilation(keys: Set<Pair<String, String>>) = keys.isNotEmpty() && (albumId to folder) in keys
         }
 
         private val songOrder = compareBy<Entry> { it.titleOrder }.thenBy { it.track.id.value }
@@ -109,6 +115,8 @@ data class LibraryIndex(
             .then(songOrder)
         private val collectionOrder = compareBy<Entry> { it.artistOrder }.thenBy { it.albumOrder }
             .thenBy { it.albumId }.then(albumOrder)
+        const val VARIOUS = "Various artists"
+        private const val VARIOUS_ID = "\u0000various"
         private fun identity(value: String) = Normalizer.normalize(value.trim(), Normalizer.Form.NFC).lowercase(Locale.ROOT)
     }
 }

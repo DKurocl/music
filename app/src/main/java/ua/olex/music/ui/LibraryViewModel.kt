@@ -87,6 +87,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     val localLyrics = combine(lyricTrack, graph.musicFiles.revision, graph.downloadedLyrics.revision) { track, revision, _ -> track to revision }
         .mapLatest { (track, _) ->
             if (track == null) return@mapLatest LocalLyricsState()
+            graph.downloadedLyrics.edited(track)?.let(ua.olex.music.lyrics.Lyrics::parse)?.takeIf { it.lines.isNotEmpty() }?.let {
+                return@mapLatest LocalLyricsState(it, "Your timing", mediaId = track.id.value, edited = true)
+            }
             val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
             val downloaded = graph.downloadedLyrics.read(track)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
             val fallback = if (downloaded != null && (embedded.lines.isEmpty() || downloaded.sync.ordinal >= embedded.sync.ordinal))
@@ -110,6 +113,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
     fun reloadLyrics() = refreshLocalFiles(rescan = false)
+
+    /** Saves hand-fixed timing for the playing song (app storage, wins over other sources). */
+    fun saveLyricTiming(lyrics: ua.olex.music.lyrics.Lyrics) {
+        val track = lyricTrackNow() ?: return
+        viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.saveEdited(track, ua.olex.music.lyrics.LrcWriter.write(lyrics)) }
+    }
+    fun resetLyricTiming() {
+        val track = lyricTrackNow() ?: return
+        viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.deleteEdited(track) }
+    }
+    private fun lyricTrackNow() = playing.value.mediaId?.let { library.value?.byId?.get(ua.olex.music.model.TrackId(it)) }
 
     /** The outcome of the last tag edit, shown once. */
     var tagMessage by mutableStateOf<String?>(null); private set

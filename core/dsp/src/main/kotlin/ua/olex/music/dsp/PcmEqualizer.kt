@@ -20,23 +20,26 @@ class PcmEqualizer(private val encoding: PcmEncoding, private val sampleRateHz: 
     private var previous: EqualizerEngine? = null
     private val fadeFrames = (sampleRateHz / 100).coerceAtLeast(1)
     private var fadeAt = fadeFrames
+    private var frame = FloatArray(0)
 
     fun render(input: ByteBuffer): ByteBuffer {
         pending?.let { require(source === input) { "Previous PCM buffer not consumed" }; return it }
         val requested = settings()
-        if (!requested.enabled && !currentSettings.enabled && previous == null) { currentSettings = requested; return input }
+        if (!requested.active && !currentSettings.active && previous == null) { currentSettings = requested; return input }
         if (requested != currentSettings && previous == null) {
             previous = current
             currentSettings = requested
             current = EqualizerEngine(requested, sampleRateHz, channels)
             fadeAt = 0
         }
-        if (!currentSettings.enabled && previous == null) return input
+        if (!currentSettings.active && previous == null) return input
         val bytes = input.remaining()
         require(bytes % (channels * encoding.bytesPerSample) == 0) { "Incomplete PCM frame" }
         if (storage.capacity() < bytes) storage = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
         storage.clear(); storage.limit(bytes)
         val read = input.duplicate().order(ByteOrder.nativeOrder())
+        if (frame.size != channels) frame = FloatArray(channels)
+        val mixChannels = channels == 2 && (!currentSettings.channels.neutral || previous?.settings?.channels?.neutral == false)
         while (read.hasRemaining()) {
             val mix = if (previous != null) (fadeAt + 1).toDouble() / fadeFrames else 1.0
             for (channel in 0 until channels) {
@@ -45,7 +48,19 @@ class PcmEqualizer(private val encoding: PcmEncoding, private val sampleRateHz: 
                     PcmEncoding.FLOAT32 -> read.float
                 }
                 val processed = current.sample(sample, channel)
-                val value = previous?.let { it.sample(sample, channel) * (1 - mix) + processed * mix }?.toFloat() ?: processed
+                frame[channel] = previous?.let { it.sample(sample, channel) * (1 - mix) + processed * mix }?.toFloat() ?: processed
+            }
+            if (mixChannels) {
+                // The new mix fades in with the EQ change, so toggling mono or balance never clicks.
+                val before = previous?.settings?.channels
+                if (before == null || before == currentSettings.channels) currentSettings.channels.apply(frame)
+                else {
+                    val old = frame.copyOf(); before.apply(old); currentSettings.channels.apply(frame)
+                    for (c in 0 until channels) frame[c] = (old[c] * (1 - mix) + frame[c] * mix).toFloat()
+                }
+            }
+            for (channel in 0 until channels) {
+                val value = frame[channel]
                 when (encoding) {
                     PcmEncoding.INT16 -> storage.putShort(kotlin.math.round(value.coerceIn(-1f, 1f) * 32768f).toInt().coerceIn(-32768, 32767).toShort())
                     PcmEncoding.FLOAT32 -> storage.putFloat(value)

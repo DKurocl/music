@@ -70,3 +70,44 @@ class YearsAndComposersTest {
         assertEquals(2, index.composers[0].tracks.size)
     }
 }
+
+class LibraryExtrasTest {
+    private fun t(id: String, artist: String, album: String, path: String, disc: Int? = null, year: Int? = null, codec: String = "flac", depth: Int = 16) =
+        Track(TrackId(id), "", id, artist, album = album, path = path, discNumber = disc, year = year,
+            format = AudioFormat(codec, 44_100, depth, null, null), genre = "Rock")
+
+    @Test fun compilationIsOneAlbumUnderVariousArtists() {
+        val index = LibraryIndex.build(listOf(t("a", "X", "Hits", "Music/Hits/a.flac"), t("b", "Y", "Hits", "Music/Hits/b.flac"), t("c", "Z", "Solo", "Music/Solo/c.flac")))
+        val hits = index.albums.single { it.name == "Hits" }
+        assertEquals(LibraryIndex.VARIOUS, hits.subtitle)
+        assertEquals(2, hits.tracks.size)
+    }
+
+    @Test fun filtersCombine() {
+        val a = t("a", "X", "R", "p/a", year = 1994, depth = 24)
+        val b = t("b", "X", "R", "p/b", year = 2004, codec = "mp3")
+        val stats = mapOf(a.id to SongStats(plays = 2, rating = 4))
+        assertEquals(listOf(a), TrackFilter(lossless = true).apply(listOf(a, b)))
+        assertEquals(listOf(a), TrackFilter(hiRes = true).apply(listOf(a, b)))
+        assertEquals(listOf(b), TrackFilter(unplayed = true).apply(listOf(a, b)) { stats[it.id] })
+        assertEquals(listOf(a), TrackFilter(minRating = 3).apply(listOf(a, b)) { stats[it.id] })
+        assertEquals(listOf(b), TrackFilter(decade = 2000).apply(listOf(a, b)))
+        assertEquals(listOf(2000, 1990), TrackFilter.decades(listOf(a, b)))
+        assertEquals(2, TrackFilter(genre = "rock").apply(listOf(a, b)).size)
+    }
+
+    @Test fun discHeadersOnlyForMultiDiscAlbums() {
+        val one = listOf(t("a", "X", "R", "p", disc = 1), t("b", "X", "R", "p", disc = 1))
+        assertEquals(emptyMap<Int, Int>(), discStarts(one))
+        val two = one + t("c", "X", "R", "p", disc = 2)
+        assertEquals(mapOf(0 to 1, 2 to 2), discStarts(two))
+    }
+
+    @Test fun statsCountPlaysAndFormats() {
+        val a = t("a", "X", "R", "p", depth = 24).copy(durationMs = 1000)
+        val b = t("b", "Y", "R", "p", codec = "mp3").copy(durationMs = 2000)
+        val s = LibraryStats.of(LibraryIndex.build(listOf(a, b))) { if (it.id == a.id) SongStats(plays = 3) else null }
+        assertEquals(3, s.plays); assertEquals(3000, s.listenedMs); assertEquals(1, s.hiRes)
+        assertEquals("X" to 3, s.topArtists.single())
+    }
+}
