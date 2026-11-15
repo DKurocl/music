@@ -24,12 +24,12 @@ YouTube Music, LastWave, PixelPlayer; taken further where they are vague. Review
 | Place | Purpose | Top bar | Why |
 |---|---|---|---|
 | Home | the usual thing in one tap | greeting, Settings | opening the app should start music, not ask where to go |
-| Library | everything by kind | "Library", Search | browsing is a different mood from starting; kinds are chips, not more tabs, so the bar stays at three |
+| Playlists | what the owner made: Favourites, Smart, own playlists | "Playlists", Search | the owner's own lists are a different job from browsing the files; albums, artists and songs live in Search tiles |
 | Search | find by words | the field itself (no title) | the field is the page; recent searches and genres fill the empty state |
 
 - **Short navigation bar (M3E)**: three items only — more would shrink targets and labels. The
   selected item fills its icon and thickens it (state by shape).
-- **Back**: Library and Search go back to Home; an open album goes back to its grid; Home leaves.
+- **Back**: Playlists and Search go back to Home; an open album goes back to its grid; Home leaves.
   Predictive back previews each step.
 - **Pages over Home** (Settings, Your listening, Duplicates) have a back arrow and keep the
   navigation bar, so the player stays one tap away.
@@ -55,11 +55,17 @@ colour, scale and motion with intent; Home is where that pays most, because it s
   Duplicates next to it only when there are any.
 - **On repeat**: the five most played with large ranks in the accent colour.
 
-## Library
+## Playlists
 
-- **Kind selector**: a connected M3E button group with the four main kinds — Albums, Artists,
-  Songs, Playlists. Four equal targets fit the width with no scrolling, the selected one fills and
-  rounds fully. The rest (genres, years, folders, history...) moved to Search's tiles.
+- **Two hub cards** on top: Favourites (pink, heart in a cookie shape — a heart in a heart read as
+  clutter) and Smart (sparkles). Under them New playlist and Import M3U8 as two equal cards.
+- **Playlist rows**: a 2×2 cover mosaic, name, count, chevron. The page has a big mosaic, Play all,
+  and Export / Rename / Delete as chips (Delete asks first).
+- **Empty states** everywhere use one pattern: a glyph in an expressive shape, a title, one line of
+  help, and the action when there is one.
+
+## Albums, artists, songs (opened from Search tiles)
+
 - **Album and artist order**: A–Z, Newest, Year (albums), Most played — one tap, kept per kind.
 - **Song lists**: one row of chips — Sort first, then filters (Lossless, Hi-res, Unplayed, 4+ stars,
   Decade, Genre), then a Select button at the end. One row instead of two keeps songs higher.
@@ -68,8 +74,8 @@ colour, scale and motion with intent; Home is where that pays most, because it s
   until then, so the grid never has holes).
 - **Album page**: big cover, title, artist, then "year · songs · minutes · quality" in one line;
   Play all (filled), Shuffle, Add (tonal). Tracks show their number, not the same cover again, and
-  quality only when it differs inside the album. Disc headers for multi-disc albums. The top bar
-  shows a back arrow, and the album's name once the cover has scrolled away.
+  quality only when it differs inside the album. Disc headers for multi-disc albums. Inside a tile
+  or an album the search field hides: the page belongs to what was opened, with its own back arrow.
 - **Letter rail**: appears while the list moves or is held, ticks at each letter, then hides, so it
   never covers the rows' menu buttons.
 
@@ -78,11 +84,12 @@ colour, scale and motion with intent; Home is where that pays most, because it s
 - **First tap on Search** shows the field and browse tiles; **a second tap** focuses the field and
   opens the keyboard (Google Play's behaviour: browsing first, typing when asked). A microphone in
   the field searches by voice.
-- **Browse tiles** in two columns: Genres, Years, Favourites, Smart playlists, History, Folders,
-  Composers, Lossless, Hi-res, Never played. Name on the left, a tonal icon on the right (colours
+- **Browse tiles** in two columns: Albums, Artists, Songs first (the main kinds), then Genres,
+  Years, Folders, History, Composers, Lossless, Hi-res, Never played. Name on the left, a tonal icon on the right (colours
   rotate through the wallpaper's accents). A tile opens its list with a back arrow; tiles that would
   be empty (no hi-res files, no composers) are not shown. Recent searches sit above the tiles.
-- **Results** in sections — Artists (photos), Albums (covers), Songs — in relevance order.
+- **Results** in sections — Artists (photos), Albums (covers), Songs — in relevance order, all rows
+  on one left edge with the same rounded press.
 
 ## Song rows (everywhere)
 
@@ -146,8 +153,21 @@ repeat with large ranks. Few numbers, large; the rest is shape and colour.
 ## Settings
 
 Grouped by what the owner thinks about — Sound, Playback, Library, Lyrics — in Android 16 style
-containers (rows touch, groups breathe). Every row says what it does in one line. Options also live
+containers (rows touch, groups breathe). Every row says what it does in one line; icons stay
+centred on the row even when the help runs to three lines. Options also live
 where they matter (EQ in the player, play-on-connect in the audio path); Settings is where all are.
+
+## Sheets
+
+- **Sleep timer**: a running timer shows first (time left, +10 min, Turn off); then 15/30/45/60
+  tiles, "When this song ends", and Other with a slider. One tap starts it; the music fades out.
+- **Audio path**: the chain File → Decoder → Processing → App output → Device, each step with what
+  it does to the sound; an Untouched/Processed pill on top and two verdict tiles (Resampling,
+  Processing) so the answer is readable without the chain.
+- **Lyrics**: shown in place of the cover (the Lyrics button toggles it); the sheet holds timing,
+  the lock-screen line and sources.
+- **Equalizer, tag editor, smart playlist editor, playlist picker**: sheets of grouped cards with
+  filled rounded fields and a sticky Save, never a dialog with a wall of fields.
 
 ## Motion and sound
 

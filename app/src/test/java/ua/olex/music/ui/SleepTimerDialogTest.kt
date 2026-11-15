@@ -17,23 +17,24 @@ class SleepTimerDialogTest {
 
     @Test fun choosingADurationSendsItToThePlayer() {
         var minutes = -1
-        compose.setContent { AppTheme { SleepTimerDialog(false, {}, { minutes = it }) } }
-        compose.onNodeWithText("15 minutes").performClick()
+        compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(false, {}, { minutes = it }) } } }
+        compose.onNodeWithText("15", substring = false).performClick()
         compose.runOnIdle { assertEquals(15, minutes) }
     }
 
     @Test fun cancellingAnActiveTimerSendsZero() {
         var minutes = -1
-        compose.setContent { AppTheme { SleepTimerDialog(true, {}, { minutes = it }) } }
-        compose.onNodeWithText("Cancel timer").performClick()
+        compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(true, {}, { minutes = it }, deadline = android.os.SystemClock.elapsedRealtime() + 600_000) } } }
+        compose.onNodeWithText("Turn off").performClick()
         compose.runOnIdle { assertEquals(0, minutes) }
     }
 
     @Test fun dismissingTheDialogDoesNotChangeTheTimer() {
         var dismissed = false
-        compose.setContent { AppTheme { SleepTimerDialog(false, { dismissed = true }, { error("Timer changed on dismiss") }) } }
-        compose.onNodeWithText("Cancel timer").assertDoesNotExist()
-        compose.onNodeWithText("Close").performClick()
-        compose.runOnIdle { assertEquals(true, dismissed) }
+        compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(false, { dismissed = true }, { error("Timer changed on open") }) } } }
+        // No running timer: nothing to turn off, and opening the sheet changes nothing.
+        compose.onNodeWithText("Turn off").assertDoesNotExist()
+        compose.onNodeWithText("When this song ends").assertExists()
+        compose.runOnIdle { assertEquals(false, dismissed) }
     }
 }

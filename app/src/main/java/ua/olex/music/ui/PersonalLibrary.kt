@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package ua.olex.music.ui
 
 import androidx.activity.compose.BackHandler
@@ -13,6 +15,12 @@ import ua.olex.music.model.SavedSong
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.material3.toShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
@@ -71,7 +79,7 @@ internal fun PlaylistBrowser(
     loaded?.let { document -> PlaylistImportDialog(document, library, onDismiss = { loaded = null }, onImport = { name, songs ->
         actions.importPlaylist(name, songs); loaded = null
     }) }
-    documentMessage?.let { message -> AlertDialog(onDismissRequest = { documentMessage = null }, title = { Text("Playlist file") },
+    documentMessage?.let { message -> AppDialog(onDismissRequest = { documentMessage = null }, title = { Text("Playlist file") },
         text = { Text(message) }, confirmButton = { TextButton(onClick = { documentMessage = null }) { Text("Close") } }) }
     val selected = playlists.firstOrNull { it.id == selectedId }
     BackHandler(selected != null) { selectedId = null }
@@ -86,7 +94,7 @@ internal fun PlaylistBrowser(
             })
     }
     deleting?.let { id ->
-        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete playlist?") },
+        AppDialog(onDismissRequest = { deleting = null }, title = { Text("Delete playlist?") },
             text = { Text("Your music files and favourites will be kept.") },
             confirmButton = { TextButton(onClick = { actions.delete(id); deleting = null; selectedId = null }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } })
@@ -94,7 +102,7 @@ internal fun PlaylistBrowser(
     val editRow = editingSong?.let { selected?.songs?.getOrNull(it) }
     if (selected != null && editRow != null) {
         val index = editingSong!!
-        AlertDialog(onDismissRequest = { editingSong = null }, title = { Text(editRow.song.title) }, text = {
+        AppDialog(onDismissRequest = { editingSong = null }, title = { Text(editRow.song.title) }, text = {
             Column {
                 if (editRow.track != null) TextButton(onClick = { onTrackActions(editRow.track); editingSong = null }) { Text("Song actions") }
                 TextButton(enabled = index > 0, onClick = { actions.move(selected.id, editRow.song.id, -1, index); editingSong = null }) { Text("Move up") }
@@ -107,39 +115,61 @@ internal fun PlaylistBrowser(
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
+            // Two starts as cards: make one, or bring one from another player (M3U8).
             item {
-                FlowRow(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { create = true }) { Text("New playlist") }
-                    TextButton(enabled = !loadingDocument, onClick = { importFile.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "application/octet-stream")) }) { Text("Import M3U8") }
+                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.material3.Surface(onClick = { create = true }, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.weight(1f).height(64.dp).squish()) {
+                        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Symbol(Glyph.ADD, bold = true); Spacer(Modifier.width(10.dp)); Text("New playlist", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
+                    androidx.compose.material3.Surface(enabled = !loadingDocument, onClick = { importFile.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "application/octet-stream")) },
+                        shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.weight(1f).height(64.dp).squish()) {
+                        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Symbol(Glyph.FOLDER); Spacer(Modifier.width(10.dp)); Text("Import M3U8", style = MaterialTheme.typography.titleMedium)
+                        }
+                    }
                 }
             }
-            if (playlists.isEmpty()) item { Text("Create a playlist, then add songs or an entire album from their actions.", Modifier.padding(16.dp)) }
+            if (playlists.isEmpty()) item { EmptyState(Glyph.PLAYLIST, "No playlists yet", "Make one here, then add songs or whole albums from their menus.") }
             items(playlists, key = { it.id }) { playlist ->
                 ListItem(
-                    headlineContent = { Text(playlist.name) },
-                    supportingContent = { Text("${playlist.songs.size} songs") },
-                    modifier = Modifier.clickable { selectedId = playlist.id },
+                    headlineContent = { Text(playlist.name, style = MaterialTheme.typography.titleMedium) },
+                    supportingContent = { Text(if (playlist.songs.size == 1) "1 song" else "${playlist.songs.size} songs") },
+                    leadingContent = { PlaylistCover(playlist.playable, 56.dp) },
+                    trailingContent = { Symbol(Glyph.CHEVRON, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                    colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable { selectedId = playlist.id },
                 )
             }
         } else {
             item {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { selectedId = null }) { Text("Back to playlists") }
-                    Text(selected.name, style = MaterialTheme.typography.headlineMedium)
-                    Text("${selected.songs.size} songs · ${selected.songs.size - selected.playable.size} unavailable")
+                // Like an album page: big mosaic, name, counts, Play all; the playlist's own tools as chips.
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    Row(Modifier.fillMaxWidth()) {
+                        IconButton(onClick = { selectedId = null }, modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { Symbol(Glyph.BACK) }
+                    }
+                    PlaylistCover(selected.playable, 200.dp, 28.dp)
+                    Text(selected.name, style = MaterialTheme.typography.headlineSmallEmphasized)
+                    val missing = selected.songs.size - selected.playable.size
+                    Text(listOfNotNull(if (selected.songs.size == 1) "1 song" else "${selected.songs.size} songs", if (missing > 0) "$missing unavailable" else null).joinToString(" · "),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Button(enabled = selected.playable.isNotEmpty(), onClick = { onPlay(selected.playable, 0) }, modifier = Modifier.height(52.dp)) {
+                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.width(8.dp)); Text("Play all")
+                    }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(enabled = selected.playable.isNotEmpty(), onClick = { onPlay(selected.playable, 0) }) { Text("Play all") }
-                        TextButton(enabled = !loadingDocument, onClick = {
+                        androidx.compose.material3.AssistChip(enabled = !loadingDocument, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }, onClick = {
                             exportPlaylistId = selected.id
                             exportSnapshot = selected.name to selected.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song }
                             exportFile.launch(PlaylistDocuments.filename(selected.name))
-                        }) { Text("Export M3U8") }
-                        TextButton(onClick = { namingId = selected.id }) { Text("Rename") }
-                        TextButton(onClick = { deleting = selected.id }) { Text("Delete") }
+                        }, label = { Text("Export M3U8") })
+                        androidx.compose.material3.AssistChip(leadingIcon = { Symbol(Glyph.EDIT, size = 18.dp) }, onClick = { namingId = selected.id }, label = { Text("Rename") })
+                        androidx.compose.material3.AssistChip(leadingIcon = { Symbol(Glyph.DELETE, size = 18.dp) }, onClick = { deleting = selected.id }, label = { Text("Delete") })
                     }
                 }
             }
-            if (selected.songs.isEmpty()) item { Text("Add music from a song's More menu or an album's Add all to playlist action.", Modifier.padding(16.dp)) }
+            if (selected.songs.isEmpty()) item { EmptyState(Glyph.PLAYLIST_ADD, "Empty playlist", "Add songs from their menu, or a whole album with its Add button.") }
             // Keyed by position: the same song can be in a playlist twice.
             itemsIndexed(selected.songs, key = { position, row -> "$position:${row.song.id}" }) { position, row ->
                 SavedSongItem(row, currentId, onPlay = {
@@ -163,7 +193,7 @@ internal fun SavedSongItem(row: SavedSongRow, currentId: String?, onPlay: () -> 
 @Composable
 internal fun PlaylistNameDialog(title: String, initial: String = "", onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by rememberSaveable(initial) { mutableStateOf(initial) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
+    AppDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
         OutlinedTextField(name, onValueChange = { name = it }, label = { Text("Playlist name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()) }) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
@@ -178,18 +208,31 @@ internal fun PlaylistPicker(playlists: List<PlaylistUi>, tracks: List<Track>, ac
         return
     }
     var again by rememberSaveable { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add to playlist") }, text = {
-        LazyColumn(Modifier.heightIn(max = 360.dp)) {
-            item { Text("${tracks.size} songs selected") }
-            item {
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    androidx.compose.material3.Checkbox(again, { again = it }); Text("Add again if already there")
+    // A sheet: new playlist first (the most common reason to open this), then each playlist with its cover.
+    AppSheet(onDismiss) {
+        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+            Text(if (tracks.size == 1) "Add to playlist" else "Add ${tracks.size} songs to", style = MaterialTheme.typography.titleLargeEmphasized,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                item {
+                    ListItem(headlineContent = { Text("New playlist", style = MaterialTheme.typography.titleMedium) },
+                        leadingContent = { androidx.compose.foundation.layout.Box(Modifier.size(56.dp).clip(androidx.compose.material3.MaterialShapes.Cookie6Sided.toShape())
+                            .background(MaterialTheme.colorScheme.primaryContainer), contentAlignment = androidx.compose.ui.Alignment.Center) { Symbol(Glyph.ADD, bold = true, color = MaterialTheme.colorScheme.onPrimaryContainer) } },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable { creating = true })
+                }
+                items(playlists, key = { it.id }) { playlist ->
+                    ListItem(headlineContent = { Text(playlist.name, style = MaterialTheme.typography.titleMedium) },
+                        supportingContent = { Text(if (playlist.songs.size == 1) "1 song" else "${playlist.songs.size} songs") },
+                        leadingContent = { PlaylistCover(playlist.playable, 56.dp) },
+                        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                        modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable { actions.add(playlist.id, tracks, again); onDismiss() })
                 }
             }
-            items(playlists, key = { it.id }) { playlist ->
-                TextButton(onClick = { actions.add(playlist.id, tracks, again); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(playlist.name) }
+            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Add again if already there", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(again, { again = it })
             }
         }
-    }, confirmButton = { TextButton(onClick = { creating = true }) { Text("New playlist") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    }
 }
