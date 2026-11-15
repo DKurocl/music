@@ -671,15 +671,16 @@ private fun WaveTrack(fraction: Float, wave: Boolean) {
         else 0f
     androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(24.dp)) {
         val mid = size.height / 2
-        val gap = 6.dp.toPx()
+        // As thin as the system media player in the shade: a 3 dp line, a low wave, a short handle.
+        val gap = 5.dp.toPx()
         val end = (fraction.coerceIn(0f, 1f) * size.width)
-        val stroke = 4.dp.toPx()
+        val stroke = 3.dp.toPx()
         // The rest of the song: straight, muted, ending in a dot like Android's.
         if (end + gap < size.width) drawLine(cs.secondaryContainer, androidx.compose.ui.geometry.Offset(end + gap, mid), androidx.compose.ui.geometry.Offset(size.width, mid), stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round)
         // What has played: a sine that fades in from its start, so the line leaves the edge flat.
         val stop = (end - gap).coerceAtLeast(0f)
         if (stop > 0f) {
-            val length = 24.dp.toPx(); val height = 3.dp.toPx() * amplitude
+            val length = 22.dp.toPx(); val height = 2.5.dp.toPx() * amplitude
             val path = androidx.compose.ui.graphics.Path()
             var x = 0f
             while (x <= stop) {
@@ -719,13 +720,17 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     Column(modifier.fillMaxWidth()) {
         // Material's own slider: the expressive track with the handle in a gap, nothing imitated.
         val slider = remember { androidx.compose.material3.SliderState(0f, 0, 0f..1f) }
+        val touch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
         val shown = dragged ?: (at.toFloat() / duration).coerceIn(0f, 1f)
         androidx.compose.runtime.SideEffect { if (dragged == null) slider.value = shown }
         androidx.compose.material3.Slider(
-            state = slider, enabled = state.durationMs > 0,
+            state = slider, enabled = state.durationMs > 0, interactionSource = touch,
             onValueChange = { v: Float -> if (dragged == null) haptics.tick(); dragged = v; slider.value = v },
             onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); at = (it * duration).toLong() }; dragged = null; haptics.tick() },
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Position"; stateDescription = "${clock(at)} of ${clock(state.durationMs)}" },
+            thumb = { _: androidx.compose.material3.SliderState ->
+                androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = state.durationMs > 0)
+            },
             track = { _: androidx.compose.material3.SliderState -> WaveTrack(shown, wave = state.isPlaying && dragged == null) },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
