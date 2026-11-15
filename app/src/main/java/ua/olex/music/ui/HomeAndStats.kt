@@ -31,7 +31,9 @@ internal fun HomePage(
     currentId: String?, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit, onShuffle: (List<Track>) -> Unit,
     onOpenAlbum: (MusicCollection) -> Unit, onTrackActions: (Track) -> Unit,
     onOpenArtist: (MusicCollection) -> Unit = {}, duplicates: Int = 0, onStats: () -> Unit = {}, onDuplicates: () -> Unit = {},
+    favourites: List<Track> = emptyList(), onSeeAll: (String) -> Unit = {},
 ) {
+    val newest = remember(library) { library.songs.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(100) }
     // Your artists: the most played first, then those with the most songs.
     val artists = remember(library, stats) {
         library.artists.filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", true) }
@@ -48,14 +50,24 @@ internal fun HomePage(
     }
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 16.dp)) {
         if (library.songs.isEmpty()) { item { Text("No music yet. Put music in the Music folder, then rescan.", Modifier.padding(16.dp)) }; return@LazyColumn }
-        item(key = "shuffle") {
-            Button(onClick = { onShuffle(library.songs) }, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth().height(56.dp)) {
-                Symbol(Glyph.SHUFFLE, size = 20.dp); Spacer(Modifier.size(8.dp)); Text("Shuffle all ${library.songs.size} songs")
+        // Three one-tap starts, most used first. A row of buttons instead of one huge button: Home stays
+        // about music, not about a control.
+        item(key = "starts") {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = { onShuffle(library.songs) }, modifier = Modifier.weight(1.2f).height(56.dp)) {
+                    Symbol(Glyph.SHUFFLE, size = 20.dp); Spacer(Modifier.size(8.dp)); Text("Shuffle", maxLines = 1)
+                }
+                FilledTonalButton(enabled = favourites.isNotEmpty(), onClick = { onPlay(favourites, 0) }, modifier = Modifier.weight(1f).height(56.dp)) {
+                    Symbol(Glyph.FAVOURITE, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Liked", maxLines = 1)
+                }
+                FilledTonalButton(enabled = newest.isNotEmpty(), onClick = { onPlay(newest, 0) }, modifier = Modifier.weight(1f).height(56.dp)) {
+                    Symbol(Glyph.ADD, size = 20.dp); Spacer(Modifier.size(8.dp)); Text("New", maxLines = 1)
+                }
             }
         }
-        if (recentAlbums.isNotEmpty()) { item(key = "recent-h") { SectionTitle("Played lately") }; item(key = "recent") { AlbumRow(recentAlbums, onOpenAlbum) { onPlay(it.tracks, 0) } } }
+        if (recentAlbums.isNotEmpty()) { item(key = "recent-h") { SectionTitle("Played lately") { onSeeAll("HISTORY") } }; item(key = "recent") { AlbumRow(recentAlbums, onOpenAlbum) { onPlay(it.tracks, 0) } } }
         if (artists.size > 1) {
-            item(key = "artists-h") { SectionTitle("Your artists") }
+            item(key = "artists-h") { SectionTitle("Your artists") { onSeeAll("ARTISTS") } }
             item(key = "artists") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     items(artists, key = { it.id }) { artist ->
@@ -69,10 +81,10 @@ internal fun HomePage(
                 }
             }
         }
-        if (addedAlbums.isNotEmpty()) { item(key = "added-h") { SectionTitle("Added lately") }; item(key = "added") { AlbumRow(addedAlbums, onOpenAlbum) { onPlay(it.tracks, 0) } } }
+        if (addedAlbums.isNotEmpty()) { item(key = "added-h") { SectionTitle("Added lately") { onSeeAll("ALBUMS") } }; item(key = "added") { AlbumRow(addedAlbums, onOpenAlbum) { onPlay(it.tracks, 0) } } }
         val lists = smart.filter { it.tracks.isNotEmpty() }
         if (lists.isNotEmpty()) {
-            item(key = "smart-h") { SectionTitle("Smart playlists") }
+            item(key = "smart-h") { SectionTitle("Smart playlists") { onSeeAll("SMART") } }
             item(key = "smart") {
                 LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(lists, key = { it.key }) { list ->
@@ -85,7 +97,8 @@ internal fun HomePage(
         item(key = "cards") {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 HomeCard(Glyph.STATS, "Your listening", "Plays, time, top artists", Modifier.weight(1f), onStats)
-                HomeCard(Glyph.DUPLICATES, "Duplicates", if (duplicates == 0) "None found" else "$duplicates songs kept twice", Modifier.weight(1f), onDuplicates)
+                // Shown only when there is something to tidy: an empty card would be noise.
+                if (duplicates > 0) HomeCard(Glyph.DUPLICATES, "Duplicates", "$duplicates songs kept twice", Modifier.weight(1f), onDuplicates)
             }
         }
         if (mostPlayed.isNotEmpty()) {
@@ -148,9 +161,16 @@ internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modif
     }
 }
 
+/** A section heading; with [onSeeAll], the whole heading row opens the full list (a bigger target than a small link). */
 @Composable
-private fun SectionTitle(text: String) =
-    Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp))
+private fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp).clip(RoundedCornerShape(16.dp))
+        .then(if (onSeeAll != null) Modifier.clickable(onClickLabel = "See all $text", onClick = onSeeAll) else Modifier)
+        .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+        if (onSeeAll != null) Symbol(Glyph.CHEVRON, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
 
 @Composable
 private fun AlbumRow(albums: List<MusicCollection>, onOpen: (MusicCollection) -> Unit, onPlay: (MusicCollection) -> Unit) {
