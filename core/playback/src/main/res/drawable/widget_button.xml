@@ -1,5 +1,5 @@
 <!-- The play pill, as in the app's player. -->
 <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
     <solid android:color="@color/w_play" />
-    <corners android:radius="16dp" />
+    <corners android:radius="18dp" />
 </shape>

@@ -67,6 +67,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
@@ -307,7 +308,8 @@ fun MusicRoot(model: LibraryViewModel) {
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
                 moods = moods,
-                youTubeHome = youTubeHome,
+                youTubeHome = youTubeHome.map { shelf -> shelf.copy(songs = shelf.songs.filterNot { it.id.value in model.excluded || Mix.songKey(it) in model.excluded },
+                    cards = shelf.cards.filterNot { it.kind == YouTubeMusic.Card.Kind.SONG && "yt:${it.id}" in model.excluded }) },
                 onSeeAll = { tab ->
                     // Smart playlists live in Playlists; albums, artists and history are Search tiles.
                     if (tab == "SMART") { returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
@@ -425,6 +427,10 @@ fun MusicRoot(model: LibraryViewModel) {
             // A mix grown from this song, as YouTube Music's "Start radio", local files first.
             TrackAction(Glyph.MIX, "Start mix") { haptics.spin(); model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
+            // Never offered again in mixes, autoplay and Home; out of the queue now.
+            if (online) TrackAction(Glyph.HIDDEN, "Don't recommend this song") {
+                model.dontRecommend(track); scope.launch { snackbar.showSnackbar("${track.title} won't be recommended again") }
+            } else null,
             // An online song has no album or artist page here and no file to tag: those actions are not offered.
             if (online) null else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
             if (online) null else TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
@@ -548,7 +554,9 @@ private fun NowPlaying(
         onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true },
         inlineLyrics = { mod ->
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
-                onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus, modifier = mod)
+                onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,
+                // Words fill at 60 frames a second: smooth to the eye, without holding the panel at 120 Hz.
+                modifier = mod.preferredFrameRate(60f))
         })
     if (outputUnavailable) AppDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
         text = { Text("Open Android's media output controls to choose a device.") },

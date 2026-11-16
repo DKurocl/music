@@ -45,16 +45,28 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
 
     /** Finds and saves one song in the best quality the network has. */
     fun song(artist: String, title: String, album: String?, durationMs: Long): Unit = start(songKey(artist, title), "$artist · $title", { song(artist, title, album, durationMs) }) { update ->
-        update("Searching Soulseek…", null)
-        val results = client.search("$artist $title")
-        val best = chooseSong(results, title, durationMs / 1000) ?: error("Not on Soulseek in lossless or 320 kbps")
-        save(best, artist, album ?: "Singles", update, 1, 1)
+        // From exact to loose; the first search with a good copy wins.
+        val phrases = queries(artist, title)
+        val results = ArrayList<SoulseekClient.Result>()
+        var best: SoulseekClient.Result? = null
+        for ((i, q) in phrases.withIndex()) {
+            update(if (phrases.size > 1) "Searching Soulseek\u2026 ${i + 1} of ${phrases.size}" else "Searching Soulseek\u2026", null)
+            results += client.search(q, seconds = 7)
+            best = chooseSong(results, title, durationMs / 1000)
+            if (best != null) break
+        }
+        save(best ?: error("Not on Soulseek in lossless or 320 kbps"), artist, album ?: "Singles", update, 1, 1)
     }
 
     /** Finds the best copy of a whole album (one peer's folder) and saves every song in it. */
     fun album(artist: String, album: String): Unit = start(albumKey(artist, album), "$artist · $album", { album(artist, album) }) { update ->
         update("Searching Soulseek…", null)
-        val files = chooseAlbum(client.search("$artist $album", seconds = 10)) ?: error("This album isn't on Soulseek in lossless or 320 kbps")
+        var files: List<SoulseekClient.Result>? = null
+        for (q in queries(artist, album)) {
+            files = chooseAlbum(client.search(q, seconds = 10))
+            if (files != null) break
+        }
+        if (files == null) error("This album isn't on Soulseek in lossless or 320 kbps")
         files.forEachIndexed { i, f -> save(f, artist, album, update, i + 1, files.size) }
     }
 
@@ -146,6 +158,26 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
 
         private fun words(s: String) = TextFold.fold(s).replace(Regex("""[(\[].*?[)\]]"""), " ").split(Regex("""\W+""")).filter { it.length > 1 }.toSet()
 
+        /** A file's words, brackets included: "02 - wanton soup (chopped and screwed).flac" has "chopped". */
+        private fun fileWords(s: String) = TextFold.fold(s.substringBeforeLast('.')).split(Regex("""\W+""")).filter { it.length > 1 }.toSet()
+
+        /** Search phrases, exact to loose, without brackets, "feat." and symbols the server ignores. */
+        fun queries(artist: String, title: String): List<String> {
+            fun clean(s: String) = s.replace(Regex("""[(\[].*?[)\]]"""), " ").replace(Regex("""(?i)\s(feat\.?|ft\.?|featuring)\s.*$"""), " ")
+                .replace(Regex("""[^\p{L}\p{N}' ]"""), " ").replace(Regex("""\s+"""), " ").trim()
+            val a = clean(artist.substringBefore(",")); val t = clean(title)
+            val short = t.split(' ').take(3).joinToString(" ")
+            return listOf("$a $t", t, "$a $short").map { it.trim() }.filter { it.length >= 3 }.distinct()
+        }
+
+        /** The title's words in the file: all of a short title, three in four of a long one. */
+        private fun named(file: String, want: Set<String>): Boolean {
+            if (want.isEmpty()) return true
+            val have = fileWords(file)
+            val hits = want.count { it in have }
+            return if (want.size <= 2) hits == want.size else hits * 4 >= want.size * 3
+        }
+
         /** A lossy copy good enough to keep: MP3 (or AAC) at 256 kbps or more, by its tag or by size over length. */
         fun goodLossy(r: SoulseekClient.Result): Boolean {
             if (r.extension !in setOf("mp3", "m4a", "aac", "ogg", "opus")) return false
@@ -160,7 +192,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
          */
         fun chooseSong(results: List<SoulseekClient.Result>, title: String, seconds: Long): SoulseekClient.Result? {
             val want = words(title)
-            val named = results.filter { r -> words(r.name).containsAll(want) }
+            val named = results.filter { r -> named(r.name, want) }
                 .filter { r -> seconds <= 0 || r.seconds == null || kotlin.math.abs(r.seconds - seconds) <= 5 }
             fun best(list: List<SoulseekClient.Result>) = list.maxByOrNull { r -> (if (r.extension == "flac") 1_000_000L else 0L) + (if (r.slotFree) 500_000L else 0L) - r.queue * 1_000 + r.speed / 1_000 + (r.bitrate ?: 0) * 100L }
             return best(named.filter { it.extension in LOSSLESS && it.size in 2_000_000..400_000_000 }) ?: best(named.filter(::goodLossy))
