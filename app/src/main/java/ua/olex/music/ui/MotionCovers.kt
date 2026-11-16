@@ -22,15 +22,29 @@ class MotionCovers(private val context: Context) {
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
+    /**
+     * One key per album, the same for every song on it. Without an album artist tag the first artist
+     * of the song stands in: "Travis Scott, Drake" and "Travis Scott" are one album's songs, and the
+     * whole artist line used to give each guest song a key (and so no moving cover) of its own.
+     */
     private fun key(track: Track): String? {
         val album = track.album?.takeIf { it.isNotBlank() } ?: return null
-        val owner = track.albumArtist?.takeIf { it.isNotBlank() } ?: track.artist
-        val digest = MessageDigest.getInstance("SHA-256").digest(TextFold.fold("$owner\u0000$album").toByteArray())
-        return digest.take(12).joinToString("") { "%02x".format(it) }
+        val owner = track.albumArtist?.takeIf { it.isNotBlank() } ?: firstArtist(track.artist)
+        return digest("$owner\u0000$album")
     }
 
+    /** The key songs had before (the whole artist line), so covers kept then still show. */
+    private fun oldKey(track: Track): String? {
+        val album = track.album?.takeIf { it.isNotBlank() } ?: return null
+        return digest("${track.albumArtist?.takeIf { it.isNotBlank() } ?: track.artist}\u0000$album")
+    }
+
+    private fun digest(s: String) = MessageDigest.getInstance("SHA-256").digest(TextFold.fold(s).toByteArray()).take(12).joinToString("") { "%02x".format(it) }
+
     /** The album's moving cover, if one was attached. */
-    fun file(track: Track): File? = key(track)?.let { File(dir, "$it.mp4") }?.takeIf { it.isFile && it.length() > 0 }
+    fun file(track: Track): File? = (listOfNotNull(key(track), oldKey(track)).distinct()).firstNotNullOfOrNull { k ->
+        File(dir, "$k.mp4").takeIf { it.isFile && it.length() > 0 }
+    }
         // Shown now: the last to go when the budget runs over.
         ?.also { it.setLastModified(System.currentTimeMillis()) }
 
@@ -71,4 +85,9 @@ class MotionCovers(private val context: Context) {
     fun bytes(): Long = dir.listFiles { f -> f.name.endsWith(".mp4") }?.sumOf { it.length() } ?: 0L
 
     companion object { const val MAX_BYTES = 40L * 1024 * 1024 }
+
 }
+
+/** "Travis Scott, Drake", "A & B", "A feat. B", "A x B" give "Travis Scott", "A". */
+internal fun firstArtist(artist: String): String =
+    artist.split(Regex(""",|&|;|\s+(feat\.?|ft\.?|featuring|x|with)\s+""", RegexOption.IGNORE_CASE)).first().trim().ifEmpty { artist }

@@ -1,0 +1,5 @@
+# The whole app, compiled ahead of time at install (Baseline Profile rules, wildcards allowed):
+# the first launch, the first scroll and the first song no longer wait for the JIT. AndroidX
+# libraries (Compose, Media3, Coil) bring their own profiles, merged in by the build.
+HSPLua/olex/music/**;->**(**)**
+Lua/olex/music/**;

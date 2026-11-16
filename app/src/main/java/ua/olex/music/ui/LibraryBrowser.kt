@@ -102,6 +102,7 @@ internal fun LibraryBrowser(
     onTrackActions: (Track) -> Unit = {},
     onAddToPlaylist: (List<Track>) -> Unit = {},
     onEditTags: (List<Track>) -> Unit = {},
+    onTrash: (List<Track>) -> Unit = {},
     sortOrders: Map<TrackSortScope, TrackSortOrder> = emptyMap(),
     onSortOrder: (TrackSortScope, TrackSortOrder) -> Unit = { _, _ -> },
     onEnqueue: (List<Track>, Boolean) -> Unit = { _, _ -> },
@@ -549,7 +550,7 @@ internal fun LibraryBrowser(
         }
         if (picking) SelectionActions(visible != null && picked.ids.isNotEmpty(),
             onPlay = { batch { onPlay(it, 0) } }, onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
-            onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) },
+            onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) }, onTrash = { batch(onTrash) },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp + LocalPlayerInset.current))
         }
     }
@@ -848,12 +849,14 @@ private fun HiddenFolders() {
 /** The actions for selected songs, as a floating toolbar over the list (M3E). */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun SelectionActions(enabled: Boolean, onPlay: () -> Unit, onNext: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onTags: () -> Unit, modifier: Modifier) {
+private fun SelectionActions(enabled: Boolean, onPlay: () -> Unit, onNext: () -> Unit, onQueue: () -> Unit, onPlaylist: () -> Unit, onTags: () -> Unit, modifier: Modifier,
+    onTrash: () -> Unit = {}) {
     val haptics = rememberHaptics()
     androidx.compose.material3.HorizontalFloatingToolbar(expanded = true, modifier = modifier,
         colors = androidx.compose.material3.FloatingToolbarDefaults.vibrantFloatingToolbarColors()) {
         listOf(Triple(Glyph.PLAY, "Play selected", onPlay), Triple(Glyph.NEXT, "Play next", onNext), Triple(Glyph.QUEUE, "Add to queue", onQueue),
-            Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags)).forEachIndexed { i, (glyph, label, action) ->
+            Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags),
+            Triple(Glyph.DELETE, "Move to trash", onTrash)).forEachIndexed { i, (glyph, label, action) ->
             androidx.compose.material3.IconButton(enabled = enabled, onClick = { haptics.confirm(); action() },
                 modifier = Modifier.semantics { contentDescription = label }) { Symbol(glyph, filled = glyph == Glyph.PLAY) }
         }

@@ -79,8 +79,8 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
     private fun dropWebToken() { prefs.edit().remove("web_token").remove("web_token_exp").apply() }
 
     /** Whether this album was looked up lately and had no moving cover (asked again after two weeks). */
-    private fun missed(album: String): Boolean = System.currentTimeMillis() - prefs.getLong("miss2:$album", 0) < 14L * 24 * 3600 * 1000
-    private fun miss(album: String) { prefs.edit().putLong("miss2:$album", System.currentTimeMillis()).apply() }
+    private fun missed(album: String): Boolean = System.currentTimeMillis() - prefs.getLong("miss3:$album", 0) < 14L * 24 * 3600 * 1000
+    private fun miss(album: String) { prefs.edit().putLong("miss3:$album", System.currentTimeMillis()).apply() }
 
     /**
      * Finds the album's moving cover and returns it as one fragmented MP4 (video only), or null.
@@ -88,7 +88,7 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
      */
     suspend fun find(track: Track, storefront: String = "us"): ByteArray? = withContext(Dispatchers.IO) {
         val album = track.album?.takeIf { it.isNotBlank() } ?: return@withContext null
-        val artist = track.albumArtist?.takeIf { it.isNotBlank() } ?: track.artist
+        val artist = track.albumArtist?.takeIf { it.isNotBlank() } ?: firstArtist(track.artist)
         val lookup = TextFold.fold("$artist\u0000$album")
         if (!enabled || missed(lookup)) return@withContext null
         val (bearer, base) = access() ?: return@withContext null

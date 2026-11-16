@@ -127,7 +127,14 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
             volume = 0f
             repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
             setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
-            addListener(object : androidx.media3.common.Player.Listener { override fun onRenderedFirstFrame() { ready = true } })
+            addListener(object : androidx.media3.common.Player.Listener {
+                override fun onRenderedFirstFrame() { ready = true }
+                // The joined Apple video is a fragmented MP4 without a seek index, so the built-in
+                // repeat stops after one pass; starting it again by hand loops it for good.
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == androidx.media3.common.Player.STATE_ENDED) { seekTo(0); play() }
+                }
+            })
             prepare()
         }
     }
