@@ -68,22 +68,42 @@ class Haptics(private val view: View) {
         runCatching { v.vibrate(c.compose(), touch) }
     }
 
+    /**
+     * On the Pixel's actuator (Android 16+), the same cue as a shaped envelope of intensity and
+     * sharpness over time, as Pixel's haptic ringtones and Earbuds and VPN are made: smoother and
+     * more physical than stacked primitives. Points are (intensity, sharpness, ms).
+     */
+    private val shaped = vibrator?.areEnvelopeEffectsSupported() == true
+
+    private fun envelope(start: Float, vararg points: Triple<Float, Float, Long>): Boolean {
+        val v = vibrator
+        if (!shaped || v == null || !view.isHapticFeedbackEnabled) return false
+        val effect = android.os.VibrationEffect.BasicEnvelopeBuilder().setInitialSharpness(start)
+            .apply { points.forEach { (i, sh, ms) -> addControlPoint(i, sh, ms) } }.build()
+        return runCatching { v.vibrate(effect, touch) }.isSuccess
+    }
+
     /** Play: a quick rise into a click, something starting. */
-    fun play() = compose(HapticFeedbackConstants.TOGGLE_ON, Triple(Composition.PRIMITIVE_QUICK_RISE, 0.45f, 0), Triple(Composition.PRIMITIVE_CLICK, 0.7f, 0))
+    fun play() { if (!envelope(0.3f, Triple(0.35f, 0.4f, 25L), Triple(0.75f, 0.9f, 12L), Triple(0f, 0.9f, 25L)))
+        compose(HapticFeedbackConstants.TOGGLE_ON, Triple(Composition.PRIMITIVE_QUICK_RISE, 0.45f, 0), Triple(Composition.PRIMITIVE_CLICK, 0.7f, 0)) }
     /** Pause: a quick fall settling on a low tick. */
-    fun pause() = compose(HapticFeedbackConstants.TOGGLE_OFF, Triple(Composition.PRIMITIVE_QUICK_FALL, 0.45f, 0), Triple(Composition.PRIMITIVE_LOW_TICK, 0.7f, 20))
+    fun pause() { if (!envelope(0.6f, Triple(0.55f, 0.55f, 12L), Triple(0.15f, 0.3f, 50L), Triple(0f, 0.2f, 30L)))
+        compose(HapticFeedbackConstants.TOGGLE_OFF, Triple(Composition.PRIMITIVE_QUICK_FALL, 0.45f, 0), Triple(Composition.PRIMITIVE_LOW_TICK, 0.7f, 20)) }
     /** Skip: two taps leaning the way it goes, light then firm forward, firm then light back. */
     fun skip(forward: Boolean) = if (forward) compose(HapticFeedbackConstants.SEGMENT_TICK, Triple(Composition.PRIMITIVE_TICK, 0.5f, 0), Triple(Composition.PRIMITIVE_CLICK, 0.85f, 35))
         else compose(HapticFeedbackConstants.SEGMENT_TICK, Triple(Composition.PRIMITIVE_CLICK, 0.85f, 0), Triple(Composition.PRIMITIVE_TICK, 0.5f, 35))
     /** Like: a slow bloom into a bright click; unlike: a soft fall. */
-    fun like(on: Boolean) = if (on) compose(HapticFeedbackConstants.CONFIRM, Triple(Composition.PRIMITIVE_SLOW_RISE, 0.3f, 0), Triple(Composition.PRIMITIVE_CLICK, 1f, 0))
-        else compose(HapticFeedbackConstants.TOGGLE_OFF, Triple(Composition.PRIMITIVE_QUICK_FALL, 0.3f, 0))
+    fun like(on: Boolean) {
+        if (on) { if (!envelope(0.2f, Triple(0.3f, 0.3f, 80L), Triple(0.9f, 1f, 10L), Triple(0f, 1f, 30L)))
+            compose(HapticFeedbackConstants.CONFIRM, Triple(Composition.PRIMITIVE_SLOW_RISE, 0.3f, 0), Triple(Composition.PRIMITIVE_CLICK, 1f, 0)) }
+        else if (!envelope(0.5f, Triple(0.35f, 0.4f, 10L), Triple(0f, 0.2f, 70L))) compose(HapticFeedbackConstants.TOGGLE_OFF, Triple(Composition.PRIMITIVE_QUICK_FALL, 0.3f, 0))
+    }
     /** Something new spinning up: a mix, a cover swiped to the next song. */
     fun spin() = compose(HapticFeedbackConstants.GESTURE_END, Triple(Composition.PRIMITIVE_SPIN, 0.5f, 0))
     /** A detent while scrubbing; firmer when moving fast. */
     fun scrub(speed: Float) = compose(HapticFeedbackConstants.SEGMENT_FREQUENT_TICK, Triple(Composition.PRIMITIVE_LOW_TICK, (0.3f + speed * 0.5f).coerceIn(0.3f, 0.8f), 0))
     /** Reaching an end (start or end of the song): a soft thud. */
-    fun edge() = compose(HapticFeedbackConstants.GESTURE_THRESHOLD_DEACTIVATE, Triple(Composition.PRIMITIVE_THUD, 0.6f, 0))
+    fun edge() { if (!envelope(0.15f, Triple(0.6f, 0.15f, 25L), Triple(0f, 0.1f, 90L))) compose(HapticFeedbackConstants.GESTURE_THRESHOLD_DEACTIVATE, Triple(Composition.PRIMITIVE_THUD, 0.6f, 0)) }
 
     fun toggle(on: Boolean) = perform(if (on) HapticFeedbackConstants.TOGGLE_ON else HapticFeedbackConstants.TOGGLE_OFF)
     fun threshold() = perform(HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE)

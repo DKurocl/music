@@ -99,6 +99,7 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        Thread { NowPlaying.publishPreview(this) }.start()
         equalizer = EqualizerController(this) { state -> session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply { putBundle(EqualizerCommand.KEY, EqualizerCommand.bundle(state)) })
             scope.launch { updateOffload() }
