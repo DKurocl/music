@@ -73,7 +73,8 @@ class Haptics(private val view: View) {
      * sharpness over time, as Pixel's haptic ringtones and Earbuds and VPN are made: smoother and
      * more physical than stacked primitives. Points are (intensity, sharpness, ms).
      */
-    private val shaped = vibrator?.areEnvelopeEffectsSupported() == true
+    // Asked once, on first use; runCatching also covers test runtimes older than the app's minimum.
+    private val shaped by lazy { runCatching { vibrator?.areEnvelopeEffectsSupported() == true }.getOrDefault(false) }
 
     private fun envelope(start: Float, vararg points: Triple<Float, Float, Long>): Boolean {
         val v = vibrator
