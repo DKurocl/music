@@ -33,13 +33,23 @@ internal object PlayerFactory {
             // preferring them stays off so the platform's FLAC/MP3/AAC/Opus decoders are used.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         return ExoPlayer.Builder(context, renderers)
+            // Media3 keeps 50 s ahead and tops up in small pieces every few seconds, which never
+            // lets the radio sleep (each fetch keeps it awake about ten more seconds). Buffering up
+            // to ten minutes (24 MB) fetches an online song whole, as YouTube Music and Spotify do,
+            // and reads files in large runs; the radio and storage then rest until the next song.
+            .setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                .setBufferDurationsMs(30_000, 600_000, 1_000, 2_000)
+                .setTargetBufferBytes(24 shl 20)
+                .build())
             .setMediaSourceFactory(ReplayGainMediaSourceFactory(context))
             // Music, with Android's audio focus rules: pause for calls, duck for navigation prompts.
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             // Output disconnected: pause before falling back to the speaker. Wear detection is
             // an earbud-generated media command and must be verified separately on the phone.
             .setHandleAudioBecomingNoisy(true)
-            // Keeps the CPU awake while playing with the screen off (local files; streams add Wi-Fi).
+            // Keeps the CPU awake while playing with the screen off. Online songs too: they are fetched
+            // whole (the load control above), so no Wi-Fi lock is needed; a NETWORK wake mode would hold
+            // Wi-Fi at full performance for the whole song and drain the battery for nothing.
             .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
     }
