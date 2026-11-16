@@ -63,4 +63,11 @@ class DeviceReportTest {
         assertEquals("A, B & C" to "Juicy (2005 Remaster) feat. X", v.first())
         assertTrue(v.contains("A" to "Juicy"))
     }
+
+    @Test fun oneMovingCoverKeyForAnAlbumWithGuests() {
+        assertEquals("Travis Scott", firstArtist("Travis Scott, Drake"))
+        assertEquals("Travis Scott", firstArtist("Travis Scott feat. Drake"))
+        assertEquals("Kanye West", firstArtist("Kanye West & Jay-Z"))
+        assertEquals("Lil Nas X", firstArtist("Lil Nas X"))
+    }
 }

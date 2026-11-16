@@ -47,34 +47,16 @@ internal fun HomePage(
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val newest = remember(library) { library.songs.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(100) }
-    val artists = remember(library, stats) {
-        library.artists.filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", true) }
-            .sortedWith(compareByDescending<MusicCollection> { a -> a.tracks.sumOf { stats[it.key.value]?.plays ?: 0 } }.thenByDescending { it.tracks.size })
-            .take(15)
-    }
-    val albumOf = remember(library) { library.albums.flatMap { a -> a.tracks.map { it.id to a } }.toMap() }
-    val recentAlbums = remember(history, albumOf) { history.mapNotNull { albumOf[it.id] }.distinctBy { it.id }.take(12) }
-    val addedAlbums = remember(library) {
-        library.albums.filter { a -> a.tracks.any { it.addedAt != null } }.sortedByDescending { a -> a.tracks.maxOf { it.addedAt ?: 0 } }.take(12)
-    }
-    val mostPlayed = remember(library, stats) {
-        library.songs.map { it to (stats[it.key.value]?.plays ?: 0) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
-    }
-    val listened = remember(library, stats) { LibraryStats.of(library) { stats[it.key.value] } }
-    // Quick picks (YouTube Music's opening shelf): today's mix of what the owner plays and likes,
-    // with a few unplayed songs by the artists they play; stable for the day. A second source
-    // (YouTube Music) will mix its songs into this same shelf.
+    // Everything Home shows is worked out from the whole library and the play counts, which change
+    // with every song played. A new library is worked out at once (the first frame is complete);
+    // new counts in the background, the screen showing the last result meanwhile.
     val day = java.time.LocalDate.now().toEpochDay()
-    val quickPicks = remember(library, stats, favourites, day) {
-        val random = java.util.Random(day)
-        val liked = favourites.toSet()
-        val played = library.songs.filter { (stats[it.key.value]?.plays ?: 0) > 0 || it in liked }
-            .sortedByDescending { (stats[it.key.value]?.plays ?: 0) + if (it in liked) 5 else 0 }.take(60).shuffled(random).take(14)
-        val topArtists = artists.take(6).map { it.name }.toSet()
-        val fresh = library.songs.filter { it.artist in topArtists && (stats[it.key.value]?.plays ?: 0) == 0 }.shuffled(random).take(6)
-        (played + fresh).distinctBy { it.id }.ifEmpty { library.songs.shuffled(random).take(20) }.shuffled(random).take(20)
+    val initial = remember(library) { homeData(library, history, stats, favourites, day) }
+    val data by androidx.compose.runtime.produceState(initial, library, history, stats, favourites, day) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { homeData(library, history, stats, favourites, day) }
     }
+    val newest = data.newest; val artists = data.artists; val recentAlbums = data.recentAlbums; val addedAlbums = data.addedAlbums
+    val mostPlayed = data.mostPlayed; val listened = data.listened; val quickPicks = data.quickPicks
     val hero = recentAlbums.firstOrNull() ?: addedAlbums.firstOrNull() ?: library.albums.firstOrNull()
 
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
@@ -530,4 +512,31 @@ private fun BarRow(label: String, value: Int, max: Int, modifier: Modifier = Mod
         }
         LinearProgressIndicator(progress = { if (max > 0) value.toFloat() / max else 0f }, modifier = Modifier.fillMaxWidth().padding(top = 4.dp), drawStopIndicator = {})
     }
+}
+
+/** What Home shows, worked out in one pass from the library, history, play counts and favourites. */
+private class HomeData(val newest: List<Track>, val artists: List<MusicCollection>, val recentAlbums: List<MusicCollection>, val addedAlbums: List<MusicCollection>,
+    val mostPlayed: List<Track>, val listened: LibraryStats, val quickPicks: List<Track>)
+
+private fun homeData(library: LibraryIndex, history: List<Track>, stats: Map<String, SongStats>, favourites: List<Track>, day: Long): HomeData {
+    val newest = library.songs.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(100)
+    val artists = library.artists.filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", true) }
+        .sortedWith(compareByDescending<MusicCollection> { a -> a.tracks.sumOf { stats[it.key.value]?.plays ?: 0 } }.thenByDescending { it.tracks.size })
+        .take(15)
+    val albumOf = HashMap<ua.olex.music.model.TrackId, MusicCollection>().apply { library.albums.forEach { a -> a.tracks.forEach { put(it.id, a) } } }
+    val recentAlbums = history.mapNotNull { albumOf[it.id] }.distinctBy { it.id }.take(12)
+    val addedAlbums = library.albums.filter { a -> a.tracks.any { it.addedAt != null } }.sortedByDescending { a -> a.tracks.maxOf { it.addedAt ?: 0 } }.take(12)
+    val mostPlayed = library.songs.map { it to (stats[it.key.value]?.plays ?: 0) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
+    val listened = LibraryStats.of(library) { stats[it.key.value] }
+    // Quick picks (YouTube Music's opening shelf): today's mix of what the owner plays and likes,
+    // with a few unplayed songs by the artists they play; stable for the day. Liked songs are
+    // compared by id: hashing whole tracks (every tag) for each of thousands of songs was the slow part.
+    val random = java.util.Random(day)
+    val liked = favourites.mapTo(HashSet()) { it.id }
+    val played = library.songs.filter { (stats[it.key.value]?.plays ?: 0) > 0 || it.id in liked }
+        .sortedByDescending { (stats[it.key.value]?.plays ?: 0) + if (it.id in liked) 5 else 0 }.take(60).shuffled(random).take(14)
+    val topArtists = artists.take(6).map { it.name }.toSet()
+    val fresh = library.songs.filter { it.artist in topArtists && (stats[it.key.value]?.plays ?: 0) == 0 }.shuffled(random).take(6)
+    val quickPicks = (played + fresh).distinctBy { it.id }.ifEmpty { library.songs.shuffled(random).take(20) }.shuffled(random).take(20)
+    return HomeData(newest, artists, recentAlbums, addedAlbums, mostPlayed, listened, quickPicks)
 }
