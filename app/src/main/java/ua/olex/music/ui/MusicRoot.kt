@@ -202,6 +202,19 @@ fun MusicRoot(model: LibraryViewModel) {
         if (result.resultCode == android.app.Activity.RESULT_OK) { haptics.confirm(); model.refresh() }
         trashing = null
     }
+    /**
+     * Moves the owner's files to Android's trash (recoverable for 30 days in Files), after Android's
+     * own confirmation. A song that is playing is skipped first, so nothing plays a vanishing file.
+     */
+    val moveToTrash: (List<Track>) -> Unit = { tracks ->
+        val files = tracks.filter { '#' !in it.id.value && !YouTubeMusic.isOnline(it) && it.uri.startsWith("content://") }
+        if (files.isNotEmpty()) {
+            if (files.any { it.id.value == playing.mediaId }) model.next()
+            trashing = files
+            val pending = android.provider.MediaStore.createTrashRequest(context.contentResolver, files.map { Uri.parse(it.uri) }, true)
+            trashRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build())
+        }
+    }
 
     // In an open collection the bar shows a back arrow, and the name once the header has scrolled away.
     val inCollection = page == null && place != Place.HOME && collectionTitle != null
@@ -293,12 +306,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders)
             page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
-                val uris = tracks.filter { '#' !in it.id.value }.map { Uri.parse(it.uri) }
-                if (uris.isNotEmpty()) {
-                    trashing = tracks
-                    val pending = android.provider.MediaStore.createTrashRequest(context.contentResolver, uris, true)
-                    trashRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build())
-                }
+                moveToTrash(tracks)
             }
             place == Place.HOME -> HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
                 Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
@@ -325,7 +333,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
-                onEditTags = { editingTags = it },
+                onEditTags = { editingTags = it }, onTrash = moveToTrash,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
                 personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = songStats,
@@ -456,6 +464,7 @@ fun MusicRoot(model: LibraryViewModel) {
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
             if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
+            if (online || '#' in track.id.value) null else TrackAction(Glyph.DELETE, "Move to trash") { moveToTrash(listOf(track)) },
             TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
         ))
     }
