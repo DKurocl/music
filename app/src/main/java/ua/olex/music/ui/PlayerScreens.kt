@@ -68,6 +68,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -730,7 +731,9 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     }
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    Column(modifier.fillMaxWidth()) {
+    // 60 frames a second while it plays (the line moves about a pixel every 130 ms; 60 looks the
+    // same and lets the panel stop holding 120 Hz), 120 while the owner drags it.
+    Column(modifier.fillMaxWidth().then(Modifier.preferredFrameRate(if (dragged != null) 120f else 60f))) {
         // Material's own slider: the expressive track with the handle in a gap, nothing imitated.
         val touch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
         androidx.compose.material3.Slider(

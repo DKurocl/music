@@ -19,7 +19,11 @@ import android.widget.RemoteViews
  * broadcasts to Media3's receiver, which starts the service if needed (playback resumption).
  */
 class NowPlayingWidget : AppWidgetProvider() {
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) = NowPlaying.render(context, ids)
+    // The cover may need the network (an online song's), which the main thread may not use.
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+        val pending = goAsync()
+        Thread { try { NowPlaying.render(context, ids) } finally { pending.finish() } }.start()
+    }
 }
 
 /** What the widget and the Quick Settings tile show; written only by the playback service. */
@@ -68,14 +72,30 @@ internal object NowPlaying {
     }
 
     /** A small cover; widgets have a bitmap memory budget, so never the full picture. */
+    @Volatile private var lastArt: Pair<String, Bitmap>? = null
+
+    /**
+     * A small cover; widgets have a bitmap memory budget, so never the full picture. A file's cover
+     * is decoded from the device; an online song's is fetched at 256 px (its address asks for a
+     * size) and kept, so play, pause and skip do not fetch it again.
+     */
     private fun artwork(context: Context, uri: String?): Bitmap? = uri?.let {
+        lastArt?.takeIf { (key, _) -> key == it }?.let { (_, bitmap) -> return bitmap }
         runCatching {
-            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, Uri.parse(it))) { decoder, info, _ ->
+            if (it.startsWith("http")) {
+                val small = it.replace(Regex("""=w\d+-h\d+"""), "=w256-h256")
+                val connection = java.net.URL(small).openConnection().apply { connectTimeout = 5_000; readTimeout = 5_000 }
+                val bytes = connection.getInputStream().use { input -> input.readNBytes(2 shl 20) }
+                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                val sample = generateSequence(1) { it * 2 }.first { s -> maxOf(bounds.outWidth, bounds.outHeight) / s <= 384 }
+                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+            } else ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, Uri.parse(it))) { decoder, info, _ ->
                 val scale = 192f / maxOf(info.size.width, info.size.height).coerceAtLeast(1)
                 if (scale < 1f) decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             }
-        }.getOrNull()
+        }.getOrNull()?.also { bitmap -> lastArt = it to bitmap }
     }
 
     fun button(context: Context, keyCode: Int): PendingIntent {

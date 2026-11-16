@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -77,7 +78,7 @@ internal fun SettingsPage(
                 Toggle(Glyph.WAVE, "Feel the music", "The phone taps with the beat and the bass, in time with what you hear. Pauses in Battery Saver",
                     feel, first = true, last = !feel) { feel = it; ua.olex.music.playback.MusicHaptics.set(context, it, strength) }
                 androidx.compose.animation.AnimatedVisibility(feel) {
-                    Surface(shape = RoundedCornerShape(4.dp, 4.dp, 24.dp, 24.dp), color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth()) {
+                    Surface(shape = RoundedCornerShape(4.dp, 4.dp, 24.dp, 24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
                         androidx.compose.foundation.layout.Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
                             val all = ua.olex.music.playback.MusicHaptics.Strength.entries
                             all.forEachIndexed { i, s ->
@@ -246,12 +247,17 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
                 below: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
     val big = 24.dp; val small = 4.dp
     val shape = RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)
-    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainer, onClick = onClick ?: {}, enabled = onClick != null, modifier = Modifier.fillMaxWidth()) {
+    // As Android's own Settings: groups a step lighter than the page, each icon in a circle whose
+    // colour says what it is about (measured on the owner's phone: page #181920, groups #2A2C34).
+    val (circle, onCircle) = tint(glyph)
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerHigh, onClick = onClick ?: {}, enabled = onClick != null, modifier = Modifier.fillMaxWidth()) {
         // A ListItem pins its icon to the top once the text runs to three lines; settings keep it centred.
-        androidx.compose.foundation.layout.Row(Modifier.padding(start = 20.dp, end = 16.dp, top = 14.dp, bottom = 14.dp).heightIn(min = 48.dp),
+        androidx.compose.foundation.layout.Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp).heightIn(min = 48.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Symbol(glyph, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            androidx.compose.foundation.layout.Spacer(Modifier.width(20.dp))
+            Surface(shape = androidx.compose.foundation.shape.CircleShape, color = circle, contentColor = onCircle, modifier = Modifier.size(40.dp)) {
+                androidx.compose.foundation.layout.Box(contentAlignment = androidx.compose.ui.Alignment.Center) { Symbol(glyph, size = 22.dp, color = onCircle, filled = true) }
+            }
+            androidx.compose.foundation.layout.Spacer(Modifier.width(16.dp))
             androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -259,6 +265,21 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
             }
             if (trailing != null) { androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp)); trailing() }
         }
+    }
+}
+
+/** The circle's colour for a setting, by what it is about: sound, playback and feel, library, online. */
+@Composable
+private fun tint(glyph: Glyph): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color> {
+    val cs = MaterialTheme.colorScheme
+    // Light, saturated circles with a dark glyph in both themes, as Android's Settings: the "fixed"
+    // tones (80) of the wallpaper's palette; online gets the red family, as YouTube's own colour.
+    val dark = cs.surface.luminance() < 0.5f
+    return when (glyph) {
+        Glyph.TUNE, Glyph.USB, Glyph.BATTERY, Glyph.SPEAKER -> cs.primaryFixedDim to cs.onPrimaryFixed
+        Glyph.PLAY, Glyph.HEADPHONES, Glyph.WAVE, Glyph.STAR -> cs.tertiaryFixedDim to cs.onTertiaryFixed
+        Glyph.SEARCH, Glyph.PERSON, Glyph.MOTION, Glyph.LOCK -> if (dark) cs.error to cs.onError else cs.errorContainer to cs.onErrorContainer
+        else -> cs.secondaryFixedDim to cs.onSecondaryFixed
     }
 }
 

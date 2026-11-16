@@ -17,8 +17,36 @@ data class FoundLyrics(val text: String, val source: String, val format: Format,
  * live or extended version is not taken for the studio one.
  */
 class OnlineLyrics(private val http: (String) -> String? = ::get) {
-    fun find(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? =
-        runCatching { kugou(artist, title, durationMs) }.getOrNull() ?: runCatching { lrclib(artist, title, album, durationMs) }.getOrNull()
+    /**
+     * The song's lyrics, trying names from exact to clean: services match titles literally, so
+     * "Juicy (2005 Remaster)" or "Song - Remastered 2011" finds nothing until the extras go, and
+     * "A, B & C" until only the first artist is asked. The last try is LRCLIB's free search.
+     */
+    fun find(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? {
+        for ((a, t) in variants(artist, title)) {
+            runCatching { kugou(a, t, durationMs) }.getOrNull()?.let { return it }
+            runCatching { lrclib(a, t, album.takeIf { a == artist && t == title }, durationMs) }.getOrNull()?.let { return it }
+        }
+        return runCatching { lrclibSearch("${variants(artist, title).last().first} ${variants(artist, title).last().second}", durationMs) }.getOrNull()
+    }
+
+    fun variants(artist: String, title: String): List<Pair<String, String>> {
+        val cleanTitle = title.replace(Regex("""\s*[(\[][^)\]]*[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "")
+            .replace(Regex("""(?i)\s+(feat\.?|ft\.?|featuring)\s.*$"""), "").replace(Regex("""\s+"""), " ").trim().ifEmpty { title }
+        val firstArtist = artist.split(Regex(""",|&| x | feat\.? | ft\.? """)).first().trim().ifEmpty { artist }
+        return listOf(artist to title, artist to cleanTitle, firstArtist to cleanTitle).distinct()
+    }
+
+    internal fun lrclibSearch(query: String, durationMs: Long): FoundLyrics? {
+        val body = http("https://lrclib.net/api/search?q=${enc(query)}") ?: return null
+        val hits = (Json.parse(body) as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+        val hit = hits.filter { close((it["duration"] as? Double)?.times(1000)?.toLong(), durationMs) }
+            .firstOrNull { !(it["syncedLyrics"] as? String).isNullOrBlank() } ?: hits.firstOrNull { close((it["duration"] as? Double)?.times(1000)?.toLong(), durationMs) && !(it["plainLyrics"] as? String).isNullOrBlank() }
+            ?: return null
+        val text = (hit["syncedLyrics"] as? String)?.takeIf { it.isNotBlank() } ?: hit["plainLyrics"] as? String ?: return null
+        val synced = !(hit["syncedLyrics"] as? String).isNullOrBlank()
+        return FoundLyrics(text, "LRCLIB", if (synced) FoundLyrics.Format.LRC else FoundLyrics.Format.PLAIN, Lyrics.parse(text))
+    }
 
     internal fun kugou(artist: String, title: String, durationMs: Long): FoundLyrics? {
         val search = http("https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${enc("$artist - $title")}&duration=$durationMs&hash=") ?: return null
