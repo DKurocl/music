@@ -48,4 +48,19 @@ class DeviceReportTest {
         // No bitrate tag: worked out from size and length (9.3 MB over 232 s is about 320 kbps).
         assertTrue(SoulseekDownloads.goodLossy(r("x.mp3", 9_300_000)))
     }
+
+    @Test fun soulseekFindsTitlesWhoseWordsSitInBrackets() {
+        val file = r("02 - unforgiven - wanton soup (chopped and screwed).flac", 30_000_000, seconds = 200)
+        assertEquals(file, SoulseekDownloads.chooseSong(listOf(file), "wanton soup chopped & screwed", 200))
+        // A short title still needs every word: "Rottweiler" never matches "Rottweiler Remix Pack" by halves.
+        assertNull(SoulseekDownloads.chooseSong(listOf(r("Rott.flac", 30_000_000)), "Rottweiler", 232))
+        assertEquals(listOf("unforgiven wanton soup chopped screwed", "wanton soup chopped screwed", "unforgiven wanton soup chopped"),
+            SoulseekDownloads.queries("unforgiven", "wanton soup chopped & screwed"))
+    }
+
+    @Test fun lyricsTryCleanNamesAndTheFirstArtist() {
+        val v = ua.olex.music.lyrics.OnlineLyrics().variants("A, B & C", "Juicy (2005 Remaster) feat. X")
+        assertEquals("A, B & C" to "Juicy (2005 Remaster) feat. X", v.first())
+        assertTrue(v.contains("A" to "Juicy"))
+    }
 }

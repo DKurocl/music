@@ -410,8 +410,25 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** True while the first page of a mix is being found. */
     var mixLoading by mutableStateOf(false); private set
 
+    // "Don't recommend": YouTube Music songs the owner never wants offered again, by their video
+    // id and by the song (so another upload of it does not slip through). Kept on the phone.
+    private val notForMe = getApplication<Application>().getSharedPreferences("not_recommended", android.content.Context.MODE_PRIVATE)
+    var excluded by mutableStateOf(notForMe.getStringSet("keys", emptySet()).orEmpty()); private set
+
+    /** Never offers [track] again; out of the queue too, skipping it if it plays. */
+    fun dontRecommend(track: Track) {
+        excluded = excluded + track.id.value + Mix.songKey(track)
+        notForMe.edit().putStringSet("keys", excluded).apply()
+        val state = playing.value
+        state.queue.drop(state.queueIndex + 1).filter { it.mediaId == track.id.value }.forEach { player.removeQueueItem(it.key) }
+        if (state.mediaId == track.id.value) player.next()
+        mixRun?.seen?.addAll(listOf(track.id.value, Mix.songKey(track)))
+    }
+
     /** Songs played lately, as mix keys, so a mix does not bring them straight back. */
-    private fun recentKeys(): Set<String> {
+    private fun recentKeys(): Set<String> = recentPlayed() + excluded
+
+    private fun recentPlayed(): Set<String> {
         val byId = library.value?.songs?.associateBy { it.id.value }.orEmpty()
         return stats.value.entries.filter { it.value.lastPlayedAt != null }.sortedByDescending { it.value.lastPlayedAt }.take(50)
             .mapNotNull { byId[it.key]?.let(Mix::songKey) }.toSet()
@@ -522,6 +539,25 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     init { viewModelScope.launch { player.state.collect(::followMix) } }
+
+    // A song downloaded while it plays (or waits in the queue) switches to the file by itself, at the
+    // same second: the library sees the new file, and every online song it now has is swapped.
+    init {
+        viewModelScope.launch {
+            library.collect { lib ->
+                if (lib == null) return@collect
+                val state = playing.value
+                val online = state.queue.drop(state.queueIndex.coerceAtLeast(0)).filter { it.mediaId.startsWith("yt:") }
+                if (online.isEmpty()) return@collect
+                val index = kotlinx.coroutines.withContext(Dispatchers.Default) { localIndex() } ?: return@collect
+                for (item in online) {
+                    val duration = if (item.mediaId == state.mediaId) state.durationMs else 0L
+                    val file = index.copyOf(Track(TrackId(item.mediaId), "", item.title, item.artist, durationMs = duration)) ?: continue
+                    player.replaceQueueItem(item.key, file)
+                }
+            }
+        }
+    }
 
     /**
      * Plays a mood: its first YouTube Music playlist, cleaned like a mix, flowing into the radio of

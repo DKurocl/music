@@ -59,7 +59,7 @@ internal object Mix {
         val keys = HashSet(seen)
         val kept = batch.filter { t ->
             // The radio starts with the seed itself: never play it twice, whatever its artist line says.
-            t.id != seed.id && (marks(t) - allowed).isEmpty() &&
+            t.id != seed.id && t.id.value !in keys && (marks(t) - allowed).isEmpty() &&
                 (t.durationMs <= 0 || t.durationMs in 90_000L..longest) &&
                 keys.add(songKey(t))
         }

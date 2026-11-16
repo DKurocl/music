@@ -206,6 +206,21 @@ class PlayerConnection(context: Context) {
         player.replaceMediaItem(player.currentMediaItemIndex, item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build())
     }
 
+    /**
+     * Swaps a queued song for another source of the same song (an online song for the file just
+     * downloaded), keeping its place in the queue and, when it is the one playing, its position.
+     */
+    fun replaceQueueItem(key: String, track: Track) {
+        val player = controller ?: return
+        if (!player.isCommandAvailable(androidx.media3.common.Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
+        val index = player.indexOfQueueKey(key).takeIf { it >= 0 } ?: return
+        val current = index == player.currentMediaItemIndex
+        val position = player.currentPosition
+        val playing = player.playWhenReady
+        player.replaceMediaItem(index, mediaItem(track))
+        if (current) { player.seekTo(index, position); player.playWhenReady = playing }
+    }
+
     fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun cycleRepeat() {
         controller?.let { it.repeatMode = when (it.repeatMode) {

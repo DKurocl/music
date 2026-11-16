@@ -10,6 +10,7 @@ import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
@@ -67,7 +68,8 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
-    Box(modifier.background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
+    // A small loop in a list: 30 frames a second is plenty and keeps the panel from holding 120 Hz.
+    Box(modifier.preferredFrameRate(30f).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp),
             verticalAlignment = Alignment.Bottom, modifier = Modifier.size(width = 18.dp, height = 16.dp)) {
             // Each bar keeps its own range and never drops to a square, so even a still frame reads as
