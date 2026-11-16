@@ -45,7 +45,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         if (timelineChanged || events.containsAny(Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) checkpoint()
         if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
             clock?.cancel()
-            clock = if (player.isPlaying) serviceScope.launch { while (isActive) { delay(15_000); checkpoint() } } else null
+            clock = if (player.isPlaying) serviceScope.launch { while (isActive) { delay(60_000); checkpoint() } } else null
         }
     }
 
