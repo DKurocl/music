@@ -47,28 +47,54 @@ internal object NowPlaying {
 
     fun render(context: Context, ids: IntArray) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val playing = prefs.getBoolean("playing", false)
-        val art = artwork(context, prefs.getString("art", null))
+        val views = views(context, prefs.getString("title", null), prefs.getString("artist", null),
+            artwork(context, prefs.getString("art", null)), prefs.getBoolean("playing", false), interactive = true)
+        AppWidgetManager.getInstance(context).updateAppWidget(ids, views)
+    }
+
+    private fun views(context: Context, title: String?, artist: String?, art: Bitmap?, playing: Boolean, interactive: Boolean): RemoteViews {
         fun layout(id: Int) = RemoteViews(context.packageName, id).apply {
-            setTextViewText(R.id.widget_title, prefs.getString("title", null) ?: context.getString(R.string.widget_idle))
-            setTextViewText(R.id.widget_artist, prefs.getString("artist", null).orEmpty())
+            setTextViewText(R.id.widget_title, title ?: context.getString(R.string.widget_idle))
+            setTextViewText(R.id.widget_artist, artist.orEmpty())
             setImageViewResource(R.id.widget_play, if (playing) R.drawable.widget_pause else R.drawable.widget_play)
             setContentDescription(R.id.widget_play, context.getString(if (playing) R.string.widget_pause else R.string.widget_play))
             art?.let { setImageViewBitmap(R.id.widget_art, it) }
                 ?: setImageViewResource(R.id.widget_art, R.drawable.widget_note)
-            setOnClickPendingIntent(R.id.widget_play, button(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
-            setOnClickPendingIntent(R.id.widget_next, button(context, KeyEvent.KEYCODE_MEDIA_NEXT))
-            setOnClickPendingIntent(R.id.widget_previous, button(context, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
-            context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
-                setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE))
+            if (interactive) {
+                setOnClickPendingIntent(R.id.widget_play, button(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
+                setOnClickPendingIntent(R.id.widget_next, button(context, KeyEvent.KEYCODE_MEDIA_NEXT))
+                setOnClickPendingIntent(R.id.widget_previous, button(context, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
+                context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
+                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE))
+                }
             }
         }
         // Two rows when the widget is tall enough, one row when it is short; the launcher picks.
-        val views = RemoteViews(mapOf(
+        return RemoteViews(mapOf(
             android.util.SizeF(0f, 0f) to layout(R.layout.widget_now_playing_short),
             android.util.SizeF(0f, 90f) to layout(R.layout.widget_now_playing),
         ))
-        AppWidgetManager.getInstance(context).updateAppWidget(ids, views)
+    }
+
+    /**
+     * The widget picker's picture (Android 15+ generated previews): the widget as it really looks,
+     * with the owner's last song and its cover, playing, instead of an empty "Nothing playing".
+     * Published once per app version (and once more when the first song has played); the call
+     * is rate-limited, so a refusal is simply retried next time. Runs off the main thread.
+     */
+    fun publishPreview(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val version = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode }.getOrDefault(0L)
+        val title = prefs.getString("title", null)
+        val key = "$version:${title != null}"
+        if (prefs.getString("preview", null) == key) return
+        val views = views(context, title ?: context.getString(R.string.widget_sample_title), prefs.getString("artist", null) ?: context.getString(R.string.widget_sample_artist),
+            artwork(context, prefs.getString("art", null)), playing = true, interactive = false)
+        val ok = runCatching {
+            AppWidgetManager.getInstance(context).setWidgetPreview(ComponentName(context, NowPlayingWidget::class.java),
+                android.appwidget.AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN or android.appwidget.AppWidgetProviderInfo.WIDGET_CATEGORY_KEYGUARD, views)
+        }.getOrDefault(false)
+        if (ok) prefs.edit().putString("preview", key).apply()
     }
 
     /** A small cover; widgets have a bitmap memory budget, so never the full picture. */
