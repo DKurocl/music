@@ -149,7 +149,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                             Artwork(artist.photo, Modifier.size(120.dp), 60.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
                             Column(Modifier.padding(start = 20.dp).weight(1f)) {
                                 Text(artist.name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text("YouTube Music", style = MaterialTheme.typography.labelLarge, color = cs.primary)
+                                Text(artist.listeners ?: "YouTube Music", style = MaterialTheme.typography.labelLarge, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                         Spacer(Modifier.height(16.dp))
@@ -176,12 +176,20 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                     }
                 }
                 if (artist.albums.isNotEmpty()) {
-                    item(key = "albums-h") { OnlineHeading("Albums and singles") }
+                    item(key = "albums-h") { OnlineHeading("Albums") }
                     item(key = "albums") {
                         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp)) {
                             items(artist.albums, key = { it.id }) { a -> OnlineCard(a.cover, a.title, a.subtitle) { nav.open(OnlineTarget.Album(a.id, a.title, cover = a.cover, subtitle = a.subtitle)) } }
                         }
                     }
+                }
+                if (artist.singles.isNotEmpty()) {
+                    item(key = "singles-h") { OnlineHeading("Singles and EPs") }
+                    item(key = "singles") { YouTubeCards(artist.singles.map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.ALBUM) }) }
+                }
+                if (artist.related.isNotEmpty()) {
+                    item(key = "related-h") { OnlineHeading("Fans also like") }
+                    item(key = "related") { YouTubeCards(artist.related) }
                 }
                 if (artist.videos.isNotEmpty()) {
                     item(key = "videos-h") { OnlineHeading("Videos") }
@@ -258,8 +266,9 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
 }
 
 /**
- * Under the owner's own artist page: the artist's most played songs on YouTube Music that the
- * library does not have, and a way into the full YouTube Music page. Nothing shows while offline.
+ * The YouTube Music half of the owner's artist page (docs/specs/M10_ONLINE.md, D1): their popular
+ * songs (the owner's own files where he has them, each with its source mark), the albums and singles
+ * the library lacks, and artists like them. One page, two sources; nothing shows while offline.
  */
 @Composable
 internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: String?) {
@@ -269,14 +278,25 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
     val nav = LocalOnlineNav.current
     val state = rememberLoad(name, 0) { graph.youTube.artistId(name)?.let { graph.youTube.artist(it) } }
     val artist = (state as? Load.Done)?.value
-    val missing = rememberOwned(artist?.songs.orEmpty(), library).filter(YouTubeMusic::isOnline).take(5)
+    val popular = rememberOwned(artist?.songs.orEmpty(), library).take(5)
     if (artist == null) return
+    // Albums the owner already has open from his library above; only the others are offered here.
+    val owned = remember(library) { library.albums.mapTo(HashSet()) { TextFold.fold(it.name) } }
+    fun cards(list: List<YouTubeMusic.OnlineAlbum>) = list.filterNot { TextFold.fold(it.title) in owned }
+        .map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.ALBUM) }
+    val albums = cards(artist.albums)
+    val singles = cards(artist.singles)
     Column {
-        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f)) { OnlineHeading("More on YouTube Music") }
-            TextButton(onClick = { nav.open(OnlineTarget.Artist(artist.name, artist.id)) }) { Text("Open") }
+        if (popular.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f)) { OnlineHeading("Popular") }
+                TextButton(onClick = { nav.open(OnlineTarget.Artist(artist.name, artist.id)) }) { Text("See all") }
+            }
+            popular.forEachIndexed { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(popular, i, artist.name) } }
         }
-        missing.forEachIndexed { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(missing, i, artist.name) } }
+        if (albums.isNotEmpty()) { OnlineHeading("More albums"); YouTubeCards(albums) }
+        if (singles.isNotEmpty()) { OnlineHeading("Singles and EPs"); YouTubeCards(singles) }
+        if (artist.related.isNotEmpty()) { OnlineHeading("Fans also like"); YouTubeCards(artist.related) }
     }
 }
 
@@ -471,14 +491,14 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
  * artist (round, as YouTube Music draws them) opens their page, a mix or a song plays at once.
  */
 @Composable
-internal fun YouTubeCards(cards: List<YouTubeMusic.Card>) {
+internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose.ui.unit.Dp = 148.dp) {
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(cards, key = { it.id }) { card ->
             val round = card.kind == YouTubeMusic.Card.Kind.ARTIST
-            Column(Modifier.width(148.dp).clip(RoundedCornerShape(20.dp)).clickable {
+            Column(Modifier.width(size).clip(RoundedCornerShape(20.dp)).clickable {
                 when (card.kind) {
                     YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
                     YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
@@ -488,8 +508,8 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>) {
                         card.title, YouTubeMusic.artistOf(card.subtitle), artworkUri = card.cover)), 0, null)
                 }
             }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-                if (round) Artwork(card.cover, Modifier.size(148.dp).clip(androidx.compose.foundation.shape.CircleShape), 74.dp)
-                else Artwork(card.cover, Modifier.size(148.dp), 20.dp)
+                if (round) Artwork(card.cover, Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape), size / 2)
+                else Artwork(card.cover, Modifier.size(size), if (size < 140.dp) 16.dp else 20.dp)
                 Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
                 card.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,

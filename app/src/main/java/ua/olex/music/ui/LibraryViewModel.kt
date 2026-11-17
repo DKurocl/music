@@ -78,13 +78,21 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      * YouTube Music's songs for the same query, a moment after typing stops. Songs the owner already
      * has are left out here (the library section above shows them, and they play from the file).
      */
-    val online: StateFlow<OnlineSearch?> = query
+    internal val online: StateFlow<OnlineSearch?> = query
         .debounce { if (it.isBlank()) 0 else 450 }
         .combine(graph.youTubeOn) { text, on -> text to on }
         .mapLatest { (text, on) ->
             if (!on || text.trim().length < 2) return@mapLatest null
             val index = library.value ?: LibraryIndex.EMPTY
-            try { OnlineSearch(text, graph.youTube.search(text.trim()).filter { YouTubeMusic.localCopy(it, index) == null }) }
+            try {
+                val found = graph.youTube.searchAll(text.trim())
+                // An artist the owner has appears once, as theirs (the library section above); albums too.
+                val mineArtists = index.artists.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
+                val mineAlbums = index.albums.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
+                OnlineSearch(text, found.songs.filter { YouTubeMusic.localCopy(it, index) == null },
+                    artists = found.artists.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineArtists },
+                    albums = found.albums.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineAlbums })
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { OnlineSearch(text, emptyList(), failed = true) }
         }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -631,4 +639,5 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 data class LibrarySearchResult(val query: String, val tracks: List<Track>, val failed: Boolean = false)
 
 /** YouTube Music's answer to a search: songs not in the library. */
-data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false)
+internal data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false,
+    val artists: List<YouTubeMusic.Card> = emptyList(), val albums: List<YouTubeMusic.Card> = emptyList())
