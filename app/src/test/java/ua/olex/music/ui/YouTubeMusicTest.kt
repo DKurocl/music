@@ -90,4 +90,24 @@ class YouTubeMusicTest {
         assertTrue(artist.related.none { it.id == "UCGz" })
         assertTrue(artist.singles.none { s -> artist.albums.any { it.id == s.id } })
     }
+
+    @Test fun playlistCardsAreFoundInARealAnswer() {
+        val json = javaClass.classLoader!!.getResource("ytm-artist.json")!!.readText()
+        val cards = YouTubeMusic.playlistCards(json)
+        assertTrue(cards.isNotEmpty())
+        assertTrue(cards.all { it.kind == YouTubeMusic.Card.Kind.PLAYLIST && it.title.isNotBlank() })
+    }
+
+    @Test fun searchedSongsRememberTheirAlbumPage() {
+        // One song row as YouTube Music's search draws it: title, then "Song • Artist • Album • 4:21".
+        fun run(text: String, page: String? = null, id: String? = null) = if (page == null) """{"text":"$text"}""" else
+            """{"text":"$text","navigationEndpoint":{"browseEndpoint":{"browseId":"$id","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"$page"}}}}}"""
+        val row = """{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"abcdefghijk"},
+            "overlay":{"musicItemThumbnailOverlayRenderer":{"content":{"musicPlayButtonRenderer":{"playNavigationEndpoint":{"watchEndpoint":{"videoId":"abcdefghijk","watchEndpointMusicSupportedConfigs":{"watchEndpointMusicConfig":{"musicVideoType":"MUSIC_VIDEO_TYPE_ATV"}}}}}}}},
+            "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[${run("Teardrop")}]}}},
+              {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[${run("Song")},${run(" \u2022 ")},${run("Massive Attack", "MUSIC_PAGE_TYPE_ARTIST", "UCx")},${run(" \u2022 ")},${run("Mezzanine", "MUSIC_PAGE_TYPE_ALBUM", "MPREb_mezz")},${run(" \u2022 ")},${run("5:31")}]}}}]}}"""
+        val song = YouTubeMusic.parseSearch("""{"contents":[$row]}""").single()
+        assertEquals("Mezzanine", song.album)
+        assertEquals("MPREb_mezz", YouTubeMusic.albumOf(song))
+    }
 }

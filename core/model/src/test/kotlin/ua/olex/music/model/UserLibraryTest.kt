@@ -33,4 +33,15 @@ class UserLibraryTest {
     @Test fun differentPathsRemainDistinctSavedFiles() {
         assertNotEquals(SavedSong.from(original).id, SavedSong.from(original.copy(path = "Copy/song.flac")).id)
     }
+
+    @Test fun aYouTubeMusicSongStaysSavedAndBecomesTheFileOnceOwned() {
+        val online = Track(TrackId("yt:abc123"), "ytm://abc123", "Teardrop", "Massive Attack", album = "Mezzanine", durationMs = 330_000)
+        val saved = SavedSong.from(online)
+        // Not in the library: it comes back as the same streamed song.
+        assertEquals(online.id, saved.resolve(LibraryIndex.EMPTY)?.id)
+        assertEquals("ytm://abc123", saved.resolve(LibraryIndex.EMPTY)?.uri)
+        // Downloaded later: the file is what plays.
+        val file = Track(TrackId("local:9"), "content://9", "Teardrop", "Massive Attack", album = "Mezzanine", durationMs = 330_400, path = "Music/Teardrop.flac")
+        assertEquals(file, saved.resolve(LibraryIndex.build(listOf(file))))
+    }
 }

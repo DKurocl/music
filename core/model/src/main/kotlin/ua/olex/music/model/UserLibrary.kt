@@ -19,12 +19,26 @@ data class SavedSong(
         }
         return candidates.firstOrNull { it.path.orEmpty() == path }
             ?: candidates.maxByOrNull { it.format?.rank ?: 0 }
+            // A YouTube Music song (liked, in a playlist, in history) stays itself, streaming, until the
+            // owner has it as a file: then the file above wins, with no step from him.
+            ?: online()
+    }
+
+    /** The streamed song this reference names, when it was saved from YouTube Music. */
+    fun online(): Track? {
+        if (!path.startsWith(ONLINE_PREFIX)) return null
+        val videoId = path.removePrefix(ONLINE_PREFIX).takeIf { it.isNotBlank() } ?: return null
+        return Track(TrackId("yt:$videoId"), path, title, artist, album = album, durationMs = durationMs, artworkUri = artworkUri)
     }
 
     companion object {
+        /** How a YouTube Music song's address starts (OnlineStreams.SCHEME in the player). */
+        const val ONLINE_PREFIX = "ytm://"
+
         fun from(track: Track): SavedSong {
             val key = track.key.value
-            val path = track.path.orEmpty()
+            // A file is kept by its path; a YouTube Music song by its address, which never changes.
+            val path = track.path ?: track.uri.takeIf { it.startsWith(ONLINE_PREFIX) }.orEmpty()
             return SavedSong("${key.length}:$key${path.length}:$path", key, path, track.title, track.artist, track.album, track.durationMs, track.artworkUri)
         }
     }

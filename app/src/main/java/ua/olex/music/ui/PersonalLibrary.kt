@@ -83,6 +83,13 @@ internal fun PlaylistBrowser(
         text = { Text(message) }, confirmButton = { TextButton(onClick = { documentMessage = null }) { Text("Close") } }) }
     val selected = playlists.firstOrNull { it.id == selectedId }
     BackHandler(selected != null) { selectedId = null }
+    // Signed in to YouTube Music: his playlists there too (Liked music first), loaded once a session.
+    val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
+    val signedIn by graph.youTubeAccount.signedIn.collectAsState()
+    val youTubeOn by graph.youTubeOn.collectAsState()
+    val youTubePlaylists by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), signedIn, youTubeOn) {
+        value = if (signedIn && youTubeOn) runCatching { graph.youTube.accountPlaylists() }.getOrDefault(emptyList()) else emptyList()
+    }
 
     if (create || namingId != null) {
         val name = playlists.firstOrNull { it.id == namingId }?.name.orEmpty()
@@ -132,7 +139,7 @@ internal fun PlaylistBrowser(
                     }
                 }
             }
-            if (playlists.isEmpty()) item { EmptyState(Glyph.PLAYLIST, "No playlists yet", "Make one here, then add songs or whole albums from their menus.") }
+            if (playlists.isEmpty() && youTubePlaylists.isEmpty()) item { EmptyState(Glyph.PLAYLIST, "No playlists yet", "Make one here, then add songs or whole albums from their menus.") }
             items(playlists, key = { it.id }) { playlist ->
                 ListItem(
                     headlineContent = { Text(playlist.name, style = MaterialTheme.typography.titleMedium) },
@@ -142,6 +149,11 @@ internal fun PlaylistBrowser(
                     colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
                     modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable { selectedId = playlist.id },
                 )
+            }
+            // The owner's playlists on YouTube Music, under his own: the same list, a cloud on each.
+            if (youTubePlaylists.isNotEmpty()) {
+                item(key = "yt-h") { Text("On YouTube Music", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp)) }
+                items(youTubePlaylists, key = { "yt-" + it.id }) { card -> OnlineResultRow(card) }
             }
         } else {
             item {
