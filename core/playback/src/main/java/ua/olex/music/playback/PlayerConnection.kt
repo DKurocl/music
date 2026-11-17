@@ -89,6 +89,7 @@ class PlayerConnection(context: Context) {
     private var connection: ListenableFuture<MediaController>? = null
     private var pendingPlay: Pair<List<Track>, Int>? = null
     private var pendingContext: String? = null
+    private var pendingStart = true
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val queueMutex = Mutex()
     private var queueSnapshot: List<QueueItem> = emptyList()
@@ -134,7 +135,7 @@ class PlayerConnection(context: Context) {
                 publish(connected, updateQueue = true)
                 pendingPlay?.let { (tracks, index) ->
                     pendingPlay = null
-                    play(tracks, index, pendingContext)
+                    play(tracks, index, pendingContext, pendingStart)
                 }
             } catch (_: CancellationException) {
                 connectionFailed()
@@ -169,13 +170,14 @@ class PlayerConnection(context: Context) {
     val positionMs: Long get() = controller?.currentPosition?.coerceAtLeast(0) ?: 0
 
     /** Replaces the queue with [tracks] and starts at [index], even during the initial connection. */
-    fun play(tracks: List<Track>, index: Int, context: String? = null) {
+    fun play(tracks: List<Track>, index: Int, context: String? = null, startPlayback: Boolean = true) {
         if (index !in tracks.indices) return
         dismissQueueError()
         val player = controller
         if (player == null) {
             pendingPlay = tracks.toList() to index
             pendingContext = context
+            pendingStart = startPlayback
             connect()
             return
         }
@@ -189,9 +191,9 @@ class PlayerConnection(context: Context) {
                     snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track, playbackContext = context) }
                 }
                 if (controller !== player) return@withLock
+                if (!startPlayback) player.pause()
                 player.setMediaItems(items, index, C.TIME_UNSET)
-                player.prepare()
-                player.play()
+                if (startPlayback) { player.prepare(); player.play() }
             }
         }
     }
@@ -223,7 +225,7 @@ class PlayerConnection(context: Context) {
         val current = index == player.currentMediaItemIndex
         val position = player.currentPosition
         val playing = player.playWhenReady
-        player.replaceMediaItem(index, mediaItem(track))
+        player.replaceMediaItem(index, mediaItem(track, key, player.getMediaItemAt(index).mediaMetadata.extras?.getString(CONTEXT_KEY)))
         if (current) { player.seekTo(index, position); player.playWhenReady = playing }
     }
 
@@ -240,7 +242,7 @@ class PlayerConnection(context: Context) {
         if (indices.isEmpty()) return
         val from = indices.first().first; val to = indices.last().first + 1
         val swap = indices.associate { (i, key) -> i to (key to byKey.getValue(key)) }
-        val items = (from until to).map { i -> swap[i]?.let { (key, track) -> mediaItem(track, key) } ?: player.getMediaItemAt(i) }
+        val items = (from until to).map { i -> swap[i]?.let { (key, track) -> mediaItem(track, key, player.getMediaItemAt(i).mediaMetadata.extras?.getString(CONTEXT_KEY)) } ?: player.getMediaItemAt(i) }
         // The current song may sit inside the range; replacing it with itself keeps it playing.
         if (current in from until to) {
             // Two ranges around the current song, so it is never replaced.
@@ -294,8 +296,9 @@ class PlayerConnection(context: Context) {
         val snapshot = tracks.toList()
         scope.launch {
             queueMutex.withLock {
+                val context = player.mediaMetadata.extras?.getString(CONTEXT_KEY)
                 val items = withContext(Dispatchers.Default) {
-                    snapshot.map { currentCoroutineContext().ensureActive(); mediaItem(it) }
+                    snapshot.map { currentCoroutineContext().ensureActive(); mediaItem(it, playbackContext = context) }
                 }
                 if (controller !== player) return@withLock
                 val success = try {

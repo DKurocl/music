@@ -52,7 +52,6 @@ internal class LyricLinePlayer(private val real: Player) : ForwardingPlayer(real
 class LockScreenLyrics internal constructor(private val context: Context, private val real: Player, private val shown: LyricLinePlayer, private val scope: CoroutineScope) {
     private var lyrics: Lyrics = Lyrics.EMPTY
     private var offsetMs = 0L
-    private var loadedFor: String? = null
     // The line moves only while the screen is on: with it off nobody sees the lock screen, and every
     // change would wake the system to redraw the media card for nothing. The line stays where it is
     // and jumps to the current one the moment the screen turns on.
@@ -93,7 +92,6 @@ class LockScreenLyrics internal constructor(private val context: Context, privat
                     catch (_: Exception) { null }
                 lyrics = shared?.lyrics ?: withContext(Dispatchers.IO) { load(meta, item.localConfiguration?.uri ?: item.requestMetadata.mediaUri) }
                 offsetMs = shared?.offsetMs ?: 0L
-                loadedFor = item.mediaId
             }
             if (lyrics.sync == Sync.NONE) { shown.line = null; return@launch }
             while (isActive) {

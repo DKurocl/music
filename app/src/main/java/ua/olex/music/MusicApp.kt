@@ -82,16 +82,25 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         return ua.olex.music.playback.PlaybackLyrics(ua.olex.music.lyrics.LyricsCleanup.clean(lyrics, known.title, known.artist), offset)
     }
 
-    /** Rebuild Coil after closing its disk cache, then trim the other image stores off main. */
-    suspend fun resizeCaches() {
+    /** Close the image disk cache before resizing or clearing it; perform file work off main. */
+    @OptIn(coil3.annotation.DelicateCoilApi::class)
+    suspend fun resizeCaches(clear: Boolean = false) {
         val old = coil3.SingletonImageLoader.get(this)
         old.shutdown()
-        coil3.SingletonImageLoader.setUnsafe(newImageLoader(this))
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val replacement = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            old.diskCache?.shutdown()
+            if (clear) {
+                ua.olex.music.playback.CacheBudget.clearStreams(this@MusicApp)
+                cacheDir.listFiles { f -> f.name != "streams" }?.forEach { it.deleteRecursively() }
+                graph.artistImages.clear()
+                graph.motionCovers.clearFetched()
+            }
             graph.artwork.trimTo(ua.olex.music.playback.CacheBudget.localImageBytes(this@MusicApp))
             graph.artistImages.trim()
             graph.motionCovers.trim()
+            newImageLoader(this@MusicApp)
         }
+        coil3.SingletonImageLoader.setUnsafe(replacement)
     }
 
     /** The library for Android Auto, Assistant and other browsers: songs, smart and own playlists. */
