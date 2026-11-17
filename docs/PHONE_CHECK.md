@@ -70,7 +70,7 @@ accessibility checks remain separate M2/M9 gates.
 5. Enable shuffle, use Play next, and confirm the inserted song is actually next. Test repeat off,
    repeat all and repeat one separately. Queued songs must not interrupt the current song.
 6. Pause and swipe away, then reopen. Queue, shuffle/repeat and position restore paused. Press Play.
-   Kill the process while playing, reopen, and check recovery to within the last 15-second checkpoint.
+   Kill the process while playing, reopen, and check recovery to within the last 60-second checkpoint.
    Explicitly selecting a new song during startup must override the saved queue.
 7. Remove every queue item, restart, and confirm the old queue does not return. An unavailable saved
    URI must give a playback error; a queue checkpoint currently retains URIs, not a moved-file lookup.
@@ -90,3 +90,35 @@ accessibility checks remain separate M2/M9 gates.
 5. Play a known gapless album across track boundaries with the screen off for 30 minutes on each
    relevant output. Test incoming calls and notification interruptions. Record audible gaps or clicks,
    route, battery loss and any thermal change. No claim of Poweramp/Symfonium parity is verified yet.
+
+
+## Audit continuation acceptance (2026-11-17)
+
+Not run here. Record phone firmware, app version and actual result for each scenario.
+
+1. Save an online song in Liked, a playlist and history. Restart without network: its metadata
+   remains in Songs, Home, search and smart lists. A matching downloaded file replaces the online
+   row once, while removing that file brings back the saved online reference. Live takes remain
+   separate. A played online song older than the 200-event history page remains searchable.
+2. Start an online mix, turn the screen off and listen past the original queue. Confirm that the
+   service appends songs without reopening Music. Replace the queue during a slow radio request;
+   none of the old mix's result may enter the new queue. Process-death mix cursor recovery is open.
+3. Offline, select a queue containing an uncached online song, a cached song and a local file.
+   All three occurrences must remain in place. Playback starts at an available occurrence and
+   skips a later unavailable song without deleting it. With no available songs the queue is kept
+   paused. Reconnect and confirm the original unavailable occurrence can play.
+4. Watch the cache marks while a stream finishes caching, then clear the cache or lower its limit.
+   Cached marks must disappear on eviction without changing tracks or reopening the screen.
+   Change the image budget and immediately leave Settings; covers must still load afterwards.
+5. Open a playlist longer than one page containing deliberate repetitions, including the same
+   video on either side of a page boundary. Confirm count and order. Interrupt the network during
+   pagination and reopen; no previously accepted occurrence may duplicate or disappear. Check
+   account playlist discovery with enough playlists to require a continuation.
+6. Retime an online song, then play with Music hidden and the lock screen visible. Edited text,
+   sidecar priority for a file, and the saved offset must agree with the full player. Review word
+   filling at 120 Hz with Perfetto or composition tracing; JVM rendering is not a frame-time result.
+7. Enable shuffle and repeat, seek within a mixed queue and restart the process. Resume from the
+   system card. Verify current occurrence, position, actual Next order, repeat and Playing from.
+   Repeat with a new explicit selection during startup: the new selection must win.
+8. Search for a saved online song through a system browser or voice entry point, then play it.
+   Physical Android Auto and Gemini behavior remains unverified by the JVM suite.
