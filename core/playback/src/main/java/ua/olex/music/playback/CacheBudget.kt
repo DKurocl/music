@@ -1,5 +1,6 @@
 package ua.olex.music.playback
 
+import kotlinx.coroutines.launch
 import android.content.Context
 import android.net.Uri
 import androidx.annotation.OptIn
@@ -23,6 +24,10 @@ import java.util.TreeSet
  * drops what was used longest ago when it runs over.
  */
 object CacheBudget {
+    private val _revision = kotlinx.coroutines.flow.MutableStateFlow(0L)
+    /** Changes when cached audio is added, evicted or explicitly cleared; observation never opens disk. */
+    val revision: kotlinx.coroutines.flow.StateFlow<Long> = _revision
+    private fun changed() { synchronized(_revision) { _revision.value++ } }
     const val DEFAULT_MB = 4_096L
     /** Stored for "no limit". */
     const val UNLIMITED = -1L
@@ -33,7 +38,7 @@ object CacheBudget {
     fun limitMb(context: Context): Long = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("limit_mb", DEFAULT_MB)
     fun setLimitMb(context: Context, mb: Long) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong("limit_mb", mb).apply()
-        listeners.forEach { it() }
+        cacheScope.launch { listeners.forEach { it() } }
     }
 
     /** The whole budget in bytes; [Long.MAX_VALUE] for no limit. */
@@ -44,11 +49,15 @@ object CacheBudget {
     /** Moving covers (a few MB per album). */
     fun motionBytes(context: Context): Long = share(context, 0.20)
     /** Covers and artist photos; bounded even without a limit, since they are cheap to fetch again. */
-    fun imageBytes(context: Context): Long = minOf(share(context, 0.10), 2L shl 30).coerceAtLeast(100L shl 20)
+    fun imageBytes(context: Context): Long = minOf(share(context, 0.10), 2L shl 30).coerceAtLeast(10L shl 20)
+    fun coilBytes(context: Context): Long = imageBytes(context) / 2
+    fun localImageBytes(context: Context): Long = imageBytes(context) * 3 / 10
+    fun artistBytes(context: Context): Long = imageBytes(context) / 5
 
     private fun share(context: Context, part: Double): Long = bytes(context).let { if (it == Long.MAX_VALUE) Long.MAX_VALUE else (it * part).toLong() }
 
     private val listeners = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
+    private val cacheScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     internal fun onChange(listener: () -> Unit) { listeners += listener }
 
     /** "4 GB", "512 MB", "No limit". */
@@ -64,8 +73,14 @@ object CacheBudget {
     /** The streamed-songs cache (one per process, as Media3 requires). */
     @OptIn(UnstableApi::class)
     internal fun streams(context: Context): SimpleCache = streams ?: synchronized(this) {
-        streams ?: SimpleCache(File(context.cacheDir, "streams"), BudgetEvictor { streamBytes(context.applicationContext) },
-            StandaloneDatabaseProvider(context.applicationContext)).also { streams = it }
+        streams ?: run {
+            val evictor = BudgetEvictor(::changed) { streamBytes(context.applicationContext) }
+            SimpleCache(File(context.cacheDir, "streams"), evictor, StandaloneDatabaseProvider(context.applicationContext)).also { cache ->
+                streams = cache
+                changed()
+                onChange { synchronized(cache) { evictor.trim(cache) } }
+            }
+        }
     }
 
     /**
@@ -90,6 +105,7 @@ object CacheBudget {
     fun clearStreams(context: Context) {
         val cache = streams(context)
         cache.keys.toList().forEach { runCatching { cache.removeResource(it) } }
+        changed()
     }
 }
 
@@ -98,23 +114,24 @@ object CacheBudget {
  * change the budget at any time): Media3's own evictor fixes its limit at construction.
  */
 @OptIn(UnstableApi::class)
-internal class BudgetEvictor(private val limit: () -> Long) : CacheEvictor {
+internal class BudgetEvictor(private val changed: () -> Unit = {}, private val limit: () -> Long) : CacheEvictor {
     private val spans = TreeSet<CacheSpan>(compareBy<CacheSpan> { it.lastTouchTimestamp }.thenBy { it.key }.thenBy { it.position })
     private var size = 0L
 
     override fun requiresCacheSpanTouches() = true
-    override fun onCacheInitialized() = Unit
+    override fun onCacheInitialized() = changed()
     override fun onStartFile(cache: Cache, key: String, position: Long, length: Long) {
         if (length != androidx.media3.common.C.LENGTH_UNSET.toLong()) evict(cache, length)
     }
-    override fun onSpanAdded(cache: Cache, span: CacheSpan) { spans += span; size += span.length; evict(cache, 0) }
-    override fun onSpanRemoved(cache: Cache, span: CacheSpan) { if (spans.remove(span)) size -= span.length }
-    override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) { onSpanRemoved(cache, oldSpan); onSpanAdded(cache, newSpan) }
+    override fun onSpanAdded(cache: Cache, span: CacheSpan) { spans += span; size += span.length; evict(cache, 0); changed() }
+    override fun onSpanRemoved(cache: Cache, span: CacheSpan) { if (spans.remove(span)) size -= span.length; changed() }
+    override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) { spans.remove(oldSpan); spans.add(newSpan) }
 
     private fun evict(cache: Cache, incoming: Long) {
         val max = limit()
         while (size + incoming > max && spans.isNotEmpty()) runCatching { cache.removeSpan(spans.first()) }.onFailure { spans.pollFirst() }
     }
+    fun trim(cache: Cache) = evict(cache, 0)
 }
 
 /**

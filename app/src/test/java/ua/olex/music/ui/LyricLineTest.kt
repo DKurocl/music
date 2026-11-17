@@ -44,7 +44,7 @@ class LyricLineTest {
         compose.setContent {
             AppTheme { Surface(Modifier.fillMaxSize()) {
                 Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    lyrics.lines.forEachIndexed { i, line -> LyricLine(line, i, current = 0, now = 2_200, timed = true) { seeked = i } }
+                    lyrics.lines.forEachIndexed { i, line -> LyricLine(line, i, current = 0, now = { 2_200L }, timed = true) { seeked = i } }
                 }
             } }
         }

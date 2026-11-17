@@ -50,6 +50,23 @@ class CacheBudgetTest {
         cache.release()
     }
 
+    @Test fun shrinkingBudgetTrimsImmediatelyAndNotifiesAvailabilityObservers() {
+        var limit = 10_000L
+        var changes = 0
+        val evictor = BudgetEvictor({ changes++ }) { limit }
+        val dir = kotlin.io.path.createTempDirectory("availability").toFile()
+        val cache = SimpleCache(dir, evictor, StandaloneDatabaseProvider(context))
+        try {
+            val source = CacheDataSource(cache, ByteArrayDataSource(ByteArray(3_000) { 1 }))
+            CacheWriter(source, DataSpec.Builder().setUri(Uri.parse("ytm://one")).setKey("one").build(), null, null).cache()
+            val before = changes
+            limit = 1_000
+            synchronized(cache) { evictor.trim(cache) }
+            assertEquals(0L, cache.cacheSpace)
+            assertTrue(changes > before)
+        } finally { cache.release(); dir.deleteRecursively() }
+    }
+
     @Test fun onlyOnlineSongsGoThroughTheCache() {
         val opened = mutableListOf<String>()
         fun source(name: String) = object : DataSource {

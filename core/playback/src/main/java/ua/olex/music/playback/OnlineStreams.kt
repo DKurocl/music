@@ -14,6 +14,9 @@ interface OnlineStreams {
     /** Drops a remembered address that stopped working (it expired early), so the next open asks again. */
     fun forget(id: String) {}
 
+    /** A cheap availability snapshot used to skip temporarily unavailable items without deleting them. */
+    fun available(uri: String): Boolean = true
+
     companion object {
         const val SCHEME = "ytm"
     }

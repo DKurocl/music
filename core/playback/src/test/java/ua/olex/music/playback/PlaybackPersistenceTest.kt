@@ -68,6 +68,30 @@ class PlaybackPersistenceTest {
         persistence?.close(); journal.read()
     }
 
+    @Test fun systemResumptionUsesTheNewSelectionAndRestoresItsModesAfterReplacement() = runTest {
+        journal.write(saved())
+        persistence = PlaybackPersistence(player, journal, backgroundScope)
+        player.setMediaItems(listOf(item(9), item(10)))
+        player.shuffleModeEnabled = true
+        player.repeatMode = Player.REPEAT_MODE_ONE
+        shadowOf(Looper.getMainLooper()).idle()
+        runCurrent(); journal.read(); runCurrent()
+        val resumed = requireNotNull(persistence?.resumption())
+        assertEquals(listOf("local:9", "local:10"), resumed.items.map { it.mediaId })
+        player.setMediaItems(resumed.items, resumed.index, resumed.positionMs)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(player.shuffleModeEnabled)
+        assertEquals(Player.REPEAT_MODE_ONE, player.repeatMode)
+        val order = buildList {
+            var i = player.currentTimeline.getFirstWindowIndex(true)
+            while (i != androidx.media3.common.C.INDEX_UNSET) {
+                add(i)
+                i = player.currentTimeline.getNextWindowIndex(i, Player.REPEAT_MODE_OFF, true)
+            }
+        }
+        assertEquals(resumed.shuffleOrder, order)
+    }
+
     @Test fun teardownBeforeBatchedEventsStillSavesTheFinalEmptyQueue() = runTest {
         persistence = PlaybackPersistence(player, journal, backgroundScope)
         player.setMediaItems(listOf(item(9)))

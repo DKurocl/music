@@ -231,7 +231,7 @@ internal fun SettingsPage(
             }
             if (editing) CacheLimitDialog(limit, onDismiss = { editing = false }) { mb ->
                 ua.olex.music.playback.CacheBudget.setLimitMb(context, mb); limit = mb; editing = false
-                scope.launch { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { motion.trim() } }
+                scope.launch { (context.applicationContext as ua.olex.music.MusicApp).resizeCaches() }
             }
         }
 

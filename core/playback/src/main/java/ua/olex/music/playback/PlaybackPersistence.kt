@@ -18,13 +18,17 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     private var changed = false
     private var closed = false
     private var capturedTimeline: androidx.media3.common.Timeline? = null
+    private var pendingResumption: PlaybackCheckpoint? = null
+    private val initial = serviceScope.async {
+        try { journal.read() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { Log.w("MusicPlayback", "Could not restore playback: ${failure.javaClass.simpleName}"); null }
+    }
 
     init {
         player.addListener(this)
         serviceScope.launch {
-            val saved = try { journal.read() }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { Log.w("MusicPlayback", "Could not restore playback: ${failure.javaClass.simpleName}"); null }
+            val saved = initial.await()
             // An explicit selection always wins over the asynchronous disk read.
             if (closed || changed || player.mediaItemCount > 0 || saved == null || saved.items.isEmpty()) return@launch
             player.setMediaItems(saved.items, saved.index, saved.positionMs)
@@ -49,7 +53,28 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         }
     }
 
-    override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) { changed = true }
+    override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+        changed = true
+        val modes = pendingResumption ?: return
+        pendingResumption = null
+        val items = (0 until player.mediaItemCount).map(player::getMediaItemAt)
+        if (items.map { it.mediaId to it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) } != modes.items.map { it.mediaId to it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) }) return
+        player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(modes.shuffleOrder.toIntArray(), System.nanoTime()))
+        player.shuffleModeEnabled = modes.shuffle
+        player.repeatMode = modes.repeat
+    }
+
+    /** Serialize system resumption with startup restore; explicit user selections take precedence. */
+    suspend fun resumption(): PlaybackCheckpoint? {
+        val disk = initial.await()
+        if (closed) return null
+        val saved = if (player.mediaItemCount > 0) {
+            captureQueue()
+            snapshot?.copy(index = player.currentMediaItemIndex.coerceAtLeast(0), positionMs = player.currentPosition.coerceAtLeast(0))
+        } else if (!changed) disk else null
+        pendingResumption = saved
+        return saved
+    }
 
     private fun captureQueue() {
         val items = (0 until player.mediaItemCount).map(player::getMediaItemAt)
