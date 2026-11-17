@@ -1,10 +1,13 @@
 # Active continuation (Codex, 2026-11-17)
 
 Branch: `agent/unified-library-continuation`, based on `origin/main` `4c3da63`.
-Implementation is in progress; do not promote before green CI. Local machine has no Android SDK.
+Expanded package is in progress; do not promote before its green CI. Local machine has no Android SDK.
+First catalogue/pagination package `4784a19` passed full CI 44105534320; the expanded code has not yet been verified.
 
 Shared saved-song catalogue for Home, browsing, statistics, smart playlists and prefix search;
 account playlist pagination; preserved playlist occurrences with serialized continuation loads.
+Expanded at the owner's request: service mix refill, shared session lyrics, draw-phase word timing,
+offline queue retention, cache events/budgets, saved-system search, and serialized system resumption.
 No user.db schema change. Full remaining audit list: `docs/AUDIT_CONTINUATION.md`.
 
 Verification so far: `python3 /workspace/toolchains/music-jvm/check.py` passed 164 tests before

@@ -38,6 +38,17 @@ class PlaybackStoreTest {
         assertTrue(restored.shuffle)
     }
 
+    @Test fun playingContextSurvivesRestartAndAnOlderCheckpointWithoutItStillLoads() = runBlocking {
+        val item = PlayerConnection.mediaItem(Track(TrackId("yt:one"), "ytm://one", "Song", "Artist"), playbackContext = "Evening playlist")
+        PlaybackStore(directory).write(state().copy(items = listOf(item)))
+        assertEquals("Evening playlist", PlaybackStore(directory).read()!!.items.single().mediaMetadata.extras?.getString(PlayerConnection.CONTEXT_KEY))
+        val file = File(directory, "playback-queue.json")
+        val data = org.json.JSONObject(file.readText())
+        data.getJSONArray("items").getJSONObject(0).remove("context")
+        file.writeText(data.toString())
+        assertNull(PlaybackStore(directory).read()!!.items.single().mediaMetadata.extras?.getString(PlayerConnection.CONTEXT_KEY))
+    }
+
     @Test fun replayGainTagsSurviveQueueCheckpointAndOldQueuesStayReadable() = runBlocking {
         val item = PlayerConnection.mediaItem(Track(TrackId("local:gain"), "content://gain", "Gain", "Artist",
             metadata = ua.olex.music.model.FileMetadata(trackGainDb = -6f, albumGainDb = -4f)))

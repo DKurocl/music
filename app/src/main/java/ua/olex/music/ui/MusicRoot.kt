@@ -436,7 +436,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 // A YouTube Music song: the stream's codec and bitrate, once the player picked it.
                 // Quality only, the same shape as a file's; nothing until the stream is chosen.
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { context.graph.youTube.format(it.removePrefix("yt:")) },
-            from = model.mixLabel ?: model.playingFrom,
+            from = model.mixLabel ?: playing.playbackContext ?: model.playingFrom,
             position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,

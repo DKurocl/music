@@ -2,6 +2,8 @@
 
 package ua.olex.music.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloat
@@ -233,7 +235,8 @@ private fun TrackRowContent(
     // not keep can't play without internet, so it is greyed out (and Play skips it) until it can.
     val online = YouTubeMusic.isOnline(track)
     val network = LocalNetwork.current
-    val kept = if (online) remember(track.uri, current, network) { ua.olex.music.playback.CacheBudget.isStreamCached(track.uri) } else false
+    val cacheRevision = if (online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
+    val kept = if (online) remember(track.uri, current, network, cacheRevision) { ua.olex.music.playback.CacheBudget.isStreamCached(track.uri) } else false
     val unavailable = online && !network && !kept
     // Rows sit as soft rounded segments; the playing one is a tonal pill, the selected ones stronger.
     val container by animateColorAsState(when {

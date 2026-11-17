@@ -19,7 +19,7 @@ import ua.olex.music.model.ArtworkPlan
 
 /** Read-only cover loading for the private provider; synchronous work belongs on image-loader IO threads. */
 class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
-    private val maxDiskBytes: Long = 128L * 1024 * 1024) {
+    private var maxDiskBytes: Long = 128L * 1024 * 1024) {
     private val app = context.applicationContext
     private val directory = File(app.cacheDir, "local-artwork-v1")
     // One lock per picture (by its digest), so a slow file never holds up other covers; pruning has
@@ -99,13 +99,16 @@ class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
             atomic.finishWrite(output)
         } catch (failure: Exception) { atomic.failWrite(output); throw failure }
     }
-    private fun prune(protectedDigest: String) {
+    /** Applies a changed global budget immediately. Call on an IO thread. */
+    fun trimTo(bytes: Long) = pruneLock.withLock { maxDiskBytes = bytes.coerceAtLeast(0); prune(null) }
+
+    private fun prune(protectedDigest: String?) {
         directory.listFiles().orEmpty().filter { it.name.matches(Regex("[a-f0-9]{64}-(192|512|1280)\\.png\\.(new|bak)")) }.forEach { it.delete() }
         val cached = directory.listFiles().orEmpty().filter { it.extension == "png" }.sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name })
         var bytes = cached.sumOf { it.length() }
         for (file in cached) {
             if (bytes <= maxDiskBytes) break
-            if (!file.name.startsWith(protectedDigest)) { val size = file.length(); if (file.delete()) bytes -= size }
+            if (protectedDigest == null || !file.name.startsWith(protectedDigest)) { val size = file.length(); if (file.delete()) bytes -= size }
         }
     }
     companion object { const val MAX_ENCODED_BYTES = 16 * 1024 * 1024; private const val PRUNE_EVERY = 8 }

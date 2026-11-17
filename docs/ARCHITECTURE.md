@@ -303,3 +303,17 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     next token only with an accepted page, and reject token cycles. Account playlist discovery walks
     every continuation and caches only a complete answer. Test transports and dispatchers exercise
     failures, cancellation and concurrent loads without contacting a live account.
+
+49. PlaybackQueueOwner and PlaybackLyricsOwner are application bridges used by the service. The
+    service owns continuation lifetime and rejects results for a changed timeline or occurrence;
+    radio cursor changes commit with the accepted queue append. UI binding is not required. The
+    shared lyric resolver honors edited text, sidecars, downloads and embedded text, with the same
+    stored offset on the session surface. No platform lyric display capability is assumed.
+50. CacheBudget publishes span revisions for offline availability and splits its image allowance
+    between Coil, local cover variants and artist metadata. Budget changes trim audio on IO; Settings
+    rebuilds Coil after shutdown and trims the other stores. Word lyric clocks are frame-bound and
+    read only by the active text's draw modifier, keeping time out of row composition.
+51. PlaybackPersistence serializes startup and system resumption through one initial journal read.
+    A live explicit selection supersedes disk state; restored shuffle traversal and repeat are
+    applied only to matching queue occurrences. A nullable playback-context field travels with media
+    metadata and the version-1 checkpoint, preserving readability of older checkpoints.

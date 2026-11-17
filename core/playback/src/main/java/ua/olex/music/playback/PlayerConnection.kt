@@ -40,6 +40,7 @@ data class PlayerState(
     val title: String = "",
     val artist: String = "",
     val album: String? = null,
+    val playbackContext: String? = null,
     val artworkUri: String? = null,
     val isPlaying: Boolean = false,
     /** Playback intent, including buffering or transient audio-focus loss. */
@@ -87,6 +88,7 @@ class PlayerConnection(context: Context) {
     private var controller: MediaController? = null
     private var connection: ListenableFuture<MediaController>? = null
     private var pendingPlay: Pair<List<Track>, Int>? = null
+    private var pendingContext: String? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val queueMutex = Mutex()
     private var queueSnapshot: List<QueueItem> = emptyList()
@@ -132,7 +134,7 @@ class PlayerConnection(context: Context) {
                 publish(connected, updateQueue = true)
                 pendingPlay?.let { (tracks, index) ->
                     pendingPlay = null
-                    play(tracks, index)
+                    play(tracks, index, pendingContext)
                 }
             } catch (_: CancellationException) {
                 connectionFailed()
@@ -167,12 +169,13 @@ class PlayerConnection(context: Context) {
     val positionMs: Long get() = controller?.currentPosition?.coerceAtLeast(0) ?: 0
 
     /** Replaces the queue with [tracks] and starts at [index], even during the initial connection. */
-    fun play(tracks: List<Track>, index: Int) {
+    fun play(tracks: List<Track>, index: Int, context: String? = null) {
         if (index !in tracks.indices) return
         dismissQueueError()
         val player = controller
         if (player == null) {
             pendingPlay = tracks.toList() to index
+            pendingContext = context
             connect()
             return
         }
@@ -183,7 +186,7 @@ class PlayerConnection(context: Context) {
                 // A large library can contain thousands of items; metadata construction must not
                 // block touch handling. Player commands themselves still belong on the main thread.
                 val items = withContext(Dispatchers.Default) {
-                    snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track) }
+                    snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track, playbackContext = context) }
                 }
                 if (controller !== player) return@withLock
                 player.setMediaItems(items, index, C.TIME_UNSET)
@@ -360,6 +363,7 @@ class PlayerConnection(context: Context) {
             title = meta.title?.toString().orEmpty(),
             artist = meta.artist?.toString().orEmpty(),
             album = meta.albumTitle?.toString(),
+            playbackContext = meta.extras?.getString(CONTEXT_KEY),
             artworkUri = meta.artworkUri?.toString(),
             isPlaying = player.isPlaying,
             playWhenReady = player.playWhenReady && player.playbackState != Player.STATE_ENDED,
@@ -389,8 +393,9 @@ class PlayerConnection(context: Context) {
     companion object {
         internal const val PATH_KEY = "ua.olex.music.path"
         internal const val QUEUE_KEY = "ua.olex.music.queue_id"
+        const val CONTEXT_KEY = "ua.olex.music.playback_context"
         /** A track as the session carries it: its id, where to open it, and what to show. */
-        fun mediaItem(track: Track, queueKey: String? = null): MediaItem {
+        fun mediaItem(track: Track, queueKey: String? = null, playbackContext: String? = null): MediaItem {
             val uri = track.uri.takeIf { it.isNotEmpty() }?.let(Uri::parse)
             return MediaItem.Builder()
                 .setMediaId(track.id.value)
@@ -408,7 +413,7 @@ class PlayerConnection(context: Context) {
                         .setArtworkUri(track.artworkUri?.let(Uri::parse))
                         .setTrackNumber(track.trackNumber).setDiscNumber(track.discNumber)
                         .setDurationMs(track.durationMs.takeIf { it > 0 })
-                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, queueKey ?: UUID.randomUUID().toString())
+                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, queueKey ?: UUID.randomUUID().toString()); putString(CONTEXT_KEY, playbackContext)
                             track.metadata?.let { tags -> putString(ReplayGainCodec.TAGS, ReplayGainCodec.encodeTags(ua.olex.music.dsp.ReplayGainTags(
                                 tags.trackGainDb?.toDouble(), tags.trackPeak?.toDouble(), tags.albumGainDb?.toDouble(), tags.albumPeak?.toDouble()))) } })
                         .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
