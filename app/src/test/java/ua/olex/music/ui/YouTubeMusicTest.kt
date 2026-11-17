@@ -65,7 +65,9 @@ class YouTubeMusicTest {
         val index = YouTubeMusic.indexOf(library)
         fun online(title: String, artist: String, ms: Long) = Track(TrackId("yt:$title"), "ytm://x", title, artist, durationMs = ms)
         assertEquals(eventually, index.copyOf(online("Eventually (Remastered)", "Tame Impala", 319_000)))
-        assertEquals(eventually, index.copyOf(online("Eventually [Live]", "TAME IMPALA", 0)))
+        assertEquals(eventually, index.copyOf(online("Eventually [Remastered]", "TAME IMPALA", 0)))
+        // A live take is another recording: never swapped for the studio file.
+        assertNull(index.copyOf(online("Eventually [Live]", "TAME IMPALA", 0)))
         assertEquals(cafe, index.copyOf(online("Cafe del Mar (feat. Someone)", "Energy 52", 241_000)))
         assertEquals(duet, index.copyOf(online("Under Pressure", "David Bowie", 248_500)))
         assertNull(index.copyOf(online("Eventually", "Tame Impala", 200_000)))
@@ -109,5 +111,17 @@ class YouTubeMusicTest {
         val song = YouTubeMusic.parseSearch("""{"contents":[$row]}""").single()
         assertEquals("Mezzanine", song.album)
         assertEquals("MPREb_mezz", YouTubeMusic.albumOf(song))
+    }
+
+    @Test fun aLiveTakeOrRemixNeverStandsInForTheStudioSongAndTheBestFileWins() {
+        val mp3 = Track(TrackId("local:1"), "content://1", "Creep", "Radiohead", durationMs = 238_000, format = ua.olex.music.model.AudioFormat("mp3", bitrateKbps = 320))
+        val flac = Track(TrackId("local:2"), "content://2", "Creep", "Radiohead", durationMs = 238_500, format = ua.olex.music.model.AudioFormat("flac", 44_100, 16))
+        val live = Track(TrackId("local:3"), "content://3", "Creep (Live)", "Radiohead", durationMs = 0)
+        val index = YouTubeMusic.indexOf(LibraryIndex.EMPTY.copy(songs = listOf(mp3, flac, live)))
+        fun online(title: String, ms: Long) = Track(TrackId("yt:$title$ms"), "ytm://x", title, "Radiohead", durationMs = ms)
+        assertEquals(flac, index.copyOf(online("Creep", 238_200)))
+        assertEquals(flac, index.copyOf(online("Creep (Remastered 2008)", 238_200)))
+        assertEquals(live, index.copyOf(online("Creep (Live at Glastonbury)", 0)))
+        assertNull(index.copyOf(online("Creep (Acoustic)", 0)))
     }
 }

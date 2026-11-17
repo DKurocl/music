@@ -60,6 +60,8 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     suspend fun searchAll(query: String): Found = kotlinx.coroutines.coroutineScope {
         val artists = async(Dispatchers.IO) { post("search", """"query":${quote(query)},"params":"$ARTISTS_ONLY"""")?.let(::searchCards).orEmpty() }
         val plain = withContext(Dispatchers.IO) { post("search", """"query":${quote(query)}""") }
+            // No answer (refused, limited, signed out) is an error the screen says, not "nothing found".
+            ?: throw java.io.IOException(when (lastStatus) { 429 -> "YouTube Music is limiting requests; try again in a minute"; 401, 403 -> "YouTube Music refused the request"; else -> "YouTube Music didn't answer" })
         val cards = plain?.let(::searchCards).orEmpty()
         Found(plain?.let(::parseSearch).orEmpty(),
             (cards.filter { it.kind == Card.Kind.ARTIST } + artists.await()).distinctBy { it.id }.take(8),
@@ -91,8 +93,10 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         val have = peekAlbum(id) ?: return@withContext null
         if (have.second.size >= 2_000) return@withContext null
         // The current form (continuation in the body), then the older one (in the address).
-        val json = post("browse", """"continuation":${quote(token)}""")?.takeIf { parseSearch(it, keepOrder = true).isNotEmpty() }
-            ?: post("browse", "", "&ctoken=$token&continuation=$token&type=next")
+        val json = runCatching { post("browse", """"continuation":${quote(token)}""")?.takeIf { parseSearch(it, keepOrder = true).isNotEmpty() }
+            ?: post("browse", "", "&ctoken=$token&continuation=$token&type=next") }.getOrNull()
+            // No answer (offline, a hiccup): the token is kept, so opening the page again goes on from here.
+            ?: return@withContext null
         val page = json?.let { parseSearch(it, fallbackArtist = have.second.firstOrNull()?.artist, keepOrder = true) }.orEmpty()
         val seen = have.second.mapTo(HashSet()) { it.id }
         val added = page.filter { it.id !in seen }.map { it.copy(album = it.album ?: have.first.title, artworkUri = it.artworkUri ?: have.first.cover) }
@@ -117,9 +121,25 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     private val pages = object : LinkedHashMap<String, Any>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any>?) = size > 48
     }
-    private suspend fun <T : Any> cached(key: String, load: () -> T?): T? = withContext(Dispatchers.IO) {
-        peek<T>(key) ?: load()?.also { synchronized(pages) { pages[key] = it } }
+    private suspend fun <T : Any> cached(key: String, load: suspend () -> T?): T? = withContext(Dispatchers.IO) {
+        peek<T>(key) ?: shared(key, load)?.also { synchronized(pages) { pages[key] = it } }
     }
+
+    // Requests for the same page in flight at once share one network call (two screens opening the
+    // same album, a prefetch and a tap).
+    private val inFlight = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Any?>>()
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T : Any> shared(key: String, load: suspend () -> T?): T? = kotlinx.coroutines.coroutineScope {
+        val mine = kotlinx.coroutines.CompletableDeferred<Any?>()
+        val running = inFlight.putIfAbsent(key, mine)
+        if (running != null) return@coroutineScope running.await() as T?
+        try { (load()).also { mine.complete(it) } }
+        catch (e: Throwable) { mine.completeExceptionally(e); throw e }
+        finally { inFlight.remove(key, mine) }
+    }
+
+    /** The HTTP status of the last refused answer (429 too many requests, 401/403 signed out), for honest errors. */
+    @Volatile var lastStatus: Int = 0; private set
 
     /**
      * Likes or unlikes a song on the owner's YouTube Music account, so a heart in the app is a like
@@ -136,7 +156,14 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
      */
     suspend fun accountPlaylists(): List<Card> {
         if (account() == null) return emptyList()
-        return cached("account-playlists") { post("browse", """"browseId":"FEmusic_liked_playlists"""")?.let(::playlistCards)?.takeIf { it.isNotEmpty() } }.orEmpty()
+        val who = account()?.get("Cookie")?.hashCode() ?: return emptyList()
+        return cached("account-playlists:$who") { post("browse", """"browseId":"FEmusic_liked_playlists"""")?.let(::playlistCards)?.takeIf { it.isNotEmpty() } }.orEmpty()
+    }
+
+    /** Forgets everything loaded for an account (its playlists, its own home): called on sign-in and sign-out. */
+    fun forgetAccount() {
+        synchronized(pages) { pages.keys.filter { it.startsWith("account-") || it.startsWith("mood:") }.forEach { pages.remove(it) } }
+        moodsCache = null
     }
 
     /** Resolves the stream of a song ahead of a tap (address only, no audio), so Play starts sooner. */
@@ -199,7 +226,7 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     }
 
     /** One call to YouTube Music, as its web app makes it. */
-    private fun post(endpoint: String, fields: String, query: String = ""): String? {
+    private suspend fun post(endpoint: String, fields: String, query: String = ""): String? {
         val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}}${if (fields.isEmpty()) "" else ",$fields"}}"""
         val request = okhttp3.Request.Builder().url("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false$query")
             .post(body.toRequestBody("application/json".toMediaTypeOrNull()))
@@ -207,7 +234,19 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
             // Signed in: the owner's own home, mixes and radio (YouTubeAccount).
             .apply { account()?.forEach { (k, v) -> header(k, v) } }
             .build()
-        return http.newCall(request).execute().use { if (it.isSuccessful) it.body?.string() else null }
+        // Cancelled with the coroutine that asked (a search replaced by the next keystroke stops its
+        // request instead of finishing in the background and holding a connection).
+        val call = http.newCall(request)
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: java.io.IOException) { if (cont.isActive) cont.resumeWith(Result.failure(e)) }
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
+                    val body = response.use { r -> if (r.isSuccessful) runCatching { r.body?.string() }.getOrNull() else { lastStatus = r.code; null } }
+                    if (cont.isActive) cont.resumeWith(Result.success(body))
+                }
+            })
+        }
     }
 
     /** The audio stream of a song: the best Opus or AAC stream, kept for four hours (they expire). */
@@ -223,8 +262,16 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         Uri.parse(best.content).also { synchronized(streams) { streams[id] = it to System.currentTimeMillis() } }
     }.getOrNull()
 
-    private val streams = HashMap<String, Pair<Uri, Long>>()
-    private val formats = java.util.concurrent.ConcurrentHashMap<String, String>()
+    // Bounded: a long session through many playlists keeps only the recent ones.
+    private val streams = object : LinkedHashMap<String, Pair<Uri, Long>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Uri, Long>>?) = size > 300
+    }
+    private val formats = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, String>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 300
+    })
+
+    /** Forgets a stream address that stopped working, so the next open finds a fresh one. */
+    fun forget(id: String) { synchronized(streams) { streams.remove(id) } }
 
     /** "Opus \u00b7 160 kbps" once the song's stream was chosen; null before. Quality only: where it plays from is the row's mark. */
     fun format(id: String): String? = formats[id]
@@ -236,7 +283,9 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         fun isOnline(track: Track) = track.id.value.startsWith("yt:")
 
         // Album page ids of the songs seen this session, by video id (songs carry only the album's name).
-        private val albumIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+        private val albumIds = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, String>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 5_000
+        })
 
         /** The YouTube Music album page of an online song seen this session, if its row named one. */
         fun albumOf(track: Track): String? = albumIds[track.id.value.removePrefix("yt:")]
@@ -540,12 +589,25 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
          */
         class Index(songs: List<Track>) {
             private val byKey = HashMap<String, MutableList<Track>>().apply { songs.forEach { s -> keysOf(s).forEach { getOrPut(it) { ArrayList(1) } += s } } }
-            fun copyOf(online: Track): Track? = byKey[keyOf(online)]?.firstOrNull { song ->
-                online.durationMs <= 0 || song.durationMs <= 0 || kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
-            }
+            // The best file of the same recording: lengths within three seconds when both are known (an
+            // unknown length on one side needs the same version words on both), the best quality first.
+            fun copyOf(online: Track): Track? = byKey[keyOf(online)]?.filter { song ->
+                if (online.durationMs > 0 && song.durationMs > 0) kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
+                else versionOf(song.title) == versionOf(online.title)
+            }?.maxByOrNull { it.format?.rank ?: 0 }
         }
 
-        private fun clean(s: String) = TextFold.fold(s).replace(Regex("""\s*[(\[].*?[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "").trim()
+        // Extras like "(Remastered 2011)" or "- 2009 Mix" are dropped; words that make a different
+        // recording (live, remix, acoustic, demo, instrumental...) stay, so a live take never stands in
+        // for the studio song.
+        private val versionWords = Regex("""\b(live|remix|rmx|acoustic|demo|instrumental|unplugged|karaoke|cover|edit|version|session|sped up|slowed|nightcore|orchestral|piano)\b""")
+        private fun versionOf(title: String): String = versionWords.findAll(TextFold.fold(title)).map { it.value }.filterNot { it == "version" || it == "edit" }.sorted().joinToString(" ")
+        private fun clean(s: String): String {
+            val folded = TextFold.fold(s)
+            val kept = versionOf(folded)
+            val base = folded.replace(Regex("""\s*[(\[].*?[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "").trim()
+            return if (kept.isEmpty()) base else "$base [$kept]"
+        }
 
         /** The same recording: artist and title alike once extras are dropped, lengths within three seconds. */
         fun sameSong(online: Track, song: Track): Boolean {

@@ -95,4 +95,14 @@ class M3uPlaylistTest {
         val encoded = M3uPlaylist.encode("Name\n#evil", listOf(SavedSong.from(song)), "/storage/emulated/0")
         assertEquals("Name #evil", M3uPlaylist.parse(encoded).name)
     }
+
+    @Test fun youTubeMusicSongsSurviveExportAndImport() {
+        val online = Track(TrackId("yt:dQw4w9WgXcQ"), "ytm://dQw4w9WgXcQ", "Teardrop", "Massive Attack", durationMs = 330_000)
+        val text = M3uPlaylist.encode("Mixed", listOf(SavedSong.from(online)), "/storage/emulated/0")
+        assertTrue(text.contains("https://music.youtube.com/watch?v=dQw4w9WgXcQ"))
+        val back = M3uPlaylist.resolve(M3uPlaylist.parse(text), LibraryIndex.EMPTY).songs.single()
+        assertEquals("ytm://dQw4w9WgXcQ", back.path)
+        assertEquals("Teardrop", back.title)
+        assertEquals("Massive Attack", back.artist)
+    }
 }

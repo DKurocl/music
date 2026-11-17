@@ -55,6 +55,9 @@ data class PlayerState(
     val sleepTimerError: String? = null,
     val queue: List<QueueItem> = emptyList(),
     val queueIndex: Int = -1,
+    /** The songs Next and Previous really lead to (with shuffle on they are not the neighbours in the list). */
+    val nextIndex: Int = -1,
+    val previousIndex: Int = -1,
     val shuffle: Boolean = false,
     val repeat: RepeatMode = RepeatMode.OFF,
     val audio: AudioDiagnostics = AudioDiagnostics(),
@@ -221,6 +224,29 @@ class PlayerConnection(context: Context) {
         if (current) { player.seekTo(index, position); player.playWhenReady = playing }
     }
 
+    /**
+     * Swaps several queued songs for other sources of the same song (online songs for files just
+     * downloaded) in one change of the queue, each keeping its place and its queue key. The song
+     * playing now is left as it is: re-preparing it would cause a gap; the file plays next time.
+     */
+    fun replaceQueueItems(byKey: Map<String, Track>) {
+        val player = controller ?: return
+        if (byKey.isEmpty() || !player.isCommandAvailable(androidx.media3.common.Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
+        val current = player.currentMediaItemIndex
+        val indices = byKey.keys.mapNotNull { key -> player.indexOfQueueKey(key).takeIf { it >= 0 && it != current }?.let { it to key } }.sortedBy { it.first }
+        if (indices.isEmpty()) return
+        val from = indices.first().first; val to = indices.last().first + 1
+        val swap = indices.associate { (i, key) -> i to (key to byKey.getValue(key)) }
+        val items = (from until to).map { i -> swap[i]?.let { (key, track) -> mediaItem(track, key) } ?: player.getMediaItemAt(i) }
+        // The current song may sit inside the range; replacing it with itself keeps it playing.
+        if (current in from until to) {
+            // Two ranges around the current song, so it is never replaced.
+            val before = items.subList(0, current - from); val after = items.subList(current - from + 1, items.size)
+            if (after.isNotEmpty()) player.replaceMediaItems(current + 1, to, after)
+            if (before.isNotEmpty()) player.replaceMediaItems(from, current, before)
+        } else player.replaceMediaItems(from, to, items)
+    }
+
     fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun cycleRepeat() {
         controller?.let { it.repeatMode = when (it.repeatMode) {
@@ -348,6 +374,8 @@ class PlayerConnection(context: Context) {
             sleepTimerError = _state.value.sleepTimerError,
             queue = queueSnapshot,
             queueIndex = player.currentMediaItemIndex.takeIf { player.mediaItemCount > 0 } ?: -1,
+            nextIndex = player.nextMediaItemIndex,
+            previousIndex = player.previousMediaItemIndex,
             shuffle = player.shuffleModeEnabled,
             repeat = when (player.repeatMode) { Player.REPEAT_MODE_ALL -> RepeatMode.ALL; Player.REPEAT_MODE_ONE -> RepeatMode.ONE; else -> RepeatMode.OFF },
             audio = (player as? MediaController)?.sessionExtras?.let(AudioDiagnostics::fromExtras) ?: AudioDiagnostics(),
@@ -362,7 +390,7 @@ class PlayerConnection(context: Context) {
         internal const val PATH_KEY = "ua.olex.music.path"
         internal const val QUEUE_KEY = "ua.olex.music.queue_id"
         /** A track as the session carries it: its id, where to open it, and what to show. */
-        fun mediaItem(track: Track): MediaItem {
+        fun mediaItem(track: Track, queueKey: String? = null): MediaItem {
             val uri = track.uri.takeIf { it.isNotEmpty() }?.let(Uri::parse)
             return MediaItem.Builder()
                 .setMediaId(track.id.value)
@@ -380,7 +408,7 @@ class PlayerConnection(context: Context) {
                         .setArtworkUri(track.artworkUri?.let(Uri::parse))
                         .setTrackNumber(track.trackNumber).setDiscNumber(track.discNumber)
                         .setDurationMs(track.durationMs.takeIf { it > 0 })
-                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, UUID.randomUUID().toString())
+                        .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, queueKey ?: UUID.randomUUID().toString())
                             track.metadata?.let { tags -> putString(ReplayGainCodec.TAGS, ReplayGainCodec.encodeTags(ua.olex.music.dsp.ReplayGainTags(
                                 tags.trackGainDb?.toDouble(), tags.trackPeak?.toDouble(), tags.albumGainDb?.toDouble(), tags.albumPeak?.toDouble()))) } })
                         .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
