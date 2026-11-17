@@ -36,9 +36,14 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
-- [~] Continue the 80-point audit (Codex, 2026-11-17, `agent/unified-library-continuation`):
-      shared saved-song catalogue for Home, smart playlists and search (50/51), complete account
-      playlist pagination and preserve repeated playlist occurrences (60). See `AUDIT_CONTINUATION.md`.
+- [x] Continue the 80-point audit (Codex, 2026-11-17, `bc99d27`, CI 44114015206): shared
+      saved-song catalogue (51; 50 partial), playlist pagination/occurrences (60), service mix refill
+      (21), shared session lyrics and draw-phase word timing (33/34), cache budgets/events (8/54),
+      offline queue retention (53). Auxiliary priority and resumption remain partial (45/74).
+      Full backlog and limits: `AUDIT_CONTINUATION.md`; physical acceptance: `PHONE_CHECK.md`.
+- [ ] Next unified-library block: stable recording IDs with local and YouTube sources (47/48/63),
+      safe user.db migration, durable album/artist pages and identities (49/64), service source
+      selection (52), bidirectional likes and playlist operation/conflict sync (56/58/59).
 
 1. Accurate library: integrate the existing tag reader, embedded/folder artwork, incremental scans
    and chosen music roots. Preserve all credited artists and honest audio properties.
