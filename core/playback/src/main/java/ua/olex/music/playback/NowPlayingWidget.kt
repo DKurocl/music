@@ -46,11 +46,20 @@ internal object NowPlaying {
     fun title(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("title", null)
 
     fun render(context: Context, ids: IntArray) {
+        // One snapshot of the state, numbered: a slower earlier render (its cover still loading) can
+        // never overwrite a newer one. Title and buttons go out at once; the cover follows.
+        val generation = rendered.incrementAndGet()
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val views = views(context, prefs.getString("title", null), prefs.getString("artist", null),
-            artwork(context, prefs.getString("art", null)), prefs.getBoolean("playing", false), interactive = true)
-        AppWidgetManager.getInstance(context).updateAppWidget(ids, views)
+        val title = prefs.getString("title", null); val artist = prefs.getString("artist", null)
+        val art = prefs.getString("art", null); val playing = prefs.getBoolean("playing", false)
+        val manager = AppWidgetManager.getInstance(context)
+        val known = lastArt?.takeIf { it.first == art }?.second
+        manager.updateAppWidget(ids, views(context, title, artist, known, playing, interactive = true))
+        if (known != null || art == null) return
+        val bitmap = artwork(context, art) ?: return
+        if (rendered.get() == generation) manager.updateAppWidget(ids, views(context, title, artist, bitmap, playing, interactive = true))
     }
+    private val rendered = java.util.concurrent.atomic.AtomicLong()
 
     private fun views(context: Context, title: String?, artist: String?, art: Bitmap?, playing: Boolean, interactive: Boolean): RemoteViews {
         fun layout(id: Int) = RemoteViews(context.packageName, id).apply {
@@ -64,8 +73,9 @@ internal object NowPlaying {
                 setOnClickPendingIntent(R.id.widget_play, button(context, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE))
                 setOnClickPendingIntent(R.id.widget_next, button(context, KeyEvent.KEYCODE_MEDIA_NEXT))
                 setOnClickPendingIntent(R.id.widget_previous, button(context, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
-                context.packageManager.getLaunchIntentForPackage(context.packageName)?.let {
-                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE))
+                // A tap on the widget opens the player itself, as the media notification does.
+                context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply { putExtra(PlaybackService.OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let {
+                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
                 }
             }
         }

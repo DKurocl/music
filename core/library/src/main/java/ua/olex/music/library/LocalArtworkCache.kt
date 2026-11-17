@@ -22,19 +22,24 @@ class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
     private val maxDiskBytes: Long = 128L * 1024 * 1024) {
     private val app = context.applicationContext
     private val directory = File(app.cacheDir, "local-artwork-v1")
-    private val lock = ReentrantLock()
+    // One lock per picture (by its digest), so a slow file never holds up other covers; pruning has
+    // its own lock and runs once per batch of new pictures, not on every write.
+    private val locks = java.util.concurrent.ConcurrentHashMap<String, ReentrantLock>()
+    private val pruneLock = ReentrantLock()
+    private val written = java.util.concurrent.atomic.AtomicInteger()
     private val known = LruCache<String, String>(256)
 
-    fun open(source: ArtworkSource, requestedPixels: Int): ParcelFileDescriptor = lock.withLock {
+    fun open(source: ArtworkSource, requestedPixels: Int): ParcelFileDescriptor = run {
         val pixels = requestedPixels.takeIf { it in ArtworkPlan.sizes } ?: ArtworkPlan.MEDIUM
         if (!directory.exists() && !directory.mkdirs()) throw IOException("Artwork cache unavailable")
         val key = "$source|${files.revision.value}"
-        known.get(key)?.let { digest -> variant(digest, pixels).takeIf { it.isFile && it.length() > 0 }?.let { return@withLock descriptor(it) } }
+        known.get(key)?.let { digest -> variant(digest, pixels).takeIf { it.isFile && it.length() > 0 }?.let { return@run descriptor(it) } }
         val loaders: List<() -> ByteArray?> = listOf({ embedded(source) }, { files.coverBytesBlocking(source.path) }, { read(source.fallbackUri) })
         for (load in loaders) {
             val bytes = try { load() } catch (_: Exception) { null } ?: continue
             val digest = hash(bytes)
             val target = variant(digest, pixels)
+            val made = locks.getOrPut(digest) { ReentrantLock() }.withLock {
             if (!target.isFile || target.length() == 0L) {
                 val bitmap = try {
                     ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
@@ -53,11 +58,14 @@ class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
                         try { write(file, scaled) } finally { if (scaled !== bitmap) scaled.recycle() }
                     }
                 } finally { bitmap.recycle() }
+                true
+            } else false
             }
+            locks.remove(digest)
             known.put(key, digest)
             val result = descriptor(target)
-            prune(digest)
-            return@withLock result
+            if (made && written.incrementAndGet() % PRUNE_EVERY == 0) pruneLock.withLock { prune(digest) }
+            return@run result
         }
         throw FileNotFoundException("No readable local artwork")
     }
@@ -100,5 +108,5 @@ class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
             if (!file.name.startsWith(protectedDigest)) { val size = file.length(); if (file.delete()) bytes -= size }
         }
     }
-    companion object { const val MAX_ENCODED_BYTES = 16 * 1024 * 1024 }
+    companion object { const val MAX_ENCODED_BYTES = 16 * 1024 * 1024; private const val PRUNE_EVERY = 8 }
 }

@@ -123,7 +123,7 @@ class PlaybackService : MediaLibraryService() {
         getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
         val builder = MediaLibrarySession.Builder(this, shown, Callback())
         // Tapping the notification opens the app.
-        packageManager.getLaunchIntentForPackage(packageName)?.let { launch ->
+        packageManager.getLaunchIntentForPackage(packageName)?.apply { putExtra(OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
@@ -308,9 +308,9 @@ class PlaybackService : MediaLibraryService() {
 
     private fun <T> future(block: suspend () -> T): ListenableFuture<T> = scope.future { block() }
 
-    private fun page(items: List<MediaItem>, page: Int, size: Int): com.google.common.collect.ImmutableList<MediaItem> {
+    private fun <T> page(items: List<T>, page: Int, size: Int): List<T> {
         val from = (page.toLong() * size).coerceAtMost(items.size.toLong()).toInt()
-        return com.google.common.collect.ImmutableList.copyOf(items.subList(from, (from + size).coerceAtMost(items.size)))
+        return items.subList(from, (from + size).coerceAtMost(items.size))
     }
 
     private inner class Callback : MediaLibrarySession.Callback {
@@ -319,7 +319,8 @@ class PlaybackService : MediaLibraryService() {
 
         override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
             val nodes = tree()?.children(parentId) ?: return@future LibraryResult.ofError<com.google.common.collect.ImmutableList<MediaItem>>(SessionError.ERROR_BAD_VALUE)
-            LibraryResult.ofItemList(page(nodes.map { it.toMediaItem() }, page, pageSize.coerceAtLeast(1)), params)
+            // Only the asked page is turned into media items, not the whole list.
+            LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(nodes, page, pageSize.coerceAtLeast(1)).map { it.toMediaItem() }), params)
         }
 
         override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String) = future {
@@ -332,8 +333,8 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
-            val found = tree()?.search(query).orEmpty().map { PlayerConnection.mediaItem(it) }
-            LibraryResult.ofItemList(page(found, page, pageSize.coerceAtLeast(1)), params)
+            val found = tree()?.search(query).orEmpty()
+            LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(found, page, pageSize.coerceAtLeast(1)).map { PlayerConnection.mediaItem(it) }), params)
         }
 
         /**
@@ -454,6 +455,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     companion object {
+        /** Extra on the app's launch intent: open the player (the media notification and lock screen tap). */
+        const val OPEN_PLAYER = "ua.olex.music.open_player"
         /** In [UsbBitPerfect.PREFS]: the owner's battery-saver offload switch. */
         const val OFFLOAD_KEY = "offload"
     }

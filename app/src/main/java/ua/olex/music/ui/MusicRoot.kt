@@ -185,6 +185,8 @@ fun MusicRoot(model: LibraryViewModel) {
     val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) { if (youTubeOn) value = context.graph.youTube.moods() }
     // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
+    // A different account (or none) never sees the last one's playlists, home or moods.
+    androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
     val youTubeHome by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), youTubeOn, youTubeSignedIn) {
         value = if (youTubeOn) runCatching { context.graph.youTube.home() }.getOrDefault(emptyList()) else emptyList()
     }
@@ -250,6 +252,7 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     val powerSave = rememberPowerSave()
     val network by context.graph.network.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(model.playerRequest) { if (model.playerRequest > 0 && playing.hasTrack) expanded = true }
     // Play left songs out (or found nothing to play) because the phone is offline: say so once.
     androidx.compose.runtime.LaunchedEffect(model.offlineNotice) {
         if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")
@@ -315,23 +318,27 @@ fun MusicRoot(model: LibraryViewModel) {
         val playerInset = if (playing.hasTrack) 84.dp else 0.dp
         Box(Modifier.fillMaxSize()) {
         CompositionLocalProvider(LocalPlayerInset provides playerInset) {
-        when {
-            !model.allowed -> Notice(
-                insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow",
-            ) {
-                if (permissionRequested && activity?.shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_AUDIO) == false) {
-                    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
-                } else {
-                    permissionRequested = true
-                    ask.launch(arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
-                }
+        val askForFiles: () -> Unit = {
+            if (permissionRequested && activity?.shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_AUDIO) == false) {
+                context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)))
+            } else {
+                permissionRequested = true
+                ask.launch(arrayOf(Manifest.permission.READ_MEDIA_AUDIO, Manifest.permission.POST_NOTIFICATIONS))
             }
-            model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
-            list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
+        }
+        // Without access to the files, YouTube Music still works: the permission opens the owner's own
+        // files, it doesn't lock the app. With YouTube Music off there is nothing to show but the ask.
+        val withoutFiles = !model.allowed && youTubeOn
+        val library = library ?: if (withoutFiles) ua.olex.music.model.LibraryIndex.EMPTY else null
+        when {
+            !model.allowed && !youTubeOn -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
+            model.scanError != null && list.isNullOrEmpty() && !withoutFiles -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
+            list == null && !withoutFiles -> Notice(insets, "Your music", "Loading your library…", null) {}
             onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
-                is OnlineTarget.Artist -> androidx.compose.runtime.key(top) { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
-                is OnlineTarget.Album -> androidx.compose.runtime.key(top) { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
-                is OnlineTarget.Mood -> androidx.compose.runtime.key(top) { MoodPage(top, playing.mediaId, insets, requireNotNull(library)) { onlineTitleShown = it } }
+                // Each page in the stack keeps its own scroll, so Back to a previous online page lands where it was.
+                is OnlineTarget.Artist -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Album -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Mood -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { MoodPage(top, playing.mediaId, insets, requireNotNull(library)) { onlineTitleShown = it } }
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
@@ -347,7 +354,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
-                moods = moods,
+                moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles },
                 youTubeHome = youTubeHome.map { shelf -> shelf.copy(songs = shelf.songs.filterNot { it.id.value in model.excluded || Mix.songKey(it) in model.excluded },
                     cards = shelf.cards.filterNot { it.kind == YouTubeMusic.Card.Kind.SONG && "yt:${it.id}" in model.excluded }) },
                 onSeeAll = { tab ->
@@ -377,7 +384,7 @@ fun MusicRoot(model: LibraryViewModel) {
             .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent,
                 0.55f to MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), 1f to MaterialTheme.colorScheme.surface))) {
             Box(Modifier.padding(top = 20.dp)) {
-                MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous)
+                MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, covered = expanded)
             }
         }
         }
@@ -438,9 +445,12 @@ fun MusicRoot(model: LibraryViewModel) {
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
             onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
             onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
-            onSaveLyricTiming = model::saveLyricTiming, onResetLyricTiming = model::resetLyricTiming,
+            // Timing is saved into the song's file: a YouTube Music song has none, so the controls aren't offered.
+            onSaveLyricTiming = model::saveLyricTiming.takeIf { playing.mediaId?.startsWith("yt:") != true }, onResetLyricTiming = model::resetLyricTiming,
             favourite = playing.mediaId in personal.favouriteByTrackId,
-            onFavourite = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { model.toggleFavourite(track) } },
+            // The heart works the same for a file and a YouTube Music song.
+            onFavourite = playing.mediaId?.let { id -> library?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) ua.olex.music.model.Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
+                playing.title, playing.artist, album = playing.album, durationMs = playing.durationMs, artworkUri = playing.artworkUri) else null }?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
             onMore = playing.mediaId?.let { id ->
@@ -599,7 +609,9 @@ private fun NowPlaying(
     PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
         onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
         onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
-        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,
+        // "Playing from" names a playlist or mix when there is one; a tap then must not open the song's
+        // album under that name, so it opens the album only when the line shows the album.
+        onOpenAlbum = onOpenAlbum.takeIf { from == null }, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,
         inlineLyrics = { mod ->
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
                 onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,

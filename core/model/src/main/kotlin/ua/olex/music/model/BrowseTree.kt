@@ -29,6 +29,13 @@ class BrowseTree(
 ) {
     fun root() = BrowseNode(ROOT, "Library")
 
+    // Songs a browser can name: the library's, and YouTube Music songs kept in the owner's playlists
+    // (they have no file, so they are not in the library index but still play).
+    private val known: Map<TrackId, Track> by lazy {
+        val extra = playlists.flatMap { it.third }.filter { it.id !in library.byId }
+        if (extra.isEmpty()) library.byId else library.byId + extra.associateBy { it.id }
+    }
+
     /** The children of [parentId], or null when there is no such node. */
     fun children(parentId: String): List<BrowseNode>? = when {
         parentId == ROOT -> SECTIONS.filter { (id, _) -> sectionHasContent(id) }.map { (id, title) -> BrowseNode("section:$id", title) }
@@ -46,7 +53,7 @@ class BrowseTree(
         if (id == ROOT) return root()
         SECTIONS.firstOrNull { "section:${it.first}" == id }?.let { return BrowseNode(id, it.second) }
         val trackId = id.substringAfterLast('|')
-        library.byId[TrackId(trackId)]?.let { return song(id.substringBeforeLast('|', ""), it).copy(id = id) }
+        known[TrackId(trackId)]?.let { return song(id.substringBeforeLast('|', ""), it).copy(id = id) }
         return children(id.substringBefore(':').let { "section:" + sectionFor(it) })?.firstOrNull { it.id == id }
     }
 
@@ -57,7 +64,7 @@ class BrowseTree(
     fun resolvePlay(id: String): Pair<List<Track>, Int>? {
         val parent = id.substringBeforeLast('|', "")
         val trackId = id.substringAfterLast('|')
-        library.byId[TrackId(trackId)]?.let { track ->
+        known[TrackId(trackId)]?.let { track ->
             val queue = if (parent.isEmpty()) null else if (parent == ROOT_SONGS) library.songs else tracksOf(parent)
             val index = queue?.indexOfFirst { it.id == track.id } ?: -1
             return if (queue != null && index >= 0) queue to index else listOf(track) to 0
@@ -73,11 +80,22 @@ class BrowseTree(
         val words = TextFold.fold(query).split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) return emptyList()
         fun all(text: String) = TextFold.fold(text).let { t -> words.all { t.contains(it) } }
-        val byTitle = library.songs.filter { all(it.title) }
-        val byArtist = library.songs.filter { it !in byTitle && all(it.artists.joinToString(" ") + " " + (it.albumArtist ?: "")) }
-        val byAlbum = library.songs.filter { it !in byTitle && it !in byArtist && all(it.album.orEmpty()) }
-        val byAll = library.songs.filter { it !in byTitle && it !in byArtist && it !in byAlbum && all("${it.title} ${it.artist} ${it.album.orEmpty()}") }
-        return (byTitle + byArtist + byAlbum + byAll).take(limit)
+        // One pass, each song in the first bucket it fits (title, artist, album, all fields); the
+        // buckets stop growing once the earlier ones alone fill the limit.
+        val buckets = Array(4) { ArrayList<Track>() }
+        val songs = if (known.size == library.byId.size) library.songs else library.songs + known.values.filter { it.id !in library.byId }
+        for (song in songs) {
+            if (buckets[0].size >= limit) break
+            val bucket = when {
+                all(song.title) -> 0
+                all(song.artists.joinToString(" ") + " " + (song.albumArtist ?: "")) -> 1
+                all(song.album.orEmpty()) -> 2
+                all("${song.title} ${song.artist} ${song.album.orEmpty()}") -> 3
+                else -> -1
+            }
+            if (bucket >= 0 && buckets.take(bucket).sumOf { it.size } < limit) buckets[bucket] += song
+        }
+        return buckets.flatMap { it }.take(limit)
     }
 
     private fun tracksOf(id: String): List<Track>? {

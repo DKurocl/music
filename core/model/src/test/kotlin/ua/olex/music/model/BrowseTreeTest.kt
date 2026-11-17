@@ -59,4 +59,13 @@ class BrowseTreeTest {
         assertEquals("every word must match", listOf("Paranoid Android"), tree.search("radiohead paranoid").map { it.title })
         assertTrue(tree.search("   ").isEmpty())
     }
+
+    @Test fun aYouTubeMusicSongInAPlaylistCanBeOpenedPlayedAndFound() {
+        val online = Track(TrackId("yt:abcdefghijk"), "ytm://abcdefghijk", "Teardrop", "Massive Attack")
+        val tree = BrowseTree(LibraryIndex.EMPTY, playlists = listOf(Triple(7L, "Mixed", listOf(online))))
+        val node = tree.children("playlist:7")!!.single()
+        assertEquals(online, tree.item(node.id)?.track)
+        assertEquals(listOf(online) to 0, tree.resolvePlay(node.id))
+        assertEquals(listOf(online), tree.search("teardrop"))
+    }
 }

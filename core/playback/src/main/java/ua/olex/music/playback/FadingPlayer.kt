@@ -51,13 +51,14 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
         if (playWhenReady) {
             if (!real.playWhenReady) real.volume = 0f
             super.setPlayWhenReady(true)
-            fade = ramp(real.volume, 1f, FADE_IN_MS)
+            val from = real.volume
+            fade = scope.launch { ramp(from, 1f, FADE_IN_MS) }
         } else if (real.isPlaying) {
             val from = real.volume
             pausing = true
             fade = scope.launch {
                 try {
-                    ramp(from, 0f, FADE_OUT_MS).join()
+                    ramp(from, 0f, FADE_OUT_MS)
                     pausing = false
                     super.setPlayWhenReady(false)
                     real.volume = 1f
@@ -69,13 +70,16 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
     /** The last half minute of a sleep timer: a slow fade to silence instead of a sudden stop. */
     internal fun sleepFade(durationMs: Long, then: () -> Unit): Job {
         fade?.cancel()
-        return scope.launch { ramp(real.volume, 0f, durationMs).join(); then(); real.volume = 1f }.also { fade = it }
+        val from = real.volume
+        return scope.launch { ramp(from, 0f, durationMs); then(); real.volume = 1f }.also { fade = it }
     }
 
     /** A changed or cancelled sleep timer stops its fade and restores full volume. */
     internal fun cancelFade() { fade?.cancel(); fade = null; real.volume = 1f }
 
-    private fun ramp(from: Float, to: Float, ms: Long): Job = scope.launch {
+    // Runs inside the fade's own job, so cancelling the fade (a new play or pause, a cancelled sleep
+    // timer) stops the volume at once; a separate job here used to keep lowering it after a cancel.
+    private suspend fun ramp(from: Float, to: Float, ms: Long) {
         val steps = (ms / 16).coerceAtLeast(1)
         for (i in 1..steps) {
             val t = i.toFloat() / steps

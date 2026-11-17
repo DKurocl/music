@@ -74,6 +74,12 @@ class MotionCovers(private val context: Context) {
 
     fun remove(track: Track) { key(track)?.let { File(dir, "$it.own").delete() }; file(track)?.delete(); _revision.value++ }
 
+    /** Removes every fetched moving cover (Clear cache); the owner's own videos stay. */
+    fun clearFetched() {
+        dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }?.forEach { it.delete() }
+        _revision.value++
+    }
+
     /** Drops the fetched moving covers shown longest ago while they take more than their share of the budget. */
     fun trim() {
         val limit = ua.olex.music.playback.CacheBudget.motionBytes(context)

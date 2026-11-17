@@ -342,9 +342,9 @@ internal fun QualityTag(label: String, lossless: Boolean, modifier: Modifier = M
  * next, and a thin line of progress that is read only while music plays and the app is visible.
  */
 @Composable
-internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit = {}) {
+internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> Unit, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit = {}, covered: Boolean = false) {
     val cs = MaterialTheme.colorScheme
-    val progress = rememberProgress(state, position, everyMs = 1_000)
+    val progress = rememberProgress(state, position, everyMs = 1_000, active = !covered)
     val haptics = rememberHaptics()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // Follows the finger sideways (skip) and upward (open), then springs back.
@@ -396,7 +396,12 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(state.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
-                IconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() }, modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play" }) {
+                // Asked to play but still getting ready (a stream opening, a slow file): a ring around the
+                // button says so, instead of a pause button that seems to do nothing.
+                val preparing = state.playWhenReady && state.buffering
+                IconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() },
+                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (preparing) stateDescription = "Getting ready" }) {
+                    if (preparing) CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 2.dp, color = cs.primary)
                     Symbol(if (state.playWhenReady) Glyph.PAUSE else Glyph.PLAY, size = 28.dp, filled = true)
                 }
                 IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.semantics { contentDescription = "Next" }) {
@@ -416,10 +421,12 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
  * song plays and the screen is started. A paused song is read once; nothing runs otherwise.
  */
 @Composable
-private fun rememberProgress(state: PlayerState, position: () -> Long, everyMs: Long): () -> Float {
+private fun rememberProgress(state: PlayerState, position: () -> Long, everyMs: Long, active: Boolean = true): () -> Float {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var at by remember(state.mediaId) { mutableLongStateOf(position()) }
-    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
+    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs, active) {
+        // Nothing to read while hidden (the mini player under the open player).
+        if (!active) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             do { at = position(); if (state.isPlaying) delay(everyMs) } while (state.isPlaying)
         }
@@ -516,8 +523,9 @@ internal fun PlayerPage(
             // slide in with the finger, so a skip never shows an empty space.
             val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 20.dp.toPx() }
             val step = coverWidth + gap
-            val nextArt = state.queue.getOrNull(state.queueIndex + 1)?.artworkUri
-            val previousArt = state.queue.getOrNull(state.queueIndex - 1)?.artworkUri
+            // The cover Next really leads to: with shuffle on that is not the neighbour in the list.
+            val nextArt = state.queue.getOrNull(state.nextIndex)?.artworkUri
+            val previousArt = state.queue.getOrNull(state.previousIndex)?.artworkUri
             var skipping by remember { mutableStateOf(false) }
             var seenId by remember { mutableStateOf(state.mediaId) }
             var seenIndex by remember { mutableIntStateOf(state.queueIndex) }
@@ -525,7 +533,7 @@ internal fun PlayerPage(
             val context = LocalContext.current
             LaunchedEffect(state.queueIndex, state.queue.size, coverWidth) {
                 if (coverWidth <= 1) return@LaunchedEffect
-                listOf(state.queueIndex + 1, state.queueIndex - 1).mapNotNull { state.queue.getOrNull(it)?.artworkUri }.forEach { uri ->
+                listOf(state.nextIndex, state.previousIndex).mapNotNull { state.queue.getOrNull(it)?.artworkUri }.forEach { uri ->
                     coil3.SingletonImageLoader.get(context).enqueue(coil3.request.ImageRequest.Builder(context)
                         .data(ua.olex.music.library.ArtworkUris.variant(uri, context.packageName, ArtworkPlan.LARGE)).size(coverWidth).build())
                 }
@@ -648,7 +656,7 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
     val width by animateDpAsState(if (playing) 112.dp else 88.dp, MaterialTheme.motionScheme.fastSpatialSpec(), label = "width")
     val haptics = rememberHaptics()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", onShuffle)
+        ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", switch = true, onClick = onShuffle)
         SkipButton(Glyph.PREVIOUS, "Previous", true) { haptics.skip(false); onPrevious() }
         androidx.compose.material3.FilledIconToggleButton(
             checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
@@ -659,7 +667,7 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
         ) { Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true) }
         SkipButton(Glyph.NEXT, "Next", state.hasNext) { haptics.skip(true); onNext() }
         ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
-            when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onRepeat)
+            when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onClick = onRepeat)
     }
 }
 
@@ -680,13 +688,15 @@ private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, onClick: (
  * it takes the accent and a small dot appears under it. The change fades, nothing jumps.
  */
 @Composable
-private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, onClick: () -> Unit) {
+private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, switch: Boolean = false, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
     val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
     Box(Modifier.size(52.dp).clip(CircleShape)
-        .toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { haptics.toggle(it); onClick() }
+        // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
+        .then(if (switch) Modifier.toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { haptics.toggle(it); onClick() }
+            else Modifier.clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { haptics.toggle(!on); onClick() })
         .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
         Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on)
         Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp).size(5.dp).graphicsLayer { scaleX = dot; scaleY = dot; alpha = dot }

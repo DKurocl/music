@@ -26,7 +26,7 @@ class AppGraph(context: Context) {
     val youTubeAccount by lazy { ua.olex.music.ui.YouTubeAccount(app) }
     internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic { youTubeAccount.headers() } }
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
-    val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {} }
+    val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {}.also { if (it.account != null) it.resume() } }
     private val onlinePrefs by lazy { app.getSharedPreferences("online", Context.MODE_PRIVATE) }
     /** YouTube Music in search and playback; the owner can turn it off in Settings. */
     val youTubeOn by lazy { kotlinx.coroutines.flow.MutableStateFlow(onlinePrefs.getBoolean("youtube", true)) }
@@ -66,12 +66,20 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
 
     /** The audio stream of an online song, found when the player opens it. */
     override fun resolve(id: String): android.net.Uri? = graph.youTube.audio(id)
+    override fun forget(id: String) = graph.youTube.forget(id)
     override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
 
     /** The library for Android Auto, Assistant and other browsers: songs, smart and own playlists. */
-    override suspend fun browseTree(): ua.olex.music.model.BrowseTree = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+    // A browser (Android Auto, Assistant) asks many times in a row while the owner looks around: the
+    // tree is reused for a short while instead of being rebuilt from the database each time.
+    @Volatile private var lastTree: Pair<Long, ua.olex.music.model.BrowseTree>? = null
+    override suspend fun browseTree(): ua.olex.music.model.BrowseTree {
+        lastTree?.takeIf { android.os.SystemClock.elapsedRealtime() - it.first < 20_000 }?.let { return it.second }
+        return buildTree().also { lastTree = android.os.SystemClock.elapsedRealtime() to it }
+    }
+    private suspend fun buildTree(): ua.olex.music.model.BrowseTree = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val index = graph.library.index.first()
         val user = graph.userLibrary
         val stats = runCatching { user.stats.first() }.getOrDefault(emptyMap())

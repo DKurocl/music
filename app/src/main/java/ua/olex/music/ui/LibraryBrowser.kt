@@ -123,6 +123,7 @@ internal fun LibraryBrowser(
     openTile: String? = null,
 ) {
     val nav = LocalOnlineNav.current
+    val network = LocalNetwork.current
     val startTab = LocalStartTab.current
     var tabName by rememberSaveable { mutableStateOf(if (mode == BrowserMode.LIBRARY) LibraryTab.PLAYLISTS.name else startTab) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -139,7 +140,7 @@ internal fun LibraryBrowser(
     }
     val selected = groups.firstOrNull { it.id == selectedId }
     var collectionSort by rememberSaveable(tabName) { mutableStateOf(CollectionSort.NAME) }
-    val shownGroups = remember(groups, collectionSort, stats) {
+    val shownGroups = rememberOffMain(groups, collectionSort, stats, initial = groups) {
         when (collectionSort) {
             CollectionSort.NAME -> groups
             CollectionSort.NEWEST -> groups.sortedByDescending { g -> g.tracks.maxOf { it.addedAt ?: 0 } }
@@ -149,7 +150,7 @@ internal fun LibraryBrowser(
     }
     val searching = query.isNotBlank()
     // Albums and artists that match every word of the search, shown above the songs.
-    val searchGroups = remember(library, query) {
+    val searchGroups = rememberOffMain(library, query, initial = emptyList<Pair<LibraryTab, MusicCollection>>()) {
         val words = ua.olex.music.model.TextFold.fold(query).split(' ').filter { it.isNotBlank() }
         if (words.isEmpty()) emptyList() else {
             fun hit(c: MusicCollection, extra: String = "") = ua.olex.music.model.TextFold.fold(c.name + " " + extra).let { t -> words.all { t.contains(it) } }
@@ -359,7 +360,8 @@ internal fun LibraryBrowser(
                             // One library: the owner's results and YouTube Music's in the same lists, his first
                             // (better sound, work offline), YouTube Music's after them with a cloud mark.
                             val found = online?.takeIf { it.query == query && onlineOn }
-                            val waiting = onlineOn && online?.query != query
+                            // Waiting only for a search that is actually asked: two letters or more, and a network.
+                            val waiting = onlineOn && network && query.trim().length >= 2 && online?.query != query
                             val webArtists = found?.artists.orEmpty().take(4)
                             val webAlbums = found?.albums.orEmpty().take(6)
                             val webSongs = found?.tracks.orEmpty()
@@ -600,7 +602,9 @@ private fun ArtistHeader(artist: MusicCollection, albums: Int, showBack: Boolean
 private fun ArtistBio(name: String) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val images = (context.applicationContext as? ua.olex.music.MusicApp)?.graph?.artistImages
-    val bio by androidx.compose.runtime.produceState(images?.cachedBio(name), name) { if (value == null && images != null) value = images.bio(name) }
+    val bio by androidx.compose.runtime.produceState(images?.knownBio(name), name) {
+        if (value == null && images != null) value = withContext(Dispatchers.IO) { images.cachedBio(name) } ?: images.bio(name)
+    }
     val text = bio ?: return
     var open by remember(name) { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
@@ -760,8 +764,8 @@ private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll:
 @Composable
 private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List<Track>,
     leading: (@Composable () -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, onChange: (ua.olex.music.model.TrackFilter) -> Unit) {
-    val decades = remember(tracks) { ua.olex.music.model.TrackFilter.decades(tracks) }
-    val genres = remember(tracks) { tracks.flatMap { it.genres }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }.take(30) }
+    val decades = rememberOffMain(tracks, initial = emptyList()) { ua.olex.music.model.TrackFilter.decades(tracks) }
+    val genres = rememberOffMain(tracks, initial = emptyList()) { tracks.flatMap { it.genres }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }.take(30) }
     var decadeMenu by remember { mutableStateOf(false) }
     var genreMenu by remember { mutableStateOf(false) }
     androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -798,7 +802,7 @@ private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List
 private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.compose.foundation.lazy.LazyListState, descending: Boolean, modifier: Modifier, onHeld: (Boolean) -> Unit = {}) {
     val haptics = rememberHaptics()
     if (tracks.size < 50) return
-    val starts = remember(tracks) {
+    val starts = rememberOffMain(tracks, initial = emptyList()) {
         val map = LinkedHashMap<Char, Int>()
         tracks.forEachIndexed { i, t ->
             val c = ua.olex.music.model.LibraryOrder.name(t.title).firstOrNull()?.uppercaseChar()?.let { if (it.isLetter()) it else '#' } ?: '#'

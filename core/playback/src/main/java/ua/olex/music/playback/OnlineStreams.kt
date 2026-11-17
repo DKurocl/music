@@ -11,6 +11,9 @@ interface OnlineStreams {
     /** The playable address for an online song id, or null. Called on a loader thread; may block. */
     fun resolve(id: String): Uri?
 
+    /** Drops a remembered address that stopped working (it expired early), so the next open asks again. */
+    fun forget(id: String) {}
+
     companion object {
         const val SCHEME = "ytm"
     }

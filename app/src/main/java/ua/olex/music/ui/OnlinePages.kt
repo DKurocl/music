@@ -76,6 +76,14 @@ internal fun rememberOwned(songs: List<Track>, library: LibraryIndex): List<Trac
     }.value
 }
 
+/**
+ * A value worked out from the library on a background thread: [initial] until it is ready, then the
+ * result, recomputed when a key changes. For anything that walks every song, album or artist.
+ */
+@Composable
+internal fun <T> rememberOffMain(vararg keys: Any?, initial: T, compute: () -> T): T =
+    produceState(initial, *keys) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { compute() } }.value
+
 private sealed interface Load<out T> { data object Wait : Load<Nothing>; data object Failed : Load<Nothing>; data class Done<T>(val value: T) : Load<T> }
 
 /** Loads a page; one opened before this session is there in the first frame ([cached]). */

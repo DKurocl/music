@@ -18,12 +18,18 @@ class MainActivity : ComponentActivity() {
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
         setContent { AppTheme { MusicRoot(model) } }
-        if (savedInstanceState == null) playFromSearch(intent)
+        if (savedInstanceState == null) { playFromSearch(intent); openPlayer(intent) }
+    }
+
+    /** The media notification (or the lock screen) was tapped: open the player, not just the app. */
+    private fun openPlayer(intent: android.content.Intent?) {
+        if (intent?.getBooleanExtra(ua.olex.music.playback.PlaybackService.OPEN_PLAYER, false) == true) model.requestPlayer()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         playFromSearch(intent)
+        openPlayer(intent)
     }
 
     /** "Play Karma Police on Music": search the library the way Android Auto does and play the matches. */
@@ -37,9 +43,13 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         model.connectPlayer()
         model.startWatching()
-        // Files change behind the app's back (downloads, a cable, another app): look again on return.
-        model.refresh()
+        // Files change behind the app's back (downloads, a cable, another app): look again on return, but
+        // only when Android's media store says something changed since the last look (its generation).
+        val generation = runCatching { android.provider.MediaStore.getGeneration(this, android.provider.MediaStore.VOLUME_EXTERNAL) }.getOrDefault(-1L)
+        if (generation < 0 || generation != lastGeneration) { lastGeneration = generation; model.refresh() }
     }
+
+    private var lastGeneration = Long.MIN_VALUE
 
     override fun onStop() {
         model.stopWatching()
