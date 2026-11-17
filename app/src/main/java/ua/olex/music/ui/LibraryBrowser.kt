@@ -122,6 +122,7 @@ internal fun LibraryBrowser(
     /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
     openTile: String? = null,
 ) {
+    val nav = LocalOnlineNav.current
     val startTab = LocalStartTab.current
     var tabName by rememberSaveable { mutableStateOf(if (mode == BrowserMode.LIBRARY) LibraryTab.PLAYLISTS.name else startTab) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -390,7 +391,7 @@ internal fun LibraryBrowser(
                                     found.tracks.isEmpty() -> item(key = "online-none") { BrowserMessage("Nothing more on YouTube Music.") }
                                     else -> itemsIndexed(found.tracks, key = { _, t -> "online-" + t.id.value }) { i, t ->
                                         TrackRow(t, current = t.id.value == currentId, onMore = { onTrackActions(t) },
-                                            onPlayNext = { onEnqueue(listOf(t), true) }, onQueue = { onEnqueue(listOf(t), false) }) { onSearchUsed(query); onPlay(found.tracks, i) }
+                                            onPlayNext = { onEnqueue(listOf(t), true) }, onQueue = { onEnqueue(listOf(t), false) }) { onSearchUsed(query); nav.play(found.tracks, i, "Search") }
                                     }
                                 }
                             }

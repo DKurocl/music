@@ -56,4 +56,21 @@ class YouTubeMusicTest {
         assertEquals(file, YouTubeMusic.localCopy(online, library))
         assertNull(YouTubeMusic.localCopy(online.copy(durationMs = 200_000), library))
     }
+
+    @Test fun theIndexFindsTheOwnersFileForEveryCaseTheSlowMatchDid() {
+        val eventually = Track(TrackId("local:1"), "content://1", "Eventually", "Tame Impala", album = "Currents", durationMs = 318_500)
+        val cafe = Track(TrackId("local:2"), "content://2", "Caf\u00e9 del Mar", "Energy 52", durationMs = 240_000)
+        val duet = Track(TrackId("local:3"), "content://3", "Under Pressure", "Queen, David Bowie", artists = listOf("Queen", "David Bowie"), durationMs = 248_000)
+        val library = LibraryIndex.EMPTY.copy(songs = listOf(eventually, cafe, duet))
+        val index = YouTubeMusic.indexOf(library)
+        fun online(title: String, artist: String, ms: Long) = Track(TrackId("yt:$title"), "ytm://x", title, artist, durationMs = ms)
+        assertEquals(eventually, index.copyOf(online("Eventually (Remastered)", "Tame Impala", 319_000)))
+        assertEquals(eventually, index.copyOf(online("Eventually [Live]", "TAME IMPALA", 0)))
+        assertEquals(cafe, index.copyOf(online("Cafe del Mar (feat. Someone)", "Energy 52", 241_000)))
+        assertEquals(duet, index.copyOf(online("Under Pressure", "David Bowie", 248_500)))
+        assertNull(index.copyOf(online("Eventually", "Tame Impala", 200_000)))
+        assertNull(index.copyOf(online("Let It Happen", "Tame Impala", 0)))
+        // Built once per library: the same object until the library changes.
+        assertTrue(YouTubeMusic.indexOf(library) === index && YouTubeMusic.builtIndex(library) === index)
+    }
 }

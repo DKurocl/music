@@ -68,6 +68,19 @@ object CacheBudget {
             StandaloneDatabaseProvider(context.applicationContext)).also { streams = it }
     }
 
+    /**
+     * Whether a streamed song (its `ytm://` address, the cache key) is kept whole in the cache, so it
+     * plays without the network. False until playback has opened the cache: never opens it itself,
+     * so a list asking this does no disk work on the main thread.
+     */
+    @OptIn(UnstableApi::class)
+    fun isStreamCached(uri: String): Boolean = streams?.let { cache ->
+        runCatching {
+            val length = androidx.media3.datasource.cache.ContentMetadata.getContentLength(cache.getContentMetadata(uri))
+            length > 0 && cache.isCached(uri, 0, length)
+        }.getOrDefault(false)
+    } ?: false
+
     /** Bytes the streamed songs take now. */
     @OptIn(UnstableApi::class)
     fun streamUse(context: Context): Long = runCatching { streams(context).cacheSpace }.getOrDefault(0L)
