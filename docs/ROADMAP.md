@@ -48,7 +48,7 @@ Poweramp and Symfonium as the reference for a local player.
       full-evidence selection to app/browser/enqueue/recovery; retain unavailable occurrences and
       reject ambiguous local substitutions. Include recording-matcher refinement for metadata bridges,
       history/recovery guards and generation-aware refresh (41). First full CI 44188651400: 477 tests, both lints/builds and owner signer passed.
-      Follow-ups await final CI. Local: 202 pure, 25 user SQLite,
+      Follow-ups await final CI. Local: 203 pure, 25 user SQLite,
       9 library SQLite tests passed; full Android CI pending.
 - [ ] Persistent online pages and album/artist identities (49/64).
 - [ ] Account-scoped bidirectional likes and playlist operation/conflict sync (56/58/59).

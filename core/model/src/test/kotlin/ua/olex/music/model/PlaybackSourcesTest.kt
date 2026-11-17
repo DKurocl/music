@@ -141,4 +141,22 @@ class PlaybackSourcesTest {
         assertFalse(request.matchesPlayback(null))
     }
 
+    @Test fun onlineRequestsPreferTheBestFileWhileExplicitFilesAndVideosKeepTheirPreference() {
+        val mp3 = file.copy(format = AudioFormat("mp3", bitrateKbps = 320))
+        val flac = file.copy(id = TrackId("local:flac"), uri = "content://flac", path = "Music/song-hi.flac", format = AudioFormat("flac", 96_000, 24))
+        val a = online("first")
+        val b = online("requested")
+        val refs = listOf(mp3, flac, a, b).map { RecordingSource.from(it)!! }
+        val linked = saved("recording:one", mp3).copy(sources = refs)
+        val policy = PlaybackSources(LibraryIndex.build(listOf(mp3, flac)), listOf(linked))
+        assertEquals(flac.id, policy.select(b).track.id)
+        assertEquals(mp3.id, policy.select(mp3).track.id)
+        assertEquals(flac.id, policy.select(flac).track.id)
+        assertEquals(b.id, PlaybackSources(LibraryIndex.EMPTY, listOf(linked)).select(b).track.id)
+        val unavailable = policy.select(b, available = { false })
+        assertEquals(SourceIssue.OFFLINE, unavailable.issue)
+        assertEquals(b.id, unavailable.track.id)
+        assertEquals(b.artworkUri, unavailable.track.artworkUri)
+    }
+
 }
