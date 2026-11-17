@@ -15,6 +15,7 @@ class PersonalSourcesTest {
         assertEquals(setOf("local:a", "local:b", "yt:one", "recording:one"), personal.favouriteByTrackId.keys)
         assertEquals(setOf(song.id), personal.favouriteByTrackId.values.map { it.id }.toSet())
         assertEquals(1, personal.favourites.size)
+        assertEquals(b.id, personal.localCopies.getValue(online.uri).id)
     }
 
     @Test fun anAmbiguousPhysicalCopyDoesNotBorrowAnotherRecordingsHeart() {
@@ -26,6 +27,8 @@ class PersonalSourcesTest {
         val state = PersonalLibraryState.resolve(catalogue, listOf(a), emptyList(), emptyList(), mapOf("old-a" to a.id))
         assertFalse(state.favouriteByTrackId.containsKey(file.id.value))
         assertFalse(state.favouriteByTrackId.containsKey(raw.id))
+        assertFalse(state.localCopies.containsKey("ytm://a"))
+        assertFalse(state.localCopies.containsKey("ytm://b"))
         assertEquals(a.id, state.favouriteByTrackId.getValue("yt:a").id)
         assertEquals(a.id, state.favouriteByTrackId.getValue("old-a").id)
     }

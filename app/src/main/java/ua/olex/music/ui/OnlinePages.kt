@@ -92,7 +92,8 @@ private fun ReportTitle(list: androidx.compose.foundation.lazy.LazyListState, on
 @Composable
 private fun WarmFirst(songs: List<Track>) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val first = songs.firstOrNull()?.takeIf(YouTubeMusic::isOnline)?.id?.value?.removePrefix("yt:")
+    val owned = LocalOwnedSources.current
+    val first = songs.firstOrNull()?.takeIf(YouTubeMusic::isOnline)?.takeUnless { it.uri in owned }?.id?.value?.removePrefix("yt:")
     LaunchedEffect(first) { if (first != null) runCatching { graph.youTube.warm(first) } }
 }
 
