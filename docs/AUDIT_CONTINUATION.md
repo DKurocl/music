@@ -48,10 +48,26 @@ Software evidence: 406 tests passed, debug/release lint and APK builds passed, o
 verified. Only component renders were reviewed. Phone measurements and live account pagination
 are not verified. Source-only statuses do not stand in for physical acceptance.
 
+## Recording/source continuation (music-v1116, 45be07f)
+
+- 47/48/63 foundation [код, CI 44172917731]: durable recording IDs, retained local/YouTube
+  sources, permanent merge aliases, shared statistics, favourites and lyric text/timing. Migration
+  preserves existing IDs, playlist occurrences and history. Ambiguous takes are not merged by name.
+- Downloaded music-v1116 APK matches its published SHA256 and existing owner signer. 441 distinct
+  tests passed with zero failures/errors/skips; both lints and both APK builds passed. No device claim.
+- 52 is being verified on agent/service-source-policy: one bulk full-evidence source policy for
+  app/browser/enqueue/refill/startup/resumption and bounded recovery. It keeps unavailable occurrences,
+  requested identity, physical source and queue key separate, protects a healthy current stream and
+  avoids counting a source replacement as another play. Full branch CI is pending.
+- 41 refinement on the same branch: unchanged MediaStore generations skip refresh scans; manual
+  Rescan remains forced. Playback uses the cached snapshot while the observer refreshes independently.
+  This does not implement a complete incremental scanner or establish a phone performance number.
+
 ## Still open after this batch
 
-- Model and sync: 47, 48, 49, 52, 56, 58, 59, 63, 64. Saved song snapshots are projected here;
-  stable recording/source IDs, full offline page storage and bidirectional sync remain open.
+- Model and sync: 49, 56, 58, 59, 64; central policy 52 is in verification. Durable online pages,
+  stable album/artist links and bidirectional account sync remain open. Recording/source foundation
+  47/48/63 is delivered; cross-surface source behavior still depends on verifying the policy block.
 - Partial performance/system work: 45, 50, 74; the remaining limitations are described above.
 - Navigation, system and UI: 15, 18, 70, 76, 77, 78, 79, 80.
 - Physical phone gates: 10, 11, 12, 19, 23, 46, 75. No Pixel or Sony measurements in this session.

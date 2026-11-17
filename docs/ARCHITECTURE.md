@@ -348,3 +348,5 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     Unchanged in-process refreshes skip scanning; manual Rescan remains forced and unknown versions
     use a full scan. Capture the version before scanning so concurrent changes are not lost. This
     optimization does not replace the initial full reconciliation or prove phone timing targets.
+    The service observer performs refresh independently; Play uses the latest cached snapshot and
+    never waits for a full scan or fails merely because scanning failed.

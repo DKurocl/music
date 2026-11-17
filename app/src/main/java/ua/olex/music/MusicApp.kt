@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserDatabase
@@ -94,7 +95,7 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         graph.library.tracks.map { Unit }, graph.network.map { Unit }, graph.youTubeOn.map { Unit },
         ua.olex.music.playback.CacheBudget.revision.map { Unit },
         graph.audioAccess.flatMapLatest { granted ->
-            if (!granted) kotlinx.coroutines.flow.emptyFlow() else graph.library.changes.debounce(500).map {
+            if (!granted) kotlinx.coroutines.flow.emptyFlow() else graph.library.changes.debounce(500).onStart { emit(Unit) }.map {
                 try { graph.library.refresh() }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (failure: Exception) { android.util.Log.w("MusicLibrary", "Could not refresh sources: ${failure.javaClass.simpleName}") }
@@ -106,7 +107,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {
         val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
         graph.audioAccess.value = permitted
-        if (permitted) graph.library.refresh()
+        // Playback reads the current snapshot immediately. The service source observer refreshes
+        // it independently; a long scan or its failure must not hold up an online/local Play.
         // Hidden library folders still remain legitimate playlist/playback sources.
         val local = if (permitted) ua.olex.music.model.LibraryIndex.build(graph.library.tracks.first()) else ua.olex.music.model.LibraryIndex.EMPTY
         val policy = graph.userLibrary.sourcePolicy(local)

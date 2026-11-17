@@ -278,6 +278,7 @@ class PlaybackService : MediaLibraryService() {
 
     private fun skipOrPause() {
         val player = exoOrNull() ?: return
+        if (!player.playWhenReady) return
         val owner = application as? OnlineStreams
         if (player.repeatMode != Player.REPEAT_MODE_ONE) {
             var next = player.currentTimeline.getNextWindowIndex(player.currentMediaItemIndex, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
