@@ -16,6 +16,7 @@ class RecordingSourceTest {
         assertEquals(a.key, a.copy(uri = "content://renumbered").key)
         assertNotEquals(a.key, a.copy(path = "Music/copy.flac").key)
         assertNotEquals(a.copy(clipStartMs = 0, clipEndMs = 100_000).key, a.copy(clipStartMs = 100_000, clipEndMs = 200_000).key)
+        assertNotEquals(a.copy(path = "Music/song.flac#clip:0:100000").key, a.copy(clipStartMs = 0, clipEndMs = 100_000).key)
     }
 
     @Test fun knownRecordingLinksBothSourcesAndKeepsTheOldestDurableId() {
