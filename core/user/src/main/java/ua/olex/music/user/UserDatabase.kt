@@ -222,7 +222,7 @@ interface UserDao {
     @Transaction @Query("""
         SELECT * FROM saved_songs WHERE id IN (
             SELECT songId FROM favourites UNION SELECT songId FROM playlist_entries
-            UNION SELECT songId FROM play_history UNION SELECT songId FROM ratings UNION SELECT songId FROM lyric_offsets
+            UNION SELECT songId FROM play_history UNION SELECT songId FROM ratings WHERE stars > 0 UNION SELECT songId FROM lyric_offsets
         ) ORDER BY id
     """)
     fun catalogue(): Flow<List<RecordingRelations>>

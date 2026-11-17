@@ -15,7 +15,7 @@ CI for first implementation `648bd85`: https://github.com/DKurocl/music/actions/
 431 distinct tests/executions, 0 failures/errors/skips. Tests, lintDebug/lintRelease,
 assembleDebug/assembleRelease and owner signer passed. Includes real exported-schema 3 -> 4 migration.
 Final review found ambiguity, artwork fallback, explicit clears and physical-copy heart cases; follow-up
-changes need their own complete CI before main. Local checks now pass 182 JVM tests (including physical-copy favourite state) and 22 native SQLite
+changes need their own complete CI before main. Local checks now pass 182 JVM tests (including physical-copy favourite state) and 23 native SQLite
 repository tests. A bad single-basename test was corrected to an actually resolvable folder suffix;
 basename-only matching is deliberately unavailable. Full follow-up Android CI is pending.
 Final review also isolated CUE keys from literal paths, stabilized unresolved ambiguous files across
