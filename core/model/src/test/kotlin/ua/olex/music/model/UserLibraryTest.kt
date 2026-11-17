@@ -42,6 +42,9 @@ class UserLibraryTest {
         assertEquals("ytm://abc123", saved.resolve(LibraryIndex.EMPTY)?.uri)
         // Downloaded later: the file is what plays.
         val file = Track(TrackId("local:9"), "content://9", "Teardrop", "Massive Attack", album = "Mezzanine", durationMs = 330_400, path = "Music/Teardrop.flac")
-        assertEquals(file, saved.resolve(LibraryIndex.build(listOf(file))))
+        val linked = saved.resolve(LibraryIndex.build(listOf(file)))!!
+        assertEquals(file, linked.copy(sources = emptyList()))
+        assertEquals(setOf("ytm://abc123", "content://9"), linked.sources.map { it.uri }.toSet())
+        assertEquals(online.uri, SavedSong.from(linked).online()?.uri)
     }
 }

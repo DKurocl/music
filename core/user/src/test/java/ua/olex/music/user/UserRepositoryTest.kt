@@ -46,23 +46,24 @@ class UserRepositoryTest {
         repository.toggleFavourite(c)
         val playlist = repository.createPlaylist("Saved", listOf(a))
         assertFalse(repository.history.first().any { it.song.path == "ytm://online" })
-        assertEquals(4, repository.catalogue.first().size)
+        assertEquals(3, repository.catalogue.first().size)
         database.close()
         reopen()
-        assertEquals("ytm://online", repository.catalogue.first().single { it.path.startsWith("ytm://") }.path)
+        val recordingId = idOf(a)
+        assertTrue(repository.catalogue.first().single { it.id == recordingId }.references.any { it.uri == "ytm://online" })
         repository.deletePlaylist(playlist)
         repository.toggleFavourite(c)
-        assertEquals(setOf(SavedSong.from(online).id, SavedSong.from(b).id), repository.catalogue.first().map { it.id }.toSet())
+        assertEquals(setOf(idOf(online), idOf(b)), repository.catalogue.first().map { it.id }.toSet())
     }
 
     @Test fun duplicatesOnPurposeAndPositionalEdits() = runBlocking {
         val id = repository.createPlaylist("Loop", listOf(a))
         repository.addToPlaylist(id, listOf(b, a), duplicates = true)
         assertEquals(listOf("Song 1", "Song 2", "Song 1"), names())
-        repository.removeFromPlaylist(id, SavedSong.from(a).id, position = 2)
+        repository.removeFromPlaylist(id, idOf(a), position = 2)
         assertEquals(listOf("Song 1", "Song 2"), names())
         repository.addToPlaylist(id, listOf(a), duplicates = true)
-        repository.moveInPlaylist(id, SavedSong.from(a).id, -1, position = 2)
+        repository.moveInPlaylist(id, idOf(a), -1, position = 2)
         assertEquals(listOf("Song 1", "Song 1", "Song 2"), names())
         assertEquals(listOf(0, 1, 2), database.userData().entries(id).map { it.position })
     }
@@ -71,9 +72,9 @@ class UserRepositoryTest {
         val id = repository.createPlaylist("  Evening  ", listOf(a, b, a))
         repository.addToPlaylist(id, listOf(b, c))
         assertEquals(listOf("Song 1", "Song 2", "Song 3"), names())
-        repository.moveInPlaylist(id, SavedSong.from(c).id, -1)
+        repository.moveInPlaylist(id, idOf(c), -1)
         assertEquals(listOf("Song 1", "Song 3", "Song 2"), names())
-        repository.removeFromPlaylist(id, SavedSong.from(a).id)
+        repository.removeFromPlaylist(id, idOf(a))
         repository.addToPlaylist(id, listOf(a))
         assertEquals(listOf("Song 3", "Song 2", "Song 1"), names())
         repository.renamePlaylist(id, " Night ")
@@ -102,14 +103,14 @@ class UserRepositoryTest {
         database.close()
         reopen()
         assertEquals(listOf("Song 2", "Song 1"), names())
-        assertEquals(SavedSong.from(a).id, repository.favourites.first().single().id)
+        assertEquals(idOf(a), repository.favourites.first().single().id)
         assertEquals(2, repository.history.first().size)
         assertEquals(750L, repository.lyricOffset(SavedSong.from(a)).first())
     }
 
     @Test fun movedFavouriteCanBeRemovedUsingItsOriginalReference() = runBlocking {
         repository.toggleFavourite(a)
-        repository.toggleFavourite(a.copy(path = "Moved/song.flac"), SavedSong.from(a).id)
+        repository.toggleFavourite(a.copy(path = "Moved/song.flac"), idOf(a))
         assertTrue(repository.favourites.first().isEmpty())
     }
 
@@ -124,23 +125,28 @@ class UserRepositoryTest {
             ua.olex.music.model.LibraryIndex.EMPTY).songs.single()
         val saved = SavedSong.from(a)
         repository.importPlaylist(" Imported ", listOf(missing, saved, missing))
+        val expected = repository.playlists.first().single().songs
         database.close(); reopen()
         val playlist = repository.playlists.first().single()
         assertEquals("Imported", playlist.name)
-        assertEquals(listOf(missing, saved, missing), playlist.songs) // the file's duplicates are kept
+        assertEquals(expected, playlist.songs)
+        assertEquals(listOf(missing.path, saved.path, missing.path), playlist.songs.map { it.path })
+        assertEquals(playlist.songs[0].id, playlist.songs[2].id)
     }
 
     @Test fun largeImportsAreBatchedWithoutLosingPositionsOrFavourites() = runBlocking {
         repository.toggleFavourite(a)
         val songs = (1..1201).map { SavedSong.from(track(it)) }
         val id = repository.importPlaylist("Large", songs)
-        assertEquals(songs.map { it.id }, repository.playlists.first().single().songs.map { it.id })
+        assertEquals(songs.map { it.path }, repository.playlists.first().single().songs.map { it.path })
+        assertEquals(1201, repository.playlists.first().single().songs.map { it.id }.distinct().size)
         assertEquals((0..1200).toList(), database.userData().entries(id).map { it.position })
-        assertEquals(listOf(SavedSong.from(a)), repository.favourites.first())
+        assertEquals(idOf(a), repository.favourites.first().single().id)
+        assertEquals(a.path, repository.favourites.first().single().path)
     }
 
     @Test fun invalidImportsDoNotLeaveEmptyPlaylistHeaders() {
-        for (songs in listOf(emptyList(), listOf(SavedSong.from(a).copy(path = "")))) {
+        for (songs in listOf(emptyList(), listOf(SavedSong.from(a).copy(path = "", sources = emptyList())))) {
             assertThrows(IllegalArgumentException::class.java) { runBlocking { repository.importPlaylist("Invalid", songs) } }
         }
         assertThrows(IllegalArgumentException::class.java) { runBlocking { repository.importPlaylist(" ", listOf(SavedSong.from(a))) } }
@@ -162,6 +168,7 @@ class UserRepositoryTest {
         }
     }
 
+    private suspend fun idOf(track: Track) = repository.reference(track).first()!!.id
     private suspend fun names() = repository.playlists.first().single().songs.map { it.title }
     private fun track(id: Int) = Track(TrackId("local:$id"), "content://$id", "Song $id", "Artist", path = "Music/$id.flac", durationMs = 120_000)
 
@@ -179,4 +186,96 @@ class UserRepositoryTest {
         assertEquals("0 clears it; plays stay", 0, stats.getValue(a.key.value).rating)
         assertEquals(2, stats.getValue(a.key.value).plays)
     }
+
+    @Test fun recordingIdAndOnlineReserveSurviveLocalPreferenceAndReopen() = runBlocking {
+        val online = a.copy(id = TrackId("yt:reserve"), uri = "ytm://reserve", path = null, artworkUri = "https://online/cover")
+        repository.toggleFavourite(online)
+        val id = idOf(online)
+        assertTrue(id.startsWith("recording:"))
+        repository.recordPlay(a.copy(artworkUri = "content://local/cover"))
+        repository.setRating(a, 5)
+        repository.setLyricOffset(a, 321)
+        assertEquals(id, idOf(a))
+        database.close(); reopen()
+        val song = repository.favourites.first().single()
+        assertEquals(id, song.id)
+        assertEquals(a.path, song.path)
+        assertEquals(2, song.references.size)
+        val fallback = song.resolve(ua.olex.music.model.LibraryIndex.EMPTY)!!
+        assertEquals("ytm://reserve", fallback.uri)
+        assertEquals("https://online/cover", fallback.artworkUri)
+        assertEquals(id, fallback.recordingId)
+        assertEquals(5, repository.stats.first().getValue(id).rating)
+        assertEquals(1, repository.stats.first().getValue(id).plays)
+        assertEquals(321L, repository.lyricOffset(SavedSong.from(fallback)).first())
+    }
+
+    @Test fun unknownDurationsAndDifferentTakesKeepSeparateSettings() = runBlocking {
+        val unknown = a.copy(id = TrackId("yt:unknown"), uri = "ytm://unknown", path = null, durationMs = 0)
+        val live = a.copy(id = TrackId("yt:live"), uri = "ytm://live", path = null, title = "Song 1 (Live)")
+        repository.setRating(a, 5)
+        repository.setRating(unknown, 2)
+        repository.setRating(live, 3)
+        assertEquals(3, repository.catalogue.first().size)
+        assertEquals(setOf(5, 2, 3), listOf(a, unknown, live).map { repository.stats.first().getValue(idOf(it)).rating }.toSet())
+        assertFalse(repository.stats.first().containsKey(a.key.value))
+        repository.setRating(unknown, 0)
+        assertEquals(5, repository.stats.first().getValue(idOf(a)).rating)
+    }
+
+    @Test fun aConfirmedLegacyMergeKeepsEveryOccurrenceEventAndLatestSetting() = runBlocking {
+        val online = a.copy(id = TrackId("yt:old"), uri = "ytm://old", path = null)
+        val file = SavedSong.from(a).copy(id = "a-legacy", createdAt = 0)
+        val remote = SavedSong.from(online).copy(id = "b-legacy", createdAt = 0)
+        val dao = database.userData()
+        dao.saveSongs(listOf(UserSongEntity.from(file), UserSongEntity.from(remote)))
+        dao.saveAliases(listOf(RecordingAliasEntity(file.id, file.id), RecordingAliasEntity(remote.id, remote.id)))
+        val playlist = dao.createPlaylist(PlaylistEntity(name = "Repeated", createdAt = 1))
+        dao.insertEntries(listOf(file.id, remote.id, file.id).mapIndexed { index, id -> PlaylistEntryEntity(playlist, id, index) })
+        dao.addHistory(HistoryEntity(id = 10, songId = file.id, playedAt = 100))
+        dao.addHistory(HistoryEntity(id = 11, songId = remote.id, playedAt = 200))
+        dao.addFavourite(FavouriteEntity(remote.id, 300))
+        dao.setRating(RatingEntity(file.id, 5, 100)); dao.setRating(RatingEntity(remote.id, 2, 200))
+        dao.setOffset(LyricOffsetEntity(file.id, 500, 400)); dao.setOffset(LyricOffsetEntity(remote.id, 100, 200))
+        val merged = repository.keepReference(online)
+        assertEquals(file.id, merged.id)
+        assertEquals(listOf(file.id, file.id, file.id), dao.entries(playlist).map { it.songId })
+        assertEquals(listOf(11L, 10L), repository.history.first().map { it.id })
+        assertEquals(listOf(200L, 100L), repository.history.first().map { it.playedAt })
+        assertEquals(2, repository.stats.first().getValue(file.id).plays)
+        assertEquals(2, repository.stats.first().getValue(file.id).rating)
+        assertEquals(500L, repository.lyricOffset(remote).first())
+        assertEquals(file.id, dao.canonicalId(remote.id))
+        assertEquals(1, dao.allRecordings().size)
+        repository.removeFromPlaylist(playlist, remote.id, position = 1)
+        assertEquals(listOf(0, 1), dao.entries(playlist).map { it.position })
+        repository.removeFavourite(remote.id)
+        assertTrue(repository.favourites.first().isEmpty())
+    }
+
+    @Test fun stalePositionDoesNotRemoveOrMoveAnotherOccurrence() = runBlocking {
+        val id = repository.createPlaylist("Order", listOf(a, b))
+        repository.addToPlaylist(id, listOf(a), duplicates = true)
+        repository.removeFromPlaylist(id, idOf(a), position = 1)
+        repository.moveInPlaylist(id, idOf(a), 1, position = 1)
+        assertEquals(listOf("Song 1", "Song 2", "Song 1"), names())
+    }
+
+    @Test fun staleQueueReserveCannotOverwriteFreshPrimarySource() = runBlocking {
+        val old = a.copy(id = TrackId("yt:one"), uri = "ytm://one", path = null, artworkUri = "https://old")
+        val initial = repository.keepReference(old)
+        val linkedFile = initial.bind(a)
+        repository.keepReference(old.copy(artworkUri = "https://fresh"))
+        repository.keepReference(linkedFile)
+        assertEquals("https://fresh", repository.reference(a).first()!!.online()!!.artworkUri)
+    }
+
+    @Test fun unchangedRegistrationDoesNotInvalidateTheCatalogue() = runBlocking {
+        repository.keepReference(a)
+        fun changes(): Long = database.openHelper.writableDatabase.query("SELECT total_changes()").use { it.moveToFirst(); it.getLong(0) }
+        val before = changes()
+        repeat(3) { repository.keepReference(a) }
+        assertEquals(before, changes())
+    }
+
 }

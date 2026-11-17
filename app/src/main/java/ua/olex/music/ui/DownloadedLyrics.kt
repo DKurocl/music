@@ -9,7 +9,6 @@ import ua.olex.music.lyrics.FoundLyrics
 import ua.olex.music.lyrics.OnlineLyrics
 import ua.olex.music.model.Track
 import java.io.File
-import java.security.MessageDigest
 
 /**
  * Lyrics fetched from the internet when the owner asks, kept in the app's own storage per song
@@ -21,8 +20,11 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
-    fun read(track: Track): Pair<String, String>? = FoundLyrics.Format.entries.firstNotNullOfOrNull { f ->
-        File(dir, name(track, f)).takeIf { it.isFile }?.let { it.readText() to f.name }
+    fun read(track: Track, aliases: List<String> = emptyList()): Pair<String, String>? {
+        val keys = keys(track, aliases)
+        val candidates = keys.flatMap { key -> FoundLyrics.Format.entries.map { f -> File(dir, name(key, f)) to f } }
+        val found = candidates.filter { it.first.isFile }.maxByOrNull { it.first.lastModified() } ?: return null
+        return found.first.readText() to found.second.name
     }
 
     /** What a lookup found: where from, and the cleaned lyrics as text to keep in the music file. */
@@ -38,29 +40,42 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
         val plain = clean.sync == ua.olex.music.lyrics.Sync.NONE
         val text = if (plain) clean.lines.joinToString("\n") { it.text } else ua.olex.music.lyrics.LrcWriter.write(clean)
         val format = if (plain) FoundLyrics.Format.PLAIN else FoundLyrics.Format.LRC
-        FoundLyrics.Format.entries.forEach { File(dir, name(track, it)).delete() }
-        val file = File(dir, name(track, format))
-        val tmp = File(dir, file.name + ".tmp")
-        tmp.writeText(text); tmp.renameTo(file)
+        FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
+        val file = File(dir, name(writeKey(track), format))
+        write(file, text)
         _revision.value++
         Fetched(found.source, text)
     }
 
-    /** Lyrics the owner retimed by hand; they win over every other source for this song. */
-    fun edited(track: Track): String? = File(dir, editedName(track)).takeIf { it.isFile }?.readText()
+    /** Latest explicit edit wins across recording aliases; an empty reset marker blocks old edits. */
+    fun edited(track: Track, aliases: List<String> = emptyList()): String? = keys(track, aliases)
+        .map { File(dir, editedName(it)) }.filter { it.isFile }.maxByOrNull { it.lastModified() }?.readText()?.takeIf { it.isNotEmpty() }
 
     fun saveEdited(track: Track, lrc: String) {
-        val file = File(dir, editedName(track)); val tmp = File(dir, file.name + ".tmp")
-        tmp.writeText(lrc); tmp.renameTo(file); _revision.value++
+        write(File(dir, editedName(writeKey(track))), lrc)
+        _revision.value++
     }
 
-    fun deleteEdited(track: Track) { File(dir, editedName(track)).delete(); _revision.value++ }
+    fun deleteEdited(track: Track) = saveEdited(track, "")
 
-    private fun editedName(track: Track) = name(track, FoundLyrics.Format.LRC).removeSuffix(".lrc") + ".edited.lrc"
+    private fun editedName(key: String) = name(key, FoundLyrics.Format.LRC).removeSuffix(".lrc") + ".edited.lrc"
 
-    fun delete(track: Track) { FoundLyrics.Format.entries.forEach { File(dir, name(track, it)).delete() }; _revision.value++ }
+    fun delete(track: Track) {
+        FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
+        write(File(dir, name(writeKey(track), FoundLyrics.Format.PLAIN)), "")
+        _revision.value++
+    }
 
-    private fun name(track: Track, f: FoundLyrics.Format): String {
-        return ua.olex.music.lyrics.LyricsStore.stem(track.key.value) + "." + f.extension
+    private fun writeKey(track: Track) = track.recordingId ?: track.key.value
+    private fun keys(track: Track, aliases: List<String>) =
+        (listOf(writeKey(track)) + aliases + track.sources.map { it.songKey } + track.key.value).distinct()
+
+    private fun name(key: String, format: FoundLyrics.Format) = ua.olex.music.lyrics.LyricsStore.stem(key) + "." + format.extension
+
+    private fun write(file: File, text: String) {
+        val target = android.util.AtomicFile(file)
+        val stream = target.startWrite()
+        try { stream.write(text.toByteArray(Charsets.UTF_8)); target.finishWrite(stream) }
+        catch (failure: Exception) { target.failWrite(stream); throw failure }
     }
 }

@@ -41,7 +41,7 @@ Poweramp and Symfonium as the reference for a local player.
       (21), shared session lyrics and draw-phase word timing (33/34), cache budgets/events (8/54),
       offline queue retention (53). Auxiliary priority and resumption remain partial (45/74).
       Full backlog and limits: `AUDIT_CONTINUATION.md`; physical acceptance: `PHONE_CHECK.md`.
-- [ ] Next unified-library block: stable recording IDs with local and YouTube sources (47/48/63),
+- [~] Next unified-library block (Codex, 2026-11-17, `agent/recording-sources`): stable recording IDs with local and YouTube sources (47/48/63),
       safe user.db migration, durable album/artist pages and identities (49/64), service source
       selection (52), bidirectional likes and playlist operation/conflict sync (56/58/59).
 

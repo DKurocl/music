@@ -73,6 +73,8 @@ internal class PlaybackStore(directory: File) {
         put("artwork", meta.artworkUri?.toString()); put("duration", meta.durationMs)
         put("track", meta.trackNumber); put("disc", meta.discNumber); put("path", meta.extras?.getString(PlayerConnection.PATH_KEY))
         put("context", meta.extras?.getString(PlayerConnection.CONTEXT_KEY))
+        put("recording", meta.extras?.getString(PlayerConnection.RECORDING_KEY))
+        put("sources", meta.extras?.getString(PlayerConnection.SOURCES_KEY))
         item.clippingConfiguration.takeIf { it.startPositionMs > 0 || it.endPositionMs != androidx.media3.common.C.TIME_END_OF_SOURCE }?.let {
             put("clipStart", it.startPositionMs); put("clipEnd", it.endPositionMs)
         }
@@ -91,7 +93,11 @@ internal class PlaybackStore(directory: File) {
                 .setArtworkUri(row.string("artwork")?.let(Uri::parse))
                 .setDurationMs(row.string("duration")?.toLong()).setTrackNumber(row.string("track")?.toInt()).setDiscNumber(row.string("disc")?.toInt())
                 .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
-                .setExtras(Bundle().apply { putString(PlayerConnection.QUEUE_KEY, row.getString("key")); putString(PlayerConnection.PATH_KEY, row.string("path")); putString(ReplayGainCodec.TAGS, row.string("replayGain")); putString(PlayerConnection.CONTEXT_KEY, row.string("context")) }).build())
+                .setExtras(Bundle().apply {
+                    putString(PlayerConnection.QUEUE_KEY, row.getString("key")); putString(PlayerConnection.PATH_KEY, row.string("path"))
+                    putString(ReplayGainCodec.TAGS, row.string("replayGain")); putString(PlayerConnection.CONTEXT_KEY, row.string("context"))
+                    putString(PlayerConnection.RECORDING_KEY, row.string("recording")); putString(PlayerConnection.SOURCES_KEY, row.string("sources"))
+                }).build())
             .build()
     }
 

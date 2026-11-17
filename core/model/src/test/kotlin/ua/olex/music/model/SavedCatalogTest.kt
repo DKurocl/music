@@ -22,7 +22,9 @@ class SavedCatalogTest {
     @Test fun downloadingAndRemovingAFilePreservesTheOnlineFallbackWithoutDuplicates() {
         val saved = listOf(SavedSong.from(online))
         val local = LibraryIndex.build(listOf(file))
-        assertSame(local, SavedCatalog.merge(local, saved))
+        val merged = SavedCatalog.merge(local, saved)
+        assertEquals(file.id, merged.songs.single().id)
+        assertEquals(setOf("ytm://one", "content://1"), merged.songs.single().sources.map { it.uri }.toSet())
         assertEquals(listOf(online), SavedCatalog.merge(LibraryIndex.EMPTY, saved).songs)
         assertEquals("ytm://one", saved.single().path)
     }
@@ -58,4 +60,27 @@ class SavedCatalogTest {
         assertEquals(local.songs, merged.songs.filter { it.id.value.startsWith("local:") })
         assertEquals(3, merged.songs.size)
     }
+
+    @Test fun durableRecordingsBindAllCopiesButAppearOnceInTheCatalogue() {
+        val saved = SavedSong.from(online).copy(id = "recording:one", createdAt = 10)
+        val copy = file.copy(id = TrackId("local:2"), path = "Other/Halo.flac", format = AudioFormat("flac", 96_000, 24))
+        val local = LibraryIndex.build(listOf(file, copy))
+        val bound = SavedCatalog.bindLocal(local, listOf(saved))
+        assertEquals(listOf("recording:one", "recording:one"), bound.map { it.recordingId })
+        val catalogue = SavedCatalog.merge(local, listOf(saved))
+        assertEquals(copy.id, catalogue.songs.single().id)
+        assertEquals(2, catalogue.folders.sumOf { it.tracks.size })
+        assertTrue(catalogue.folders.flatMap { it.tracks }.all { it.recordingId == saved.id })
+        assertEquals("recording:one", catalogue.songs.single().statsKey)
+        assertEquals(online.uri, SavedSong.from(catalogue.songs.single()).online()!!.uri)
+    }
+
+    @Test fun anAmbiguousRecordingCannotClaimAScannedFile() {
+        val first = SavedSong.from(online).copy(id = "recording:a", durationMs = 260_000,
+            sources = listOf(RecordingSource.from(online)!!))
+        val second = SavedSong.from(online.copy(uri = "ytm://two", durationMs = 265_000)).copy(id = "recording:b")
+        val middle = file.copy(durationMs = 262_000)
+        assertNull(SavedCatalog.bindLocal(LibraryIndex.build(listOf(middle)), listOf(first, second)).single().recordingId)
+    }
+
 }

@@ -86,9 +86,15 @@ data class Track(
     /** A track cut from a longer file (a cue sheet): where it starts and ends in that file, in ms. */
     val clipStartMs: Long? = null,
     val clipEndMs: Long? = null,
+    /** Durable recording identity, independent of the selected source and MediaStore numbering. */
+    val recordingId: String? = null,
+    /** Linked sources retained when a local copy substitutes for a streamed track. */
+    val sources: List<RecordingSource> = emptyList(),
 ) {
     // Browsing does not need song matching; defer normalization until a source lookup asks for it.
     val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }
+    /** Unsaved tracks can still use a unique legacy key until their first durable reference exists. */
+    val statsKey: String get() = recordingId ?: key.value
 }
 
 /** File-derived information retained for gain, gapless, artwork and lyrics consumers. Unknown stays null. */

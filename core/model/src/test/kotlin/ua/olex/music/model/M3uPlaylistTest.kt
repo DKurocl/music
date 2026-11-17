@@ -37,13 +37,17 @@ class M3uPlaylistTest {
         val resolved = M3uPlaylist.resolve(M3uPlaylist.parse("Album/Пісня + #1.flac"), library(song, other))
         assertEquals(1, resolved.count(M3uMatch.AMBIGUOUS))
         assertNull(resolved.songs.single().resolve(library(song, other)))
-        assertEquals(song, resolved.songs.single().resolve(library(song)))
+        val linked = resolved.songs.single().resolve(library(song))!!
+        assertEquals(song, linked.copy(recordingId = null, sources = emptyList()))
+        assertEquals(resolved.songs.single().id, linked.recordingId)
     }
     @Test fun missingPathsRemainDurableAndResolveAfterFilesArriveWithDifferentTags() {
         val imported = M3uPlaylist.resolve(M3uPlaylist.parse("#EXTINF:120,Old artist - Old title\n${song.path}"), LibraryIndex.EMPTY)
         assertEquals(1, imported.count(M3uMatch.MISSING))
         assertEquals(song.path, imported.songs.single().path)
-        assertEquals(song, imported.songs.single().resolve(library(song)))
+        val linked = imported.songs.single().resolve(library(song))!!
+        assertEquals(song, linked.copy(recordingId = null, sources = emptyList()))
+        assertEquals(imported.songs.single().id, linked.recordingId)
     }
     @Test fun relativeParentsNeedAFolderAndAreNotSilentlyDropped() {
         val doc = M3uPlaylist.parse("../Album/Пісня + #1.flac")
