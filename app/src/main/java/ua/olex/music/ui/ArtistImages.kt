@@ -42,7 +42,16 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     /** Stores a photo as if fetched (tests and previews). */
     internal fun put(name: String, bytes: ByteArray) { File(dir, key(name) + ".jpg").writeBytes(bytes) }
 
-    fun cached(name: String): File? = if (!enabled) null else cachedFile(name)
+    fun cached(name: String): File? = if (!enabled) null else cachedFile(name).also { photos[name] = Optional(it) }
+
+    /** What [cached] last found for this artist, without touching the disk (for drawing a screen). */
+    fun known(name: String): File? = if (!enabled) null else photos[name]?.value
+    /** What [cachedBio] last read, without touching the disk. */
+    fun knownBio(name: String): String? = if (!enabled) null else bios[name]?.value
+
+    private class Optional<T>(val value: T?)
+    private val photos = java.util.concurrent.ConcurrentHashMap<String, Optional<File>>()
+    private val bios = java.util.concurrent.ConcurrentHashMap<String, Optional<String>>()
     // Photos are kept for every artist in the library (they are small and fetched once); no limit.
     private fun cachedFile(name: String): File? = File(dir, key(name) + ".jpg").takeIf { it.isFile }
 
@@ -76,6 +85,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     }
 
     fun cachedBio(name: String): String? = if (!enabled) null else File(dir, key(name) + ".bio").takeIf { it.isFile }?.readText()?.let(::tidyBio)?.ifBlank { null }
+        .also { bios[name] = Optional(it) }
 
     /**
      * A short "about" for the artist page: Wikipedia's summary (no account, no key; only the name is
@@ -140,7 +150,10 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
 internal fun ArtistImage(name: String, modifier: Modifier, size: Dp, shape: androidx.compose.ui.graphics.Shape = CircleShape) {
     val context = LocalContext.current
     val images = (context.applicationContext as ua.olex.music.MusicApp).graph.artistImages
-    val file by produceState(images.cached(name), name) { if (value == null) value = images.image(name) }
+    // The disk is checked off the main thread; a photo seen before in this process shows at once.
+    val file by produceState(images.known(name), name) {
+        if (value == null) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { images.cached(name) } ?: images.image(name)
+    }
     val cs = MaterialTheme.colorScheme
     Box(modifier.clip(shape).background(cs.tertiaryContainer), contentAlignment = Alignment.Center) {
         Text(name.trim().firstOrNull()?.uppercase() ?: "?", color = cs.onTertiaryContainer, fontSize = (size.value * 0.4f).sp,

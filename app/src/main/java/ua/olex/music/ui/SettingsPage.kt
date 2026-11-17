@@ -223,6 +223,8 @@ internal fun SettingsPage(
                         ua.olex.music.playback.CacheBudget.clearStreams(context)
                         context.cacheDir.listFiles { f -> f.name != "streams" }?.forEach { it.deleteRecursively() }
                         images.clear()
+                        // Fetched moving covers live with the app's files, not in the cache folder.
+                        motion.clearFetched()
                     }
                     cleared++
                 }

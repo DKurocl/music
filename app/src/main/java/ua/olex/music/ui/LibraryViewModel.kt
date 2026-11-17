@@ -88,10 +88,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 val found = graph.youTube.searchAll(text.trim())
                 // An artist the owner has appears once, as theirs (the library section above); albums too.
                 val mineArtists = index.artists.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
-                val mineAlbums = index.albums.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
+                // An album is the owner's only when the title and the artist both match: a namesake by
+                // someone else ("Greatest Hits") still shows.
+                val mineAlbums = index.albums.groupBy({ ua.olex.music.model.TextFold.fold(it.name) }, { ua.olex.music.model.TextFold.fold(it.subtitle.orEmpty()) })
                 OnlineSearch(text, found.songs.filter { YouTubeMusic.localCopy(it, index) == null },
                     artists = found.artists.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineArtists },
-                    albums = found.albums.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineAlbums })
+                    albums = found.albums.filterNot { card ->
+                        val by = ua.olex.music.model.TextFold.fold(card.subtitle.orEmpty())
+                        mineAlbums[ua.olex.music.model.TextFold.fold(card.title)].orEmpty().any { artist -> artist.isNotBlank() && by.contains(artist.substringBefore(",").trim()) }
+                    })
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { OnlineSearch(text, emptyList(), failed = true) }
@@ -321,7 +326,24 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         val saved = personal.value.favouriteByTrackId[track.id.value]
         editUserData { toggleFavourite(track, saved?.id) }
         // A YouTube Music song: the same heart on the owner's YouTube Music account, when signed in.
-        if (YouTubeMusic.isOnline(track)) viewModelScope.launch { graph.youTube.like(track.id.value.removePrefix("yt:"), liked = saved == null) }
+        // Kept as pending until YouTube Music confirms it, and sent again when the network returns.
+        if (YouTubeMusic.isOnline(track)) {
+            val id = track.id.value.removePrefix("yt:")
+            pendingLikes.edit().putBoolean(id, saved == null).apply()
+            viewModelScope.launch { sendLikes() }
+        }
+    }
+
+    private val pendingLikes = getApplication<Application>().getSharedPreferences("pending_likes", android.content.Context.MODE_PRIVATE)
+    private suspend fun sendLikes() {
+        if (!graph.youTubeAccount.signedIn.value || !graph.network.value) return
+        for ((id, liked) in pendingLikes.all) {
+            if (liked !is Boolean) continue
+            if (graph.youTube.like(id, liked)) pendingLikes.edit().remove(id).apply()
+        }
+    }
+    init {
+        viewModelScope.launch { graph.network.collect { online -> if (online) sendLikes() } }
     }
     fun dismissUserError() { userError = null }
     private fun editUserData(action: suspend UserRepository.() -> Unit) {
@@ -401,11 +423,19 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Plays a list and remembers what it is ("Top Hits", an artist, "Search") for the player's "Playing from". */
     fun playFrom(list: List<Track>, index: Int, from: String?) {
         playingFrom = from
+        // The last choice wins: a slower earlier one (an online list still being matched) is dropped,
+        // so it can never replace what the owner picked after it.
+        playJob?.cancel()
         // All online: swap in the owner's files off the main thread (the index may still be building
         // right after a start); a list of files plays at once.
-        if (list.none(YouTubeMusic::isOnline)) { player.play(list, index); return }
-        viewModelScope.launch { playChecked(kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(list) }, index) }
+        if (list.none(YouTubeMusic::isOnline)) { playJob = null; player.play(list, index); return }
+        playJob = viewModelScope.launch {
+            val songs = kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(list) }
+            kotlinx.coroutines.yield()
+            playChecked(songs, index)
+        }
     }
+    private var playJob: Job? = null
 
     private fun playChecked(songs: List<Track>, index: Int) {
         if (graph.network.value || songs.none(YouTubeMusic::isOnline)) { player.play(songs, index); return }
@@ -417,6 +447,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         player.play(playable.map { it.value }, start)
         if (playable.size < songs.size) offlineNotice++
     }
+
+    /** Bumped when the player should open (a tap on the media notification). */
+    var playerRequest by mutableStateOf(0); private set
+    fun requestPlayer() { playerRequest++ }
 
     /** Bumped when Play had to leave songs out (or play nothing) because the phone is offline. */
     var offlineNotice by mutableStateOf(0); private set
@@ -585,11 +619,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 val online = state.queue.drop(state.queueIndex.coerceAtLeast(0)).filter { it.mediaId.startsWith("yt:") }
                 if (online.isEmpty()) return@collect
                 val index = kotlinx.coroutines.withContext(Dispatchers.Default) { localIndex() } ?: return@collect
-                for (item in online) {
+                // All at once (one queue change, not one per song), each keeping its place; the song
+                // playing now keeps playing from the stream (PlayerConnection.replaceQueueItems).
+                val swaps = online.mapNotNull { item ->
                     val duration = if (item.mediaId == state.mediaId) state.durationMs else 0L
-                    val file = index.copyOf(Track(TrackId(item.mediaId), "", item.title, item.artist, durationMs = duration)) ?: continue
-                    player.replaceQueueItem(item.key, file)
-                }
+                    index.copyOf(Track(TrackId(item.mediaId), "", item.title, item.artist, durationMs = duration))?.let { item.key to it }
+                }.toMap()
+                player.replaceQueueItems(swaps)
             }
         }
     }

@@ -70,7 +70,7 @@ internal fun PlaylistBrowser(
             try {
                 val text = withContext(Dispatchers.Default) { PlaylistDocuments.export(snapshot.first, snapshot.second) }
                 withContext(Dispatchers.IO) { PlaylistDocuments.write(context, uri, text) }
-                documentMessage = "Exported ${snapshot.second.size} songs. Missing file references are included."
+                documentMessage = "Exported ${snapshot.second.size} songs. Missing file references are included; YouTube Music songs are saved as their music.youtube.com links."
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { documentMessage = "Couldn't complete the export. Some songs may lack a file path, or the destination could not be written. The selected document may be incomplete." }
             finally { loadingDocument = false }

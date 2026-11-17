@@ -71,6 +71,13 @@ object M3uPlaylist {
     fun resolve(document: M3uDocument, library: LibraryIndex, baseFolder: String? = null): M3uImport {
         val seen = HashSet<String>()
         return M3uImport(document.entries.map { entry ->
+            // A YouTube Music song this app exported: the same streamed song again (the owner's file
+            // plays instead whenever he has it, as for any saved song).
+            Regex("""^https://music\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})""").find(entry.path)?.let { m ->
+                val (artist, title) = entry.label?.split(" - ", limit = 2)?.takeIf { it.size == 2 }?.let { it[0] to it[1] } ?: ("" to (entry.label ?: m.groupValues[1]))
+                val online = SavedSong.from(Track(TrackId("yt:${m.groupValues[1]}"), SavedSong.ONLINE_PREFIX + m.groupValues[1], title, artist, durationMs = entry.durationMs))
+                return@map if (!seen.add(online.id)) M3uResolved(entry, M3uMatch.REPEATED, null) else M3uResolved(entry, M3uMatch.EXACT, online)
+            }
             val result = library.playlistPaths.resolve(entry.path, baseFolder)
             val song = when (result.match) {
                 M3uMatch.EXACT, M3uMatch.RELOCATED -> SavedSong.from(requireNotNull(result.track))
@@ -90,6 +97,15 @@ object M3uPlaylist {
         return buildString {
             append("#EXTM3U\n#PLAYLIST:").append(label(name)).append('\n')
             for (song in songs) {
+                val seconds0 = if (song.durationMs > 0) BigDecimal.valueOf(song.durationMs, 3).stripTrailingZeros().toPlainString() else "-1"
+                // A YouTube Music song in a mixed playlist: its web address, which other players can open
+                // (and this app reads back as the same song), instead of failing the whole export.
+                if (song.path.startsWith(SavedSong.ONLINE_PREFIX)) {
+                    val id = song.path.removePrefix(SavedSong.ONLINE_PREFIX).filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+                    append("#EXTINF:").append(seconds0).append(',').append(label("${song.artist} - ${song.title}")).append('\n')
+                    append("https://music.youtube.com/watch?v=").append(id).append('\n')
+                    continue
+                }
                 val path = requireNotNull(PlaylistPathIndex.normalize(song.path, null)) { "A song has no exportable file path" }
                 require(!path.needsFolder && path.value.isNotBlank()) { "A relative path needs its playlist folder" }
                 val full = if (path.value.startsWith('/')) path.value else storageRoot.trimEnd('/') + "/" + path.value

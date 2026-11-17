@@ -2,6 +2,8 @@
 
 package ua.olex.music.ui
 
+import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -41,6 +43,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
+    val edgeScroll = androidx.compose.runtime.rememberCoroutineScope()
     var draggingKey by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var rowHeightPx by remember { mutableFloatStateOf(1f) }
@@ -99,6 +102,15 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                                         onVerticalDrag = { change, amount ->
                                             change.consume()
                                             dragOffset += amount
+                                            // Near the top or bottom of the list it scrolls by itself, so a song can be
+                                            // carried far down (or up) the queue in one drag.
+                                            val info = list.layoutInfo
+                                            info.visibleItemsInfo.firstOrNull { it.key == item.key }?.let { row ->
+                                                val at = row.offset + dragOffset
+                                                val edge = rowHeightPx
+                                                val step = when { at < info.viewportStartOffset + edge * 0.5f -> -rowHeightPx / 3; at + row.size > info.viewportEndOffset - edge * 0.5f -> rowHeightPx / 3; else -> 0f }
+                                                if (step != 0f) edgeScroll.launch { list.scrollBy(step) }
+                                            }
                                             val now = latestOrder.indexOfFirst { it.key == item.key }
                                             // Past half a row, the neighbour swaps places with the dragged row.
                                             val step = when { dragOffset > rowHeightPx / 2 && now < latestOrder.lastIndex -> 1; dragOffset < -rowHeightPx / 2 && now > 0 -> -1; else -> 0 }
