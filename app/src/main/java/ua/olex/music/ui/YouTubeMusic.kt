@@ -159,10 +159,11 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     }
 
     /** One mood's page: YouTube Music's home filtered by it. */
-    suspend fun mood(mood: Mood): MoodPage? = withContext(Dispatchers.IO) {
-        val params = mood.params ?: return@withContext null
-        post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage)
+    suspend fun mood(mood: Mood): MoodPage? {
+        val params = mood.params ?: return null
+        return cached("mood:${mood.label}") { post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage)?.takeIf { it.playlists.isNotEmpty() || it.songs.isNotEmpty() } }
     }
+    fun peekMood(mood: Mood): MoodPage? = peek("mood:${mood.label}")
 
     /** A home shelf: its title, and its songs or its cards. */
     data class Shelf(val title: String, val songs: List<Track>, val cards: List<Card>)

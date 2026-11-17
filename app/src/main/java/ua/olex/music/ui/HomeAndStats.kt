@@ -59,11 +59,20 @@ internal fun HomePage(
     val mostPlayed = data.mostPlayed; val listened = data.listened; val quickPicks = data.quickPicks
     val hero = recentAlbums.firstOrNull() ?: addedAlbums.firstOrNull() ?: library.albums.firstOrNull()
 
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
+    // A mood chip filters Home in place, as YouTube Music's do; Back or the same chip again clears it.
+    var moodLabel by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val mood = moods.firstOrNull { it.label == moodLabel }
+    androidx.activity.compose.BackHandler(mood != null) { moodLabel = null }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    androidx.compose.runtime.LaunchedEffect(moodLabel) { if (list.firstVisibleItemIndex > 0) list.animateScrollToItem(0) }
+    val moodView = mood?.let { m -> androidx.compose.runtime.key(m.label) { rememberMoodView(m, library) } }
+
+    LazyColumn(modifier, state = list, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
         if (library.songs.isEmpty()) { item { Text("No music yet. Put music in the Music folder, then rescan.", Modifier.padding(16.dp)) }; return@LazyColumn }
 
-        // Moods first, as in YouTube Music: Energize, Relax, Sad, Sleep... one tap to their page.
-        if (moods.isNotEmpty()) item(key = "moods") { MoodRow(moods, Modifier.padding(top = 4.dp, bottom = 4.dp)) }
+        // Moods first, as in YouTube Music: Energize, Relax, Sad, Sleep... a tap shows Home for that mood.
+        if (moods.isNotEmpty()) item(key = "moods") { MoodRow(moods, Modifier.padding(top = 4.dp, bottom = 4.dp), chosen = mood?.label) { moodLabel = it?.label } }
+        if (mood != null && moodView != null) { moodItems(mood, moodView, currentId); return@LazyColumn }
 
         // The owner's own YouTube Music home, at the top as they asked: quick picks, mixes, listen
         // again... Songs they have as files play from the files.
