@@ -103,7 +103,7 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
                 Unit
             }
         },
-    ).debounce(300)
+    ).debounce(300).flowOn(Dispatchers.Default)
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
     override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {
         val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
