@@ -85,7 +85,7 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     /** Close the image disk cache before resizing or clearing it; perform file work off main. */
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     suspend fun resizeCaches(clear: Boolean = false): Unit = kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
-        val old = coil3.SingletonImageLoader.get(this)
+        val old = coil3.SingletonImageLoader.get(this@MusicApp)
         old.shutdown()
         val replacement = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             old.diskCache?.shutdown()
