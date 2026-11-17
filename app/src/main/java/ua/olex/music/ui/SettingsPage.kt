@@ -218,14 +218,7 @@ internal fun SettingsPage(
             Spacer(Modifier.height(4.dp))
             Row(Glyph.DELETE, "Clear cache", "Streamed songs, covers, photos and fetched moving covers. Your music, lyrics and own moving covers stay", last = true) {
                 scope.launch {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        // The stream cache is a live database: emptied through it, never deleted underneath.
-                        ua.olex.music.playback.CacheBudget.clearStreams(context)
-                        context.cacheDir.listFiles { f -> f.name != "streams" }?.forEach { it.deleteRecursively() }
-                        images.clear()
-                        // Fetched moving covers live with the app's files, not in the cache folder.
-                        motion.clearFetched()
-                    }
+                    (context.applicationContext as ua.olex.music.MusicApp).resizeCaches(clear = true)
                     cleared++
                 }
             }

@@ -420,7 +420,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         if (graph.network.value || songs.none(YouTubeMusic::isOnline)) { player.play(songs, index, playingFrom); return }
         // Keep every occurrence in place. Only the starting index changes while offline.
         val playable = songs.withIndex().filter { (_, t) -> !YouTubeMusic.isOnline(t) || ua.olex.music.playback.CacheBudget.isStreamCached(t.uri) }
-        if (playable.isEmpty()) { offlineNotice++; return }
+        if (playable.isEmpty()) { player.play(songs, index, playingFrom, startPlayback = false); offlineNotice++; return }
         val start = playable.firstOrNull { it.index >= index }?.index ?: playable.first().index
         player.play(songs, start, playingFrom)
         if (playable.size < songs.size) offlineNotice++
