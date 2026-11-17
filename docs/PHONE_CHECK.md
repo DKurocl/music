@@ -15,7 +15,8 @@ Record the tested commit, APK versionCode, Pixel build, and WF-1000XM5 firmware 
    Clear search, rotate the phone and return to the same collection.
 7. Copy several files into Music while the app is visible. After MediaStore indexes them, one
    settled refresh updates the list. Remove a file and check it disappears. While the app is
-   backgrounded, its ContentObserver is unregistered; returning triggers a fresh scan.
+   backgrounded, the UI observer stops; an active playback service may keep watching source changes.
+   Returning skips a full scan if the MediaStore version/generation is unchanged.
 8. Revoke audio permission in Settings and return. Regrant and retry. A provider failure must not
    be presented as an empty successful scan or delete the saved library.
 
@@ -73,7 +74,8 @@ accessibility checks remain separate M2/M9 gates.
    Kill the process while playing, reopen, and check recovery to within the last 60-second checkpoint.
    Explicitly selecting a new song during startup must override the saved queue.
 7. Remove every queue item, restart, and confirm the old queue does not return. An unavailable saved
-   URI must give a playback error; a queue checkpoint currently retains URIs, not a moved-file lookup.
+   recording must retain its queue position and show a reason; linked available sources are resolved
+   again at restore. A moved-file match still requires unambiguous recording evidence.
 
 ## Outputs and sound quality
 
@@ -122,3 +124,21 @@ Not run here. Record phone firmware, app version and actual result for each scen
    Repeat with a new explicit selection during startup: the new selection must win.
 8. Search for a saved online song through a system browser or voice entry point, then play it.
    Physical Android Auto and Gemini behavior remains unverified by the JVM suite.
+
+## Central source policy acceptance (service-source-policy)
+
+Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
+
+1. Start an online track, download its matching file, and rescan while it plays. Audio must not
+   restart or pause. A later queued occurrence may use the file, keeping its original context/key.
+2. Remove the selected local source during playback. Verify a retained YouTube reserve can recover
+   at the same position, with no second history start. Pause during recovery: it must stay paused.
+   With no reserve, retain the unavailable row and skip in the actual shuffle order only if playing.
+3. Save two same-title takes with incompatible lengths, then add a file close to both. Neither
+   saved take may claim that file automatically. Check named remixes, live venues and CUE clips too.
+4. Select new queues rapidly during startup and system resumption. The latest explicit selection
+   wins. Clear before restore completes, restart, and verify the old queue does not return.
+5. Change sources from the app, external browser, widget and notification. Confirm equivalent source
+   choice and metadata. Repeat while offline and with local audio permission denied/revoked.
+6. Start a long manual scan, then select a cached or online song. Selection must use the current
+   snapshot without waiting for the full scan. Measure actual command latency and rare long frames.
