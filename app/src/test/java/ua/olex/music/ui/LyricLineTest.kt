@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -52,5 +53,36 @@ class LyricLineTest {
         File("build/reports/ui-previews/testDebugUnitTest").apply { mkdirs() }.resolve("lyrics-words.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
         compose.onNodeWithText("Is this fantasy").performClick()
         compose.runOnIdle { assertEquals(1, seeked) }
+    }
+
+    @Test fun changingWordTimeRedrawsWithoutRecomposingTheParent() {
+        val clock = androidx.compose.runtime.mutableLongStateOf(1_200L)
+        var compositions = 0
+        compose.setContent {
+            AppTheme { Surface(Modifier.fillMaxSize()) {
+                androidx.compose.runtime.SideEffect { compositions++ }
+                LyricLine(lyrics.lines.first(), 0, 0, { clock.longValue }, true) { }
+            } }
+        }
+        val before = compose.onRoot().captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false)
+        var settled = 0
+        compose.runOnIdle { settled = compositions; clock.longValue = 3_800 }
+        val after = compose.onRoot().captureToImage().asAndroidBitmap()
+        org.junit.Assert.assertFalse(before.sameAs(after))
+        compose.runOnIdle { assertEquals(settled, compositions) }
+    }
+
+    @Test fun aPlayingWordClockFollowsFramesAndChangesTheSelectedLine() {
+        compose.mainClock.autoAdvance = false
+        var position = 1_200L
+        compose.setContent { AppTheme {
+            InlineLyrics(lyrics, ua.olex.music.playback.PlayerState(mediaId = "yt:clock", isPlaying = true), 0,
+                { position }, {}, {}, null, null, Modifier.fillMaxSize())
+        } }
+        compose.mainClock.advanceTimeBy(500)
+        compose.onNodeWithText("Is this the real life").assertIsSelected()
+        compose.runOnUiThread { position = 4_500 }
+        compose.mainClock.advanceTimeBy(1_000)
+        compose.onNodeWithText("Is this fantasy").assertIsSelected()
     }
 }

@@ -66,7 +66,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
             do {
                 now = position() + offsetMs
                 current = shownNow.indexAt(now)
-                if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.runtime.withFrameNanos { } else delay(100) }
+                if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.animation.core.withInfiniteAnimationFrameNanos { } else delay(100) }
             } while (state.isPlaying)
         }
     }
@@ -244,7 +244,7 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
             do {
                 now = position() + offsetMs
                 current = lyrics.indexAt(now)
-                if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.runtime.withFrameNanos { } else delay(100) }
+                if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.animation.core.withInfiniteAnimationFrameNanos { } else delay(100) }
             } while (state.isPlaying)
         }
     }
