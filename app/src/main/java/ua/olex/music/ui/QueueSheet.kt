@@ -71,7 +71,10 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     },
                     supportingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            // The same source mark as every song list: a cloud for a song that streams.
+                            if (item.mediaId.startsWith("yt:")) Symbol(Glyph.CLOUD, size = 16.dp, color = cs.onSurfaceVariant,
+                                modifier = Modifier.semantics { contentDescription = "Streams" })
                         }
                     },
                     leadingContent = {

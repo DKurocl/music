@@ -355,13 +355,24 @@ internal fun LibraryBrowser(
                     when {
                         search == null || search.query != query -> item { BrowserMessage("Searching…") }
                         search.failed -> item { ErrorNotice("Couldn't search your library.", onRetrySearch) }
-                        search.tracks.isEmpty() && searchGroups.isEmpty() && online?.tracks.isNullOrEmpty() -> item {
-                            if (online == null && onlineOn) BrowserMessage("Searching YouTube Music…")
-                            else EmptyState(Glyph.SEARCH, "Nothing found", "Try fewer words, or part of a title, artist or album.",
-                                shape = androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape())
-                        }
                         else -> {
-                            searchGroups.groupBy { it.first }.forEach { (kind, hits) ->
+                            // One library: the owner's results and YouTube Music's in the same lists, his first
+                            // (better sound, work offline), YouTube Music's after them with a cloud mark.
+                            val found = online?.takeIf { it.query == query && onlineOn }
+                            val waiting = onlineOn && online?.query != query
+                            val webArtists = found?.artists.orEmpty().take(4)
+                            val webAlbums = found?.albums.orEmpty().take(6)
+                            val webSongs = found?.tracks.orEmpty()
+                            val groups = searchGroups.groupBy { it.first }
+                            if (search.tracks.isEmpty() && searchGroups.isEmpty() && webArtists.isEmpty() && webAlbums.isEmpty() && webSongs.isEmpty()) {
+                                if (waiting) items(4, key = { "online-wait-$it" }) { PlaceholderRow() }
+                                else item(key = "nothing") { EmptyState(Glyph.SEARCH, "Nothing found", if (found?.failed == true) "Nothing in your library, and YouTube Music didn't answer." else "Try fewer words, or part of a title, artist or album.",
+                                    shape = androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape()) }
+                            } else {
+                            for (kind in listOf(LibraryTab.ARTISTS, LibraryTab.ALBUMS)) {
+                                val hits = groups[kind].orEmpty()
+                                val web = if (kind == LibraryTab.ARTISTS) webArtists else webAlbums
+                                if (hits.isEmpty() && web.isEmpty()) continue
                                 item(key = "group-title-$kind") { SearchHeading(if (kind == LibraryTab.ARTISTS) "Artists" else "Albums") }
                             hits.forEach { (_, collection) ->
                                 item(key = "group-$kind-${collection.id}") {
@@ -374,37 +385,24 @@ internal fun LibraryBrowser(
                                     )
                                 }
                             }
+                                items(web, key = { "web-$kind-" + it.id }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
                             }
-                            if (search.tracks.isNotEmpty()) item { SearchHeading("Songs · ${search.tracks.size}") }
+                            if (search.tracks.isNotEmpty() || webSongs.isNotEmpty() || waiting) item(key = "songs-title") { SearchHeading("Songs") }
                             if (visible == null) item { BrowserMessage("Sorting...") }
-                            else itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
-                                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
-                            checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) { onSearchUsed(query); onPlay(visible, index) }
+                            else {
+                                // Play from any song plays the whole list, the owner's files first.
+                                val all = visible + webSongs
+                                itemsIndexed(visible, key = { _, track -> track.id.value }) { index, track ->
+                                    TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
+                                        checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) { onSearchUsed(query); if (webSongs.isEmpty()) onPlay(visible, index) else nav.play(all, index, "Search") }
+                                }
+                                itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }) { i, t ->
+                                    TrackRow(t, current = t.id.value == currentId, onMore = { onTrackActions(t) },
+                                        onPlayNext = { onEnqueue(listOf(t), true) }, onQueue = { onEnqueue(listOf(t), false) }) { onSearchUsed(query); nav.play(all, visible.size + i, "Search") }
+                                }
                             }
-                            // YouTube Music under the owner's own results: songs not in the library, played the same way.
-                            if (onlineOn) {
-                                item(key = "online-title") { SearchHeading("YouTube Music") }
-                                val found = online?.takeIf { it.query == query }
-                                if (found != null && found.artists.isNotEmpty()) {
-                                    item(key = "online-artists-h") { SearchSubheading("Artists") }
-                                    item(key = "online-artists") { YouTubeCards(found.artists, size = 104.dp) }
-                                }
-                                if (found != null && found.albums.isNotEmpty()) {
-                                    item(key = "online-albums-h") { SearchSubheading("Albums") }
-                                    item(key = "online-albums") { YouTubeCards(found.albums, size = 120.dp) }
-                                }
-                                if (found != null && (found.artists.isNotEmpty() || found.albums.isNotEmpty()) && found.tracks.isNotEmpty())
-                                    item(key = "online-songs-h") { SearchSubheading("Songs") }
-                                when {
-                                    found == null -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
-                                    found.failed -> item(key = "online-failed") { BrowserMessage("YouTube Music didn't answer. Check the connection.") }
-                                    found.tracks.isEmpty() && found.artists.isEmpty() && found.albums.isEmpty() -> item(key = "online-none") { BrowserMessage("Nothing more on YouTube Music.") }
-                                    found.tracks.isEmpty() -> {}
-                                    else -> itemsIndexed(found.tracks, key = { _, t -> "online-" + t.id.value }) { i, t ->
-                                        TrackRow(t, current = t.id.value == currentId, onMore = { onTrackActions(t) },
-                                            onPlayNext = { onEnqueue(listOf(t), true) }, onQueue = { onEnqueue(listOf(t), false) }) { onSearchUsed(query); nav.play(found.tracks, i, "Search") }
-                                    }
-                                }
+                            if (waiting) items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
+                            else if (found?.failed == true) item(key = "online-failed") { BrowserMessage("YouTube Music didn't answer, so only your library is shown.") }
                             }
                         }
                     }
@@ -998,8 +996,3 @@ private fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: androi
         }
     }
 }
-
-/** A small heading inside a search section ("Artists", "Albums", "Songs"). */
-@Composable
-private fun SearchSubheading(text: String) = Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp))

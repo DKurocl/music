@@ -397,7 +397,27 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun play(list: List<Track>, index: Int) = playFrom(list, index, null)
 
     /** Plays a list and remembers what it is ("Top Hits", an artist, "Search") for the player's "Playing from". */
-    fun playFrom(list: List<Track>, index: Int, from: String?) { playingFrom = from; player.play(localFirst(list), index) }
+    fun playFrom(list: List<Track>, index: Int, from: String?) {
+        playingFrom = from
+        // All online: swap in the owner's files off the main thread (the index may still be building
+        // right after a start); a list of files plays at once.
+        if (list.none(YouTubeMusic::isOnline)) { player.play(list, index); return }
+        viewModelScope.launch { playChecked(kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(list) }, index) }
+    }
+
+    private fun playChecked(songs: List<Track>, index: Int) {
+        if (graph.network.value || songs.none(YouTubeMusic::isOnline)) { player.play(songs, index); return }
+        // Offline: only what can play now (files, and streams the cache keeps whole), starting at the
+        // tapped song or the first playable one after it, so nothing stalls on a song that can't load.
+        val playable = songs.withIndex().filter { (_, t) -> !YouTubeMusic.isOnline(t) || ua.olex.music.playback.CacheBudget.isStreamCached(t.uri) }
+        if (playable.isEmpty()) { offlineNotice++; return }
+        val start = playable.indexOfFirst { it.index >= index }.takeIf { it >= 0 } ?: 0
+        player.play(playable.map { it.value }, start)
+        if (playable.size < songs.size) offlineNotice++
+    }
+
+    /** Bumped when Play had to leave songs out (or play nothing) because the phone is offline. */
+    var offlineNotice by mutableStateOf(0); private set
 
     /** What the queue was started from, when the screen that started it said; null for the owner's own album lists. */
     var playingFrom by mutableStateOf<String?>(null); private set
@@ -626,7 +646,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun playQueueItem(key: String) = player.playQueueItem(key)
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
-    fun enqueue(tracks: List<Track>, next: Boolean) = player.enqueue(localFirst(tracks), next)
+    fun enqueue(tracks: List<Track>, next: Boolean) {
+        if (tracks.none(YouTubeMusic::isOnline)) player.enqueue(tracks, next)
+        else viewModelScope.launch { player.enqueue(kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(tracks) }, next) }
+    }
     fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) = player.setEqualizer(routeKey, settings)
     fun setReplayGain(settings: ua.olex.music.dsp.ReplayGainSettings) = player.setReplayGain(settings)
     fun dismissQueueError() = player.dismissQueueError()

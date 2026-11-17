@@ -173,6 +173,9 @@ fun MusicRoot(model: LibraryViewModel) {
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by remember { mutableStateOf<Place?>(null) }
     var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
+    // The screen under an online page keeps its state (scroll, open artist) while the page is over
+    // it, so Back lands exactly where the owner was.
+    val baseStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     // An online page's title moves into the top bar once its header has scrolled away.
     var onlineTitleShown by remember { mutableStateOf(false) }
     val onlineTop = onlineStack.lastOrNull()
@@ -187,7 +190,7 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
-    fun go(to: Place) { onlineStack = emptyList(); returnTo = null; if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    fun go(to: Place) { onlineStack = emptyList(); returnTo = null; baseStates.removeState("place-${to.name}"); if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     BackHandler(page != null) { page = null }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
     fun openOf(track: Track, artist: Boolean) {
@@ -226,7 +229,17 @@ fun MusicRoot(model: LibraryViewModel) {
     BackHandler(onlineStack.isNotEmpty() && !expanded) { onlineStack = onlineStack.dropLast(1) }
     val onlineNav = remember(model) {
         OnlineNav(
-            open = { target -> expanded = false; actionTrack = null; page = null; onlineStack = onlineStack + target },
+            open = { target ->
+                expanded = false; actionTrack = null; page = null
+                val twin = model.library.value?.let { libraryTwin(target, it) }
+                if (twin == null) onlineStack = onlineStack + target
+                else {
+                    // One artist, one page: the owner's own, with YouTube Music's sections on it.
+                    onlineStack = emptyList()
+                    if (place == Place.SEARCH) model.setQuery("") else returnTo = place
+                    openInLibrary = twin; place = Place.SEARCH
+                }
+            },
             play = model::playFrom,
             actions = { actionTrack = it },
             openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
@@ -236,7 +249,13 @@ fun MusicRoot(model: LibraryViewModel) {
         )
     }
     val powerSave = rememberPowerSave()
+    val network by context.graph.network.collectAsStateWithLifecycle()
+    // Play left songs out (or found nothing to play) because the phone is offline: say so once.
+    androidx.compose.runtime.LaunchedEffect(model.offlineNotice) {
+        if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")
+    }
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
+        LocalNetwork provides network,
         LocalPowerSave provides powerSave) {
     afterSignIn?.let { pending ->
         SoulseekDialog(null, onDismiss = { afterSignIn = null }) { account ->
@@ -312,7 +331,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
                 is OnlineTarget.Artist -> androidx.compose.runtime.key(top) { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
                 is OnlineTarget.Album -> androidx.compose.runtime.key(top) { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
-                is OnlineTarget.Mood -> androidx.compose.runtime.key(top) { MoodPage(top, playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Mood -> androidx.compose.runtime.key(top) { MoodPage(top, playing.mediaId, insets, requireNotNull(library)) { onlineTitleShown = it } }
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
@@ -321,7 +340,7 @@ fun MusicRoot(model: LibraryViewModel) {
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
-            place == Place.HOME -> HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
+            place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
                 Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
                 onOpenAlbum = { returnTo = Place.HOME; openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
                 onOpenArtist = { returnTo = Place.HOME; openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
@@ -334,8 +353,8 @@ fun MusicRoot(model: LibraryViewModel) {
                 onSeeAll = { tab ->
                     // Smart playlists live in Playlists; albums, artists and history are Search tiles.
                     if (tab == "SMART") { returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
-                })
-            else -> LibraryBrowser(
+                }) }
+            else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
@@ -351,7 +370,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onRetrySearch = model::retrySearch,
                 personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = songStats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
-            )
+            ) }
         }
         }
         if (playing.hasTrack) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = insets.calculateBottomPadding()).fillMaxWidth()

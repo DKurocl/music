@@ -1,5 +1,25 @@
 # Current state (Claude, 2026-11-17): start here
 
+## M10, second pass: one library (Claude, 2026-11-17, night)
+
+Built and checked in the container like the first pass; not measured on the phone.
+
+- Search is one list `[код]`: Artists, Albums, Songs; the owner's results first, YouTube Music's after
+  them in the same row style with a cloud (`OnlineResultRow`), placeholder rows while it answers,
+  no separate "YouTube Music" block. Play from any song plays the owner's songs then the online ones.
+- An artist is one page `[код]`: opening an artist the library has (from Search, a song, an album
+  page) opens the owner's artist page with the YouTube Music sections (`libraryTwin`); "See all"
+  opens the full YouTube Music page (`OnlineTarget.Artist.full`).
+- Offline `[код]`: `AppGraph.network` (default network callback). Online songs the stream cache
+  doesn't keep are greyed out with `cloud_off`; Play skips them and starts at the next playable song,
+  with one snackbar; online pages say "You're offline" and open by themselves when the connection
+  returns (only on reconnect, never in a loop).
+- Long playlists `[код]`: `albumMore` follows YouTube Music's continuation token (both forms) in the
+  background and appends; not checked against a live answer (browse is blocked from the build machine).
+- Back keeps the screen under an online page (scroll, open artist) through a saveable state holder.
+- Play and Add to queue swap in the owner's files off the main thread; download marks redraw only
+  their own row; the queue shows the cloud mark too.
+
 ## M10 built (Claude, 2026-11-17, evening)
 
 Built and checked in the container (unit tests, lint debug and release, release build, gallery
