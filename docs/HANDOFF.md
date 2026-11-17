@@ -1,3 +1,18 @@
+# Next: M10, YouTube Music as part of one library (Claude, 2026-11-17)
+
+The owner hands the next milestone to another agent. Start here:
+
+- Spec: `docs/specs/M10_ONLINE.md` (the owner's report, root causes found in the code at `938eedb`,
+  what to build, acceptance numbers, order). Tasks: `docs/ROADMAP.md`, M10.
+- The freezes on YouTube Music pages and after Play all have a found cause `[код]`: `owned()` in
+  `ui/OnlinePages.kt` scans the whole library with regexes for every song, in the composable body,
+  on every recomposition. `YouTubeMusic.Companion.Index` already solves the matching; use it off the
+  main thread. Do that first.
+- State of the app: music-v1083 (`938eedb`) is on the phone. Nothing in M10 is started. Measured on
+  the phone: nothing; the owner's screenshots are the evidence for the visible problems.
+- Build and checks: `AGENTS.md`, "How to work". The Gradle wrapper and SDK setup are in
+  `docs/INSTALL.md`.
+
 # Second functional batch: towards the full spec (Claude, 2026-11-15)
 
 Everything in PRODUCT_SPEC.md is now done in code except S6 (APE, WavPack, TTA, Musepack: need own

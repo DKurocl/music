@@ -202,3 +202,20 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
 - [ ] Baseline profile generated on the phone; cold start measured (`am start -W`).
 - [ ] Background check: no service, job or alarm when not playing (`dumpsys`).
 - [ ] Release checklist from `.agents/skills/pixel-apk/references/quality.md` wired into CI.
+
+## M10 YouTube Music as part of one library (`:app`, spec `docs/specs/M10_ONLINE.md`)
+Owner's report from the phone, 2026-11-17. Do the tasks in this order; each keeps `main` releasable.
+- [ ] D4: song ownership computed once, off the main thread, with `Index`; pages open from the card's
+      title and cover with placeholder rows; in-memory page cache; continuations in the background.
+      Done when: no frame over 32 ms opening a 100 song playlist or on Play all (spec, "Done when" 1 to 4).
+- [ ] D5: online pages get the shared top app bar (no Home greeting over them); 16 dp under the header
+      buttons; back keeps the previous scroll position.
+- [ ] D3: player format line is codec and rate only; "Playing from" names the playlist, album, mix,
+      mood or Search, never "YouTube Music".
+- [ ] D2: one source mark per row (quality tag, cloud, cloud_done, downloading with progress); one row
+      height; covers on mixed playlists; Download in the row menu; marks update in place.
+- [ ] D1: one artist page merging library and YouTube Music (Popular, In your library, Albums,
+      Singles and EPs, Fans also like, About, Start radio); Search shows YouTube Music artists and
+      albums. Parser tests on saved answers.
+- [ ] D6: design review of every state in the gallery, goldens committed.
+
