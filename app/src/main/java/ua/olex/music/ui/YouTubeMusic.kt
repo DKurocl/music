@@ -401,7 +401,7 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
             val artist = text(header?.get("straplineTextOne")).ifEmpty { text(header?.get("subtitle")).split("•").getOrNull(1)?.trim().orEmpty() }
             val cover = biggestImage(header?.get("thumbnail"))
             val album = OnlineAlbum(id, title, text(header?.get("subtitle")).ifEmpty { null }, cover)
-            val songs = parseSearch(json, fallbackArtist = artist.ifEmpty { null }, keepOrder = true).map { it.copy(album = it.album ?: title, artworkUri = cover ?: it.artworkUri) }
+            val songs = parseSearch(json, fallbackArtist = artist.ifEmpty { null }, keepOrder = true).map { it.copy(album = it.album ?: title, artworkUri = it.artworkUri ?: cover) }
             return album to songs
         }
 

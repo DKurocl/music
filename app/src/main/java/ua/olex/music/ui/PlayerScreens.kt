@@ -663,8 +663,13 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
             shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
             colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
                 checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
-            modifier = Modifier.padding(horizontal = 6.dp).width(width).height(88.dp).semantics { contentDescription = if (playing) "Pause" else "Play" },
-        ) { Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true) }
+            modifier = Modifier.padding(horizontal = 6.dp).width(width).height(88.dp).semantics {
+                contentDescription = if (playing) "Pause" else "Play"; if (state.playWhenReady && state.buffering) stateDescription = "Getting ready" },
+        ) {
+            // Asked to play, still getting ready (a stream opening): a ring says it is on its way.
+            if (state.playWhenReady && state.buffering) CircularProgressIndicator(Modifier.size(64.dp), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
+            Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true)
+        }
         SkipButton(Glyph.NEXT, "Next", state.hasNext) { haptics.skip(true); onNext() }
         ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
             when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onClick = onRepeat)
