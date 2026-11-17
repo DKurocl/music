@@ -55,19 +55,21 @@ are not verified. Source-only statuses do not stand in for physical acceptance.
   preserves existing IDs, playlist occurrences and history. Ambiguous takes are not merged by name.
 - Downloaded music-v1116 APK matches its published SHA256 and existing owner signer. 441 distinct
   tests passed with zero failures/errors/skips; both lints and both APK builds passed. No device claim.
-- 52 is being verified on agent/service-source-policy: one bulk full-evidence source policy for
+- 52 [код, implementation 6cc00d7, CI 44191397033]: one bulk full-evidence source policy for
   app/browser/enqueue/refill/startup/resumption and bounded recovery. It keeps unavailable occurrences,
   requested identity, physical source and queue key separate, protects a healthy current stream and
-  avoids counting a source replacement as another play. Full branch CI is pending.
+  avoids counting a source replacement as another play. 480 tests, both lints/builds and signer
+  passed. Final observer follow-up reacts to recording/source metadata changes; delivery is gated
+  on the final branch head before integration.
 - 41 refinement on the same branch: unchanged MediaStore generations skip refresh scans; manual
   Rescan remains forced. Playback uses the cached snapshot while the observer refreshes independently.
   This does not implement a complete incremental scanner or establish a phone performance number.
 
 ## Still open after this batch
 
-- Model and sync: 49, 56, 58, 59, 64; central policy 52 is in verification. Durable online pages,
+- Model and sync: 49, 56, 58, 59, 64. Durable online pages,
   stable album/artist links and bidirectional account sync remain open. Recording/source foundation
-  47/48/63 is delivered; cross-surface source behavior still depends on verifying the policy block.
+  47/48/63 is delivered with the central policy block; physical cross-surface acceptance remains open.
 - Partial performance/system work: 45, 50, 74; the remaining limitations are described above.
 - Navigation, system and UI: 15, 18, 70, 76, 77, 78, 79, 80.
 - Physical phone gates: 10, 11, 12, 19, 23, 46, 75. No Pixel or Sony measurements in this session.

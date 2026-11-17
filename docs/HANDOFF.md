@@ -1,4 +1,4 @@
-# Active service-source policy (Codex, 2026-11-17)
+# Service-source policy package (Codex, 2026-11-17)
 
 Branch `agent/service-source-policy` starts at main `45be07f`. Foundation is integrated, verified
 by CI 44172917731 (441 tests, zero failures/errors/skips, both lints, both APK builds, owner signature).
@@ -12,8 +12,8 @@ Three player/lyrics/queue component renders reviewed; the gallery is not a phone
 Installation, Pixel/Sony audio/focus/Bluetooth, startup/battery and live account are unverified.
 Old recording-sources branch is fully merged and deleted locally and remotely.
 
-Owner asked to continue while asleep and repeated "continue". Active task is 52, with the
-41 generation-skip refinement. The draft routes set/add/enqueue/radio refill, paused startup and
+Owner asked to continue while asleep and repeated "continue". This package implements 52, with the
+41 generation-skip refinement. The implementation routes set/add/enqueue/radio refill, paused startup and
 system resumption through one bulk source policy built from all saved recording evidence. It
 preserves requested video IDs, queue occurrence keys/context and real shuffle traversal. Unavailable
 occurrences retain their position and expose a reason; their guarded URI cannot open an unrelated
@@ -27,7 +27,8 @@ snapshot. Search/credit hints require complete artist names, known durations and
 annotations; named remixes and live venues remain distinct. Source matching and queue conversion run
 off main. MediaStore version/generation checks skip unchanged scans; manual Rescan stays forced,
 unknown generation falls back to a full scan, and a change during a scan triggers the next refresh.
-This is not a complete incremental MediaStore scanner. The service observer refreshes independently;
+This is not a complete incremental MediaStore scanner. The service observer follows recording/source evidence changes as well as file/network/cache events,
+and refreshes independently;
 Play consumes the latest cached snapshot without waiting for scanning. Recovery cannot start the
 next track after a concurrent Pause.
 
@@ -36,20 +37,29 @@ Local verification before full Android CI:
 - actual Room/native SQLite UserRepositoryTest: 25 passed, zero skipped/failures/errors;
 - actual Room/native SQLite LibraryRepositoryTest: 9 passed, zero skipped/failures/errors;
 - git diff --check passed. No dependency, schema or SDK pin changed.
-First complete branch CI 44188651400 (b9cd0c6): 477 distinct cases/executions, zero failures, errors
-or skips; tests, both lints, both APK builds and owner signer passed. Follow-ups keep Play independent
-of scanning, guard paused recovery and stale system resumption, and preserve row playing/source marks
-without substituting the original online request in UI actions. Only confirmed catalogue links expose
-local quality/offline marks; an ambiguous raw file does not claim them. Online intent selects the best confirmed file; explicitly chosen files/videos keep their preference
-and own unavailable artwork. Final follow-up CI is pending.
-Next: final exact-source CI, review the signed artifact, fast-forward main only after every gate
-passes, then verify delivery.
+Android evidence:
+- CI 44188651400 (b9cd0c6): 477 distinct tests/executions, zero failures/errors/skips;
+- CI 44191397033 (6cc00d7): 480 distinct tests/executions, zero failures/errors/skips;
+- both runs passed tests, debug/release lint, debug/release APK builds and owner signer verification.
+The latter includes source preference, row identity and slow-resumption regressions. A final observer
+follow-up also invalidates future choices when durable recording/source evidence changes, without
+waiting for a file/network/cache event. Delivery uses the same required CI gates for that head.
+
+The app retains original online requests for actions; confirmed catalogue links expose local
+quality/offline marks, and ambiguous raw files do not claim them. Online intent selects the best
+confirmed file; explicitly chosen files/videos keep their preference and own unavailable artwork.
+
+Delivery: only integrate the task branch after exact-source CI succeeds. Main then publishes the
+signed APK automatically; verify the downloaded artifact, version, ABI/SDK and existing signer.
+Current workflow evidence: https://github.com/DKurocl/music/actions
+Next implementation: durable online pages and stable album/artist links (49/64), followed by
+account-scoped inbound likes and playlist operation/conflict synchronization (56/58/59).
 
 Still open: durable online pages and album/artist identity (49/64), inbound/account-scoped likes and
 playlist synchronization (56/58/59), remaining audit/UI/device work in AUDIT_CONTINUATION.md.
 Do not promote these local checks into Pixel/Sony, startup, battery or complete UI acceptance.
 
-# Active recording/source continuation (Codex, 2026-11-17)
+# Historical recording/source implementation notes (Codex, 2026-11-17)
 
 Branch `agent/recording-sources`, based on main `d2ef360` after music-v1109. Owner asked to keep
 working after release while asleep, then repeated "continue". This new block is not released yet.
