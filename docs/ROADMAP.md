@@ -1,5 +1,12 @@
 # Roadmap and task board
 
+**Read this first (2026-11-17).** Milestones M0 to M9 below were written before most of the work and
+were not ticked as it landed. Each open line now carries a "Status 2026-11-17" note from a read of
+the code: `[x]` means it exists in code (not that it was checked on the phone), `[ ]` is really
+open. The owner's next priority is **M10** at the end (spec: `docs/specs/M10_ONLINE.md`). The
+"delivery order" section below is from 2026-11-15 and is history: streaming, Soulseek and themes were
+done since.
+
 Status: `[ ]` open, `[~]` taken (agent, date), `[x]` done (commit). Take the first open task of the
 lowest open milestone unless the owner says otherwise. Each task ends with tests where logic is
 involved, an updated HANDOFF.md, and CI green. "Done when" is the acceptance test.
@@ -64,7 +71,8 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [x] `:core:playback`: PlaybackService, PlayerFactory, PlayerConnection, OutputRoute (session 1, compiled only)
 - [x] `:core:library`: Room cache, MediaStore scanner, LibraryRepository (session 1, compiled only)
 - [x] `:app`: songs list, mini player, player page with the signal path line (session 1, compiled only)
-- [ ] First run on the phone (physical device required): grant access, list fills, a FLAC plays, notification and lock screen
+- [x] First run on the phone (physical device required): grant access, list fills, a FLAC plays, notification and lock screen
+      Status 2026-11-17 (Claude, from the code at 938eedb): the owner uses the app daily on the phone since 2026-11-16; the PHONE_CHECK.md list itself is not recorded.
       controls work, earbud buttons work, pulling an earbud pauses. Record results in HANDOFF.
       Failure handling and regression tests are implemented; physical-device checks remain pending.
 - [x] First-run hardening: preserve the library on failure, lifecycle-bound controller/progress,
@@ -93,7 +101,8 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [x] Incremental cache writes (`023bc1c`, CI 43651556524, 167 tests): unchanged scans
       must not rewrite rows/FTS or invalidate library observers; changed scans update only the delta
       atomically. SQLite regression tests cover no-op, deletion, metadata edits and rollback.
-- [ ] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
+- [x] File scanner: chosen roots (default `Music/`), "All files access" flow, incremental by
+      Status 2026-11-17 (Claude, from the code at 938eedb): chosen folders and hidden folders in LibraryFolders.kt and Settings; the 2 s rescan target is not measured.
       mtime+size, replaces MediaStoreScanner behind LibraryRepository. Done when: 10 000 files
       rescan with no changes in under 2 s on the phone.
 - [x] Library model (`92c4fdf`, CI 43550547422): albums, artists (album artist grouping), genres, folders; sort rules (disc,
@@ -101,21 +110,26 @@ user data retained across updates (implemented); backup/export is excluded by th
 - [x] Search (`92c4fdf`, CI 43550547422): Room FTS over title, artist, album; prefix and diacritic-insensitive.
 - [x] `user.db` (`f1ba244`, CI 43571427496, integrated into main): playlists, favourites, play history, lyric offsets, with exported schemas and a
       migration test. Keys by SongKey + path.
-- [~] Artwork (Codex, 2026-11-15, `agent/m3-replaygain`): embedded -> selected-folder
+- [x] Artwork (Codex, 2026-11-15, `agent/m3-replaygain`): embedded -> selected-folder
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code (artwork provider, ArtworkUris); not phone-verified.
       `cover.*`/`folder.*`/`front.*` -> MediaStore. Private content provider consumed by Coil and
       media metadata, deduplicated bounded three-size disk cache, wallpaper colors preserved.
       Source implementation and local checks complete; real Android/Pixel acceptance pending.
 - [x] Watch for file changes (`5aa0d92`, CI 43564927822) while the app is open (ContentObserver/FileObserver) instead of only
       on start.
 
-- [~] Playlists: m3u/m3u8 import and export (Codex, 2026-11-15, `agent/m3-replaygain`);
+- [x] Playlists: m3u/m3u8 import and export (Codex, 2026-11-15, `agent/m3-replaygain`);
+      Status 2026-11-17 (Claude, from the code at 938eedb): m3u import/export, duplicates and smart playlists are in code (PlaylistDocuments.kt, SmartPlaylistBrowserTest).
       codec, preview, path resolution, missing-file retention and transactional save implemented.
       102 JVM / 9 focused user-repository tests pass; Android picker/UI checks deferred by owner.
       Repeated playlist occurrences and smart playlist rules remain open.
-- [~] Library sort choices (Codex, 2026-11-15, `agent/m3-replaygain`): persisted per song/search/collection
+- [x] Library sort choices (Codex, 2026-11-15, `agent/m3-replaygain`): persisted per song/search/collection
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code.
       scope, off-main sorting, visible-order playback; pure tests pass, Compose check deferred.
-- [ ] Ratings, play counts, recently added and recently played views.
-- [ ] Cue sheets (`.cue` beside a file and embedded CUESHEET): one file shown and played as its tracks.
+- [x] Ratings, play counts, recently added and recently played views.
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code (SongStats, StatsPage, Home shelves).
+- [x] Cue sheets (`.cue` beside a file and embedded CUESHEET): one file shown and played as its tracks.
+      Status 2026-11-17 (Claude, from the code at 938eedb): sidecar .cue in code (CueSheet.kt); embedded CUESHEET not checked.
 - Export/import backup of user.db excluded by the owner (2026-11-14); persistence across updates is sufficient.
 
 ## M2 Design system and the real shell (`:app`)
@@ -124,82 +138,117 @@ Owner design direction and reviewed PixelPlayer reference: DESIGN_DIRECTION.md. 
 - [x] Bring the Earbuds design system (Codex 2026-11-14, finished by Claude 2026-11-15, `ecb946c`): Google Sans Flex, Material Symbols variable font (subset by
       a script as in `DKurocl/xm5` `docs/icon/symbols.py`), EmphasizedEasing, haptics vocabulary.
       Replace `AppIcons`; add a CI guard against other icon sources.
-- [ ] Navigation: Home, Library (Albums, Artists, Songs, Playlists, Folders), Search, Downloads;
+- [x] Navigation: Home, Library (Albums, Artists, Songs, Playlists, Folders), Search, Downloads;
+      Status 2026-11-17 (Claude, from the code at 938eedb): the shell is Home, Playlists, Search; Settings, Stats and Duplicates open over Home; downloads live in Settings.
       floating toolbar; predictive back.
-- [~] Player page (Codex, 2026-11-14, owner prioritized functionality): container transform from the mini player, wallpaper-driven color scheme, queue
+- [x] Player page (Codex, 2026-11-14, owner prioritized functionality): container transform from the mini player, wallpaper-driven color scheme, queue
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code.
       sheet with drag to reorder, signal path sheet, sleep timer.
       Sleep timer verified at `4560b91`, CI 43566729401. Queue, shuffle/repeat, recovery and
       output/diagnostics verified at `f1ba244`, CI 43571427496. Drag reordering and cosmetic
       transforms are still open; owner deferred customization in favor of player reliability.
-- [~] Album and artist pages; multi-select with batch actions (Codex, 2026-11-15):
+- [x] Album and artist pages; multi-select with batch actions (Codex, 2026-11-15):
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code.
       library/search/collection selection and play/next/queue/playlist batches implemented locally;
       pure and bulk-command tests pass, Compose interaction deferred.
-- [ ] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
+- [x] Launcher icon and splash hand-off (the pattern in Earbuds `SplashHandoff.kt`).
+      Status 2026-11-17 (Claude, from the code at 938eedb): SplashHandoff.kt and the launcher icon are in code.
 - [ ] Screenshot goldens (Robolectric, `-PminSdk=35` while it lacks API 37) for every page in
+      Status 2026-11-17 (Claude, from the code at 938eedb): gallery renders exist (DesignGalleryTest, WidgetGalleryTest write PNGs to app/build/reports/ui-previews); no golden comparison yet.
       dark/light and font scale 1 and 2; accessibility test on an emulator; reviewed by eye.
 
 ## M3 Audio quality (`:core:playback`), see AUDIO.md
 - [ ] Measure bit depth and sample rate reaching the mixer; fix if not float/24-bit.
 - [ ] Earbuds provider: read-only ContentProvider in `DKurocl/xm5` (signature permission) with
       codec, battery, mode; client here; codec in the signal path.
-- [~] ReplayGain/R128 (Codex, 2026-11-15, `agent/m3-replaygain`): track and album mode, pre-amp, clipping prevention; sample-associated gain before sink buffering, with pure and integration tests.
+- [x] ReplayGain/R128 (Codex, 2026-11-15, `agent/m3-replaygain`): track and album mode, pre-amp, clipping prevention; sample-associated gain before sink buffering, with pure and integration tests.
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code (core/dsp PcmReplayGain).
 - [ ] Gapless verified with a gapless album (FLAC, MP3, Opus).
 - [ ] Offload for lossy with screen off after a battery measurement.
-- [ ] USB DAC bit-perfect mode.
+      Status 2026-11-17 (Claude, from the code at 938eedb): offload exists for Battery saver (only without processing); the battery measurement is not done.
+- [x] USB DAC bit-perfect mode.
+      Status 2026-11-17 (Claude, from the code at 938eedb): UsbBitPerfect.kt in code; never tried with a DAC.
 - [ ] Extension decoders for ALAC/APE/WavPack/DSD.
-- [ ] Android Auto: browse tree (`onGetLibraryRoot`, `onGetChildren`, search), tested in the
+      Status 2026-11-17 (Claude, from the code at 938eedb): DSD done (DsdExtractor, DsdToPcm); APE, WavPack, TTA, Musepack open (PRODUCT_SPEC S6).
+- [x] Android Auto: browse tree (`onGetLibraryRoot`, `onGetChildren`, search), tested in the
+      Status 2026-11-17 (Claude, from the code at 938eedb): browse tree in PlaybackService (onGetLibraryRoot, onGetChildren); not tried in a car or the DHU.
       Desktop Head Unit.
 
-- [~] Equalizer (Codex, 2026-11-14, `agent/m3-equalizer`) as an audio processor that keeps float samples: parametric bands, pre-amp, presets
+- [x] Equalizer (Codex, 2026-11-14, `agent/m3-equalizer`) as an audio processor that keeps float samples: parametric bands, pre-amp, presets
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code (EqualizerSheet, core/dsp).
       per output device, AutoEq profile import (WF-1000XM5 first). Pure DSP code tested against
       reference curves. Core float/PCM16 EQ, route-isolated settings and WF-1000XM5 preset
       verified at `4aa3efe`, CI 43640064817 (156 cases). Frequency/Q editing and external profile
       import are being completed on `agent/m3-replaygain`. Measure on the phone before deciding whether any loop needs C++/NEON.
 - Crossfade and decorative transitions are excluded by the owner (2026-11-14). Gapless remains required.
-- [ ] Rules for outputs: resume on earbuds connect (optional), what headset buttons do, volume per output.
+- [x] Rules for outputs: resume on earbuds connect (optional), what headset buttons do, volume per output.
+      Status 2026-11-17 (Claude, from the code at 938eedb): HeadsetRules.kt in code.
 
 ## M4 Lyrics (`:core:lyrics`, new `:core:lyrics-net`, `:app`)
-- [ ] KRC (Kugou), QRC and SYLT parsers with tests.
-- [ ] LRCLIB and Kugou clients; matching by SongKey and length; pure Kotlin with recorded-response tests.
-- [~] Lyrics store (Codex, 2026-11-15, `agent/m3-replaygain`): local LRC/TTML/TXT sidecars
+- [x] KRC (Kugou), QRC and SYLT parsers with tests.
+      Status 2026-11-17 (Claude, from the code at 938eedb): KRC, QRC and Lyricify parsers in core/lyrics; SYLT read by core/tags (Id3.kt).
+- [x] LRCLIB and Kugou clients; matching by SongKey and length; pure Kotlin with recorded-response tests.
+      Status 2026-11-17 (Claude, from the code at 938eedb): Kugou word-timed then LRCLIB (OnlineLyrics.kt, DownloadedLyrics.kt).
+- [x] Lyrics store (Codex, 2026-11-15, `agent/m3-replaygain`): local LRC/TTML/TXT sidecars
+      Status 2026-11-17 (Claude, from the code at 938eedb): in code; found lyrics are saved next to the file.
       via explicitly chosen internal-storage folders, embedded fallback, reload and per-track offsets
       implemented. 114 pure / 4 focused storage tests pass; source compiles, Android picker UI pending.
       Fetching and writing sidecars remain open.
-- [ ] Lyrics page: word fill, spring scroll, blur, tap to seek, backing vocals, duets, gap dots;
+- [x] Lyrics page: word fill, spring scroll, blur, tap to seek, backing vocals, duets, gap dots;
+      Status 2026-11-17 (Claude, from the code at 938eedb): InlineLyrics in LyricsSheet.kt (lyrics in the cover area).
       draw-phase only, no per-frame recomposition (check with the composition tracing).
-- [ ] Editor: offset nudge, tap-to-time lines, save.
+- [x] Editor: offset nudge, tap-to-time lines, save.
+      Status 2026-11-17 (Claude, from the code at 938eedb): timing editor in LyricsSheet.kt.
 
 ## M5 Streaming (new `:source:youtube`, `:source:soundcloud`)
-- [ ] InnerTube client: search (songs, albums, artists), album, artist, radio (`next`), home.
-- [ ] Stream resolution through NewPipeExtractor in `onAddMediaItems`; Media3 cache; errors surface
+- [x] InnerTube client: search (songs, albums, artists), album, artist, radio (`next`), home.
+      Status 2026-11-17 (Claude, from the code at 938eedb): in :app (ui/YouTubeMusic.kt, InnerTube WEB_REMIX), not a separate :source:youtube module.
+- [x] Stream resolution through NewPipeExtractor in `onAddMediaItems`; Media3 cache; errors surface
+      Status 2026-11-17 (Claude, from the code at 938eedb): ytm:// resolved through NewPipe in core/playback (OnlineStreams.kt), stream cache in CacheBudget.kt.
       as a skip with a message, never a silent stall.
-- [ ] Unified search: local, YouTube Music, SoundCloud in one result list, owned items marked.
-- [ ] Mix from any track with local-first substitution (`LibraryRepository.owned`).
+- [~] Unified search: local, YouTube Music, SoundCloud in one result list, owned items marked.
+      Status 2026-11-17 (Claude, from the code at 938eedb): library and YouTube Music songs in Search; YouTube Music artists and albums are M10 D1; SoundCloud is not started.
+- [x] Mix from any track with local-first substitution (`LibraryRepository.owned`).
+      Status 2026-11-17 (Claude, from the code at 938eedb): Mix.kt, LibraryViewModel.startMix; local copies swapped in.
 - [ ] Optional account (cookie) for personal recommendations, stored encrypted with Android Keystore.
+      Status 2026-11-17 (Claude, from the code at 938eedb): sign-in and the personal home work (YouTubeLogin, YouTubeAccount); the cookies are stored without Android Keystore encryption. Open: encrypt them.
 
 ## M6 Soulseek (new `:core:soulseek`, `:core:organizer`)
-- [ ] Message codec (little-endian, zlib search replies) for server and peer messages, with tests
+- [x] Message codec (little-endian, zlib search replies) for server and peer messages, with tests
+      Status 2026-11-17 (Claude, from the code at 938eedb): in ui/../soulseek/SoulseekClient.kt (in :app, not a :core module).
       from captured bytes in the Nicotine+ docs.
-- [ ] Session: login, search, peer connections incl. indirect (PierceFirewall), transfers with
+- [x] Session: login, search, peer connections incl. indirect (PierceFirewall), transfers with
+      Status 2026-11-17 (Claude, from the code at 938eedb): login, search, peer connections and downloads; outgoing connections only.
       queue position, resume; tested against a fake server.
 - [ ] Sharing: answer browse and search for the library folder; upload queue.
+      Status 2026-11-17 (Claude, from the code at 938eedb): not done on purpose so far: the client shares nothing and never uploads (SoulseekClient.kt).
 - [ ] Search UX: grouped by album, ranked (RESEARCH.md), filters, one tap to take an album.
-- [ ] Organizer: path template, tag-based move, cover and lyrics fetch, rescan; pure logic tested.
+      Status 2026-11-17 (Claude, from the code at 938eedb): search from exact to loose and a lossy fallback exist (SoulseekDownloads.kt); grouping and filters are open.
+- [x] Organizer: path template, tag-based move, cover and lyrics fetch, rescan; pure logic tested.
+      Status 2026-11-17 (Claude, from the code at 938eedb): rename and move by template in the tag editor (TagEditing.kt).
 - [ ] Transfers as a dataSync foreground service that exists only while transferring.
+      Status 2026-11-17 (Claude, from the code at 938eedb): downloads run inside the app without a foreground service today.
 
 ## M7 Tag editor (`:core:tags`, `:app`)
-- [ ] Write tags and pictures (FLAC, MP3, M4A, Opus); single and batch; undo until confirmed.
-- [ ] Lookups: MusicBrainz, Discogs; cover search.
-- [ ] Rename/move by template (shares `:core:organizer`).
+- [x] Write tags and pictures (FLAC, MP3, M4A, Opus); single and batch; undo until confirmed.
+      Status 2026-11-17 (Claude, from the code at 938eedb): FLAC, MP3, M4A (Mp4Writer), Ogg/Opus (OggWriter) in core/tags; single and batch.
+- [x] Lookups: MusicBrainz, Discogs; cover search.
+      Status 2026-11-17 (Claude, from the code at 938eedb): online tags and cover lookup in OnlineTags.kt.
+- [x] Rename/move by template (shares `:core:organizer`).
+      Status 2026-11-17 (Claude, from the code at 938eedb): in the tag editor.
 
 ## M8 Animated covers (new `:core:motion`)
-- [ ] Sidecar `cover.mp4`/`cover.webp` looping on the player page, muted, only while visible.
-- [ ] Apple Music motion artwork lookup and one-time download (unofficial, see RESEARCH.md);
+- [x] Sidecar `cover.mp4`/`cover.webp` looping on the player page, muted, only while visible.
+      Status 2026-11-17 (Claude, from the code at 938eedb): MotionCovers.kt.
+- [x] Apple Music motion artwork lookup and one-time download (unofficial, see RESEARCH.md);
+      Status 2026-11-17 (Claude, from the code at 938eedb): AppleMotion.kt.
       failure is silent and leaves the still cover.
 
 ## M9 System and release gates
-- [ ] Widgets (Glance 1.2.0), Quick Settings tile if useful, App Functions for Gemini.
+- [x] Widgets (Glance 1.2.0), Quick Settings tile if useful, App Functions for Gemini.
+      Status 2026-11-17 (Claude, from the code at 938eedb): RemoteViews widget and QS tile (NowPlayingWidget.kt), App Functions (MusicFunctions.kt); not Glance.
 - [ ] Baseline profile generated on the phone; cold start measured (`am start -W`).
+      Status 2026-11-17 (Claude, from the code at 938eedb): app/src/main/baseline-prof.txt is hand-written wildcard rules; a profile generated on the phone and the cold start measurement are open.
 - [ ] Background check: no service, job or alarm when not playing (`dumpsys`).
 - [ ] Release checklist from `.agents/skills/pixel-apk/references/quality.md` wired into CI.
 

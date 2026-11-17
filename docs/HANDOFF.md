@@ -1,18 +1,26 @@
-# Next: M10, YouTube Music as part of one library (Claude, 2026-11-17)
+# Current state (Claude, 2026-11-17): start here
 
-The owner hands the next milestone to another agent. Start here:
+- **On the phone:** release music-v1083 (`938eedb`, "Music 1.0"), installed through Obtainium. The
+  owner uses it daily. Commits after it are docs only.
+- **What the app is:** a local lossless player first (library, tags, lyrics, equalizer, ReplayGain,
+  DSD, CUE, widget, tile, App Functions), joined to YouTube Music (search, home shelves, moods,
+  mixes, sign-in, stream cache) and Soulseek (lossless downloads into the library). Feature status
+  per line: `docs/PRODUCT_SPEC.md`; task status checked against the code: `docs/ROADMAP.md`.
+- **Next:** milestone M10, spec `docs/specs/M10_ONLINE.md`. The owner's report from the phone, root
+  causes found in the code, what to build, acceptance numbers, order. Do D4 first: the freezes on
+  YouTube Music pages and after Play all come from `owned()` in `ui/OnlinePages.kt`, which scans the
+  whole library with regexes for every song, in the composable body, on every recomposition
+  `[код]`; `YouTubeMusic.Companion.Index` already does the matching fast.
+- **Measured on the phone:** nothing formally (no frame stats, battery or cold start numbers yet).
+  Everything else below is "compiled and unit-tested" at most, unless it says otherwise.
+- **Known open items outside M10:** cookies of the YouTube Music sign-in are stored without Keystore
+  encryption (ROADMAP M5); the hand-written baseline profile; APE/WavPack/TTA/Musepack; no golden
+  comparison for the screenshot gallery.
+- **Build:** `docs/INSTALL.md`, "Build environment for agents".
+- **Workflow:** `AGENTS.md`. Every push to `main` is built, signed and released to the phone by CI,
+  so `main` must always pass.
 
-- Spec: `docs/specs/M10_ONLINE.md` (the owner's report, root causes found in the code at `938eedb`,
-  what to build, acceptance numbers, order). Tasks: `docs/ROADMAP.md`, M10.
-- The freezes on YouTube Music pages and after Play all have a found cause `[код]`: `owned()` in
-  `ui/OnlinePages.kt` scans the whole library with regexes for every song, in the composable body,
-  on every recomposition. `YouTubeMusic.Companion.Index` already solves the matching; use it off the
-  main thread. Do that first.
-- State of the app: music-v1083 (`938eedb`) is on the phone. Nothing in M10 is started. Measured on
-  the phone: nothing; the owner's screenshots are the evidence for the visible problems.
-- Build and checks: `AGENTS.md`, "How to work". The Gradle wrapper and SDK setup are in
-  `docs/INSTALL.md`.
-
+# History (newest first)
 # Second functional batch: towards the full spec (Claude, 2026-11-15)
 
 Everything in PRODUCT_SPEC.md is now done in code except S6 (APE, WavPack, TTA, Musepack: need own
