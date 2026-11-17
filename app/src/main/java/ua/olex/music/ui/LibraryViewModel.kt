@@ -606,6 +606,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun playShuffled(list: List<Track>) {
         if (list.isEmpty()) return
         graph.mix.stop()
+        playingFrom = null
         if (!playing.value.shuffle) player.toggleShuffle()
         player.play(list, list.indices.random())
     }
