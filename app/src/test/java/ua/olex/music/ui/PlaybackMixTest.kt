@@ -56,10 +56,14 @@ class PlaybackMixTest {
 
     @Test fun replacingTheQueueAfterLoadingRejectsTheCommit() = runBlocking {
         val mix = PlaybackMix(graph(), nextPage = { YouTubeMusic.RadioPage(listOf(next), "after") }, localLibrary = { LibraryIndex.EMPTY })
-        mix.run = run()
+        val previous = run()
+        mix.run = previous
+        mix.label = "Old mix"
         val extension = requireNotNull(mix.extend(listOf(seed), 0))
-        mix.run = run()
+        mix.stop()
         assertFalse(extension.commit())
-        assertEquals("token", mix.run?.token)
+        assertNull(mix.run)
+        assertNull(mix.label)
+        assertEquals("token", previous.token)
     }
 }

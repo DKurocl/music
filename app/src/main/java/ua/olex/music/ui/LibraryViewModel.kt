@@ -401,6 +401,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Plays a list and remembers what it is ("Top Hits", an artist, "Search") for the player's "Playing from". */
     fun playFrom(list: List<Track>, index: Int, from: String?) {
+        if (index !in list.indices) return
+        graph.mix.stop()
         playingFrom = from
         // The last choice wins: a slower earlier one (an online list still being matched) is dropped,
         // so it can never replace what the owner picked after it.
@@ -603,6 +605,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Plays [list] with shuffle on, from a random song; the queue keeps its order for "shuffle off". */
     fun playShuffled(list: List<Track>) {
         if (list.isEmpty()) return
+        graph.mix.stop()
         if (!playing.value.shuffle) player.toggleShuffle()
         player.play(list, list.indices.random())
     }

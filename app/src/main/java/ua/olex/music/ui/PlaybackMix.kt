@@ -21,6 +21,9 @@ internal class PlaybackMix(
     var run: Run? = null
     var label by mutableStateOf<String?>(null)
 
+    /** A manual selection supersedes both the old context and any page still loading for it. */
+    fun stop() { run = null; label = null }
+
     suspend fun extend(queue: List<Track>, current: Int): QueueExtension? {
         val seed = queue.getOrNull(current) ?: return null
         if (!graph.youTubeOn.value || !graph.network.value) return null
