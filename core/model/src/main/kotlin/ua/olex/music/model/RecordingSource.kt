@@ -30,8 +30,10 @@ data class RecordingSource(
     /** A path identifies a local copy across MediaStore renumbering; CUE occurrences keep their clip. */
     val key: String get() = when (kind) {
         RecordingSourceKind.YOUTUBE -> "youtube:${uri!!.removePrefix(SavedSong.ONLINE_PREFIX)}"
-        else -> (path?.takeIf { it.isNotBlank() }?.let { "file:$it" } ?: "uri:$uri") +
-            (clipStartMs?.let { "#clip:$it:${clipEndMs ?: "end"}" } ?: "")
+        else -> {
+            val address = path?.takeIf { it.isNotBlank() }?.let { "file:$it" } ?: "uri:$uri"
+            clipStartMs?.let { "clip:$it:${clipEndMs ?: "end"}:$address" } ?: address
+        }
     }
 
     companion object {
