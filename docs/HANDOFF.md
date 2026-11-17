@@ -32,7 +32,7 @@ Play consumes the latest cached snapshot without waiting for scanning. Recovery 
 next track after a concurrent Pause.
 
 Local verification before full Android CI:
-- pure JVM harness: 202 tests passed after the row-identity follow-up;
+- pure JVM harness: 203 tests passed after row-identity and source-preference follow-ups;
 - actual Room/native SQLite UserRepositoryTest: 25 passed, zero skipped/failures/errors;
 - actual Room/native SQLite LibraryRepositoryTest: 9 passed, zero skipped/failures/errors;
 - git diff --check passed. No dependency, schema or SDK pin changed.
@@ -40,7 +40,8 @@ First complete branch CI 44188651400 (b9cd0c6): 477 distinct cases/executions, z
 or skips; tests, both lints, both APK builds and owner signer passed. Follow-ups keep Play independent
 of scanning, guard paused recovery and stale system resumption, and preserve row playing/source marks
 without substituting the original online request in UI actions. Only confirmed catalogue links expose
-local quality/offline marks; an ambiguous raw file does not claim them. Final follow-up CI is pending.
+local quality/offline marks; an ambiguous raw file does not claim them. Online intent selects the best confirmed file; explicitly chosen files/videos keep their preference
+and own unavailable artwork. Final follow-up CI is pending.
 Next: final exact-source CI, review the signed artifact, fast-forward main only after every gate
 passes, then verify delivery.
 
