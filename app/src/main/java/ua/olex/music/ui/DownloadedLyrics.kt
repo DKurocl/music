@@ -20,7 +20,7 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
-    fun read(track: Track, aliases: List<String> = emptyList()): Pair<String, String>? {
+    @Synchronized fun read(track: Track, aliases: List<String> = emptyList()): Pair<String, String>? {
         val keys = keys(track, aliases)
         val candidates = keys.flatMap { key -> FoundLyrics.Format.entries.map { f -> File(dir, name(key, f)) to f } }
         val found = candidates.filter { it.first.isFile }.maxByOrNull { it.first.lastModified() } ?: return null
@@ -40,18 +40,22 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
         val plain = clean.sync == ua.olex.music.lyrics.Sync.NONE
         val text = if (plain) clean.lines.joinToString("\n") { it.text } else ua.olex.music.lyrics.LrcWriter.write(clean)
         val format = if (plain) FoundLyrics.Format.PLAIN else FoundLyrics.Format.LRC
-        FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
-        val file = File(dir, name(writeKey(track), format))
-        write(file, text)
-        _revision.value++
+        saveFetched(track, format, text)
         Fetched(found.source, text)
     }
 
+    // UI and lock-screen loads share this store. AtomicFile itself does not serialize writers.
+    @Synchronized private fun saveFetched(track: Track, format: FoundLyrics.Format, text: String) {
+        FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
+        write(File(dir, name(writeKey(track), format)), text)
+        _revision.value++
+    }
+
     /** Latest explicit edit wins across recording aliases; an empty reset marker blocks old edits. */
-    fun edited(track: Track, aliases: List<String> = emptyList()): String? = keys(track, aliases)
+    @Synchronized fun edited(track: Track, aliases: List<String> = emptyList()): String? = keys(track, aliases)
         .map { File(dir, editedName(it)) }.filter { it.isFile }.maxByOrNull { it.lastModified() }?.readText()?.takeIf { it.isNotEmpty() }
 
-    fun saveEdited(track: Track, lrc: String) {
+    @Synchronized fun saveEdited(track: Track, lrc: String) {
         write(File(dir, editedName(writeKey(track))), lrc)
         _revision.value++
     }
@@ -60,7 +64,7 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
 
     private fun editedName(key: String) = name(key, FoundLyrics.Format.LRC).removeSuffix(".lrc") + ".edited.lrc"
 
-    fun delete(track: Track) {
+    @Synchronized fun delete(track: Track) {
         FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
         write(File(dir, name(writeKey(track), FoundLyrics.Format.PLAIN)), "")
         _revision.value++
