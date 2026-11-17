@@ -34,6 +34,8 @@ Owner asked to continue while asleep. Nothing in this block is delivered yet.
   and duplicate-file management remain available; every linked source shares favourite state/stats.
   Unresolved imported paths acquire real tags only on unambiguous resolution; that weak placeholder
   is then promoted, preventing a later different take from claiming its old import automatically.
+- Ambiguous physical sources get a stable unresolved row, preserving conflicting linked takes.
+  Explicit valid recording IDs remain authoritative when source metadata alone is ambiguous.
 - Local-first substitutions, PlayerConnection and v1 checkpoints retain identity and reserves.
   Current playback is not re-prepared on download. Source references are bounded in queue metadata.
 - Recording-keyed lyric writes, legacy SongKey/merged-ID reads, latest explicit edits and reset
@@ -47,6 +49,8 @@ owner signing verification passed, including migration 3 -> 4. Final follow-up C
 ## Next blocks
 
 1. Central source selection in PlaybackService for app, enqueue, browser and recovery (52).
+   Use the entire known recording/source evidence to guard automatic local substitutions, including
+   ambiguous physical copies shared by conflicting takes. Raw local-index matching alone is insufficient.
    Select an available file first, else the retained YouTube source, preserving occurrence identity.
 2. Persistent online pages and stable album/artist links (49/64).
 3. Account-scoped bidirectional likes, unified playlists and conflict-aware operation journals

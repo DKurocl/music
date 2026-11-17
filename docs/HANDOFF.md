@@ -15,9 +15,12 @@ CI for first implementation `648bd85`: https://github.com/DKurocl/music/actions/
 431 distinct tests/executions, 0 failures/errors/skips. Tests, lintDebug/lintRelease,
 assembleDebug/assembleRelease and owner signer passed. Includes real exported-schema 3 -> 4 migration.
 Final review found ambiguity, artwork fallback, explicit clears and physical-copy heart cases; follow-up
-changes need their own complete CI before main. Local checks now pass 181 JVM tests (including physical-copy favourite state) and 21 native SQLite
+changes need their own complete CI before main. Local checks now pass 182 JVM tests (including physical-copy favourite state) and 22 native SQLite
 repository tests. A bad single-basename test was corrected to an actually resolvable folder suffix;
 basename-only matching is deliberately unavailable. Full follow-up Android CI is pending.
+Final review also isolated CUE keys from literal paths, stabilized unresolved ambiguous files across
+repeated plays, kept explicit recording IDs authoritative, and moved rich queue decoding/matching
+off the UI thread.
 
 Standalone user harness lacks Android schema asset packaging, so its MigrationTestHelper cases fail
 with missing assets. Actual Android CI passed them without assertion or dependency changes. Independent
@@ -28,6 +31,11 @@ Next: final branch CI, inspect source/lyric regressions and migration, then fast
 verify the signed release. Follow with central service source selection (52), saved online pages
 (49/64), account-scoped bidirectional sync (56/58/59), and remaining audit work in
 `docs/AUDIT_CONTINUATION.md`. Detailed model contract: `docs/specs/RECORDING_SOURCES.md`.
+A source-policy prototype and integration notes live only in `/tmp/music-next-sources`; they are
+uncompiled and not in this branch. Central selection must consider all known recording evidence,
+not just the raw local index. In particular do not let an automatic UI local-first substitution
+claim a physical file that is ambiguous between two saved takes. Preserve queue occurrence keys
+and avoid a second history event during same-occurrence source recovery.
 
 # Current continuation (Codex, 2026-11-17): start here
 

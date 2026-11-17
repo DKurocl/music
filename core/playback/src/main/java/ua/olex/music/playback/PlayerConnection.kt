@@ -72,7 +72,10 @@ data class PlayerState(
 }
 
 /** Stable per-occurrence identity keeps repeated songs distinct while reordering a queue. */
-data class QueueItem(val key: String, val mediaId: String, val title: String, val artist: String, val artworkUri: String?, val track: Track? = null)
+data class QueueItem(val key: String, val mediaId: String, val title: String, val artist: String, val artworkUri: String?, private val item: MediaItem? = null) {
+    /** Decode rich source metadata only for a background consumer, never for every visible row. */
+    val track: Track? by lazy(LazyThreadSafetyMode.PUBLICATION) { item?.let(PlayerConnection::track) }
+}
 
 /** UI-level repeat policy, independent of Media3 constants. */
 enum class RepeatMode { OFF, ALL, ONE }
@@ -357,7 +360,7 @@ class PlayerConnection(context: Context) {
             val queued = player.getMediaItemAt(index)
             val metadata = queued.mediaMetadata
             QueueItem(metadata.extras?.getString(QUEUE_KEY) ?: "$index:${queued.mediaId}", queued.mediaId,
-                metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString(), track(queued))
+                metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString(), queued)
         }
         val item = player.currentMediaItem
         val meta = player.mediaMetadata

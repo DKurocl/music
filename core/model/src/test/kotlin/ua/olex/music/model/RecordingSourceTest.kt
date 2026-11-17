@@ -48,6 +48,16 @@ class RecordingSourceTest {
         assertEquals(listOf(a), RecordingMatcher.group(listOf(file("A.flac", 202_000)), listOf(a, b)))
     }
 
+    @Test fun anUnresolvedSourceStaysStableWithoutMergingItsConflictingLinkedTakes() {
+        val actual = file(ms = 202_000)
+        val a = RecordingCandidate("a", 1, listOf(actual, online("a", 200_000)))
+        val b = RecordingCandidate("b", 2, listOf(actual, online("b", 205_000)))
+        assertTrue(RecordingMatcher.group(listOf(actual), listOf(a, b)).isEmpty())
+        val unresolved = candidate("unresolved", actual, 3)
+        assertEquals(listOf(unresolved), RecordingMatcher.group(listOf(actual), listOf(a, b, unresolved)))
+        assertEquals(listOf(a), RecordingMatcher.group(listOf(online("a", 200_000)), listOf(a, b, unresolved)))
+    }
+
     @Test fun differentCueOccurrencesInTheSameFileRemainSeparate() {
         val a = file().copy(clipStartMs = 0, clipEndMs = 200_000)
         val b = file().copy(clipStartMs = 200_000, clipEndMs = 400_000)
