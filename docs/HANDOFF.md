@@ -1,5 +1,19 @@
 # Current state (Claude, 2026-11-17): start here
 
+## YouTube Music as part of the library (Claude, 2026-11-17)
+
+- Liked, playlists and history keep YouTube Music songs `[код]`: `SavedSong.from` stores the
+  `ytm://` address as the path; `resolve` prefers the owner's file (same song key), else returns the
+  streamed song (`SavedSong.online`). Songs liked or added before this change were saved without the
+  address and still drop out when there is no file. Test: `UserLibraryTest`.
+- A heart on a YouTube Music song is also a like on the owner's account when signed in
+  (`YouTubeMusic.like`, `like/like` and `like/removelike`; not tried against a live account).
+- Signed in: Playlists shows "On YouTube Music" (his playlists and Liked music) under his own
+  (`accountPlaylists`, `FEmusic_liked_playlists`; parser checked on a fixture, not on a live library).
+- Online songs: "Go to album" opens the album page YouTube Music named in the song's row
+  (`albumOf`, remembered while parsing); "Go to artist" and the player's title/artist taps open the
+  artist (the owner's own page when he has them).
+
 ## Moods on Home (Claude, 2026-11-17)
 
 - A mood chip filters Home in place, as YouTube Music's chips do `[код]` (`MoodRow` chosen state,

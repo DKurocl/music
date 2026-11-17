@@ -121,6 +121,24 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         peek<T>(key) ?: load()?.also { synchronized(pages) { pages[key] = it } }
     }
 
+    /**
+     * Likes or unlikes a song on the owner's YouTube Music account, so a heart in the app is a like
+     * there too (and the other way it shows in his "Liked music"). Only when signed in; quiet on failure.
+     */
+    suspend fun like(videoId: String, liked: Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (account() == null) return@withContext false
+        runCatching { post(if (liked) "like/like" else "like/removelike", """"target":{"videoId":${quote(videoId)}}""") != null }.getOrDefault(false)
+    }
+
+    /**
+     * The owner's own playlists on YouTube Music (Liked music first, as there), when signed in; empty
+     * otherwise. Kept for the session.
+     */
+    suspend fun accountPlaylists(): List<Card> {
+        if (account() == null) return emptyList()
+        return cached("account-playlists") { post("browse", """"browseId":"FEmusic_liked_playlists"""")?.let(::playlistCards)?.takeIf { it.isNotEmpty() } }.orEmpty()
+    }
+
     /** Resolves the stream of a song ahead of a tap (address only, no audio), so Play starts sooner. */
     suspend fun warm(id: String) { withContext(Dispatchers.IO) { audio(id) } }
 
@@ -216,6 +234,23 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
         fun isOnline(track: Track) = track.id.value.startsWith("yt:")
+
+        // Album page ids of the songs seen this session, by video id (songs carry only the album's name).
+        private val albumIds = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        /** The YouTube Music album page of an online song seen this session, if its row named one. */
+        fun albumOf(track: Track): String? = albumIds[track.id.value.removePrefix("yt:")]
+
+        /** Playlist cards anywhere in an answer (a library grid, a shelf), in order, without the "New playlist" tile. */
+        fun playlistCards(json: String): List<Card> {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
+            return collect(root, "musicTwoRowItemRenderer").mapNotNull { card ->
+                val nav = dump(card["navigationEndpoint"])
+                if (!nav.contains("MUSIC_PAGE_TYPE_PLAYLIST")) return@mapNotNull null
+                val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return@mapNotNull null
+                Card(id, text(card["title"]).ifEmpty { return@mapNotNull null }, text(card["subtitle"]).ifEmpty { null }, biggestImage(card["thumbnailRenderer"]), Card.Kind.PLAYLIST)
+            }.distinctBy { it.id }
+        }
 
         /** The token for the rest of a long list, in either form YouTube Music sends it. */
         fun continuationOf(json: String): String? =
@@ -345,7 +380,10 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
                 val plain = columns.getOrNull(1).orEmpty().mapNotNull { (it as? Map<*, *>)?.get("text") as? String }
                     .filter { it.isNotBlank() && it.trim() != "•" && it.trim() != "&" && it.trim() != "," }
                 val artist = artists.joinToString(", ").ifEmpty { fallbackArtist ?: plain.getOrNull(1) ?: plain.firstOrNull() ?: return@mapNotNull null }
-                val album = runs.firstOrNull { page(it) == "MUSIC_PAGE_TYPE_ALBUM" }?.get("text") as? String
+                val albumRun = runs.firstOrNull { page(it) == "MUSIC_PAGE_TYPE_ALBUM" }
+                val album = albumRun?.get("text") as? String
+                // Where "Go to album" leads for this song (its album page on YouTube Music).
+                albumRun?.let { Regex(""""browseId"\s*:\s*"([^"]+)"""").find(dump(it["navigationEndpoint"]))?.groupValues?.get(1) }?.let { albumIds[id] = it }
                 val clock = Regex("""\d{1,2}(:\d{2}){1,2}""")
                 val fixed = Regex(""""text"\s*:\s*"(\d{1,2}(?::\d{2}){1,2})"""").find(dump(row["fixedColumns"]))?.groupValues?.get(1)
                 val duration = (plain.lastOrNull { it.matches(clock) } ?: fixed)?.split(':')?.fold(0L) { acc, p -> acc * 60 + p.toLong() } ?: 0L
