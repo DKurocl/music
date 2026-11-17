@@ -43,7 +43,8 @@ Android evidence:
 - both runs passed tests, debug/release lint, debug/release APK builds and owner signer verification.
 The latter includes source preference, row identity and slow-resumption regressions. A final observer
 follow-up also invalidates future choices when durable recording/source evidence changes, without
-waiting for a file/network/cache event. Delivery uses the same required CI gates for that head.
+waiting for a file/network/cache event. Source-event projections run on Dispatchers.Default,
+including decoding saved recording relations. Delivery uses the same required CI gates for that head.
 
 The app retains original online requests for actions; confirmed catalogue links expose local
 quality/offline marks, and ambiguous raw files do not claim them. Online intent selects the best
