@@ -117,4 +117,24 @@ class PlaybackStoreTest {
             assertEquals(8_000L, journal.read()?.positionMs)
         } finally { journal.close() }
     }
+
+    @Test fun recordingAndReserveSurviveCheckpointWhileLegacyItemsRemainReadable() = runBlocking {
+        val online = Track(TrackId("yt:reserve"), "ytm://reserve", "Song", "Artist", durationMs = 180_000, artworkUri = "https://cover")
+        val file = Track(TrackId("local:one"), "content://one", "Song", "Artist", durationMs = 180_000, path = "Music/song.flac")
+        val linked = ua.olex.music.model.SavedSong.from(online).copy(id = "recording:one").bind(file)
+        val item = PlayerConnection.mediaItem(linked, "occurrence")
+        PlaybackStore(directory).write(state().copy(items = listOf(item)))
+        val restored = PlayerConnection.track(PlaybackStore(directory).read()!!.items.single())
+        assertEquals("recording:one", restored.recordingId)
+        assertEquals(linked.sources, restored.sources)
+        assertEquals("ytm://reserve", ua.olex.music.model.SavedSong.from(restored).online()!!.uri)
+        val jsonFile = File(directory, "playback-queue.json")
+        val data = org.json.JSONObject(jsonFile.readText())
+        data.getJSONArray("items").getJSONObject(0).apply { remove("recording"); remove("sources") }
+        jsonFile.writeText(data.toString())
+        val legacy = PlayerConnection.track(PlaybackStore(directory).read()!!.items.single())
+        assertNull(legacy.recordingId); assertTrue(legacy.sources.isEmpty())
+        assertEquals(file.uri, legacy.uri)
+    }
+
 }

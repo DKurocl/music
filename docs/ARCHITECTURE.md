@@ -317,3 +317,20 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     A live explicit selection supersedes disk state; restored shuffle traversal and repeat are
     applied only to matching queue occurrences. A nullable playback-context field travels with media
     metadata and the version-1 checkpoint, preserving readability of older checkpoints.
+
+52. user.db v4 separates durable recording identity from sources. Existing saved_songs IDs survive;
+    new IDs are UUID-based, while source: snapshots are lookup inputs only. song_sources retains
+    exact local paths/URIs and CUE clips alongside YouTube video references with their own artwork.
+    Reconciliation requires compatible known durations and recording evidence, rejects conflicting
+    takes/MBIDs and duration bridges, and never guesses a URI for old metadata-only rows. Confirmed
+    merges keep the oldest identity and permanent aliases, redirect playlist positions/history events
+    in one transaction, OR favourites and select the latest rating/offset. No destructive migration.
+53. SavedCatalog binds every current local copy to its recording but displays the best copy once;
+    folders retain their physical file rows. The app graph reconciles saved references off main.
+    Statistics use recording IDs (plus durable aliases and unique legacy SongKey fallbacks). Queue
+    metadata and v1 playback checkpoints carry bounded versioned source references and recording IDs;
+    missing optional fields preserve old checkpoints. A local-first substitution keeps its video reserve.
+54. Edited/downloaded lyrics write by recording ID and read merged IDs and old SongKeys as fallbacks.
+    Latest explicit edits win. Reset stores an empty marker so an old alias cannot resurrect timing;
+    it does not delete another identity's only text. Main UI and lock-screen resolution share this
+    lookup and the same recording-owned offset. Audio sidecars/embedded tags remain source-specific.

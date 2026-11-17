@@ -145,7 +145,7 @@ internal fun LibraryBrowser(
             CollectionSort.NAME -> groups
             CollectionSort.NEWEST -> groups.sortedByDescending { g -> g.tracks.maxOf { it.addedAt ?: 0 } }
             CollectionSort.YEAR -> groups.sortedByDescending { g -> g.tracks.mapNotNull { it.year }.maxOrNull() ?: 0 }
-            CollectionSort.PLAYED -> groups.sortedByDescending { g -> g.tracks.sumOf { stats[it.key.value]?.plays ?: 0 } }
+            CollectionSort.PLAYED -> groups.sortedByDescending { g -> g.tracks.sumOf { stats[it.statsKey]?.plays ?: 0 } }
         }
     }
     val searching = query.isNotBlank()
@@ -175,13 +175,13 @@ internal fun LibraryBrowser(
     var filter by remember { mutableStateOf(ua.olex.music.model.TrackFilter()) }
     var browsing by rememberSaveable { mutableStateOf<String?>(null) }
     val filterStats = if (filter.unplayed || filter.minRating > 0) stats else null
-    val unsorted = remember(raw, filter, filterStats) { raw?.let { list -> filter.apply(list) { stats[it.key.value] } } }
+    val unsorted = remember(raw, filter, filterStats) { raw?.let { list -> filter.apply(list) { stats[it.statsKey] } } }
     val order = sortOrders[sortScope] ?: TrackSortOrder()
     val source = unsorted?.let(::SortSource)
     val statsKey = if (order.mode == TrackSortMode.PLAYS || order.mode == TrackSortMode.RATING) stats else null
     val sorted by produceState<SortedTracks?>(null, source, order, statsKey) {
         value = if (source == null || order == TrackSortOrder()) null else withContext(Dispatchers.Default) {
-            SortedTracks(source, order, order.sort(source.tracks) { stats[it.key.value] })
+            SortedTracks(source, order, order.sort(source.tracks) { stats[it.statsKey] })
         }
     }
     val visible = if (order == TrackSortOrder()) unsorted else sorted?.takeIf { it.source == source && it.order == order }?.tracks
@@ -430,7 +430,7 @@ internal fun LibraryBrowser(
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else {
-                        val shown = if (allArtistSongs || visible.size <= 5) visible else visible.sortedByDescending { stats[it.key.value]?.plays ?: 0 }.take(5)
+                        val shown = if (allArtistSongs || visible.size <= 5) visible else visible.sortedByDescending { stats[it.statsKey]?.plays ?: 0 }.take(5)
                         item(key = "artist-songs-title") {
                             Row(Modifier.fillMaxWidth().padding(top = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played", style = MaterialTheme.typography.titleLarge,

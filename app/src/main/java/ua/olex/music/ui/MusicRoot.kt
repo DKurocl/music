@@ -475,11 +475,11 @@ fun MusicRoot(model: LibraryViewModel) {
     actionTrack?.let { track ->
         val online = YouTubeMusic.isOnline(track)
         val saved = track.id.value in personal.favouriteByTrackId
-        TrackActionsSheet(track, saved, rating = stats[track.key.value]?.rating ?: 0, onRate = { stars ->
+        TrackActionsSheet(track, saved, rating = stats[track.statsKey]?.rating ?: 0, onRate = { stars ->
             model.setRating(track, stars)
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
         },
-            plays = stats[track.key.value]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
+            plays = stats[track.statsKey]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
             // A mix grown from this song, as YouTube Music's "Start radio", local files first.
             TrackAction(Glyph.MIX, "Start mix") { haptics.spin(); model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },

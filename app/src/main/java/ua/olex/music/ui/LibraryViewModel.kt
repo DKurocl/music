@@ -48,9 +48,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Null until the first read from the database: the list shows nothing rather than "empty". */
     val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     /** The scanned files plus durable online songs; never built in composition or from network pages. */
-    val catalogue: StateFlow<LibraryIndex?> = combine(library, graph.userLibrary.catalogue) { local, saved ->
-        ua.olex.music.model.SavedCatalog.merge(local ?: LibraryIndex.EMPTY, saved)
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    val catalogue: StateFlow<LibraryIndex?> = graph.catalogue.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val sortPreferences = app.getSharedPreferences("library-sort-v1", android.content.Context.MODE_PRIVATE)
     private val prefs = app.getSharedPreferences("library-options", android.content.Context.MODE_PRIVATE)
     private val _sortOrders = MutableStateFlow(TrackSortScope.entries.associateWith { scope ->
@@ -113,7 +111,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
-    val personal: StateFlow<PersonalLibraryState> = combine(library, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
+    val personal: StateFlow<PersonalLibraryState> = combine(catalogue, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
         PersonalLibraryState.resolve(index ?: LibraryIndex.EMPTY, favourites, playlists, history)
     }.flowOn(Dispatchers.Default).catch {
         userError = "Couldn't open your personal library. Your saved data has not been reset."
@@ -122,12 +120,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     val musicFolders = graph.musicFiles.folders
     /** The playing song: the library's file, or, for a YouTube Music song, what the player knows of it. */
-    private fun playingTrack(state: PlayerState = playing.value, index: LibraryIndex? = library.value): Track? {
+    private fun playingTrack(state: PlayerState = playing.value, index: LibraryIndex? = catalogue.value): Track? {
         val id = state.mediaId ?: return null
-        return index?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
+        val file = index?.byId?.get(TrackId(id))
+        val queued = state.track
+        if (file != null && (queued == null || file.uri == queued.uri)) return file.copy(
+            recordingId = file.recordingId ?: queued?.recordingId,
+            sources = (file.sources + queued?.sources.orEmpty()).distinctBy { it.key })
+        return queued ?: if (id.startsWith("yt:")) Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
             state.title, state.artist, album = state.album, durationMs = state.durationMs, artworkUri = state.artworkUri) else null
     }
-    private val lyricTrack = combine(library, playing.distinctUntilChanged { a, b -> a.mediaId == b.mediaId && a.title == b.title }) { index, state ->
+    private val lyricTrack = combine(catalogue, playing.distinctUntilChanged { a, b -> a.mediaId == b.mediaId && a.title == b.title && a.track == b.track }) { index, state ->
         playingTrack(state, index)
     }.distinctUntilChanged()
     val localLyrics = combine(lyricTrack, graph.musicFiles.revision, graph.downloadedLyrics.revision) { track, revision, _ -> track to revision }
@@ -167,11 +170,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Saves hand-fixed timing for the playing song (app storage, wins over other sources). */
     fun saveLyricTiming(lyrics: ua.olex.music.lyrics.Lyrics) {
         val track = lyricTrackNow() ?: return
-        viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.saveEdited(track, ua.olex.music.lyrics.LrcWriter.write(lyrics)) }
+        viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.saveEdited(graph.userLibrary.keepReference(track).bind(track), ua.olex.music.lyrics.LrcWriter.write(lyrics)) }
     }
     fun resetLyricTiming() {
         val track = lyricTrackNow() ?: return
-        viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.deleteEdited(track) }
+        viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.deleteEdited(graph.userLibrary.keepReference(track).bind(track)) }
     }
     private fun lyricTrackNow() = playingTrack()
 
@@ -222,7 +225,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         onlineLyricsStatus = "Searching online…"
         viewModelScope.launch {
             onlineLyricsStatus = try {
-                graph.downloadedLyrics.fetch(track)?.let { found ->
+                graph.downloadedLyrics.fetch(graph.userLibrary.keepReference(track).bind(track))?.let { found ->
                     // Kept in the file too, replacing what it had, so other players and a reinstall see them.
                     if ('#' !in track.id.value && !YouTubeMusic.isOnline(track)) lyricsForFile = track to found.text
                     "Found on ${found.source}"
@@ -264,8 +267,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Plays and ratings per song identity (SongKey value). */
     /** Ratings in the files count when the app has none of its own, so they survive a reinstall. */
-    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, library) { own, index ->
-        val fromFiles = index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.key.value to it } }.orEmpty()
+    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, catalogue) { own, index ->
+        val fromFiles = index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.statsKey to it } }.orEmpty()
         if (fromFiles.isEmpty()) own else own.toMutableMap().apply {
             for ((key, stars) in fromFiles) { val s = get(key) ?: ua.olex.music.model.SongStats.NONE; if (s.rating == 0) put(key, s.copy(rating = stars)) }
         }
@@ -281,7 +284,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         val now = System.currentTimeMillis()
         val seed = now / 86_400_000L // a shuffled list keeps its order for the day
         (ua.olex.music.model.SmartPlaylist.BUILT_IN + own).map { p ->
-            SmartPlaylistUi(p, p.evaluate(songs, { stats[it.key.value] ?: ua.olex.music.model.SongStats.NONE }, { it.id.value in personal.favouriteByTrackId }, now, seed))
+            SmartPlaylistUi(p, p.evaluate(songs, { stats[it.statsKey] ?: ua.olex.music.model.SongStats.NONE }, { it.id.value in personal.favouriteByTrackId }, now, seed))
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -441,7 +444,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private fun localFirst(list: List<Track>): List<Track> {
         if (list.none(YouTubeMusic::isOnline)) return list
         val index = localIndex() ?: return list
-        return list.map { if (YouTubeMusic.isOnline(it)) index.copyOf(it) ?: it else it }
+        return list.map { if (YouTubeMusic.isOnline(it)) index.preferLocal(it) else it }
     }
 
     // The library indexed by title and artist (YouTubeMusic.indexOf), rebuilt only when the library itself changes.
@@ -557,7 +560,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 // playing now keeps playing from the stream (PlayerConnection.replaceQueueItems).
                 val swaps = online.mapNotNull { item ->
                     val duration = if (item.mediaId == state.mediaId) state.durationMs else 0L
-                    index.copyOf(Track(TrackId(item.mediaId), "", item.title, item.artist, durationMs = duration))?.let { item.key to it }
+                    index.preferLocal(item.track ?: Track(TrackId(item.mediaId), "ytm://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, durationMs = duration)).takeUnless(YouTubeMusic::isOnline)?.let { item.key to it }
                 }.toMap()
                 player.replaceQueueItems(swaps)
             }

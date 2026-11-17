@@ -70,9 +70,9 @@ internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
  */
 @Composable
 internal fun rememberOwned(songs: List<Track>, library: LibraryIndex): List<Track> {
-    val ready = remember(songs, library) { YouTubeMusic.builtIndex(library)?.let { index -> songs.map { index.copyOf(it) ?: it } } }
+    val ready = remember(songs, library) { YouTubeMusic.builtIndex(library)?.let { index -> songs.map { index.preferLocal(it) } } }
     return produceState(ready ?: songs, songs, library) {
-        value = ready ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { YouTubeMusic.indexOf(library).let { index -> songs.map { index.copyOf(it) ?: it } } }
+        value = ready ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { YouTubeMusic.indexOf(library).let { index -> songs.map { index.preferLocal(it) } } }
     }.value
 }
 

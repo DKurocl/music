@@ -1,14 +1,43 @@
 package ua.olex.music.model
 
-/** Projects durable online references into the library without changing their stored source links. */
+/** Projects durable recordings into the library without losing their source links. */
 object SavedCatalog {
+    /** Bind scanned copies through indexed evidence; ambiguous takes keep their own identity. */
+    fun bindLocal(local: LibraryIndex, saved: List<SavedSong>): List<Track> {
+        if (saved.isEmpty()) return local.songs
+        val candidates = saved.map { RecordingCandidate(it.id, it.createdAt, it.references, it.songKey, it.durationMs) }
+        val byId = saved.associateBy { it.id }
+        val byKey = HashMap<String, MutableSet<RecordingCandidate>>()
+        val bySource = HashMap<String, MutableSet<RecordingCandidate>>()
+        for (candidate in candidates) {
+            byKey.getOrPut(candidate.legacySongKey.orEmpty()) { LinkedHashSet() }.add(candidate)
+            for (source in candidate.sources) {
+                byKey.getOrPut(source.songKey) { LinkedHashSet() }.add(candidate)
+                bySource.getOrPut(source.key) { LinkedHashSet() }.add(candidate)
+            }
+        }
+        return local.songs.map { track ->
+            val source = RecordingSource.from(track) ?: return@map track
+            val group = RecordingMatcher.group(listOf(source), (byKey[source.songKey].orEmpty() + bySource[source.key].orEmpty()).toList())
+            val first = group.firstOrNull() ?: return@map track
+            byId.getValue(first.id).copy(sources = group.flatMap { it.sources }.distinctBy { it.key }).bind(track)
+        }
+    }
+
     /** Build off main. Files win when they match; unavailable files do not become playable snapshots. */
     fun merge(local: LibraryIndex, saved: List<SavedSong>): LibraryIndex {
-        val added = saved.asSequence().filter { it.path.startsWith(SavedSong.ONLINE_PREFIX) }
-            .mapNotNull { it.resolve(local) }.filter { it.id !in local.byId }.distinctBy { it.id }.toList()
-        if (added.isEmpty()) return local
+        if (saved.isEmpty()) return local
+        val bound = bindLocal(local, saved)
+        val represented = bound.mapNotNullTo(HashSet()) { it.recordingId }
+        val added = saved.asSequence().filter { it.id !in represented }
+            .mapNotNull { it.resolve(local) }.filter { it.uri.startsWith(SavedSong.ONLINE_PREFIX) && it.id !in local.byId }.distinctBy { it.id }.toList()
+        val preferred = bound.groupBy { it.recordingId ?: it.id.value }.values.map { copies -> copies.maxBy { it.format?.rank ?: 0 } }
+        if (added.isEmpty() && preferred == local.songs) return local
         // Online songs have no filesystem folder. Keep the local folder tree exactly as scanned.
-        return LibraryIndex.build(local.songs + added).copy(folders = local.folders)
+        val identities = bound.associateBy { it.id }
+        return LibraryIndex.build(preferred + added).copy(folders = local.folders.map { folder ->
+            folder.copy(tracks = folder.tracks.map { identities[it.id] ?: it })
+        })
     }
 
     /** Literal AND-ed word prefixes, matching the local FTS search without network access. */

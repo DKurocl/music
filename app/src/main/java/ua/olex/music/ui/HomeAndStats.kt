@@ -399,7 +399,7 @@ private fun AlbumRow(albums: List<MusicCollection>, onOpen: (MusicCollection) ->
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit) {
-    val s = rememberOffMain(library, stats, initial = null) { LibraryStats.of(library) { stats[it.key.value] } } ?: LibraryStats.of(LibraryIndex.EMPTY) { null }
+    val s = rememberOffMain(library, stats, initial = null) { LibraryStats.of(library) { stats[it.statsKey] } } ?: LibraryStats.of(LibraryIndex.EMPTY) { null }
     val cs = MaterialTheme.colorScheme
     fun hours(ms: Long) = if (ms >= 3_600_000) "${ms / 3_600_000} h ${ms / 60_000 % 60} min" else "${ms / 60_000} min"
     val byName = rememberOffMain(library, initial = emptyMap()) { library.artists.associateBy { it.name } }
@@ -544,22 +544,22 @@ private object HomeCache { @Volatile var last: HomeData? = null }
 private fun homeData(library: LibraryIndex, history: List<Track>, stats: Map<String, SongStats>, favourites: List<Track>, day: Long): HomeData {
     val newest = library.songs.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(100)
     val artists = library.artists.filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", true) }
-        .sortedWith(compareByDescending<MusicCollection> { a -> a.tracks.sumOf { stats[it.key.value]?.plays ?: 0 } }.thenByDescending { it.tracks.size })
+        .sortedWith(compareByDescending<MusicCollection> { a -> a.tracks.sumOf { stats[it.statsKey]?.plays ?: 0 } }.thenByDescending { it.tracks.size })
         .take(15)
     val albumOf = HashMap<ua.olex.music.model.TrackId, MusicCollection>().apply { library.albums.forEach { a -> a.tracks.forEach { put(it.id, a) } } }
     val recentAlbums = history.mapNotNull { albumOf[it.id] }.distinctBy { it.id }.take(12)
     val addedAlbums = library.albums.filter { a -> a.tracks.any { it.addedAt != null } }.sortedByDescending { a -> a.tracks.maxOf { it.addedAt ?: 0 } }.take(12)
-    val mostPlayed = library.songs.map { it to (stats[it.key.value]?.plays ?: 0) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
-    val listened = LibraryStats.of(library) { stats[it.key.value] }
+    val mostPlayed = library.songs.map { it to (stats[it.statsKey]?.plays ?: 0) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
+    val listened = LibraryStats.of(library) { stats[it.statsKey] }
     // Quick picks (YouTube Music's opening shelf): today's mix of what the owner plays and likes,
     // with a few unplayed songs by the artists they play; stable for the day. Liked songs are
     // compared by id: hashing whole tracks (every tag) for each of thousands of songs was the slow part.
     val random = java.util.Random(day)
     val liked = favourites.mapTo(HashSet()) { it.id }
-    val played = library.songs.filter { (stats[it.key.value]?.plays ?: 0) > 0 || it.id in liked }
-        .sortedByDescending { (stats[it.key.value]?.plays ?: 0) + if (it.id in liked) 5 else 0 }.take(60).shuffled(random).take(14)
+    val played = library.songs.filter { (stats[it.statsKey]?.plays ?: 0) > 0 || it.id in liked }
+        .sortedByDescending { (stats[it.statsKey]?.plays ?: 0) + if (it.id in liked) 5 else 0 }.take(60).shuffled(random).take(14)
     val topArtists = artists.take(6).map { it.name }.toSet()
-    val fresh = library.songs.filter { it.artist in topArtists && (stats[it.key.value]?.plays ?: 0) == 0 }.shuffled(random).take(6)
+    val fresh = library.songs.filter { it.artist in topArtists && (stats[it.statsKey]?.plays ?: 0) == 0 }.shuffled(random).take(6)
     val quickPicks = (played + fresh).distinctBy { it.id }.ifEmpty { library.songs.shuffled(random).take(20) }.shuffled(random).take(20)
     return HomeData(newest, artists, recentAlbums, addedAlbums, mostPlayed, listened, quickPicks)
 }
