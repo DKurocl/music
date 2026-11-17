@@ -27,7 +27,9 @@ snapshot. Search/credit hints require complete artist names, known durations and
 annotations; named remixes and live venues remain distinct. Source matching and queue conversion run
 off main. MediaStore version/generation checks skip unchanged scans; manual Rescan stays forced,
 unknown generation falls back to a full scan, and a change during a scan triggers the next refresh.
-This is not a complete incremental MediaStore scanner.
+This is not a complete incremental MediaStore scanner. The service observer refreshes independently;
+Play consumes the latest cached snapshot without waiting for scanning. Recovery cannot start the
+next track after a concurrent Pause.
 
 Local verification before full Android CI:
 - pure JVM harness: 201 tests passed;

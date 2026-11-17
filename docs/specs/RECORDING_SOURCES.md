@@ -1,7 +1,7 @@
 # Recording identity and source links
 
-Status: in progress on `agent/recording-sources`, after verified release music-v1109.
-Owner asked to continue while asleep. Nothing in this block is delivered yet.
+Status: foundation delivered in music-v1116 at `45be07f`, CI 44172917731 and 44175207911.
+Central service policy is under verification on `agent/service-source-policy`.
 
 ## Contract
 
@@ -23,7 +23,7 @@ Owner asked to continue while asleep. Nothing in this block is delivered yet.
   event IDs and timestamps. Favourite is OR, rating takes latest ratedAt, offset takes latest updatedAt
   (prefer canonical on ties, since old offsets had no timestamp). No destructive migration.
 
-## Implemented, final CI pending
+## Delivered foundation
 
 - RecordingSource, conservative matcher and bounded versioned queue codec. Source ID remains
   separate from recording ID and queue occurrence. Unknown-length automatic substitutions do not link.
@@ -43,8 +43,9 @@ Owner asked to continue while asleep. Nothing in this block is delivered yet.
 - Linked local hearts queue outbound YouTube likes too. Sending is serialized and an old response
   cannot clear a newer pending intent. Inbound/account-scoped sync remains a later block.
 
-First complete Android CI 44166893313 (`648bd85`): 431 tests, both lints, debug/release APKs and
-owner signing verification passed, including migration 3 -> 4. Final follow-up CI is required.
+Final foundation CI 44172917731 (`45be07f`): 441 distinct tests, zero failures/errors/skips, both
+lints, debug/release APKs and owner signing verification passed, including migration 3 -> 4.
+Main CI 44175207911 released music-v1116; downloaded APK and release digest verified.
 
 ## Next blocks
 
