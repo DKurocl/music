@@ -47,6 +47,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconButton
@@ -182,7 +183,7 @@ internal fun TrackRow(
             val color by animateColorAsState(when { armed && next -> cs.primary; armed -> cs.tertiary; next -> cs.secondaryContainer; else -> cs.tertiaryContainer }, label = "swipe")
             val ink = when { armed && next -> cs.onPrimary; armed -> cs.onTertiary; next -> cs.onSecondaryContainer; else -> cs.onTertiaryContainer }
             val iconScale by androidx.compose.animation.core.animateFloatAsState(if (armed) 1.15f else 0.85f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "swipe-icon")
-            Row(Modifier.matchParentSize().padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
+            Row(Modifier.matchParentSize().padding(horizontal = 8.dp, vertical = 2.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
                 horizontalArrangement = if (next) Arrangement.Start else Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 Symbol(if (next) Glyph.NEXT else Glyph.QUEUE, filled = true, color = ink, modifier = Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale })
                 Spacer(Modifier.width(10.dp))
@@ -241,10 +242,14 @@ private fun TrackRowContent(
                 style = MaterialTheme.typography.titleMedium)
         },
         supportingContent = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                else Text(clock(track.durationMs), maxLines = 1)
-                if (showQuality) track.format?.let { QualityTag(it.label, it.lossless) }
+            // One line's height whatever the mark (a quality tag, a cloud, a ring): every row is the same height.
+            val line = with(androidx.compose.ui.platform.LocalDensity.current) { MaterialTheme.typography.bodyMedium.lineHeight.toDp() }
+            Row(Modifier.height(line), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // The tag shares the text's baseline: ListItem reads two different baselines as a
+                // second line and grows the row, which is what made rows with a tag taller.
+                if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
+                else Text(clock(track.durationMs), maxLines = 1, modifier = Modifier.alignByBaseline())
+                if (showQuality) SourceMark(track, Modifier.alignByBaseline(), current)
             }
         },
         leadingContent = {
@@ -267,21 +272,54 @@ private fun TrackRowContent(
         colors = ListItemDefaults.colors(containerColor = if (lifted) cs.surfaceContainerHigh else container,
             headlineColor = if (selecting && checked) cs.onSecondaryContainer else cs.onSurface,
             supportingColor = if (selecting && checked) cs.onSecondaryContainer else cs.onSurfaceVariant),
-        modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).combinedClickable(
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp).clip(RoundedCornerShape(20.dp)).combinedClickable(
             onLongClickLabel = if (onSelect != null) "Select song" else null, onLongClick = onSelect?.let { select -> { haptics.longPress(); select() } },
             onClick = { if (selecting) onSelect?.invoke() else onClick() },
         ).semantics { selected = if (selecting) checked else current },
     )
 }
 
+/**
+ * Where a song plays from, always in the same place after the artist (docs/specs/M10_ONLINE.md, D2):
+ * a file shows its quality tag; an online song a small cloud, a filled-in cloud once the stream
+ * cache keeps it whole (plays without the network), and a filling ring while Soulseek downloads it.
+ * Every mark is the tag's height, so rows never change size when a mark changes.
+ */
+@Composable
+internal fun SourceMark(track: Track, modifier: Modifier = Modifier, current: Boolean = false) {
+    if (!YouTubeMusic.isOnline(track)) { track.format?.let { QualityTag(it.label, it.lossless, modifier) }; return }
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val cs = MaterialTheme.colorScheme
+    val key = remember(track.artist, track.title) { ua.olex.music.soulseek.SoulseekDownloads.songKey(track.artist.substringBefore(",").trim(), track.title) }
+    val jobs by graph.soulseek.jobs.collectAsState()
+    val job = jobs.lastOrNull { it.key == key }?.takeIf { it.running }
+    // Asked again when the song stops or starts playing, which is when the cache fills.
+    val kept = remember(track.uri, current) { ua.olex.music.playback.CacheBudget.isStreamCached(track.uri) }
+    Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+        when {
+            job != null -> {
+                val p = job.progress
+                if (p == null) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = cs.primary, trackColor = cs.primary.copy(alpha = 0.2f))
+                else CircularProgressIndicator(progress = { p }, modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = cs.primary, trackColor = cs.primary.copy(alpha = 0.2f))
+                Box(Modifier.semantics { contentDescription = "Downloading" })
+            }
+            kept -> Symbol(Glyph.CLOUD_DONE, size = 16.dp, color = cs.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = "Streams, kept offline" })
+            else -> Symbol(Glyph.CLOUD, size = 16.dp, color = cs.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = "Streams from YouTube Music" })
+        }
+    }
+}
+
 /** "FLAC 24/96" as a small tonal tag; lossless files get the accent so the eye finds them. */
 @Composable
-internal fun QualityTag(label: String, lossless: Boolean) {
+internal fun QualityTag(label: String, lossless: Boolean, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     Text(
-        label, style = MaterialTheme.typography.labelSmall, maxLines = 1,
+        label, maxLines = 1,
+        // Trimmed to the letters, so the tag is no taller than the line it sits in.
+        style = MaterialTheme.typography.labelSmall.copy(lineHeight = MaterialTheme.typography.labelSmall.fontSize * 1.2f,
+            lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center, androidx.compose.ui.text.style.LineHeightStyle.Trim.Both)),
         color = if (lossless) cs.onTertiaryContainer else cs.onSurfaceVariant,
-        modifier = Modifier.clip(RoundedCornerShape(6.dp))
+        modifier = modifier.clip(RoundedCornerShape(6.dp))
             .background(if (lossless) cs.tertiaryContainer else cs.surfaceContainerHighest)
             .padding(horizontal = 6.dp, vertical = 1.dp),
     )
@@ -395,6 +433,8 @@ internal fun PlayerPage(
     motionCover: String? = null,
     /** Opens the lyrics options; shown in the top bar while the lyrics are on. */
     onLyricsTools: (() -> Unit)? = null,
+    /** What the queue came from ("Top Hits", "Mix from Teardrop", "Search"), when known. */
+    from: String? = null,
 ) {
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val cs = MaterialTheme.colorScheme
@@ -437,7 +477,9 @@ internal fun PlayerPage(
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = "Open album", onClick = onOpenAlbum) else Modifier)
                     .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                    Text(state.album ?: if (state.mediaId?.startsWith("yt:") == true) "YouTube Music" else "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // What is really playing: the playlist, artist, mix or mood the queue came from, else the
+                    // song's album, else the queue itself. Never the service's name.
+                    Text(from ?: state.album ?: if (state.mediaId?.startsWith("yt:") == true) "Your queue" else "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End) {
                     // With the lyrics on, their options (timing, sources, online) sit up here, clear of the text.
