@@ -68,6 +68,9 @@ data class RecordingCandidate(val id: String, val createdAt: Long, val sources: 
 /** Conservative recording reconciliation, independent of Room, Android and network clients. */
 object RecordingMatcher {
     private val generic = setOf("", "unknown", "unknownartist", "unknowntitle", "track", "track1", "track01")
+    /** Check all competing evidence together; compatibility alone is not proof of identity. */
+    fun canCombine(incoming: List<RecordingSource>, candidates: List<RecordingCandidate>) =
+        consistent(incoming + candidates.flatMap(::evidence))
     /**
      * Returns an oldest-first merge group, or nothing when the metadata is ambiguous. Unknown
      * duration requires an exact source. Explicitly linked credits may differ, but the take may not.
@@ -79,15 +82,26 @@ object RecordingMatcher {
         }
         if (matches.isEmpty()) return emptyList()
         val exact = matches.filter { c -> c.sources.any { old -> incoming.any { it.key == old.key && same(old, it) } } }
-        if (exact.isNotEmpty()) {
+        run {
             val matchedIds = matches.mapTo(HashSet()) { it.id }
             val outside = HashMap<String, MutableList<RecordingCandidate>>()
-            candidates.filter { it.id !in matchedIds }.forEach { candidate -> candidate.sources.forEach { source ->
+            val nearby = HashMap<Pair<String, Long>, MutableSet<RecordingCandidate>>()
+            val bucketMs = SongKey.LENGTH_TOLERANCE_MS + 1
+            candidates.filter { it.id !in matchedIds }.forEach { candidate -> evidence(candidate).forEach { source ->
                 outside.getOrPut(source.key) { ArrayList() }.add(candidate)
+                if (source.durationMs > 0 && useful(source.songKey))
+                    nearby.getOrPut(source.songKey to source.durationMs / bucketMs) { LinkedHashSet() }.add(candidate)
             } }
             val exactIds = exact.mapTo(HashSet()) { it.id }
-            matches = matches.filter { candidate -> candidate.id in exactIds || candidate.sources.none { source ->
-                outside[source.key].orEmpty().any { other -> !consistent(candidate.sources + evidence(other) + incoming) }
+            matches = matches.filter { candidate -> candidate.id in exactIds || evidence(candidate).none { source ->
+                val alternatives = LinkedHashSet(outside[source.key].orEmpty())
+                if (source.durationMs > 0 && useful(source.songKey)) for (delta in -1L..1L)
+                    alternatives.addAll(nearby[source.songKey to (source.durationMs / bucketMs + delta)].orEmpty())
+                alternatives.any { other ->
+                    val old = evidence(other)
+                    old.any { same(source, it) } && consistent(evidence(candidate) + old) &&
+                        !consistent(evidence(candidate) + old + incoming)
+                }
             } }
         }
         val selected = if (consistent(matches.flatMap(::evidence) + incoming)) matches

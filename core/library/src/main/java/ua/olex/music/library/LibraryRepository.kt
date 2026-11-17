@@ -32,6 +32,7 @@ class LibraryRepository internal constructor(
     private val artworkRevision: Flow<Long> = flowOf(0L),
     /** Folders the owner hid from the library (relative path prefixes such as "Recordings/"). */
     private val excluded: Flow<Set<String>> = flowOf(emptySet()),
+    private val version: suspend () -> String? = { null },
 ) {
     constructor(context: Context, database: LibraryDatabase, files: LocalMusicFiles? = null) : this(
         database.tracks(), { scanId -> MediaStoreScanner.scan(context.applicationContext, scanId) },
@@ -39,10 +40,20 @@ class LibraryRepository internal constructor(
         enrich = { rows -> FileTagScanner.enrich(rows, database.tracks().observeAll().first(), cue = { path -> files?.sidecarCueBlocking(path) }, read = AndroidTagSource(context.applicationContext)::read) },
         excluded = LibraryFolders.excluded(context.applicationContext),
         artworkPackage = context.applicationContext.packageName, artworkRevision = files?.revision ?: flowOf(0L),
+        version = metadata@{
+            val revisions = ArrayList<String>()
+            for (volume in android.provider.MediaStore.getExternalVolumeNames(context.applicationContext).sorted()) {
+                val revision = android.provider.MediaStore.getVersion(context.applicationContext, volume) ?: return@metadata null
+                revisions += "$volume:$revision:${android.provider.MediaStore.getGeneration(context.applicationContext, volume)}"
+            }
+            revisions.joinToString("|")
+        },
     )
 
     private val scanning = Mutex()
     private var lastScanId = 0L
+    private var lastVersion: String? = null
+    private var lastCount = 0
 
     val tracks: Flow<List<Track>> = combine(dao.observeAll(), artworkRevision) { rows, revision -> rows.map { it.toTrack(artworkPackage, revision) } }.flowOn(Dispatchers.Default)
     val index: Flow<LibraryIndex> = combine(tracks, excluded) { all, hidden ->
@@ -61,13 +72,24 @@ class LibraryRepository internal constructor(
     }
 
     /** Reads the phone's music again; returns how many tracks there are. One scan at a time. */
-    suspend fun rescan(): Int = scanning.withLock {
+    suspend fun rescan(): Int = refresh(force = true)
+
+    /** Reuse the current snapshot until a MediaStore volume version/generation changes. */
+    suspend fun refresh(): Int = refresh(force = false)
+
+    private suspend fun refresh(force: Boolean): Int = scanning.withLock {
         withContext(ioDispatcher) {
+            val generation = try { version() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { null }
+            if (!force && generation != null && generation == lastVersion) return@withContext lastCount
             // Two fast scans (or a wall-clock adjustment) must not retain deleted rows.
             val scanId = maxOf(System.currentTimeMillis(), lastScanId + 1).also { lastScanId = it }
             val found = enrich(scan(scanId))
             currentCoroutineContext().ensureActive()
             dao.replace(Origin.LOCAL.prefix, scanId, found)
+            lastVersion = generation
+            lastCount = found.size
             found.size
         }
     }

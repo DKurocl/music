@@ -11,7 +11,6 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import ua.olex.music.AppGraph
-import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
@@ -27,7 +26,7 @@ class PlaybackMixTest {
     private fun run() = PlaybackMix.Run(seed, "token", mutableSetOf(Mix.songKey(seed)), mutableSetOf(seed.id.value))
 
     @Test fun continuationWorksWithoutConnectingAUiPlayerAndCommitsOnlyWhenAccepted() = runBlocking {
-        val mix = PlaybackMix(graph(), nextPage = { YouTubeMusic.RadioPage(listOf(seed, next), "after") }, localLibrary = { LibraryIndex.EMPTY })
+        val mix = PlaybackMix(graph(), nextPage = { YouTubeMusic.RadioPage(listOf(seed, next), "after") })
         val before = run()
         mix.run = before
         val extension = requireNotNull(mix.extend(listOf(seed), 0))
@@ -42,7 +41,7 @@ class PlaybackMixTest {
     @Test fun aNewMixWinsOverAnOldContinuationInFlight() = runBlocking {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
-        val mix = PlaybackMix(graph(), nextPage = { entered.complete(Unit); release.await(); YouTubeMusic.RadioPage(listOf(next), "after") }, localLibrary = { LibraryIndex.EMPTY })
+        val mix = PlaybackMix(graph(), nextPage = { entered.complete(Unit); release.await(); YouTubeMusic.RadioPage(listOf(next), "after") })
         mix.run = run()
         val loading = async { mix.extend(listOf(seed), 0) }
         entered.await()
@@ -55,7 +54,7 @@ class PlaybackMixTest {
     }
 
     @Test fun replacingTheQueueAfterLoadingRejectsTheCommit() = runBlocking {
-        val mix = PlaybackMix(graph(), nextPage = { YouTubeMusic.RadioPage(listOf(next), "after") }, localLibrary = { LibraryIndex.EMPTY })
+        val mix = PlaybackMix(graph(), nextPage = { YouTubeMusic.RadioPage(listOf(next), "after") })
         val previous = run()
         mix.run = previous
         mix.label = "Old mix"
@@ -66,4 +65,15 @@ class PlaybackMixTest {
         assertNull(mix.label)
         assertEquals("token", previous.token)
     }
+
+    @Test fun aServiceChosenPhysicalSourceKeepsTheOriginalRadioCursor() = runBlocking {
+        val mix = PlaybackMix(graph(), nextPage = { YouTubeMusic.RadioPage(listOf(next), "after") })
+        val before = run(); mix.run = before
+        val physical = seed.copy(id = TrackId("local:one"), uri = "content://one", requestedId = seed.id.value)
+        val extension = requireNotNull(mix.extend(listOf(physical), 0))
+        assertTrue(extension.commit())
+        assertSame(before, mix.run)
+        assertEquals("after", before.token)
+    }
+
 }

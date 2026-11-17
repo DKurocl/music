@@ -52,7 +52,7 @@ internal object QueueCommand {
         if (empty) { player.prepare(); player.play() }
     }
 
-    private fun shuffleTraversal(player: Player): List<Int> {
+    internal fun shuffleTraversal(player: Player): List<Int> {
         val timeline = player.currentTimeline
         val result = ArrayList<Int>(player.mediaItemCount)
         var index = timeline.getFirstWindowIndex(true)

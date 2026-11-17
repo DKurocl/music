@@ -27,7 +27,9 @@ internal class RecordingRegistrar private constructor(
     }
 
     suspend fun register(snapshot: SavedSong): SavedSong {
+        val named = records[snapshot.id] ?: if (snapshot.persistent) dao.canonicalId(snapshot.id)?.let(records::get) else null
         val incoming = snapshot.references
+        if (incoming.isEmpty() && named != null) return named.toSong()
         require(incoming.isNotEmpty()) { "This song has no source to save" }
         val ids = LinkedHashSet<String>()
         ids.add(snapshot.id)
@@ -35,12 +37,17 @@ internal class RecordingRegistrar private constructor(
         val candidates = ids.mapNotNull { records[it] }.map { row ->
             RecordingCandidate(row.id, row.song.createdAt, row.toSong().references, row.song.songKey, row.song.durationMs)
         }
-        val named = records[snapshot.id] ?: if (snapshot.persistent) dao.canonicalId(snapshot.id)?.let(records::get) else null
+        val primary = incoming.first()
         val pinned = candidates.firstOrNull { it.id == named?.id }
             ?.takeIf { RecordingMatcher.group(incoming, listOf(it)).isNotEmpty() }
-        val matched = RecordingMatcher.group(incoming, candidates)
-        val selected = if (pinned != null && matched.none { it.id == pinned.id }) listOf(pinned) else matched
-        val group = selected.map { records.getValue(it.id) }
+        val possiblePrimary = candidates.filter { RecordingMatcher.group(listOf(primary), listOf(it)).isNotEmpty() }
+        val matched = (RecordingMatcher.group(listOf(primary), candidates) + RecordingMatcher.group(incoming,
+            candidates.filter { it.sources.isNotEmpty() && it.sources.all { source -> source.kind == RecordingSourceKind.MISSING_LOCAL } }))
+            .distinctBy { it.id }
+        val selected = if (pinned != null && matched.none { it.id == pinned.id }) {
+            if (RecordingMatcher.canCombine(incoming, (possiblePrimary + pinned).distinctBy { it.id })) matched + pinned else listOf(pinned)
+        } else matched
+        val group = selected.sortedWith(compareBy<ua.olex.music.model.RecordingCandidate> { it.createdAt }.thenBy { it.id }).map { records.getValue(it.id) }
         val keep = group.firstOrNull()?.id ?: newId()
         require(!keep.startsWith(SavedSong.SNAPSHOT_PREFIX))
         val existing = group.flatMap { row -> row.sources.ifEmpty { row.toSong().references.map { RecordingSourceEntity.from(row.id, it, row.song.createdAt) } } }
@@ -49,6 +56,10 @@ internal class RecordingRegistrar private constructor(
         }.toMutableMap()
         for ((position, source) in incoming.withIndex()) {
             val old = mergedSources[source.key]
+            if (position > 0 && old == null) {
+                val possible = candidates.filter { RecordingMatcher.group(listOf(source), listOf(it)).isNotEmpty() }
+                if (!RecordingMatcher.canCombine(listOf(primary, source), (possiblePrimary + possible + selected).distinctBy { it.id })) continue
+            }
             // Only the selected source is fresh evidence. A queue snapshot may carry an older
             // reserve than the database; it must not roll that reserve's metadata backwards.
             val fresh = if (position > 0 && old != null) old.toSource() else source
@@ -61,7 +72,6 @@ internal class RecordingRegistrar private constructor(
             )
             mergedSources[source.key] = RecordingSourceEntity.from(keep, refreshed, old?.addedAt ?: at)
         }
-        val primary = incoming.first()
         val sourceRows = mergedSources.values.map { row ->
             if (primary.kind == RecordingSourceKind.LOCAL && row.kind == RecordingSourceKind.MISSING_LOCAL.value)
                 RecordingSourceEntity.from(keep, row.toSource().copy(kind = RecordingSourceKind.LOCAL,

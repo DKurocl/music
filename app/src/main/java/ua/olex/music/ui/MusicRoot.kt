@@ -447,7 +447,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
             // Timing belongs to the recording, including a streamed source.
             onSaveLyricTiming = model::saveLyricTiming, onResetLyricTiming = model::resetLyricTiming,
-            favourite = playing.mediaId in personal.favouriteByTrackId,
+            favourite = (model.currentTrack()?.recordingId ?: playing.mediaId) in personal.favouriteByTrackId,
             // The heart works the same for a file and a YouTube Music song.
             onFavourite = model.currentTrack()?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
@@ -470,7 +470,7 @@ fun MusicRoot(model: LibraryViewModel) {
         loudness = playing.replayGain, onLoudness = model::setReplayGain)
     actionTrack?.let { track ->
         val online = YouTubeMusic.isOnline(track)
-        val saved = track.id.value in personal.favouriteByTrackId
+        val saved = (track.recordingId ?: track.id.value) in personal.favouriteByTrackId
         TrackActionsSheet(track, saved, rating = stats[track.statsKey]?.rating ?: 0, onRate = { stars ->
             model.setRating(track, stars)
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))

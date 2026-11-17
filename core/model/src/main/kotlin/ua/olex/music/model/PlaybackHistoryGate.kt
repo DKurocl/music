@@ -4,7 +4,9 @@ package ua.olex.music.model
 class PlaybackHistoryGate {
     private var recorded: String? = null
 
-    fun transition() { recorded = null }
+    fun transition(occurrence: String? = null, replay: Boolean = true) {
+        if (replay || recorded != occurrence) recorded = null
+    }
 
     fun shouldRecord(occurrence: String?, isPlaying: Boolean): Boolean {
         if (!isPlaying || occurrence.isNullOrBlank() || recorded == occurrence) return false

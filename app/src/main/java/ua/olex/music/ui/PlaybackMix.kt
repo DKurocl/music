@@ -4,7 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import ua.olex.music.AppGraph
 import ua.olex.music.model.Track
@@ -15,7 +14,6 @@ internal class PlaybackMix(
     private val graph: AppGraph,
     private val nextPage: suspend (String) -> YouTubeMusic.RadioPage? = { graph.youTube.radioMore(it) },
     private val firstPage: suspend (String) -> YouTubeMusic.RadioPage? = { graph.youTube.radio(it) },
-    private val localLibrary: suspend () -> ua.olex.music.model.LibraryIndex = { graph.library.index.first() },
 ) {
     class Run(val seed: Track, var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>, var startFrom: String? = null)
     var run: Run? = null
@@ -28,7 +26,7 @@ internal class PlaybackMix(
         val seed = queue.getOrNull(current) ?: return null
         if (!graph.youTubeOn.value || !graph.network.value) return null
         var active = run
-        if (active != null && seed.id.value !in active.ids) { run = null; label = null; active = null }
+        if (active != null && seed.id.value !in active.ids && seed.requestedId !in active.ids) { run = null; label = null; active = null }
         val expected = active
         val left = queue.size - current - 1
         if (left > if (active == null) 0 else 3) return null
@@ -44,14 +42,10 @@ internal class PlaybackMix(
         if (run !== expected) return null
         val hidden = graph.excludedRecommendations()
         val seen = (active?.seen.orEmpty() + queue.map(Mix::songKey) + hidden).toMutableSet()
-        val local = localLibrary()
-        val more = withContext(Dispatchers.Default) {
-            val index = YouTubeMusic.indexOf(local)
-            Mix.clean(page.tracks, active?.seed ?: seed, seen).map { index.preferLocal(it) }
-        }
+        val more = withContext(Dispatchers.Default) { Mix.clean(page.tracks, active?.seed ?: seed, seen) }
         return QueueExtension(more) {
             if (run !== expected) false else {
-                val updated = active ?: Run(seed, null, seen, queue.mapTo(HashSet()) { it.id.value })
+                val updated = active ?: Run(seed, null, seen, queue.flatMap { listOfNotNull(it.id.value, it.requestedId) }.toMutableSet())
                 updated.token = page.continuation
                 updated.startFrom = null
                 updated.seen += more.map(Mix::songKey)

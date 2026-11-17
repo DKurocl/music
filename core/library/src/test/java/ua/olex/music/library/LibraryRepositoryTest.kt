@@ -79,6 +79,59 @@ class LibraryRepositoryTest {
         assertEquals(listOf("local:${ids.last()}"), dao.rows.value.map { it.id })
     }
 
+
+    @Test fun unchangedGenerationsSkipRescansAndManualRescanStillForcesOne() = runTest {
+        val dao = MemoryTracks()
+        var generation = "volume:one:10"
+        var scans = 0
+        val repo = LibraryRepository(dao, { scans++; emptyList() }, StandardTestDispatcher(testScheduler), version = { generation })
+        repo.refresh(); repo.refresh()
+        assertEquals(1, scans)
+        repo.rescan()
+        assertEquals(2, scans)
+        generation = "volume:one:11"
+        repo.refresh()
+        assertEquals(3, scans)
+    }
+
+    @Test fun overlappingRefreshesShareACompletedGenerationButANewerEventGetsAnotherScan() = runTest {
+        val dao = MemoryTracks()
+        var generation = "10"
+        var scans = 0
+        val allow = CompletableDeferred<Unit>()
+        val repo = LibraryRepository(dao, { scans++; if (scans == 1) allow.await(); emptyList() },
+            StandardTestDispatcher(testScheduler), version = { generation })
+        val first = launch { repo.refresh() }; runCurrent()
+        val second = launch { repo.refresh() }; runCurrent()
+        allow.complete(Unit); first.join(); second.join()
+        assertEquals(1, scans)
+        generation = "11"
+        repo.refresh()
+        assertEquals(2, scans)
+    }
+
+    @Test fun unknownProviderGenerationFallsBackToAFullReconciliation() = runTest {
+        val dao = MemoryTracks()
+        var scans = 0
+        val repo = LibraryRepository(dao, { scans++; emptyList() }, StandardTestDispatcher(testScheduler), version = { null })
+        repo.refresh(); repo.refresh()
+        assertEquals(2, scans)
+    }
+
+
+    @Test fun aGenerationChangeDuringScanningIsNotMistakenForTheCompletedSnapshot() = runTest {
+        var generation = "10"
+        var scans = 0
+        val allow = CompletableDeferred<Unit>()
+        val repo = LibraryRepository(MemoryTracks(), { scans++; if (scans == 1) allow.await(); emptyList() },
+            StandardTestDispatcher(testScheduler), version = { generation })
+        val first = launch { repo.refresh() }; runCurrent()
+        generation = "11"
+        val second = launch { repo.refresh() }; runCurrent()
+        allow.complete(Unit); first.join(); second.join()
+        assertEquals(2, scans)
+    }
+
     private class MemoryTracks : TrackDao {
         val rows = MutableStateFlow(listOf(entity("local:old", 1)))
         var replacements = 0

@@ -74,7 +74,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     },
                     supportingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            Text(item.sourceError ?: item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             // The same source mark as every song list: a cloud for a song that streams.
                             if (item.mediaId.startsWith("yt:")) Symbol(Glyph.CLOUD, size = 16.dp, color = cs.onSurfaceVariant,
                                 modifier = Modifier.semantics { contentDescription = "Streams" })
@@ -140,7 +140,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                         .graphicsLayer { if (dragging) { translationY = dragOffset; shadowElevation = 12f } }
                         .clickable { onPlay(item.key) }
                         .semantics {
-                            contentDescription = "${item.title}, ${item.artist}, queue item ${position + 1}"
+                            contentDescription = "${item.title}, ${item.artist}, queue item ${position + 1}" + item.sourceError?.let { ", $it" }.orEmpty()
                             selected = current
                             customActions = listOfNotNull(
                                 if (position > 0) CustomAccessibilityAction("Move up") { onMove(item.key, -1); true } else null,
