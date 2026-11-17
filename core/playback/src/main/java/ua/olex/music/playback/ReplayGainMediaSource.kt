@@ -52,7 +52,8 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
 
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val tags = ReplayGainCodec.tags(mediaItem.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS))
-        val factory = DefaultMediaSourceFactory(data, ReplayGainExtractorsFactory(WithDsd(DefaultExtractorsFactory()), tags))
+        val guarded = androidx.media3.datasource.DataSource.Factory { SourceGuard(data.createDataSource()) }
+        val factory = DefaultMediaSourceFactory(guarded, ReplayGainExtractorsFactory(WithDsd(DefaultExtractorsFactory()), tags))
         drm?.let(factory::setDrmSessionManagerProvider); errors?.let(factory::setLoadErrorHandlingPolicy)
         return factory.createMediaSource(mediaItem)
     }
@@ -102,5 +103,14 @@ internal class RetryingOnline(private val app: android.content.Context, private 
     }
     class Factory(private val app: android.content.Context, private val inner: androidx.media3.datasource.DataSource.Factory) : androidx.media3.datasource.DataSource.Factory {
         override fun createDataSource(): androidx.media3.datasource.DataSource = RetryingOnline(app, inner.createDataSource())
+    }
+}
+
+/** An unavailable queue occurrence must never open its stale or ambiguous original source. */
+@OptIn(UnstableApi::class)
+internal class SourceGuard(private val inner: androidx.media3.datasource.DataSource) : androidx.media3.datasource.DataSource by inner {
+    override fun open(spec: androidx.media3.datasource.DataSpec): Long {
+        if (spec.uri.scheme == PlaybackSourceItems.UNAVAILABLE) throw java.io.FileNotFoundException("No source is currently available for this song")
+        return inner.open(spec)
     }
 }

@@ -335,3 +335,16 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     Latest explicit edits win. Reset stores an empty marker so an old alias cannot resurrect timing;
     it does not delete another identity's only text. Main UI and lock-screen resolution share this
     lookup and the same recording-owned offset. Audio sidecars/embedded tags remain source-specific.
+
+55. MediaCatalogOwner supplies one bulk playback-source policy for set/add/enqueue, radio refill,
+    recovery and checkpoint resumption. It considers all durable recordings, including uncollected
+    conflicting evidence, while the visible catalogue projects only active references. Requested
+    identity, physical source and queue occurrence are separate. An unavailable occurrence has a
+    guarded URI and explicit issue, retaining its intent and position. Source refresh protects the
+    healthy current item, batches at most two surrounding ranges and preserves shuffle traversal.
+    Recovery has a bounded per-occurrence source budget; same-occurrence replacements do not create
+    another history event. Explicit playback requests supersede startup restore and stale choices.
+56. Local refresh compares MediaStore version/generation per external volume under the scan mutex.
+    Unchanged in-process refreshes skip scanning; manual Rescan remains forced and unknown versions
+    use a full scan. Capture the version before scanning so concurrent changes are not lost. This
+    optimization does not replace the initial full reconciliation or prove phone timing targets.

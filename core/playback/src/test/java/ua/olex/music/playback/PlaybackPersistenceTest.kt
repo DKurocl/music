@@ -101,4 +101,49 @@ class PlaybackPersistenceTest {
         assertTrue(requireNotNull(journal.read()).items.isEmpty())
         runCurrent()
     }
+
+    @Test fun aPendingExplicitChoiceSupersedesRestoreWithoutErasingThePreviousDiskQueue() = runTest {
+        journal.write(saved())
+        val allow = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        persistence = PlaybackPersistence(player, journal, backgroundScope) { items -> started.complete(Unit); allow.await(); items }
+        runCurrent(); journal.read(); runCurrent()
+        assertTrue(started.isCompleted)
+        persistence?.supersedeRestore()
+        allow.complete(Unit); runCurrent()
+        assertEquals(0, player.mediaItemCount)
+        persistence?.close()
+        assertEquals(listOf("local:1", "local:2"), journal.read()!!.items.map { it.mediaId })
+    }
+
+    @Test fun anAcceptedClearAlsoClearsANotYetRestoredDiskQueue() = runTest {
+        journal.write(saved())
+        persistence = PlaybackPersistence(player, journal, backgroundScope)
+        persistence?.acceptClear()
+        runCurrent(); journal.read(); runCurrent()
+        assertEquals(0, player.mediaItemCount)
+        persistence?.close()
+        assertTrue(journal.read()!!.items.isEmpty())
+    }
+
+    @Test fun sourceResolutionKeepsPositionAndShuffleEvenWhenPhysicalIdsChange() = runTest {
+        journal.write(saved())
+        persistence = PlaybackPersistence(player, journal, backgroundScope) { items -> items.map { original ->
+            val replacement = PlayerConnection.track(original).copy(id = TrackId("yt:" + original.mediaId), uri = "ytm://" + original.mediaId)
+            PlaybackSourceItems.convert(original, ua.olex.music.model.PlaybackSourceChoice(replacement))
+        } }
+        runCurrent(); journal.read(); runCurrent(); shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(1, player.currentMediaItemIndex)
+        assertEquals(42_000L, player.currentPosition)
+        assertTrue(player.shuffleModeEnabled)
+        assertEquals(Player.REPEAT_MODE_ALL, player.repeatMode)
+        assertEquals("yt:local:2", player.currentMediaItem!!.mediaId)
+        assertFalse(player.playWhenReady)
+        val resumed = requireNotNull(persistence?.resumption())
+        player.setMediaItems(resumed.items, resumed.index, resumed.positionMs)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(player.shuffleModeEnabled)
+        assertEquals(Player.REPEAT_MODE_ALL, player.repeatMode)
+    }
+
 }

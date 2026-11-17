@@ -179,6 +179,8 @@ interface UserDao {
     fun recordingStats(): Flow<List<RecordingStats>>
     @Transaction @Query("SELECT * FROM saved_songs ORDER BY createdAt, id")
     suspend fun allRecordings(): List<RecordingRelations>
+    @Transaction @Query("SELECT * FROM saved_songs ORDER BY createdAt, id") fun observeRecordings(): Flow<List<RecordingRelations>>
+    @Transaction @Query("SELECT * FROM saved_songs WHERE id = :id") suspend fun recording(id: String): RecordingRelations?
 
     @Transaction @Query("""
         SELECT * FROM saved_songs WHERE id IN (:ids)
@@ -203,6 +205,7 @@ interface UserDao {
     @Query("SELECT aliasId FROM recording_aliases WHERE songId = :id ORDER BY aliasId")
     suspend fun aliases(id: String): List<String>
     @Query("SELECT * FROM recording_aliases") fun recordingAliases(): Flow<List<RecordingAliasEntity>>
+    @Query("SELECT * FROM recording_aliases") suspend fun allAliases(): List<RecordingAliasEntity>
     @Query("SELECT id FROM saved_songs WHERE id = :id UNION SELECT songId FROM recording_aliases WHERE aliasId = :id LIMIT 1")
     fun observeCanonicalId(id: String): Flow<String?>
     @Transaction @Query("SELECT * FROM saved_songs WHERE id = :id") fun observeRecording(id: String): Flow<RecordingRelations?>

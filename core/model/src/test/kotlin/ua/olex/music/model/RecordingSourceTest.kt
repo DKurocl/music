@@ -56,6 +56,9 @@ class RecordingSourceTest {
         val unresolved = candidate("unresolved", actual, 3)
         assertEquals(listOf(unresolved), RecordingMatcher.group(listOf(actual), listOf(a, b, unresolved)))
         assertEquals(listOf(a), RecordingMatcher.group(listOf(online("a", 200_000)), listOf(a, b, unresolved)))
+        val remoteOnly = listOf(a.copy(sources = listOf(online("a", 200_000))), b.copy(sources = listOf(online("b", 205_000))), unresolved)
+        assertEquals(listOf(remoteOnly[0]), RecordingMatcher.group(listOf(online("a", 200_000)), remoteOnly))
+        assertTrue(RecordingMatcher.group(listOf(online("new", 200_000)), listOf(remoteOnly[1], unresolved)).isEmpty())
     }
 
     @Test fun differentCueOccurrencesInTheSameFileRemainSeparate() {

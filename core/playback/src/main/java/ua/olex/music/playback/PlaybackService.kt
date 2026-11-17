@@ -30,6 +30,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.flow.collectLatest
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService.LibraryParams
 import android.util.Log
@@ -93,6 +94,9 @@ class PlaybackService : MediaLibraryService() {
     private fun exoOrNull(): ExoPlayer? = if (::exo.isInitialized) exo else null
     private var lockLyrics: LockScreenLyrics? = null
     private var refill: Job? = null
+    private var recovery: Job? = null
+    private var sourceRequest = 0L
+    private val sourceAttempts = ua.olex.music.model.SourceRecoveryBudget()
     private val lanServer by lazy { LanMediaServer(this) }
     private var fading: FadingPlayer? = null
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
@@ -119,7 +123,7 @@ class PlaybackService : MediaLibraryService() {
                 .setRemotePlayer(androidx.media3.cast.RemoteCastPlayer.Builder(this).setMediaItemConverter(LanMediaItemConverter(lanServer)).build())
                 .build()
         }.getOrElse { faded }
-        val shown = LyricLinePlayer(castable)
+        val shown = LyricLinePlayer(castable) { sourceAttempts.reset(); recovery?.cancel() }
         lockLyrics = LockScreenLyrics(this, player, shown, scope)
         getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
         val builder = MediaLibrarySession.Builder(this, shown, Callback())
@@ -137,7 +141,14 @@ class PlaybackService : MediaLibraryService() {
             equalizer.routeChanged(monitor.route.value)
             scope.launch { monitor.route.collect(equalizer::routeChanged) }
         }
-        persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope)
+        persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope) { selectSources(it, allowDirect = true) }
+        (application as? MediaCatalogOwner)?.let { owner -> scope.launch {
+            owner.playbackSourceChanges.collectLatest {
+                try { refreshFutureSources() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { Log.w("MusicSource", "Could not refresh queue sources: ${failure.javaClass.simpleName}") }
+            }
+        } }
         updateOffload()
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
@@ -167,24 +178,12 @@ class PlaybackService : MediaLibraryService() {
             override fun onEvents(player: Player, events: Player.Events) {
                 if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) refillQueue()
             }
-            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                val owner = application as? OnlineStreams ?: return
-                val uri = player.currentMediaItem?.requestMetadata?.mediaUri?.toString() ?: return
-                if (owner.available(uri)) return
-                val timeline = player.currentTimeline
-                var next = timeline.getNextWindowIndex(player.currentMediaItemIndex, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
-                while (next != androidx.media3.common.C.INDEX_UNSET) {
-                    val item = player.getMediaItemAt(next)
-                    val address = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri
-                    if (address != null && owner.available(address.toString())) {
-                        player.seekTo(next, 0); player.prepare(); return
-                    }
-                    next = timeline.getNextWindowIndex(next, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
-                }
-            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) = recoverSource()
+
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 lockLyrics?.update()
-                historyGate.transition()
+                val key = mediaItem?.mediaMetadata?.extras?.getString(PlayerConnection.QUEUE_KEY) ?: mediaItem?.mediaId
+                historyGate.transition(key, reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                 recordCurrentPlayback()
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback(); publishNowPlaying(); lockLyrics?.update() }
@@ -204,7 +203,6 @@ class PlaybackService : MediaLibraryService() {
         val owner = application as? PlaybackQueueOwner ?: return
         val player = exoOrNull() ?: return
         if (!player.isPlaying || refill?.isActive == true || player.mediaItemCount == 0 || player.mediaItemCount - player.currentMediaItemIndex > 4) return
-        val timeline = player.currentTimeline
         val current = player.currentMediaItemIndex
         val from = (current - 100).coerceAtLeast(0)
         val items = (from until player.mediaItemCount).map(player::getMediaItemAt)
@@ -212,13 +210,88 @@ class PlaybackService : MediaLibraryService() {
             try {
                 val tracks = items.map(PlayerConnection::track)
                 val extension = owner.extendPlaybackQueue(tracks, current - from) ?: return@launch
-                if (player.currentTimeline !== timeline || player.currentMediaItemIndex != current) return@launch
-                if (extension.commit() && extension.tracks.isNotEmpty()) QueueCommand.enqueue(player, extension.tracks.map { item ->
-                    PlayerConnection.mediaItem(item, playbackContext = player.mediaMetadata.extras?.getString(PlayerConnection.CONTEXT_KEY)).let { it.buildUpon().setUri(it.requestMetadata.mediaUri).build() }
-                }, false)
+                val context = player.mediaMetadata.extras?.getString(PlayerConnection.CONTEXT_KEY)
+                val selected = selectSources(extension.tracks.map { PlayerConnection.mediaItem(it, playbackContext = context) }, allowDirect = true)
+                if (player.currentMediaItemIndex != current ||
+                    (from until player.mediaItemCount).map { occurrence(player.getMediaItemAt(it)) } != items.map(::occurrence)) return@launch
+                if (extension.commit() && selected.isNotEmpty()) QueueCommand.enqueue(player, selected, false)
+
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { Log.w("MusicMix", "Could not extend queue: ${failure.javaClass.simpleName}") }
         }
+    }
+
+    private suspend fun refreshFutureSources() {
+        val player = exoOrNull() ?: return
+        if (player.mediaItemCount == 0) return
+        val request = sourceRequest
+        val snapshot = (0 until player.mediaItemCount).map(player::getMediaItemAt)
+        val selected = selectSources(snapshot, allowDirect = true).associateBy(::occurrence)
+        if (request != sourceRequest || player.mediaItemCount == 0) return
+        SourceQueueUpdates.apply(player, selected)
+    }
+
+    private fun occurrence(item: MediaItem) = item.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) ?: item.mediaId
+
+    private fun recoverSource() {
+        val player = exoOrNull() ?: return
+        val failed = player.currentMediaItem ?: return
+        val key = occurrence(failed)
+        val address = failed.localConfiguration?.uri ?: failed.requestMetadata.mediaUri ?: return
+        val source = if (address.scheme == PlaybackSourceItems.UNAVAILABLE) "placeholder:$key"
+            else ua.olex.music.model.RecordingSource.from(PlayerConnection.track(failed))?.key ?: address.toString()
+        recovery?.cancel()
+        if (!sourceAttempts.begin(key, source)) { skipOrPause(); return }
+        recovery = scope.launch {
+            try {
+                val rejected = sourceAttempts.rejected(key)
+                val selected = selectSources(listOf(failed), rejected, allowDirect = true).single()
+                fun stillCurrent(): Boolean {
+                    val current = player.currentMediaItem ?: return false
+                    return occurrence(current) == key && (current.localConfiguration?.uri ?: current.requestMetadata.mediaUri) == address
+                }
+                if (!stillCurrent()) return@launch
+                if (PlaybackSourceItems.error(selected) == null) {
+                    val index = player.currentMediaItemIndex
+                    val position = player.currentPosition.coerceAtLeast(0)
+                    val intent = player.playWhenReady
+                    player.playWhenReady = false
+                    player.replaceMediaItem(index, selected)
+                    player.seekTo(index, position); player.prepare(); player.playWhenReady = intent
+                    return@launch
+                }
+                // Refresh the queue in one background batch. Reconcile by occurrence against the
+                // live queue, so a concurrent append, reorder or removal cannot be overwritten.
+                val snapshot = (0 until player.mediaItemCount).map(player::getMediaItemAt)
+                val resolved = selectSources(snapshot, rejected, allowDirect = true).associateBy(::occurrence)
+                if (!stillCurrent()) return@launch
+                val intent = player.playWhenReady
+                SourceQueueUpdates.apply(player, resolved, protectCurrent = false)
+                if (intent) skipOrPause()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                Log.w("MusicSource", "Could not recover source: ${failure.javaClass.simpleName}")
+                if (player.currentMediaItem?.let(::occurrence) == key) skipOrPause()
+            }
+        }
+    }
+
+    private fun skipOrPause() {
+        val player = exoOrNull() ?: return
+        val owner = application as? OnlineStreams
+        if (player.repeatMode != Player.REPEAT_MODE_ONE) {
+            var next = player.currentTimeline.getNextWindowIndex(player.currentMediaItemIndex, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+            var remaining = player.mediaItemCount
+            while (next != androidx.media3.common.C.INDEX_UNSET && remaining-- > 0) {
+                val item = player.getMediaItemAt(next)
+                val uri = (item.localConfiguration?.uri ?: item.requestMetadata.mediaUri)?.toString()
+                if (PlaybackSourceItems.error(item) == null && uri != null && owner?.available(uri) != false) {
+                    player.seekTo(next, 0); player.prepare(); player.playWhenReady = true; return
+                }
+                next = player.currentTimeline.getNextWindowIndex(next, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+            }
+        }
+        player.playWhenReady = false
     }
 
     /** Widget and tile state; written only on a change of song or play state. */
@@ -340,6 +413,21 @@ class PlaybackService : MediaLibraryService() {
         ).build()
     }
 
+    private suspend fun selectSources(items: List<MediaItem>, rejected: Set<String> = emptySet(), allowDirect: Boolean = false): List<MediaItem> =
+        withContext(Dispatchers.Default) { PlaybackSourceItems.resolve(application as? MediaCatalogOwner, items, rejected, allowDirect) }
+
+    private suspend fun expandSources(items: List<MediaItem>, trusted: Boolean): List<MediaItem> {
+        if (items.isEmpty()) return emptyList()
+        if (trusted && items.all { it.requestMetadata.mediaUri != null || it.localConfiguration != null }) return items
+        val catalog = tree() ?: throw IllegalArgumentException("The library is unavailable")
+        return items.flatMap { item ->
+            if (trusted && (item.requestMetadata.mediaUri != null || item.localConfiguration != null || item.mediaId.startsWith("yt:"))) listOf(item)
+            else catalog.item(item.mediaId)?.track?.let { listOf(PlayerConnection.mediaItem(it)) }
+                ?: catalog.resolvePlay(item.mediaId)?.first?.map { PlayerConnection.mediaItem(it) }
+                ?: throw IllegalArgumentException("Unknown library item")
+        }.also { require(it.size <= ua.olex.music.model.TrackSelection.MAX_ITEMS) }
+    }
+
     private fun <T> future(block: suspend () -> T): ListenableFuture<T> = scope.future { block() }
 
     private fun <T> page(items: List<T>, page: Int, size: Int): List<T> {
@@ -388,17 +476,32 @@ class PlaybackService : MediaLibraryService() {
         override fun onSetMediaItems(
             mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            val single = mediaItems.singleOrNull()
-            val needsResolving = single != null && single.requestMetadata.mediaUri == null && single.localConfiguration == null
-            if (!needsResolving) return super.onSetMediaItems(mediaSession, controller, mediaItems, startIndex, startPositionMs)
+            val request = ++sourceRequest
+            persistence?.supersedeRestore()
+            recovery?.cancel()
             return future {
-                val tree = tree()
-                val query = single.requestMetadata.searchQuery
-                val resolved = if (single.mediaId.isEmpty() && !query.isNullOrBlank()) tree?.search(query)?.takeIf { it.isNotEmpty() }?.let { it to 0 }
-                    else tree?.resolvePlay(single.mediaId)
-                if (resolved == null) MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs)
-                else MediaSession.MediaItemsWithStartPosition(resolved.first.map { PlayerConnection.mediaItem(it).let { item -> item.buildUpon().setUri(item.requestMetadata.mediaUri).build() } },
-                    resolved.second, if (resolved.second == 0 && startPositionMs > 0) startPositionMs else androidx.media3.common.C.TIME_UNSET)
+                val single = mediaItems.singleOrNull()
+                val unresolved = single != null && single.requestMetadata.mediaUri == null && single.localConfiguration == null
+                val resolved = if (unresolved) {
+                    val catalog = tree()
+                    val query = single.requestMetadata.searchQuery
+                    if (single.mediaId.isEmpty() && !query.isNullOrBlank()) catalog?.search(query)?.takeIf { it.isNotEmpty() }?.let { it to 0 }
+                    else catalog?.resolvePlay(single.mediaId)
+                } else null
+                val items = if (resolved != null) resolved.first.map { PlayerConnection.mediaItem(it) }
+                    else expandSources(mediaItems, controller.uid == Process.myUid())
+                if (request != sourceRequest) throw CancellationException("Superseded playback selection")
+                if (items.isEmpty()) {
+                    persistence?.acceptClear()
+                    return@future MediaSession.MediaItemsWithStartPosition(items, startIndex, startPositionMs)
+                }
+                val selected = selectSources(items, allowDirect = controller.uid == Process.myUid())
+                if (request != sourceRequest) throw CancellationException("Superseded playback selection")
+                val chosen = (resolved?.second ?: startIndex).coerceIn(0, selected.lastIndex.coerceAtLeast(0))
+                val available = selected.indices.filter { PlaybackSourceItems.error(selected[it]) == null }
+                val start = available.firstOrNull { it >= chosen } ?: available.firstOrNull() ?: chosen
+                MediaSession.MediaItemsWithStartPosition(selected, start,
+                    if (start == chosen && startPositionMs > 0) startPositionMs else androidx.media3.common.C.TIME_UNSET)
             }
         }
 
@@ -449,10 +552,12 @@ class PlaybackService : MediaLibraryService() {
             }
             if (customCommand.customAction == QueueCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                persistence?.supersedeRestore()
                 val result = SettableFuture.create<SessionResult>()
                 val job = scope.launch {
                     try {
-                        val items = withContext(Dispatchers.Default) { QueueCommand.items(args) }
+                        val decoded = withContext(Dispatchers.Default) { QueueCommand.items(args) }
+                        val items = selectSources(decoded, allowDirect = true)
                         if (this@PlaybackService.session !== session) {
                             result.set(SessionResult(SessionError.ERROR_SESSION_DISCONNECTED))
                         } else {
@@ -484,8 +589,10 @@ class PlaybackService : MediaLibraryService() {
          */
         override fun onAddMediaItems(
             mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>,
-        ): ListenableFuture<List<MediaItem>> =
-            Futures.immediateFuture(mediaItems.map { item -> item.requestMetadata.mediaUri?.let { item.buildUpon().setUri(it).build() } ?: item })
+        ): ListenableFuture<List<MediaItem>> = future {
+            selectSources(expandSources(mediaItems, controller.uid == Process.myUid()), allowDirect = controller.uid == Process.myUid())
+        }
+
     }
 
     companion object {

@@ -90,6 +90,8 @@ data class Track(
     val recordingId: String? = null,
     /** Linked sources retained when a local copy substitutes for a streamed track. */
     val sources: List<RecordingSource> = emptyList(),
+    /** Original source request for this queue occurrence, even when another physical source plays. */
+    val requestedId: String? = null,
 ) {
     // Browsing does not need song matching; defer normalization until a source lookup asks for it.
     val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }

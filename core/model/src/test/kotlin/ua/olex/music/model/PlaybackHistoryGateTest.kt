@@ -26,4 +26,16 @@ class PlaybackHistoryGateTest {
         assertTrue(gate.shouldRecord("second", true))
         assertFalse(gate.shouldRecord(null, true))
     }
+
+    @Test fun sourceRecoveryKeepsTheOccurrenceButAnActualRepeatRecordsANewStart() {
+        val gate = PlaybackHistoryGate()
+        assertTrue(gate.shouldRecord("one", true))
+        gate.transition("one", replay = false)
+        assertFalse(gate.shouldRecord("one", true))
+        gate.transition("one", replay = true)
+        assertTrue(gate.shouldRecord("one", true))
+        gate.transition("two", replay = false)
+        assertTrue(gate.shouldRecord("two", true))
+    }
+
 }
