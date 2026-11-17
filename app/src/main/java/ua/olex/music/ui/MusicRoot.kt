@@ -173,6 +173,10 @@ fun MusicRoot(model: LibraryViewModel) {
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by remember { mutableStateOf<Place?>(null) }
     var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
+    // An online page's title moves into the top bar once its header has scrolled away.
+    var onlineTitleShown by remember { mutableStateOf(false) }
+    val onlineTop = onlineStack.lastOrNull()
+    androidx.compose.runtime.LaunchedEffect(onlineTop) { onlineTitleShown = false }
     // YouTube Music's moods for Home; the usual set when it is off or unreachable (they still play
     // from the library by genre).
     val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) { if (youTubeOn) value = context.graph.youTube.moods() }
@@ -223,7 +227,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val onlineNav = remember(model) {
         OnlineNav(
             open = { target -> expanded = false; actionTrack = null; page = null; onlineStack = onlineStack + target },
-            play = model::play,
+            play = model::playFrom,
             actions = { actionTrack = it },
             openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
             download = { start -> if (context.graph.soulseek.account == null) afterSignIn = start else start() },
@@ -245,19 +249,28 @@ fun MusicRoot(model: LibraryViewModel) {
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
-            if (place != Place.SEARCH || page != null) TopAppBar(
+            if (onlineTop != null || place != Place.SEARCH || page != null) TopAppBar(
                 title = {
-                    if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // An online page (an album, a playlist, an artist, a mood) has the same bar as the
+                    // library's pages: Back, and its name once the header is out of sight. Never Home's greeting.
+                    if (onlineTop != null) androidx.compose.animation.AnimatedVisibility(onlineTitleShown,
+                        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { it / 2 },
+                        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it / 2 }) {
+                        Text(when (onlineTop) { is OnlineTarget.Album -> onlineTop.title; is OnlineTarget.Artist -> onlineTop.name; is OnlineTarget.Mood -> onlineTop.mood.label },
+                            style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    else if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     else Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
                 }, scrollBehavior = scroll,
                 navigationIcon = {
-                    if (page != null) IconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) }
+                    if (onlineTop != null) IconButton(onClick = { onlineStack = onlineStack.dropLast(1) }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) }
+                    else if (page != null) IconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) }
                     else if (inCollection) IconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
                 },
                 actions = {
-                    if (place == Place.LIBRARY && page == null && !inCollection) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
+                    if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
-                    if (place == Place.HOME && page == null) androidx.compose.material3.FilledTonalIconButton(onClick = { page = Page.SETTINGS },
+                    if (onlineTop == null && place == Place.HOME && page == null) androidx.compose.material3.FilledTonalIconButton(onClick = { page = Page.SETTINGS },
                         shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp) }
                 },
             )
@@ -297,9 +310,9 @@ fun MusicRoot(model: LibraryViewModel) {
             model.scanError != null && list.isNullOrEmpty() -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             list == null -> Notice(insets, "Your music", "Loading your library…", null) {}
             onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
-                is OnlineTarget.Artist -> OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
-                is OnlineTarget.Album -> OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
-                is OnlineTarget.Mood -> MoodPage(top, playing.mediaId, insets) { onlineStack = onlineStack.dropLast(1) }
+                is OnlineTarget.Artist -> androidx.compose.runtime.key(top) { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Album -> androidx.compose.runtime.key(top) { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Mood -> androidx.compose.runtime.key(top) { MoodPage(top, playing.mediaId, insets) { onlineTitleShown = it } }
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
@@ -395,7 +408,9 @@ fun MusicRoot(model: LibraryViewModel) {
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
                 listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") }
                 // A YouTube Music song: the stream's codec and bitrate, once the player picked it.
-                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { context.graph.youTube.format(it.removePrefix("yt:")) ?: "YouTube Music" },
+                // Quality only, the same shape as a file's; nothing until the stream is chosen.
+                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { context.graph.youTube.format(it.removePrefix("yt:")) },
+            from = model.mixLabel ?: model.playingFrom,
             position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
@@ -510,7 +525,7 @@ internal fun Notice(insets: PaddingValues, title: String, body: String, action: 
 private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
-    onSleepTimer: (Int) -> Unit,
+    onSleepTimer: (Int) -> Unit, from: String? = null,
     onEqualizer: () -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
@@ -560,7 +575,7 @@ private fun NowPlaying(
     PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
         onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
         onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
-        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true },
+        onOpenAlbum = onOpenAlbum, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,
         inlineLyrics = { mod ->
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
                 onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,

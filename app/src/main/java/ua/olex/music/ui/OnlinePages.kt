@@ -3,6 +3,7 @@
 package ua.olex.music.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,14 +30,15 @@ import ua.olex.music.model.Track
 internal sealed interface OnlineTarget {
     data class Artist(val name: String, val id: String? = null) : OnlineTarget
     /** An album, or a playlist when [playlist] (no album download for a playlist of many artists). */
-    data class Album(val id: String, val title: String, val playlist: Boolean = false) : OnlineTarget
+    data class Album(val id: String, val title: String, val playlist: Boolean = false, val cover: String? = null, val subtitle: String? = null) : OnlineTarget
     data class Mood(val mood: YouTubeMusic.Mood) : OnlineTarget
 }
 
 /** What online pages can do in the app: open another page, play, show a song's actions, open the owner's own artist. */
 internal class OnlineNav(
     val open: (OnlineTarget) -> Unit = {},
-    val play: (List<Track>, Int) -> Unit = { _, _ -> },
+    /** Plays a list; the last argument names it for the player's "Playing from". */
+    val play: (List<Track>, Int, String?) -> Unit = { _, _, _ -> },
     val actions: (Track) -> Unit = {},
     val openLocalArtist: (MusicCollection) -> Unit = {},
     /** Starts a Soulseek download, asking for the account first when there is none. */
@@ -49,14 +51,60 @@ internal class OnlineNav(
 
 internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
 
-/** Songs the owner has as files are shown (and played) as those files: quality tag and all. */
-private fun owned(songs: List<Track>, library: LibraryIndex) = songs.map { YouTubeMusic.localCopy(it, library) ?: it }
+/**
+ * Songs the owner has as files, shown (and played) as those files: quality tag and all. Looked up in
+ * the library's index (built off the main thread by LibraryViewModel), once per list and library;
+ * when the index is not ready yet it is built on a background thread and the list shows as it came.
+ */
+@Composable
+internal fun rememberOwned(songs: List<Track>, library: LibraryIndex): List<Track> {
+    val ready = remember(songs, library) { YouTubeMusic.builtIndex(library)?.let { index -> songs.map { index.copyOf(it) ?: it } } }
+    return produceState(ready ?: songs, songs, library) {
+        value = ready ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { YouTubeMusic.indexOf(library).let { index -> songs.map { index.copyOf(it) ?: it } } }
+    }.value
+}
 
 private sealed interface Load<out T> { data object Wait : Load<Nothing>; data object Failed : Load<Nothing>; data class Done<T>(val value: T) : Load<T> }
 
+/** Loads a page; one opened before this session is there in the first frame ([cached]). */
 @Composable
-private fun <T> rememberLoad(key: Any, retry: Int, load: suspend () -> T?): Load<T> =
-    produceState<Load<T>>(Load.Wait, key, retry) { value = Load.Wait; value = runCatching { load() }.getOrNull()?.let { Load.Done(it) } ?: Load.Failed }.value
+private fun <T> rememberLoad(key: Any, retry: Int, cached: T? = null, load: suspend () -> T?): Load<T> =
+    produceState<Load<T>>(cached?.let { Load.Done(it) } ?: Load.Wait, key, retry) {
+        if (value is Load.Done && retry == 0) return@produceState
+        value = Load.Wait; value = runCatching { load() }.getOrNull()?.let { Load.Done(it) } ?: Load.Failed
+    }.value
+
+/** Tells the shell when the page's header has scrolled away, so the top bar takes the title. */
+@Composable
+private fun ReportTitle(list: androidx.compose.foundation.lazy.LazyListState, onTitleShown: (Boolean) -> Unit) {
+    val report by rememberUpdatedState(onTitleShown)
+    LaunchedEffect(list) { snapshotFlow { list.firstVisibleItemIndex > 0 }.collect { report(it) } }
+}
+
+/** Starts finding the stream of the first online song while the page is read, so Play sounds sooner. */
+@Composable
+private fun WarmFirst(songs: List<Track>) {
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val first = songs.firstOrNull()?.takeIf(YouTubeMusic::isOnline)?.id?.value?.removePrefix("yt:")
+    LaunchedEffect(first) { if (first != null) runCatching { graph.youTube.warm(first) } }
+}
+
+/** A song row's place while the list loads: the same height as a row, so nothing jumps when it fills. */
+@Composable
+internal fun PlaceholderRow(cover: Boolean = true) {
+    val tone = MaterialTheme.colorScheme.surfaceContainerHigh
+    Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(if (cover) 52.dp else 28.dp).clip(RoundedCornerShape(if (cover) 12.dp else 8.dp)).background(tone))
+        Spacer(Modifier.width(16.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.width(180.dp).height(14.dp).clip(RoundedCornerShape(7.dp)).background(tone))
+            Box(Modifier.width(110.dp).height(12.dp).clip(RoundedCornerShape(6.dp)).background(tone.copy(alpha = 0.7f)))
+        }
+    }
+}
+
+private fun androidx.compose.foundation.lazy.LazyListScope.placeholders(cover: Boolean) =
+    items(8, key = { "p-$it" }) { PlaceholderRow(cover) }
 
 /**
  * An artist from YouTube Music, joined to the owner's library: their photo and a few lines, the
@@ -64,27 +112,37 @@ private fun <T> rememberLoad(key: Any, retry: Int, load: suspend () -> T?): Load
  * and videos; when the library has the artist too, one tap leads there.
  */
 @Composable
-internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex, currentId: String?, insets: PaddingValues, onBack: () -> Unit) {
+internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex, currentId: String?, insets: PaddingValues, onTitleShown: (Boolean) -> Unit = {}) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
-    val state = rememberLoad(target, retry) {
+    val state = rememberLoad(target, retry, target.id?.let(graph.youTube::peekArtist)) {
         val id = target.id ?: graph.youTube.artistId(target.name) ?: return@rememberLoad null
         graph.youTube.artist(id)
     }
     val mine = remember(library, target.name) { library.artists.firstOrNull { TextFold.fold(it.name) == TextFold.fold(target.name) } }
     val cs = MaterialTheme.colorScheme
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
-        item(key = "back") { IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) } }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    ReportTitle(list, onTitleShown)
+    val songs = rememberOwned((state as? Load.Done)?.value?.songs.orEmpty(), library)
+    WarmFirst(songs)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         when (state) {
-            Load.Wait -> item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { LoadingIndicator() } }
+            Load.Wait -> {
+                item(key = "head") {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Artwork(null, Modifier.size(120.dp), 60.dp)
+                        Text(target.name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 20.dp).weight(1f))
+                    }
+                }
+                placeholders(cover = true)
+            }
             Load.Failed -> item {
                 EmptyState(Glyph.SEARCH, "Couldn't open ${target.name}", "YouTube Music didn't answer. Check the connection and try again.",
                     actions = { Button(onClick = { retry++ }) { Text("Try again") } })
             }
             is Load.Done -> {
                 val artist = state.value
-                val songs = owned(artist.songs, library)
                 item(key = "head") {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -97,30 +155,31 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             val playable = songs.ifEmpty { artist.videos }
-                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0) }, modifier = Modifier.height(52.dp)) {
+                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, artist.name) }, modifier = Modifier.height(52.dp)) {
                                 Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
                             }
-                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0) },
+                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, artist.name) },
                                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
                             // The owner's own songs by this artist, one tap away.
                             mine?.let { local -> FilledTonalButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.height(52.dp)) {
-                                Symbol(Glyph.LIBRARY, size = 18.dp); Spacer(Modifier.size(8.dp)); Text("Yours · ${local.tracks.size}")
+                                Symbol(Glyph.LIBRARY, size = 18.dp); Spacer(Modifier.size(8.dp)); Text("Yours \u00b7 ${local.tracks.size}")
                             } }
                         }
+                        Spacer(Modifier.height(16.dp))
                     }
                 }
                 artist.about?.let { about -> item(key = "about") { AboutCard(about) } }
                 if (songs.isNotEmpty()) {
                     item(key = "songs-h") { OnlineHeading("Top songs") }
                     itemsIndexed(songs.take(10), key = { _, t -> "s-" + t.id.value }) { i, t ->
-                        TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i) }
+                        TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, artist.name) }
                     }
                 }
                 if (artist.albums.isNotEmpty()) {
                     item(key = "albums-h") { OnlineHeading("Albums and singles") }
                     item(key = "albums") {
                         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp)) {
-                            items(artist.albums, key = { it.id }) { a -> OnlineCard(a.cover, a.title, a.subtitle) { nav.open(OnlineTarget.Album(a.id, a.title)) } }
+                            items(artist.albums, key = { it.id }) { a -> OnlineCard(a.cover, a.title, a.subtitle) { nav.open(OnlineTarget.Album(a.id, a.title, cover = a.cover, subtitle = a.subtitle)) } }
                         }
                     }
                 }
@@ -128,7 +187,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                     item(key = "videos-h") { OnlineHeading("Videos") }
                     item(key = "videos") {
                         LazyRow(contentPadding = PaddingValues(horizontal = 12.dp)) {
-                            itemsIndexed(artist.videos, key = { _, v -> v.id.value }) { i, v -> OnlineCard(v.artworkUri, v.title, null) { nav.play(artist.videos, i) } }
+                            itemsIndexed(artist.videos, key = { _, v -> v.id.value }) { i, v -> OnlineCard(v.artworkUri, v.title, null) { nav.play(artist.videos, i, artist.name) } }
                         }
                     }
                 }
@@ -137,55 +196,62 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     }
 }
 
-/** An album from YouTube Music: cover, title, Play and Shuffle, then its songs in order. */
+/**
+ * An album or playlist from YouTube Music: cover, title, Play all and Shuffle, then its songs in
+ * order. The header is drawn at once from the card that opened it; the songs fill in under it.
+ */
 @Composable
-internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, currentId: String?, insets: PaddingValues, onBack: () -> Unit) {
+internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, currentId: String?, insets: PaddingValues, onTitleShown: (Boolean) -> Unit = {}) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
-    val state = rememberLoad(target, retry) { graph.youTube.album(target.id) }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
-        item(key = "back") { IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) } }
+    val state = rememberLoad(target, retry, graph.youTube.peekAlbum(target.id)) { graph.youTube.album(target.id) }
+    val loaded = (state as? Load.Done)?.value
+    val songs = rememberOwned(loaded?.second.orEmpty(), library)
+    WarmFirst(songs)
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    ReportTitle(list, onTitleShown)
+    val album = loaded?.first
+    val title = album?.title ?: target.title
+    val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
+    // A playlist mixes albums: its rows show covers. An album's rows show track numbers.
+    val mixed = target.playlist || songs.mapTo(HashSet()) { it.album }.size > 1
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
+        item(key = "head") {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Artwork(album?.cover ?: target.cover, Modifier.size(220.dp), 28.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
+                Spacer(Modifier.height(16.dp))
+                Text(title, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                (album?.subtitle ?: target.subtitle)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                if (!target.playlist && artistName.isNotEmpty()) TextButton(onClick = { nav.open(OnlineTarget.Artist(artistName)) }) { Text(artistName) }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, title) }, modifier = Modifier.height(52.dp)) {
+                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play all")
+                    }
+                    FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, title) },
+                        modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
+                    // The whole album in lossless from Soulseek, into the library. Nothing to fetch
+                    // once every song plays from a file.
+                    if (!target.playlist && songs.isNotEmpty()) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title),
+                        owned = songs.none(YouTubeMusic::isOnline), what = "the album") {
+                        nav.download { graph.soulseek.album(artistName, title) }
+                    }
+                }
+                if (!target.playlist && songs.isNotEmpty()) DownloadStatus(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title))
+                // Room between the buttons and the first song, so a playing row's highlight never touches them.
+                Spacer(Modifier.height(16.dp))
+            }
+        }
         when (state) {
-            Load.Wait -> item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { LoadingIndicator() } }
+            Load.Wait -> placeholders(cover = mixed)
             Load.Failed -> item {
                 EmptyState(Glyph.ALBUM, "Couldn't open ${target.title}", "YouTube Music didn't answer. Check the connection and try again.",
                     actions = { Button(onClick = { retry++ }) { Text("Try again") } })
             }
-            is Load.Done -> {
-                val (album, raw) = state.value
-                val songs = owned(raw, library)
-                item(key = "head") {
-                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Artwork(album.cover, Modifier.size(220.dp), 28.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
-                        Spacer(Modifier.height(16.dp))
-                        Text(album.title, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                        album.subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1) }
-                        songs.firstOrNull()?.artist?.let { artistName ->
-                            TextButton(onClick = { nav.open(OnlineTarget.Artist(artistName)) }) { Text(artistName) }
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0) }, modifier = Modifier.height(52.dp)) {
-                                Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play all")
-                            }
-                            FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0) },
-                                modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
-                            // The whole album in lossless from Soulseek, into the library. Nothing to fetch
-                            // once every song plays from a file.
-                            val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
-                            if (!target.playlist) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, album.title),
-                                owned = songs.isNotEmpty() && songs.none { it.id.value.startsWith("yt:") }, what = "the album") {
-                                nav.download { graph.soulseek.album(artistName, album.title) }
-                            }
-                        }
-                        if (!target.playlist) DownloadStatus(ua.olex.music.soulseek.SoulseekDownloads.albumKey(songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty(), album.title))
-                    }
-                }
-                itemsIndexed(songs, key = { _, t -> "a-" + t.id.value }) { i, t ->
-                    TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }, number = i + 1, albumArtist = t.artist) { nav.play(songs, i) }
-                }
+            is Load.Done -> itemsIndexed(songs, key = { i, t -> "a-$i-" + t.id.value }) { i, t ->
+                TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, title) }
             }
         }
     }
@@ -202,14 +268,15 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
     if (!on) return
     val nav = LocalOnlineNav.current
     val state = rememberLoad(name, 0) { graph.youTube.artistId(name)?.let { graph.youTube.artist(it) } }
-    val artist = (state as? Load.Done)?.value ?: return
-    val missing = artist.songs.filter { YouTubeMusic.localCopy(it, library) == null }.take(5)
+    val artist = (state as? Load.Done)?.value
+    val missing = rememberOwned(artist?.songs.orEmpty(), library).filter(YouTubeMusic::isOnline).take(5)
+    if (artist == null) return
     Column {
         Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) { OnlineHeading("More on YouTube Music") }
             TextButton(onClick = { nav.open(OnlineTarget.Artist(artist.name, artist.id)) }) { Text("Open") }
         }
-        missing.forEachIndexed { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(missing, i) } }
+        missing.forEachIndexed { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(missing, i, artist.name) } }
     }
 }
 
@@ -344,7 +411,7 @@ internal fun MoodRow(moods: List<YouTubeMusic.Mood>, modifier: Modifier = Modifi
  * when YouTube Music lists nothing here: it grows a mix from the owner's songs of that mood.
  */
 @Composable
-internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: PaddingValues, onBack: () -> Unit) {
+internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: PaddingValues, onTitleShown: (Boolean) -> Unit = {}) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
@@ -352,8 +419,9 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
     val on by graph.youTubeOn.collectAsState()
     val state = rememberLoad(target, 0) { if (on) graph.youTube.mood(target.mood) ?: YouTubeMusic.MoodPage(emptyList(), emptyList()) else YouTubeMusic.MoodPage(emptyList(), emptyList()) }
     val page = (state as? Load.Done)?.value
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
-        item(key = "back") { IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp).semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) } }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    ReportTitle(list, onTitleShown)
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                 Surface(shape = androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, modifier = Modifier.size(72.dp)) {
@@ -368,7 +436,7 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
             }
         }
         when {
-            state is Load.Wait -> item { Box(Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) { LoadingIndicator() } }
+            state is Load.Wait -> { item { Spacer(Modifier.height(16.dp)) }; placeholders(cover = true) }
             page == null || (page.playlists.isEmpty() && page.songs.isEmpty()) -> item {
                 Text(if (on) "YouTube Music lists nothing for this mood here. Play makes a mix from your own ${target.mood.label.lowercase()} songs."
                     else "Play makes a mix from your own ${target.mood.label.lowercase()} songs. Turn on YouTube Music in Settings for its playlists.",
@@ -380,7 +448,7 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
                     item(key = "pl") {
                         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             items(page.playlists, key = { it.id }) { pl ->
-                                Column(Modifier.width(160.dp).clip(RoundedCornerShape(20.dp)).clickable { nav.open(OnlineTarget.Album(pl.id, pl.title, playlist = true)) }) {
+                                Column(Modifier.width(160.dp).clip(RoundedCornerShape(20.dp)).clickable { nav.open(OnlineTarget.Album(pl.id, pl.title, playlist = true, cover = pl.cover, subtitle = pl.subtitle)) }) {
                                     Artwork(pl.cover, Modifier.size(160.dp), 20.dp)
                                     Text(pl.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
                                     pl.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
@@ -391,7 +459,7 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
                 }
                 if (page.songs.isNotEmpty()) {
                     item(key = "s-h") { OnlineHeading("Songs") }
-                    itemsIndexed(page.songs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(page.songs, i) } }
+                    itemsIndexed(page.songs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(page.songs, i, target.mood.label) } }
                 }
             }
         }
@@ -412,12 +480,12 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>) {
             val round = card.kind == YouTubeMusic.Card.Kind.ARTIST
             Column(Modifier.width(148.dp).clip(RoundedCornerShape(20.dp)).clickable {
                 when (card.kind) {
-                    YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title))
-                    YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true))
+                    YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
+                    YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
                     YouTubeMusic.Card.Kind.ARTIST -> nav.open(OnlineTarget.Artist(card.title, card.id))
                     YouTubeMusic.Card.Kind.MIX -> { haptics.spin(); nav.playMix(card.id, card.title) }
                     YouTubeMusic.Card.Kind.SONG -> nav.play(listOf(Track(ua.olex.music.model.TrackId("yt:${card.id}"), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${card.id}",
-                        card.title, YouTubeMusic.artistOf(card.subtitle), artworkUri = card.cover)), 0)
+                        card.title, YouTubeMusic.artistOf(card.subtitle), artworkUri = card.cover)), 0, null)
                 }
             }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
                 if (round) Artwork(card.cover, Modifier.size(148.dp).clip(androidx.compose.foundation.shape.CircleShape), 74.dp)

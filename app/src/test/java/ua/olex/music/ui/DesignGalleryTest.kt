@@ -170,6 +170,30 @@ class DesignGalleryTest {
         shot("41-mood")
     }
 
+    /**
+     * A YouTube Music playlist (docs/specs/M10_ONLINE.md): the owner's own files show their quality,
+     * songs that stream a cloud, one downloading a filling ring; the playing row clear of the buttons.
+     */
+    @Test fun onlinePlaylist() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<ua.olex.music.MusicApp>()
+        val mine = library.songs.take(2)
+        val online = listOf("Sexy Boy" to 297, "Kelly Watch the Stars" to 225, "Playground Love" to 213, "La Femme d'Argent" to 428, "Cherry Blossom Girl" to 218).mapIndexed { i, (title, sec) ->
+            ua.olex.music.model.Track(ua.olex.music.model.TrackId("yt:p$i"), "ytm://p$i", title, "Air", album = "Moon Safari", durationMs = sec * 1000L, artworkUri = library.albums[i % library.albums.size].artworkUri)
+        }
+        val songs = listOf(online[0], mine[0].copy(), online[1], mine[1].copy(), online[2], online[3], online[4])
+        app.graph.youTube.keep("album:PLx", YouTubeMusic.OnlineAlbum("PLx", "Evening chill", "Playlist \u00b7 YouTube Music \u00b7 7 songs", library.albums[1].artworkUri) to songs)
+        val J = ua.olex.music.soulseek.SoulseekDownloads
+        app.graph.soulseek.show(listOf(ua.olex.music.soulseek.SoulseekDownloads.Job(9, J.songKey("Air", "Kelly Watch the Stars"), "Air \u00b7 Kelly Watch the Stars", "41% of 9 MB", 0.41f)))
+        compose.setContent { Shell(" ", Place.HOME) { pad -> OnlineAlbumPage(OnlineTarget.Album("PLx", "Evening chill", playlist = true), library, "yt:p0", pad) } }
+        shot("42-online-playlist")
+    }
+
+    /** The same page before YouTube Music answers: the header from the card, rows of real height. */
+    @Test fun onlineLoading() {
+        compose.setContent { Shell(" ", Place.HOME) { pad -> Column(Modifier.fillMaxSize().padding(pad)) { repeat(8) { PlaceholderRow() } } } }
+        shot("42b-online-loading")
+    }
+
     @Test fun songActions() {
         val t = library.songs[3]
         compose.setContent { Shell("Playlists", Place.LIBRARY) { pad -> Column(Modifier.fillMaxSize().padding(pad), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Bottom) {

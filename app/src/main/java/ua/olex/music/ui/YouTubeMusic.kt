@@ -51,18 +51,36 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
 
     /** The artist's YouTube Music page id for a name: the search's artist whose name matches best. */
     suspend fun artistId(name: String): String? = withContext(Dispatchers.IO) {
+        peek<String>("artistId:${TextFold.fold(name)}")?.let { return@withContext it }
         val text = post("search", """"query":${quote(name)}""") ?: return@withContext null
         artistIds(text).let { found -> found.firstOrNull { TextFold.fold(it.second) == TextFold.fold(name) } ?: found.firstOrNull() }?.first
+            ?.also { synchronized(pages) { pages["artistId:${TextFold.fold(name)}"] = it } }
     }
 
-    suspend fun artist(id: String): OnlineArtist? = withContext(Dispatchers.IO) {
-        post("browse", """"browseId":${quote(id)}""")?.let { parseArtist(id, it) }
-    }
+    suspend fun artist(id: String): OnlineArtist? = cached("artist:$id") { post("browse", """"browseId":${quote(id)}""")?.let { parseArtist(id, it) } }
 
     /** An album's songs, in order, with the album's cover and artist on each. */
-    suspend fun album(id: String): Pair<OnlineAlbum, List<Track>>? = withContext(Dispatchers.IO) {
-        post("browse", """"browseId":${quote(id)}""")?.let { parseAlbum(id, it) }
+    suspend fun album(id: String): Pair<OnlineAlbum, List<Track>>? = cached("album:$id") { post("browse", """"browseId":${quote(id)}""")?.let { parseAlbum(id, it) } }
+
+    /** A page already loaded this session, for drawing it in the first frame when it opens again. */
+    @Suppress("UNCHECKED_CAST")
+    fun <T> peek(key: String): T? = synchronized(pages) { pages[key] } as T?
+    fun peekAlbum(id: String): Pair<OnlineAlbum, List<Track>>? = peek("album:$id")
+    fun peekArtist(id: String): OnlineArtist? = peek("artist:$id")
+    /** Puts a page in the session cache, as if it had been loaded (screenshots and tests). */
+    internal fun keep(key: String, value: Any) { synchronized(pages) { pages[key] = value } }
+
+    // Pages opened this session (an artist, an album), newest kept: going back and forth between a
+    // playlist and its artist costs no network and no wait. Forgotten with the process.
+    private val pages = object : LinkedHashMap<String, Any>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any>?) = size > 48
     }
+    private suspend fun <T : Any> cached(key: String, load: () -> T?): T? = withContext(Dispatchers.IO) {
+        peek<T>(key) ?: load()?.also { synchronized(pages) { pages[key] = it } }
+    }
+
+    /** Resolves the stream of a song ahead of a tap (address only, no audio), so Play starts sooner. */
+    suspend fun warm(id: String) { withContext(Dispatchers.IO) { audio(id) } }
 
     /** A page of YouTube Music's radio for a song, and the token for the page after it. */
     data class RadioPage(val tracks: List<Track>, val continuation: String?)
@@ -140,14 +158,14 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         // What the player will say about the sound: codec and bitrate of the stream it plays.
         val codec = when { best.format?.name?.contains("opus", true) == true || best.codec?.contains("opus", true) == true -> "Opus"
             best.format?.name?.contains("m4a", true) == true || best.codec?.contains("mp4a", true) == true -> "AAC"; else -> best.format?.name ?: "Stream" }
-        formats[id] = "$codec \u00b7 ${best.averageBitrate.takeIf { it > 0 } ?: best.bitrate / 1000} kbps \u00b7 YouTube Music"
+        formats[id] = "$codec \u00b7 ${best.averageBitrate.takeIf { it > 0 } ?: best.bitrate / 1000} kbps"
         Uri.parse(best.content).also { synchronized(streams) { streams[id] = it to System.currentTimeMillis() } }
     }.getOrNull()
 
     private val streams = HashMap<String, Pair<Uri, Long>>()
     private val formats = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** "Opus \u00b7 160 kbps \u00b7 YouTube Music" once the song's stream was chosen; null before. */
+    /** "Opus \u00b7 160 kbps" once the song's stream was chosen; null before. Quality only: where it plays from is the row's mark. */
     fun format(id: String): String? = formats[id]
 
     companion object {
@@ -376,7 +394,18 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
          * The owner's own file for an online song: same artist and title (ignoring case, accents and
          * "(Remastered)"-style extras) and a length within three seconds when both are known.
          */
-        fun localCopy(online: Track, library: LibraryIndex): Track? = library.songs.firstOrNull { sameSong(online, it) }
+        fun localCopy(online: Track, library: LibraryIndex): Track? = indexOf(library).copyOf(online)
+
+        // The index of the current library, built once per library (identity), shared by the pages,
+        // Search and the player.
+        @Volatile private var indexed: Pair<LibraryIndex, Index>? = null
+
+        /** The library's [Index], building it when the library changed. Call off the main thread when new. */
+        fun indexOf(library: LibraryIndex): Index = indexed?.takeIf { it.first === library }?.second
+            ?: Index(library.songs).also { indexed = library to it }
+
+        /** The library's [Index] only if it is already built: cheap enough for a composable. */
+        fun builtIndex(library: LibraryIndex): Index? = indexed?.takeIf { it.first === library }?.second
 
         /** Keys under which a library song can be found by an online one (each of its artists). */
         fun keysOf(song: Track): List<String> = (song.artists + song.artist + song.artist.substringBefore(",")).map { clean(song.title) + "\u0000" + clean(it.substringBefore(",")) }.distinct()

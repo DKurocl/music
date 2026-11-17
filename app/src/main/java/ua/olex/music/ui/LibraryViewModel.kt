@@ -386,7 +386,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun disconnectPlayer() = player.disconnect()
 
     /** Plays a list; any online song the owner also has as a file plays from the file. */
-    fun play(list: List<Track>, index: Int) = player.play(localFirst(list), index)
+    fun play(list: List<Track>, index: Int) = playFrom(list, index, null)
+
+    /** Plays a list and remembers what it is ("Top Hits", an artist, "Search") for the player's "Playing from". */
+    fun playFrom(list: List<Track>, index: Int, from: String?) { playingFrom = from; player.play(localFirst(list), index) }
+
+    /** What the queue was started from, when the screen that started it said; null for the owner's own album lists. */
+    var playingFrom by mutableStateOf<String?>(null); private set
 
     private fun localFirst(list: List<Track>): List<Track> {
         if (list.none(YouTubeMusic::isOnline)) return list
@@ -394,13 +400,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         return list.map { if (YouTubeMusic.isOnline(it)) index.copyOf(it) ?: it else it }
     }
 
-    // The library indexed by title and artist, rebuilt only when the library itself changes.
-    @Volatile private var indexed: Pair<LibraryIndex, YouTubeMusic.Companion.Index>? = null
-    private fun localIndex(): YouTubeMusic.Companion.Index? {
-        val lib = library.value ?: return null
-        indexed?.takeIf { it.first === lib }?.let { return it.second }
-        return YouTubeMusic.Companion.Index(lib.songs).also { indexed = lib to it }
-    }
+    // The library indexed by title and artist (YouTubeMusic.indexOf), rebuilt only when the library itself changes.
+    private fun localIndex(): YouTubeMusic.Companion.Index? = library.value?.let(YouTubeMusic::indexOf)
     // "Start mix": YouTube Music's radio for a song, cleaned (see Mix), endless while it plays.
     private class MixRun(val seed: Track, @Volatile var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>, @Volatile var startFrom: String? = null)
     @Volatile private var mixRun: MixRun? = null
@@ -539,6 +540,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     init { viewModelScope.launch { player.state.collect(::followMix) } }
+
+    // The title/artist index of each new library is built here, off the main thread, so online pages
+    // and Search only look songs up in it (YouTubeMusic.indexOf) and never build it while drawing.
+    init { viewModelScope.launch(Dispatchers.Default) { library.collect { it?.let(YouTubeMusic::indexOf) } } }
 
     // A song downloaded while it plays (or waits in the queue) switches to the file by itself, at the
     // same second: the library sees the new file, and every online song it now has is swapped.
