@@ -141,7 +141,7 @@ data class HistoryEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val 
 @Entity(tableName = "lyric_offsets", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
 data class LyricOffsetEntity(@PrimaryKey val songId: String, val offsetMs: Long, @ColumnInfo(defaultValue = "0") val updatedAt: Long = 0)
 
-/** A song's star rating, 1 to 5; no row means unrated. Kept apart from metadata, like favourites. */
+/** Stars 1 to 5; 0 is a dated clear retained across later merges. No row is also unrated. */
 @Entity(tableName = "ratings", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
 data class RatingEntity(@PrimaryKey val songId: String, val stars: Int, val ratedAt: Long)
 
@@ -218,7 +218,6 @@ interface UserDao {
     suspend fun latestRating(ids: List<String>, keep: String): RatingEntity?
     @Query("SELECT * FROM lyric_offsets WHERE songId IN (:ids) ORDER BY updatedAt DESC, (songId = :keep) DESC, songId LIMIT 1")
     suspend fun latestOffset(ids: List<String>, keep: String): LyricOffsetEntity?
-    @Query("DELETE FROM ratings WHERE songId = :id") suspend fun clearRecordingRating(id: String)
 
     @Transaction @Query("""
         SELECT * FROM saved_songs WHERE id IN (

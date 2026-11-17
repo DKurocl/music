@@ -132,4 +132,18 @@ class YouTubeMusicTest {
         assertEquals(live, index.copyOf(online("Creep (Live at Glastonbury)", 0)))
         assertNull(index.copyOf(online("Creep (Acoustic)", 0)))
     }
+
+    @Test fun preferredLocalPlaybackRetainsItsVideoWithoutGuessingUnknownDuration() {
+        val file = Track(TrackId("local:reserve"), "content://reserve", "Song", "Artist", durationMs = 200_000, path = "Music/song.flac")
+        val online = Track(TrackId("yt:reserve"), "ytm://reserve", "Song", "Artist", durationMs = 201_000, artworkUri = "https://own-cover")
+        val index = YouTubeMusic.Companion.Index(listOf(file))
+        val selected = index.preferLocal(online)
+        assertEquals(file.uri, selected.uri)
+        val reserve = ua.olex.music.model.SavedSong.from(selected).online()!!
+        assertEquals(online.uri, reserve.uri)
+        assertEquals(online.artworkUri, reserve.artworkUri)
+        assertEquals(online.copy(durationMs = 0), index.preferLocal(online.copy(durationMs = 0)))
+        assertEquals(online.copy(title = "Song (Live)"), index.preferLocal(online.copy(title = "Song (Live)")))
+    }
+
 }

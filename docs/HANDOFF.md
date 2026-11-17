@@ -1,45 +1,33 @@
-# Active after-release continuation (Codex, 2026-11-17)
+# Active recording/source continuation (Codex, 2026-11-17)
 
-## Active recording/source continuation checkpoint (2026-11-17)
+Branch `agent/recording-sources`, based on main `d2ef360` after music-v1109. Owner asked to keep
+working after release while asleep, then repeated "continue". This new block is not released yet.
 
-Branch: `agent/recording-sources`, based on main `d2ef360` after music-v1109.
-This block is not released. Owner explicitly asked to continue after release while asleep, then
-repeated "continue". No phone measurement or complete audit claim is authorized by test evidence.
+Implemented: user.db v4 sources/aliases; conservative transactional recording reconciliation;
+recording-aware catalogue, statistics, favourites, queue/checkpoint metadata and lyric files. A
+confirmed merge preserves playlist occurrences, history event IDs, favourite state and latest settings.
+A dated zero rating prevents resurrection of an older rating. Queue local-first substitution keeps
+its video reserve. Lyrics read legacy/merged keys; reset cannot resurrect an old timing edit. The full
+player now exposes online timing save (the prior release had its persistence path but hid this action).
+Linked local hearts queue the YouTube operation too; remote inbound/account-scoped sync stays open.
 
-Implemented draft: user.db v4 sources/aliases and conservative transactional recording reconciliation;
-recording-aware catalogue, statistics, favourites, queue/checkpoint metadata and lyric files. Added
-regressions for source loss, merge relation preservation, ambiguous takes, stale references and resets.
-175 pure JVM tests passed before the final four model tests; 18 real native SQLite repository tests
-passed before the final reference/alias integration. Final reruns and complete Android CI pending.
-The standalone JVM harness cannot expose exported schema assets to MigrationTestHelper; its original
-migration tests fail with missing assets. Production Android test source sets include schemas. Added
-an actual 3 -> 4 fixture; it must pass in CI before any main update. Do not bypass this gate.
+CI for first implementation `648bd85`: https://github.com/DKurocl/music/actions/runs/44166893313
+431 distinct tests/executions, 0 failures/errors/skips. Tests, lintDebug/lintRelease,
+assembleDebug/assembleRelease and owner signer passed. Includes real exported-schema 3 -> 4 migration.
+Final review found ambiguity, artwork fallback, explicit clears and physical-copy heart cases; follow-up
+changes need their own complete CI before main. Local checks now pass 181 JVM tests (including physical-copy favourite state) and 21 native SQLite
+repository tests. A bad single-basename test was corrected to an actually resolvable folder suffix;
+basename-only matching is deliberately unavailable. Full follow-up Android CI is pending.
 
-Next: inspect final local runs, push this branch for full Android tests/lints/R8, fix failures, verify
-migration/schema and new lyric/source regressions. Only then fast-forward main. Central service source
-selection (52), disk online pages (49/64), bidirectional sync (56/58/59), and remaining audit work stay
-open. `docs/specs/RECORDING_SOURCES.md` records the broader contract; it still needs final status cleanup.
+Standalone user harness lacks Android schema asset packaging, so its MigrationTestHelper cases fail
+with missing assets. Actual Android CI passed them without assertion or dependency changes. Independent
+host SQLite also executed the exact v3 -> v4 SQL and compared all exported v4 columns/indexes/FKs.
+No Pixel/Sony, live account, startup/battery trace or complete reviewed UI golden gate was run.
 
-
-The owner explicitly asked to keep working after music-v1109 while asleep, without further prompts.
-Branch: `agent/recording-sources`, based on latest `main` `d2ef360`. The new block is in progress and not ready for main. Claimed 47/48/63 in ROADMAP.
-Detailed contract, next steps and verification limits: `docs/specs/RECORDING_SOURCES.md`.
-Pure source/matcher/codec tests reached 175 passes before later model edits. Draft schema v4 and
-DAO/registrar/repository compiled with real Room KSP in the user harness; 4.json is genuinely generated.
-Current repository/UI/migration behavior is not verified, and existing ID assertions need adaptation.
-
-Design: keep existing saved-song primary keys stable on migration; assign independent recording IDs
-for new durable rows; retain local and YouTube source references in a child table. Conservative
-matching must preserve live/remix variants and reject ambiguous duration/known MusicBrainz conflicts.
-Alias reconciliation must preserve favourite/history/rating/offset data and positional playlist repeats.
-Track source IDs and per-occurrence queue IDs remain separate from recording identity.
-
-Local user.db harness: `/workspace/toolchains/music-user-check` (not app build/SDK evidence).
-Baseline KSP and JVM type checking passed. First runtime check failed because the cache lock was
-under a read-only home; test worker cache moved into the writable workspace. Next check exposed
-wrong SQLite JVM variant selection; the harness now explicitly uses SQLite Android 2.6.2 and excludes
-the JVM variant. The genuine native SQLite reopen baseline passed. Migration assets still need setup.
-No test assertion or production dependency has been changed for these environment checks.
+Next: final branch CI, inspect source/lyric regressions and migration, then fast-forward main and
+verify the signed release. Follow with central service source selection (52), saved online pages
+(49/64), account-scoped bidirectional sync (56/58/59), and remaining audit work in
+`docs/AUDIT_CONTINUATION.md`. Detailed model contract: `docs/specs/RECORDING_SOURCES.md`.
 
 # Current continuation (Codex, 2026-11-17): start here
 

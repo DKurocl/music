@@ -5,7 +5,12 @@ object SavedCatalog {
     /** Bind scanned copies through indexed evidence; ambiguous takes keep their own identity. */
     fun bindLocal(local: LibraryIndex, saved: List<SavedSong>): List<Track> {
         if (saved.isEmpty()) return local.songs
-        val candidates = saved.map { RecordingCandidate(it.id, it.createdAt, it.references, it.songKey, it.durationMs) }
+        val candidates = saved.map { song ->
+            val resolved = song.references.filter { it.kind == RecordingSourceKind.MISSING_LOCAL }.mapNotNull { source ->
+                local.playlistPaths.resolve(source.path.orEmpty()).track?.let(RecordingSource::from)?.copy(kind = RecordingSourceKind.MISSING_LOCAL)
+            }
+            RecordingCandidate(song.id, song.createdAt, (song.references + resolved).distinctBy { it.key }, song.songKey, song.durationMs)
+        }
         val byId = saved.associateBy { it.id }
         val byKey = HashMap<String, MutableSet<RecordingCandidate>>()
         val bySource = HashMap<String, MutableSet<RecordingCandidate>>()
@@ -29,8 +34,17 @@ object SavedCatalog {
         if (saved.isEmpty()) return local
         val bound = bindLocal(local, saved)
         val represented = bound.mapNotNullTo(HashSet()) { it.recordingId }
-        val added = saved.asSequence().filter { it.id !in represented }
-            .mapNotNull { it.resolve(local) }.filter { it.uri.startsWith(SavedSong.ONLINE_PREFIX) && it.id !in local.byId }.distinctBy { it.id }.toList()
+        val linkedSources = HashMap<String, MutableList<RecordingCandidate>>()
+        for (track in bound) if (track.sources.isNotEmpty()) {
+            val candidate = RecordingCandidate(track.recordingId ?: track.id.value, track.addedAt ?: 0, track.sources)
+            track.sources.filter { it.kind == RecordingSourceKind.YOUTUBE }.forEach { source ->
+                linkedSources.getOrPut(source.key) { ArrayList() }.add(candidate)
+            }
+        }
+        val added = saved.asSequence().filter { song ->
+            song.id !in represented && RecordingMatcher.group(song.references,
+                song.references.flatMap { linkedSources[it.key].orEmpty() }.distinctBy { it.id }).isEmpty()
+        }.mapNotNull { it.online() }.filter { it.id !in local.byId }.distinctBy { it.id }.toList()
         val preferred = bound.groupBy { it.recordingId ?: it.id.value }.values.map { copies -> copies.maxBy { it.format?.rank ?: 0 } }
         if (added.isEmpty() && preferred == local.songs) return local
         // Online songs have no filesystem folder. Keep the local folder tree exactly as scanned.

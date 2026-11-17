@@ -3,7 +3,9 @@ package ua.olex.music.model
 import kotlin.random.Random
 
 /** What the owner's listening says about one song: how often, how recently, how it was rated. */
-data class SongStats(val plays: Int = 0, val lastPlayedAt: Long? = null, val rating: Int = 0) {
+data class SongStats(val plays: Int = 0, val lastPlayedAt: Long? = null, val rating: Int = 0,
+    /** Explicit 0 suppresses an old embedded rating just as it suppresses an old merged rating. */
+    val ratingSet: Boolean = rating > 0) {
     companion object { val NONE = SongStats() }
 }
 
