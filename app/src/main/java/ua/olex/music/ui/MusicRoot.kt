@@ -258,6 +258,8 @@ fun MusicRoot(model: LibraryViewModel) {
         if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
+        LocalPlayingTrack provides playing.track,
+        LocalOwnedSources provides if (model.allowed) personal.localCopies else emptyMap(),
         LocalNetwork provides network,
         LocalPowerSave provides powerSave) {
     afterSignIn?.let { pending ->

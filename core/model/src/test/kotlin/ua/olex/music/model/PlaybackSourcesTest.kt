@@ -129,4 +129,16 @@ class PlaybackSourcesTest {
         assertEquals("ytm://unknown", policy.select(online("unknown").copy(durationMs = 0)).track.uri)
     }
 
+    @Test fun rowsKeepThePlayingMarkAcrossSourceChangesWithoutMarkingAnotherTake() {
+        val request = online("request")
+        val playing = file.copy(requestedId = request.id.value, recordingId = "recording:one",
+            sources = listOf(RecordingSource.from(online("reserve"))!!))
+        assertTrue(request.matchesPlayback(playing))
+        assertTrue(online("reserve").matchesPlayback(playing))
+        assertTrue(file.copy(id = TrackId("local:second"), recordingId = playing.recordingId).matchesPlayback(playing))
+        assertFalse(online("other-take").matchesPlayback(playing))
+        assertFalse(file.copy(id = TrackId("local:cue2"), recordingId = "recording:other").matchesPlayback(playing))
+        assertFalse(request.matchesPlayback(null))
+    }
+
 }

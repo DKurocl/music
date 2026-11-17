@@ -47,7 +47,8 @@ Poweramp and Symfonium as the reference for a local player.
 - [~] Service source policy (52, Codex, 2026-11-17, `agent/service-source-policy`): apply the same
       full-evidence selection to app/browser/enqueue/recovery; retain unavailable occurrences and
       reject ambiguous local substitutions. Include recording-matcher refinement for metadata bridges,
-      history/recovery guards and generation-aware refresh (41). Local: 201 pure, 25 user SQLite,
+      history/recovery guards and generation-aware refresh (41). First full CI 44188651400: 477 tests, both lints/builds and owner signer passed.
+      Follow-ups await final CI. Local: 202 pure, 25 user SQLite,
       9 library SQLite tests passed; full Android CI pending.
 - [ ] Persistent online pages and album/artist identities (49/64).
 - [ ] Account-scoped bidirectional likes and playlist operation/conflict sync (56/58/59).

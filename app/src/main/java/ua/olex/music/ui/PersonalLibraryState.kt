@@ -20,6 +20,8 @@ data class PersonalLibraryState(
     val playlists: List<PlaylistUi> = emptyList(),
     val history: List<SavedSongRow> = emptyList(),
     private val linkedFavourites: Map<String, SavedSong> = emptyMap(),
+    /** Confirmed current file per linked video URI, prepared off main for row source marks. */
+    val localCopies: Map<String, Track> = emptyMap(),
 ) {
     val favouriteByTrackId = linkedFavourites + buildMap {
         for (row in favourites) {
@@ -44,6 +46,10 @@ data class PersonalLibraryState(
                 playlists.map { PlaylistUi(it.id, it.name, it.songs.map(::row)) },
                 history.map { row(it.song) }.distinctBy { it.song.id },
                 linked,
+                physical.filterNot { it.uri.startsWith(SavedSong.ONLINE_PREFIX) }.flatMap { track ->
+                    track.sources.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE && it.uri != null }
+                        .map { it.uri!! to track }
+                }.groupBy({ it.first }, { it.second }).mapValues { (_, copies) -> copies.maxBy { it.format?.rank ?: 0 } },
             )
         }
     }
