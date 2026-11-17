@@ -398,7 +398,14 @@ class DesignGalleryTest {
             ua.olex.music.model.Track(ua.olex.music.model.TrackId("yt:v$i"), "ytm://v$i", title, "Air", durationMs = s * 1000L, artworkUri = library.albums[i].artworkUri)
         }
         compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, q, LibrarySearchResult(q, hits), {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
-            online = OnlineSearch(q, online), onlineOn = true) } }
+            online = OnlineSearch(q, online,
+                artists = listOf(YouTubeMusic.Card("UCa", "Air", "7.76M monthly audience", library.albums[0].artworkUri, YouTubeMusic.Card.Kind.ARTIST),
+                    YouTubeMusic.Card("UCb", "Air Supply", "2.1M monthly audience", library.albums[1].artworkUri, YouTubeMusic.Card.Kind.ARTIST),
+                    YouTubeMusic.Card("UCc", "Phoenix", "3.4M monthly audience", library.albums[2].artworkUri, YouTubeMusic.Card.Kind.ARTIST)),
+                albums = listOf(YouTubeMusic.Card("MPa", "Moon Safari", "Air \u2022 1998", library.albums[3].artworkUri, YouTubeMusic.Card.Kind.ALBUM),
+                    YouTubeMusic.Card("MPb", "Talkie Walkie", "Air \u2022 2004", library.albums[4 % library.albums.size].artworkUri, YouTubeMusic.Card.Kind.ALBUM))),
+            onlineOn = true) } }
+        compose.onAllNodes(androidx.compose.ui.test.hasScrollAction())[0].performScrollToNode(androidx.compose.ui.test.hasText("Artists"))
         shot("08b-search-youtube")
     }
 
