@@ -22,12 +22,12 @@ data class SavedSong(
         val refs = references
         val missing = refs.firstOrNull { it.kind == RecordingSourceKind.MISSING_LOCAL }
         if (missing != null) library.playlistPaths.resolve(missing.path.orEmpty()).track?.let { return bind(it) }
-        val candidates = (refs.map { it.songKey } + songKey).distinct().flatMap { library.bySongKey[it].orEmpty() }
-            .distinctBy { it.id }.filter { track ->
-                val source = RecordingSource.from(track) ?: return@filter false
-                source.kind == RecordingSourceKind.LOCAL && RecordingMatcher.group(listOf(source),
-                    listOf(RecordingCandidate(id, createdAt, refs, songKey, durationMs))).isNotEmpty()
-            }
+        val possible = (refs.map { it.songKey } + songKey).distinct().flatMap { library.bySongKey[it].orEmpty() }.distinctBy { it.id }
+        val matches = RecordingMatcher.group(refs, possible.mapNotNull { track ->
+            val source = RecordingSource.from(track)?.takeIf { it.kind == RecordingSourceKind.LOCAL } ?: return@mapNotNull null
+            RecordingCandidate(track.id.value, track.addedAt ?: 0, listOf(source))
+        }).mapTo(HashSet()) { it.id }
+        val candidates = possible.filter { it.id.value in matches }
         val paths = refs.mapNotNull { it.path }.toSet()
         val file = candidates.firstOrNull { it.path.orEmpty() == path }
             ?: candidates.filter { it.path in paths }.maxByOrNull { it.format?.rank ?: 0 }
@@ -44,7 +44,7 @@ data class SavedSong(
         val videoId = uri.removePrefix(ONLINE_PREFIX).takeIf { it.isNotBlank() } ?: return null
         return Track(TrackId("yt:$videoId"), uri, title, artist, album = album,
             durationMs = online.durationMs.takeIf { it > 0 } ?: durationMs,
-            artworkUri = online.artworkUri ?: artworkUri, recordingId = id.takeIf { persistent },
+            artworkUri = online.artworkUri ?: artworkUri.takeIf { path.startsWith(ONLINE_PREFIX) }, recordingId = id.takeIf { persistent },
             sources = refs.takeIf { persistent || it.size > 1 }.orEmpty(), addedAt = createdAt.takeIf { it > 0 })
     }
 

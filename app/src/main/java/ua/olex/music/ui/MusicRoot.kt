@@ -445,18 +445,14 @@ fun MusicRoot(model: LibraryViewModel) {
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
             onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
             onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
-            // Timing is saved into the song's file: a YouTube Music song has none, so the controls aren't offered.
-            onSaveLyricTiming = model::saveLyricTiming.takeIf { playing.mediaId?.startsWith("yt:") != true }, onResetLyricTiming = model::resetLyricTiming,
+            // Timing belongs to the recording, including a streamed source.
+            onSaveLyricTiming = model::saveLyricTiming, onResetLyricTiming = model::resetLyricTiming,
             favourite = playing.mediaId in personal.favouriteByTrackId,
             // The heart works the same for a file and a YouTube Music song.
-            onFavourite = playing.mediaId?.let { id -> library?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) ua.olex.music.model.Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
-                playing.title, playing.artist, album = playing.album, durationMs = playing.durationMs, artworkUri = playing.artworkUri) else null }?.let { track -> { model.toggleFavourite(track) } },
+            onFavourite = model.currentTrack()?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
-            onMore = playing.mediaId?.let { id ->
-                library?.byId?.get(TrackId(id)) ?: if (id.startsWith("yt:")) ua.olex.music.model.Track(TrackId(id), "${ua.olex.music.playback.OnlineStreams.SCHEME}://${id.removePrefix("yt:")}",
-                    playing.title, playing.artist, album = playing.album, durationMs = playing.durationMs, artworkUri = playing.artworkUri) else null
-            }?.let { track -> { actionTrack = track } },
+            onMore = model.currentTrack()?.let { track -> { actionTrack = track } },
             mixFrom = model.mixLabel,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } }
                 // A YouTube Music song: its album page, when its row named one.

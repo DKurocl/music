@@ -80,7 +80,11 @@ class SavedCatalogTest {
             sources = listOf(RecordingSource.from(online)!!))
         val second = SavedSong.from(online.copy(uri = "ytm://two", durationMs = 265_000)).copy(id = "recording:b")
         val middle = file.copy(durationMs = 262_000)
-        assertNull(SavedCatalog.bindLocal(LibraryIndex.build(listOf(middle)), listOf(first, second)).single().recordingId)
+        val local = LibraryIndex.build(listOf(middle))
+        assertNull(SavedCatalog.bindLocal(local, listOf(first, second)).single().recordingId)
+        assertEquals(3, SavedCatalog.merge(local, listOf(first, second)).songs.size)
+        val bridge = SavedSong.from(online.copy(durationMs = 262_000))
+        assertEquals(online.uri, bridge.resolve(LibraryIndex.build(listOf(file, file.copy(id = TrackId("local:2"), durationMs = 265_000))))!!.uri)
     }
 
 }

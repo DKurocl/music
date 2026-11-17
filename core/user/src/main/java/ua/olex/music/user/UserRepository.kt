@@ -37,6 +37,10 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
 
     /** Read a source's durable recording without creating data or guessing an ambiguous match. */
     fun reference(track: Track) = reference(SavedSong.from(track))
+    /** Resolve an old durable ID through permanent merge aliases. */
+    fun reference(id: String): kotlinx.coroutines.flow.Flow<SavedSong?> = dao.observeCanonicalId(id).flatMapLatest { canonical ->
+        if (canonical == null) kotlinx.coroutines.flow.flowOf(null) else dao.observeRecording(canonical).map { it?.toSong() }
+    }.distinctUntilChanged()
     private fun reference(snapshot: SavedSong): kotlinx.coroutines.flow.Flow<SavedSong?> {
         fun candidates() = dao.observeCandidates(listOf(snapshot.id),
             (listOf(snapshot.songKey) + snapshot.references.map { it.songKey }).distinct().take(32), snapshot.references.map { it.key }.distinct().take(32))
@@ -56,14 +60,15 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         val at = now()
         val song = register(listOf(SavedSong.from(track)), at).single()
         val id = existingId?.let { dao.canonicalId(it) } ?: song.id
-        if (dao.isFavourite(id)) dao.removeFavourite(id) else dao.addFavourite(FavouriteEntity(song.id, at))
+        if (dao.isFavourite(id)) { dao.removeFavourite(id); false }
+        else { dao.addFavourite(FavouriteEntity(song.id, at)); true }
     }
 
     suspend fun removeFavourite(id: String) = database.withTransaction { dao.removeFavourite(dao.canonicalId(id) ?: id) }
 
     /** Recording IDs own statistics. A unique old SongKey alias keeps unsaved/local callers readable. */
     val stats = kotlinx.coroutines.flow.combine(dao.recordingStats(), dao.recordingAliases()) { rows, aliases ->
-        val values = rows.associate { it.songId to ua.olex.music.model.SongStats(it.plays, it.lastPlayedAt, it.rating ?: 0) }.toMutableMap()
+        val values = rows.associate { it.songId to ua.olex.music.model.SongStats(it.plays, it.lastPlayedAt, it.rating ?: 0, it.rating != null) }.toMutableMap()
         aliases.forEach { alias -> values[alias.songId]?.let { values[alias.aliasId] = it } }
         rows.groupBy { it.songKey }.forEach { (key, matches) -> if (matches.size == 1) values[key] = values.getValue(matches.single().songId) }
         values.toMap()
@@ -73,8 +78,9 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     suspend fun setRating(track: Track, stars: Int) = database.withTransaction {
         val at = now()
         val song = register(listOf(SavedSong.from(track)), at).single()
-        dao.clearRecordingRating(song.id)
-        if (stars in 1..5) dao.setRating(RatingEntity(song.id, stars, at))
+        require(stars in 0..5)
+        // Keep a dated clear, otherwise a later source merge could resurrect an older rating.
+        dao.setRating(RatingEntity(song.id, stars, at))
     }
 
     val smartPlaylists = dao.smartPlaylists().map { rows -> rows.mapNotNull { ua.olex.music.model.SmartPlaylistCodec.decode(it.definition, it.id) } }
