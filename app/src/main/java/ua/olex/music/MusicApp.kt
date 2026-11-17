@@ -92,7 +92,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
     override val playbackSourceChanges get() = merge(
-        graph.library.tracks.map { Unit }, graph.network.map { Unit }, graph.youTubeOn.map { Unit },
+        graph.library.tracks.map { Unit }, graph.userLibrary.recordings.map { Unit },
+        graph.network.map { Unit }, graph.youTubeOn.map { Unit },
         ua.olex.music.playback.CacheBudget.revision.map { Unit },
         graph.audioAccess.flatMapLatest { granted ->
             if (!granted) kotlinx.coroutines.flow.emptyFlow() else graph.library.changes.debounce(500).onStart { emit(Unit) }.map {
