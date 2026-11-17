@@ -635,7 +635,7 @@ internal fun OnlineResultRow(card: YouTubeMusic.Card, onOpened: () -> Unit = {})
         modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable {
             onOpened()
             if (artist) nav.open(OnlineTarget.Artist(card.title, card.id))
-            else nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
+            else nav.open(OnlineTarget.Album(card.id, card.title, playlist = card.kind == YouTubeMusic.Card.Kind.PLAYLIST, cover = card.cover, subtitle = card.subtitle))
         },
     )
 }

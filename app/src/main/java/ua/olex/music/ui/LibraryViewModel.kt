@@ -320,6 +320,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun toggleFavourite(track: Track) {
         val saved = personal.value.favouriteByTrackId[track.id.value]
         editUserData { toggleFavourite(track, saved?.id) }
+        // A YouTube Music song: the same heart on the owner's YouTube Music account, when signed in.
+        if (YouTubeMusic.isOnline(track)) viewModelScope.launch { graph.youTube.like(track.id.value.removePrefix("yt:"), liked = saved == null) }
     }
     fun dismissUserError() { userError = null }
     private fun editUserData(action: suspend UserRepository.() -> Unit) {
