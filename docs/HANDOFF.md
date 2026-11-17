@@ -1,5 +1,15 @@
 # Current state (Claude, 2026-11-17): start here
 
+## Moods on Home (Claude, 2026-11-17)
+
+- A mood chip filters Home in place, as YouTube Music's chips do `[код]` (`MoodRow` chosen state,
+  `rememberMoodView`, `moodItems`): a Play card, YouTube Music's playlists for the mood, "From your
+  library" (songs whose genre fits, `Mix.moodSongs`, now also for genre chips like "Rock" and aliases
+  like "Chill"), then YouTube Music's songs not shown above. Back or the same chip clears it. Mood
+  answers are cached for the session; loading shows placeholders for at most 8 s; offline shows only
+  the owner's songs. `MoodPage` (the old separate page) is no longer opened from Home.
+- Not measured on the phone; mood chips' real labels depend on YouTube Music's home for the account.
+
 ## M10, second pass: one library (Claude, 2026-11-17, night)
 
 Built and checked in the container like the first pass; not measured on the phone.
