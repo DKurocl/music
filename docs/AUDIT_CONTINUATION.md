@@ -5,13 +5,13 @@ older items marked done in that report have not all been independently reverifie
 
 ## Current batch (Codex, 2026-11-17)
 
-- 50/51 [code, verification pending]: a shared catalogue of files and actively saved online songs.
+- 50/51 [код, verification pending]: a shared catalogue of files and actively saved online songs.
   Saved metadata comes from user.db, including history older than the 200-event UI window and
   rated songs. Home, browsing, statistics and smart playlists use it. Saved songs participate in
   local prefix search before network results arrive; network deduplication updates when saved data
   changes, without repeating HTTP requests. Local matches suppress their online duplicate; stored
   YouTube links remain intact. Filesystem folders retain only actual local files.
-- 60 [code, verification pending]: complete account playlist pagination; playlist track occurrences
+- 60 [код, verification pending]: complete account playlist pagination; playlist track occurrences
   survive parsing and continuation boundaries. In-flight continuation requests are shared. Failed
   pages retain their token and partial account lists are never cached. Token cycles stop the load.
 - Regression found while composing the catalogue: LibraryIndex must not split an already clipped

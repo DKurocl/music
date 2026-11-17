@@ -10,6 +10,14 @@ import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
 class YouTubeMusicTest {
+    @Test fun savedOnlineSnapshotsAreNeverSubstitutedAsLocalFiles() {
+        val online = Track(TrackId("yt:one"), "ytm://one", "Halo", "Beyoncé", durationMs = 260_000)
+        val saved = LibraryIndex.build(listOf(online))
+        assertNull(YouTubeMusic.localCopy(online, saved))
+        val file = online.copy(id = TrackId("local:1"), uri = "content://1", format = ua.olex.music.model.AudioFormat("flac"))
+        assertEquals(file, YouTubeMusic.localCopy(online, LibraryIndex.build(listOf(online, file))))
+    }
+
     @Test fun aRealAnswerKeepsSongsAndVideosAndDropsProfilesAndPodcasts() {
         val json = javaClass.classLoader!!.getResource("ytm-search.json")!!.readText()
         val songs = YouTubeMusic.parseSearch(json)

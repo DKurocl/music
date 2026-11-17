@@ -133,7 +133,11 @@ internal class YouTubeMusic(
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any>?) = size > 48
     }
     private suspend fun <T : Any> cached(key: String, load: suspend () -> T?): T? = withContext(ioDispatcher) {
-        peek<T>(key) ?: shared(key, load)?.also { synchronized(pages) { pages[key] = it } }
+        peek<T>(key) ?: shared(key) {
+            // Publish before releasing waiters, so a late initial-page waiter cannot overwrite a
+            // newer continuation snapshot and another caller cannot start the same load in the gap.
+            peek<T>(key) ?: load()?.also { keep(key, it) }
+        }
     }
 
     // Requests for the same page in flight at once share one network call (two screens opening the
@@ -615,7 +619,7 @@ internal class YouTubeMusic(
          * songs is fifty lookups, not fifty passes over every file with regular expressions.
          */
         class Index(songs: List<Track>) {
-            private val byKey = HashMap<String, MutableList<Track>>().apply { songs.forEach { s -> keysOf(s).forEach { getOrPut(it) { ArrayList(1) } += s } } }
+            private val byKey = HashMap<String, MutableList<Track>>().apply { songs.filterNot(::isOnline).forEach { s -> keysOf(s).forEach { getOrPut(it) { ArrayList(1) } += s } } }
             // The best file of the same recording: lengths within three seconds when both are known (an
             // unknown length on one side needs the same version words on both), the best quality first.
             fun copyOf(online: Track): Track? = byKey[keyOf(online)]?.filter { song ->
