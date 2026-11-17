@@ -328,4 +328,26 @@ class UserRepositoryTest {
         assertNull(saved.resolve(ua.olex.music.model.LibraryIndex.build(listOf(arrived.copy(title = "Another recording")))))
     }
 
+
+    @Test fun repeatedAmbiguousFilePlaybackDoesNotCreateANewRecordingEveryTime() = runBlocking {
+        val actual = a.copy(durationMs = 202_000)
+        val dao = database.userData()
+        for ((id, ms) in listOf("take-a" to 200_000L, "take-b" to 205_000L)) {
+            val remote = actual.copy(id = TrackId("yt:$id"), uri = "ytm://$id", path = null, durationMs = ms)
+            val saved = SavedSong.from(remote).copy(id = id, sources = listOf(
+                ua.olex.music.model.RecordingSource.from(actual)!!, ua.olex.music.model.RecordingSource.from(remote)!!))
+            dao.saveSongs(listOf(UserSongEntity.from(saved)))
+            dao.saveSources(saved.sources.map { RecordingSourceEntity.from(id, it, 0) })
+        }
+        repeat(3) { repository.recordPlay(actual) }
+        val history = repository.history.first()
+        assertEquals(3, history.size)
+        assertEquals(1, history.map { it.song.id }.distinct().size)
+        assertTrue(history.all { it.song.id.startsWith("recording:") })
+        assertEquals(3, dao.allRecordings().size)
+        repository.recordPlay(actual.copy(recordingId = "take-a"))
+        assertEquals("take-a", repository.history.first().first().song.id)
+        assertEquals(3, dao.allRecordings().size)
+    }
+
 }

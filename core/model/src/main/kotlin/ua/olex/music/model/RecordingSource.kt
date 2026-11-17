@@ -74,13 +74,35 @@ object RecordingMatcher {
      */
     fun group(incoming: List<RecordingSource>, candidates: List<RecordingCandidate>): List<RecordingCandidate> {
         if (incoming.isEmpty() || !consistent(incoming)) return emptyList()
-        val matches = candidates.filter { candidate ->
+        var matches = candidates.filter { candidate ->
             consistent(evidence(candidate) + incoming) && evidence(candidate).any { old -> incoming.any { same(old, it) } }
         }
         if (matches.isEmpty()) return emptyList()
         val exact = matches.filter { c -> c.sources.any { old -> incoming.any { it.key == old.key && same(old, it) } } }
+        if (exact.isNotEmpty()) {
+            val matchedIds = matches.mapTo(HashSet()) { it.id }
+            val outside = HashMap<String, MutableList<RecordingCandidate>>()
+            candidates.filter { it.id !in matchedIds }.forEach { candidate -> candidate.sources.forEach { source ->
+                outside.getOrPut(source.key) { ArrayList() }.add(candidate)
+            } }
+            val exactIds = exact.mapTo(HashSet()) { it.id }
+            matches = matches.filter { candidate -> candidate.id in exactIds || candidate.sources.none { source ->
+                outside[source.key].orEmpty().any { other -> !consistent(candidate.sources + evidence(other) + incoming) }
+            } }
+        }
         val selected = if (consistent(matches.flatMap(::evidence) + incoming)) matches
-            else if (exact.size == 1) exact else return emptyList()
+            else if (exact.size == 1) exact else {
+                // A physical source can be ambiguous between two linked takes. Its own unresolved
+                // row must stay stable on the next play, without absorbing either linked recording.
+                val addresses = incoming.associateBy { it.key }
+                val identical = exact.filter { candidate -> candidate.sources.size == addresses.size && candidate.sources.all { source ->
+                    val fresh = addresses[source.key]
+                    fresh != null && source.songKey == fresh.songKey && source.durationMs == fresh.durationMs &&
+                        source.musicBrainzId == fresh.musicBrainzId
+                } }
+                if (identical.isEmpty() || !consistent(identical.flatMap(::evidence) + incoming)) return emptyList()
+                identical
+            }
         return selected.sortedWith(compareBy<RecordingCandidate> { it.createdAt }.thenBy { it.id })
     }
 
