@@ -8,6 +8,7 @@ import ua.olex.music.playback.OutputRouteMonitor
 import ua.olex.music.playback.PlayerConnection
 import ua.olex.music.playback.PlaybackHistoryOwner
 import ua.olex.music.model.Track
+import ua.olex.music.ui.resolveLyrics
 import kotlinx.coroutines.flow.first
 import ua.olex.music.user.UserDatabase
 import ua.olex.music.user.UserRepository
@@ -25,6 +26,8 @@ class AppGraph(context: Context) {
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
     val youTubeAccount by lazy { ua.olex.music.ui.YouTubeAccount(app) }
     internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic { youTubeAccount.headers() } }
+    internal val mix by lazy { ua.olex.music.ui.PlaybackMix(this) }
+    internal fun excludedRecommendations(): Set<String> = app.getSharedPreferences("not_recommended", Context.MODE_PRIVATE).getStringSet("keys", emptySet()).orEmpty()
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
     val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {}.also { if (it.account != null) it.resume() } }
     private val onlinePrefs by lazy { app.getSharedPreferences("online", Context.MODE_PRIVATE) }
@@ -50,26 +53,46 @@ class AppGraph(context: Context) {
         flow
     }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
-    val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles) }
+    val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles, ua.olex.music.playback.CacheBudget.localImageBytes(app)) }
     val player by lazy { PlayerConnection(app) }
     val output by lazy { OutputRouteMonitor(app) }
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
 }
 
-class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams,
+class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams, ua.olex.music.playback.PlaybackLyricsOwner, ua.olex.music.playback.PlaybackQueueOwner,
     coil3.SingletonImageLoader.Factory {
     /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
     override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
         .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("image_cache").absolutePath.toPath() })
-            .maxSizeBytes(ua.olex.music.playback.CacheBudget.imageBytes(this)).build() }
+            .maxSizeBytes(ua.olex.music.playback.CacheBudget.coilBytes(this)).build() }
         .build()
 
     /** The audio stream of an online song, found when the player opens it. */
     override fun resolve(id: String): android.net.Uri? = graph.youTube.audio(id)
     override fun forget(id: String) = graph.youTube.forget(id)
+    override fun available(uri: String): Boolean = !uri.startsWith("ytm://") || graph.network.value || ua.olex.music.playback.CacheBudget.isStreamCached(uri)
     override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
+    override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int) = graph.mix.extend(queue, current)
+    override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
+        val known = graph.library.index.first().byId[track.id] ?: track
+        val lyrics = graph.resolveLyrics(known).lyrics
+        val offset = graph.userLibrary.lyricOffset(ua.olex.music.model.SavedSong.from(known)).first()
+        return ua.olex.music.playback.PlaybackLyrics(ua.olex.music.lyrics.LyricsCleanup.clean(lyrics, known.title, known.artist), offset)
+    }
+
+    /** Rebuild Coil after closing its disk cache, then trim the other image stores off main. */
+    suspend fun resizeCaches() {
+        val old = coil3.SingletonImageLoader.get(this)
+        old.shutdown()
+        coil3.SingletonImageLoader.setUnsafe(newImageLoader(this))
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            graph.artwork.trimTo(ua.olex.music.playback.CacheBudget.localImageBytes(this@MusicApp))
+            graph.artistImages.trim()
+            graph.motionCovers.trim()
+        }
+    }
 
     /** The library for Android Auto, Assistant and other browsers: songs, smart and own playlists. */
     // A browser (Android Auto, Assistant) asks many times in a row while the owner looks around: the
@@ -80,8 +103,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         return buildTree().also { lastTree = android.os.SystemClock.elapsedRealtime() to it }
     }
     private suspend fun buildTree(): ua.olex.music.model.BrowseTree = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-        val index = graph.library.index.first()
         val user = graph.userLibrary
+        val index = ua.olex.music.model.SavedCatalog.merge(graph.library.index.first(), user.catalogue.first())
         val stats = runCatching { user.stats.first() }.getOrDefault(emptyMap())
         val favourites = runCatching { user.favourites.first() }.getOrDefault(emptyList()).mapNotNull { it.resolve(index)?.id }.toSet()
         val own = runCatching { user.smartPlaylists.first() }.getOrDefault(emptyList())

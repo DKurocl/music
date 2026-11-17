@@ -51,6 +51,7 @@ internal class LyricLinePlayer(private val real: Player) : ForwardingPlayer(real
 /** Loads the current song's lyrics in the service and moves the lock-screen line along with playback. */
 class LockScreenLyrics internal constructor(private val context: Context, private val real: Player, private val shown: LyricLinePlayer, private val scope: CoroutineScope) {
     private var lyrics: Lyrics = Lyrics.EMPTY
+    private var offsetMs = 0L
     private var loadedFor: String? = null
     // The line moves only while the screen is on: with it off nobody sees the lock screen, and every
     // change would wake the system to redraw the media card for nothing. The line stays where it is
@@ -78,14 +79,25 @@ class LockScreenLyrics internal constructor(private val context: Context, privat
         if (power?.isInteractive == false) return
         val item = real.currentMediaItem ?: run { shown.line = null; return }
         ticker = scope.launch {
-            if (loadedFor != item.mediaId) {
+            run {
                 shown.line = null
-                lyrics = withContext(Dispatchers.IO) { load(item.mediaMetadata, item.localConfiguration?.uri ?: item.requestMetadata.mediaUri) }
+                val meta = item.mediaMetadata
+                val track = ua.olex.music.model.Track(ua.olex.music.model.TrackId(item.mediaId),
+                    (item.requestMetadata.mediaUri ?: item.localConfiguration?.uri)?.toString().orEmpty(),
+                    meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(), album = meta.albumTitle?.toString(),
+                    durationMs = meta.durationMs ?: real.duration.coerceAtLeast(0), artworkUri = meta.artworkUri?.toString(),
+                    path = meta.extras?.getString(PlayerConnection.PATH_KEY))
+                val owner = context.applicationContext as? PlaybackLyricsOwner
+                val shared = try { owner?.playbackLyrics(track) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { null }
+                lyrics = shared?.lyrics ?: withContext(Dispatchers.IO) { load(meta, item.localConfiguration?.uri ?: item.requestMetadata.mediaUri) }
+                offsetMs = shared?.offsetMs ?: 0L
                 loadedFor = item.mediaId
             }
             if (lyrics.sync == Sync.NONE) { shown.line = null; return@launch }
             while (isActive) {
-                val now = real.currentPosition
+                val now = real.currentPosition + offsetMs
                 val index = lyrics.indexAt(now)
                 shown.line = lyrics.lines.getOrNull(index)?.text?.takeIf { it.isNotBlank() } ?: "♪"
                 val next = lyrics.lines.drop(index + 1).firstOrNull { !it.background }?.startMs

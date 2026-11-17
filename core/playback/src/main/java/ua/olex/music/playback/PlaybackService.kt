@@ -92,6 +92,7 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var exo: ExoPlayer
     private fun exoOrNull(): ExoPlayer? = if (::exo.isInitialized) exo else null
     private var lockLyrics: LockScreenLyrics? = null
+    private var refill: Job? = null
     private val lanServer by lazy { LanMediaServer(this) }
     private var fading: FadingPlayer? = null
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
@@ -163,6 +164,24 @@ class PlaybackService : MediaLibraryService() {
             }
         })
         player.addListener(object : Player.Listener {
+            override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) refillQueue()
+            }
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val owner = application as? OnlineStreams ?: return
+                val uri = player.currentMediaItem?.requestMetadata?.mediaUri?.toString() ?: return
+                if (owner.available(uri)) return
+                val timeline = player.currentTimeline
+                var next = timeline.getNextWindowIndex(player.currentMediaItemIndex, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                while (next != androidx.media3.common.C.INDEX_UNSET) {
+                    val item = player.getMediaItemAt(next)
+                    val address = item.localConfiguration?.uri ?: item.requestMetadata.mediaUri
+                    if (address != null && owner.available(address.toString())) {
+                        player.seekTo(next, 0); player.prepare(); return
+                    }
+                    next = timeline.getNextWindowIndex(next, Player.REPEAT_MODE_OFF, player.shuffleModeEnabled)
+                }
+            }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 lockLyrics?.update()
                 historyGate.transition()
@@ -179,6 +198,32 @@ class PlaybackService : MediaLibraryService() {
                 if (playbackState == Player.STATE_ENDED) historyGate.transition()
             }
         })
+    }
+
+    private fun refillQueue() {
+        val owner = application as? PlaybackQueueOwner ?: return
+        val player = exoOrNull() ?: return
+        if (!player.isPlaying || refill?.isActive == true || player.mediaItemCount == 0 || player.mediaItemCount - player.currentMediaItemIndex > 4) return
+        val timeline = player.currentTimeline
+        val current = player.currentMediaItemIndex
+        val from = (current - 100).coerceAtLeast(0)
+        val items = (from until player.mediaItemCount).map(player::getMediaItemAt)
+        refill = scope.launch {
+            try {
+                val tracks = items.map { item ->
+                    val meta = item.mediaMetadata
+                    Track(TrackId(item.mediaId), (item.requestMetadata.mediaUri ?: item.localConfiguration?.uri)?.toString().orEmpty(),
+                        meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(), album = meta.albumTitle?.toString(),
+                        durationMs = meta.durationMs ?: 0, artworkUri = meta.artworkUri?.toString(), path = meta.extras?.getString(PlayerConnection.PATH_KEY))
+                }
+                val extension = owner.extendPlaybackQueue(tracks, current - from) ?: return@launch
+                if (player.currentTimeline !== timeline || player.currentMediaItemIndex != current) return@launch
+                if (extension.commit() && extension.tracks.isNotEmpty()) QueueCommand.enqueue(player, extension.tracks.map { item ->
+                    PlayerConnection.mediaItem(item, playbackContext = player.mediaMetadata.extras?.getString(PlayerConnection.CONTEXT_KEY)).let { it.buildUpon().setUri(it.requestMetadata.mediaUri).build() }
+                }, false)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { Log.w("MusicMix", "Could not extend queue: ${failure.javaClass.simpleName}") }
+        }
     }
 
     /** Widget and tile state; written only on a change of song or play state. */
@@ -347,7 +392,7 @@ class PlaybackService : MediaLibraryService() {
          * saved queue, paused at its position, the same one the app restores.
          */
         override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, isForPlayback: Boolean) = future {
-            val saved = PlaybackJournal.get(filesDir).read() ?: throw UnsupportedOperationException("Nothing to resume")
+            val saved = persistence?.resumption() ?: throw UnsupportedOperationException("Nothing to resume")
             MediaSession.MediaItemsWithStartPosition(saved.items, saved.index, saved.positionMs)
         }
 

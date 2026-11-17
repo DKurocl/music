@@ -2,6 +2,10 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.text.drawText
+
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.draw.blur
@@ -62,7 +66,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
             do {
                 now = position() + offsetMs
                 current = shownNow.indexAt(now)
-                if (state.isPlaying) delay(if (lyrics.sync == Sync.WORD) 50 else 100)
+                if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.runtime.withFrameNanos { } else delay(100) }
             } while (state.isPlaying)
         }
     }
@@ -91,7 +95,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                     }
                     itemsIndexed(shown.lines) { index, line ->
                         Box(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
-                            LyricLine(line, index, current, now, timed) { draft = ua.olex.music.lyrics.LyricsTiming.retime(draft, index, position() + offsetMs) }
+                            LyricLine(line, index, current, { now }, timed) { draft = ua.olex.music.lyrics.LyricsTiming.retime(draft, index, position() + offsetMs) }
                         }
                     }
                 } else {
@@ -151,7 +155,7 @@ private fun ToolRow(glyph: Glyph, title: String, subtitle: String?, first: Boole
  * a second singer ("v2", "F") sits on the other side, as Apple Music shows duets.
  */
 @Composable
-internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int, now: Long, timed: Boolean, onSeek: () -> Unit) {
+internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int, now: () -> Long, timed: Boolean, onSeek: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val active = index == current
     val distance = if (current < 0) 0 else kotlin.math.abs(index - current)
@@ -166,13 +170,29 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
     val base = if (line.background) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium
     val style = base.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = (-0.2).sp)
     val dim = cs.onSurface.copy(alpha = 0.32f)
-    val text = if (active && line.words.isNotEmpty()) androidx.compose.ui.text.buildAnnotatedString {
-        for (word in line.words) {
-            val p = word.progress(now)
-            val color = when { p >= 1f -> cs.onSurface; p <= 0f -> dim; else -> androidx.compose.ui.graphics.lerp(dim, cs.onSurface, 0.3f + 0.7f * p) }
-            withStyle(androidx.compose.ui.text.SpanStyle(color = color)) { append(word.text) }
+    val text = if (active && line.words.isNotEmpty()) line.words.joinToString("") { it.text } else line.text
+    var layout by remember(line, active) { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+    val wordFill = if (!active || line.words.isEmpty()) Modifier else Modifier.drawWithCache {
+        val measured = layout
+        var offset = 0
+        val paths = if (measured == null) emptyList() else line.words.map { word ->
+            val start = offset
+            offset += word.text.length
+            word to measured.getPathForRange(start, offset)
         }
-    } else androidx.compose.ui.text.AnnotatedString(line.text)
+        onDrawWithContent {
+            drawContent()
+            if (measured != null) {
+                val clock = now()
+                for ((word, path) in paths) {
+                    val progress = word.progress(clock)
+                    if (progress > 0f) clipPath(path) {
+                        drawText(measured, color = androidx.compose.ui.graphics.lerp(dim, cs.onSurface, 0.3f + 0.7f * progress))
+                    }
+                }
+            }
+        }
+    }
     val secondVoice = line.agent != null && line.agent !in setOf("v1", "M")
     Column(
         Modifier.fillMaxWidth()
@@ -186,6 +206,7 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
         horizontalAlignment = if (secondVoice) androidx.compose.ui.Alignment.End else androidx.compose.ui.Alignment.Start,
     ) {
         Text(text, style = style, color = if (line.words.isNotEmpty() && active) dim else cs.onSurface,
+            modifier = wordFill, onTextLayout = { layout = it },
             textAlign = if (secondVoice) androidx.compose.ui.text.style.TextAlign.End else androidx.compose.ui.text.style.TextAlign.Start)
     }
 }
@@ -223,7 +244,7 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
             do {
                 now = position() + offsetMs
                 current = lyrics.indexAt(now)
-                if (state.isPlaying) delay(if (lyrics.sync == Sync.WORD) 50 else 100)
+                if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.runtime.withFrameNanos { } else delay(100) }
             } while (state.isPlaying)
         }
     }
@@ -250,7 +271,7 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
         } else LazyColumn(Modifier.fillMaxSize().nestedScroll(KeepScroll), state = list, contentPadding = PaddingValues(top = 48.dp, bottom = 200.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
             itemsIndexed(lyrics.lines) { index, line ->
-                LyricLine(line, index, current, now, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
+                LyricLine(line, index, current, { now }, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
             }
         }
         if (!follow && timed) androidx.compose.material3.FilledTonalButton(onClick = { follow = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)) {

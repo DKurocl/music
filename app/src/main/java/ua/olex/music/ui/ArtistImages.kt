@@ -36,8 +36,9 @@ import java.security.MessageDigest
  * remembered for a month so the network is not asked again and again.
  */
 class ArtistImages(context: Context, private val http: (String) -> ByteArray? = ::get) {
+    private val app = context.applicationContext
     private val dir = File(context.filesDir, "artists").apply { mkdirs() }
-    private val gate = Semaphore(3)
+    private val gate = AuxiliaryLoads.gate
 
     /** Stores a photo as if fetched (tests and previews). */
     internal fun put(name: String, bytes: ByteArray) { File(dir, key(name) + ".jpg").writeBytes(bytes) }
@@ -59,7 +60,20 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
     fun bytes(): Long = dir.listFiles()?.sumOf { it.length() } ?: 0L
 
     /** Removes every photo and note; they come back as artists are shown again. */
-    fun clear() { dir.listFiles()?.forEach { it.delete() } }
+    fun clear() { dir.listFiles()?.forEach { it.delete() }; photos.clear(); bios.clear() }
+
+    /** Artist photos and biographies share the image budget, including negative-result markers. */
+    fun trim() {
+        val files = dir.listFiles().orEmpty().filter { it.extension != "tmp" }.sortedBy { it.lastModified() }
+        var size = files.sumOf { it.length().coerceAtLeast(1) }
+        val limit = ua.olex.music.playback.CacheBudget.artistBytes(app)
+        for (file in files) {
+            if (size <= limit) break
+            val bytes = file.length().coerceAtLeast(1)
+            if (file.delete()) size -= bytes
+        }
+        photos.clear(); bios.clear()
+    }
 
 
     /** The owner can turn photos off in Settings; cached photos stay until then cleared. */
@@ -78,7 +92,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
             withContext(Dispatchers.IO) {
                 cachedFile(name) ?: fetch(name)?.let { bytes ->
                     val file = File(dir, key(name) + ".jpg"); val tmp = File(dir, file.name + ".tmp")
-                    tmp.writeBytes(bytes); tmp.renameTo(file); file
+                    tmp.writeBytes(bytes); tmp.renameTo(file); trim(); file.takeIf { it.isFile }
                 } ?: run { miss.writeText(""); null }
             }
         }
@@ -101,7 +115,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
             withContext(Dispatchers.IO) {
                 fetchBio(name)?.also { text ->
                     val file = File(dir, key(name) + ".bio"); val tmp = File(dir, file.name + ".tmp")
-                    tmp.writeText(text); tmp.renameTo(file)
+                    tmp.writeText(text); tmp.renameTo(file); trim()
                 } ?: run { miss.writeText(""); null }
             }
         }
