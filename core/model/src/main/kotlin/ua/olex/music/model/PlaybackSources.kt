@@ -105,7 +105,11 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
         val usable = localSources(rejected, available)
         // An explicitly empty set must not fall back to a legacy path and resurrect a failed source.
         val remaining = reference.references.filter { it.key !in rejected }
-        val filtered = remaining.takeIf { it.isNotEmpty() }?.let { reference.copy(sources = it) }
+        val filtered = remaining.takeIf { it.isNotEmpty() }?.let {
+            // Honour this request's source preference, not an older favourite's preferred path.
+            // Online intent picks the best owned file and keeps the exact requested video reserve.
+            reference.copy(path = snapshot.path, sources = it)
+        }
         val selected = filtered?.resolve(usable)
         if (selected != null && !selected.uri.startsWith(SavedSong.ONLINE_PREFIX)) {
             val actual = RecordingSource.from(selected)!!
@@ -129,6 +133,6 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
             selected != null -> SourceIssue.AMBIGUOUS
             else -> SourceIssue.MISSING
         }
-        return PlaybackSourceChoice(reference.displayTrack(), issue)
+        return PlaybackSourceChoice(reference.copy(path = snapshot.path).displayTrack(), issue)
     }
 }
