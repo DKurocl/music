@@ -350,4 +350,18 @@ class UserRepositoryTest {
         assertEquals(3, dao.allRecordings().size)
     }
 
+
+    @Test fun aRatingClearRetainsItsIdentityWithoutCollectingAnUnplayedOnlineSong() = runBlocking {
+        val online = a.copy(id = TrackId("yt:unrated"), uri = "ytm://unrated", path = null)
+        repository.setRating(online, 0)
+        val id = idOf(online)
+        assertTrue(repository.catalogue.first().isEmpty())
+        repository.setRating(online, 4)
+        assertEquals(id, repository.catalogue.first().single().id)
+        repository.setRating(online, 0)
+        assertTrue(repository.catalogue.first().isEmpty())
+        assertEquals(id, idOf(online))
+        assertTrue(repository.stats.first().getValue(id).ratingSet)
+    }
+
 }
