@@ -10,6 +10,9 @@ import ua.olex.music.playback.PlaybackHistoryOwner
 import ua.olex.music.model.Track
 import ua.olex.music.ui.resolveLyrics
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserDatabase
 import ua.olex.music.user.UserRepository
 
@@ -57,6 +60,13 @@ class AppGraph(context: Context) {
     val player by lazy { PlayerConnection(app) }
     val output by lazy { OutputRouteMonitor(app) }
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
+    /** Reconciliation is idempotent and never adds unrelated scanned files to the saved library. */
+    val catalogue by lazy {
+        combine(library.index, userLibrary.catalogue) { local, saved ->
+            userLibrary.reconcile(local, saved)
+            ua.olex.music.model.SavedCatalog.merge(local, saved)
+        }.flowOn(Dispatchers.Default)
+    }
 }
 
 class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams, ua.olex.music.playback.PlaybackLyricsOwner, ua.olex.music.playback.PlaybackQueueOwner,
@@ -76,7 +86,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
     override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int) = graph.mix.extend(queue, current)
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
-        val known = graph.library.index.first().byId[track.id] ?: track
+        val file = graph.library.index.first().byId[track.id]
+        val known = file?.let { track.copy(metadata = it.metadata, path = it.path) } ?: track
         val lyrics = graph.resolveLyrics(known).lyrics
         val offset = graph.userLibrary.lyricOffset(ua.olex.music.model.SavedSong.from(known)).first()
         return ua.olex.music.playback.PlaybackLyrics(ua.olex.music.lyrics.LyricsCleanup.clean(lyrics, known.title, known.artist), offset)
@@ -113,13 +124,13 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     }
     private suspend fun buildTree(): ua.olex.music.model.BrowseTree = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val user = graph.userLibrary
-        val index = ua.olex.music.model.SavedCatalog.merge(graph.library.index.first(), user.catalogue.first())
+        val index = graph.catalogue.first()
         val stats = runCatching { user.stats.first() }.getOrDefault(emptyMap())
         val favourites = runCatching { user.favourites.first() }.getOrDefault(emptyList()).mapNotNull { it.resolve(index)?.id }.toSet()
         val own = runCatching { user.smartPlaylists.first() }.getOrDefault(emptyList())
         val now = System.currentTimeMillis()
         val smart = (ua.olex.music.model.SmartPlaylist.BUILT_IN + own).map { p ->
-            p.name to p.evaluate(index.songs, { stats[it.key.value] ?: ua.olex.music.model.SongStats.NONE }, { it.id in favourites }, now, now / 86_400_000L)
+            p.name to p.evaluate(index.songs, { stats[it.statsKey] ?: ua.olex.music.model.SongStats.NONE }, { it.id in favourites }, now, now / 86_400_000L)
         }
         val playlists = runCatching { user.playlists.first() }.getOrDefault(emptyList()).map { pl -> Triple(pl.id, pl.name, pl.songs.mapNotNull { it.resolve(index) }) }
         ua.olex.music.model.BrowseTree(index, smart, playlists)

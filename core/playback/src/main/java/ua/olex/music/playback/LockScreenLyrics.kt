@@ -81,11 +81,7 @@ class LockScreenLyrics internal constructor(private val context: Context, privat
             run {
                 shown.line = null
                 val meta = item.mediaMetadata
-                val track = ua.olex.music.model.Track(ua.olex.music.model.TrackId(item.mediaId),
-                    (item.requestMetadata.mediaUri ?: item.localConfiguration?.uri)?.toString().orEmpty(),
-                    meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(), album = meta.albumTitle?.toString(),
-                    durationMs = meta.durationMs ?: real.duration.coerceAtLeast(0), artworkUri = meta.artworkUri?.toString(),
-                    path = meta.extras?.getString(PlayerConnection.PATH_KEY))
+                val track = PlayerConnection.track(item).let { it.copy(durationMs = it.durationMs.takeIf { ms -> ms > 0 } ?: real.duration.coerceAtLeast(0)) }
                 val owner = context.applicationContext as? PlaybackLyricsOwner
                 val shared = try { owner?.playbackLyrics(track) }
                     catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

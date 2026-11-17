@@ -26,7 +26,7 @@ class UserSchemaTest {
             database.execSQL("INSERT INTO playlists (id, name, createdAt) VALUES (7, 'Keep this playlist', 1000)")
         }
         helper.runMigrationsAndValidate("user-schema.db", 1, true).close()
-        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3).build()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4).build()
         try {
             val playlist = UserRepository(database).playlists.first().single()
             assertEquals(7L, playlist.id)
@@ -43,7 +43,7 @@ class UserSchemaTest {
             database.execSQL("INSERT INTO play_history (songId, playedAt) VALUES ('s1', 9000)")
         }
         helper.runMigrationsAndValidate("user-schema.db", 2, true).close()
-        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3).build()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4).build()
         try {
             val repository = UserRepository(database)
             assertEquals("Old list", repository.playlists.first().single().name)
@@ -64,11 +64,48 @@ class UserSchemaTest {
             database.execSQL("INSERT INTO playlist_entries (playlistId, songId, position) VALUES (1, 'a', 1)")
         }
         helper.runMigrationsAndValidate("user-schema.db", 3, true, UserDatabase.MIGRATION_2_3).close()
-        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3).build()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4).build()
         try {
             assertEquals(listOf("b", "a"), database.userData().entries(1).map { it.songId })
             database.userData().insertEntries(listOf(PlaylistEntryEntity(1, "b", 2)))
             assertEquals(listOf("b", "a", "b"), database.userData().entries(1).map { it.songId })
         } finally { database.close() }
     }
+
+    @Test fun versionThreeAddsSourceLinksWithoutChangingAnyPersonalRelation() = runBlocking {
+        helper.createDatabase("user-schema.db", 3).use { db ->
+            db.execSQL("INSERT INTO saved_songs VALUES ('local-old', 'artist|song', 'Music/song.flac', 'Song', 'Artist', 'Album', 120000, 'content://cover')")
+            db.execSQL("INSERT INTO saved_songs VALUES ('online-old', 'artist|song', 'ytm://video', 'Song', 'Artist', 'Album', 121000, 'https://cover')")
+            db.execSQL("INSERT INTO saved_songs VALUES ('metadata-only', 'artist|old', '', 'Old', 'Artist', NULL, 100000, NULL)")
+            db.execSQL("INSERT INTO playlists VALUES (7, 'Mixed', 100)")
+            db.execSQL("INSERT INTO playlist_entries VALUES (7, 'online-old', 0), (7, 'local-old', 1), (7, 'online-old', 2)")
+            db.execSQL("INSERT INTO favourites VALUES ('online-old', 200)")
+            db.execSQL("INSERT INTO play_history VALUES (17, 'online-old', 300), (18, 'local-old', 400)")
+            db.execSQL("INSERT INTO ratings VALUES ('local-old', 4, 500)")
+            db.execSQL("INSERT INTO lyric_offsets VALUES ('online-old', -250)")
+            db.execSQL("INSERT INTO smart_playlists VALUES (9, 'unchanged-definition', 600)")
+        }
+        helper.runMigrationsAndValidate("user-schema.db", 4, true, UserDatabase.MIGRATION_3_4).close()
+        val db = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db")
+            .addMigrations(UserDatabase.MIGRATION_3_4).build()
+        try {
+            val repo = UserRepository(db)
+            val playlist = repo.playlists.first().single()
+            assertEquals(listOf("online-old", "local-old", "online-old"), playlist.songs.map { it.id })
+            assertEquals("online-old", repo.favourites.first().single().id)
+            assertEquals(listOf(18L, 17L), repo.history.first().map { it.id })
+            assertEquals(-250L, repo.lyricOffset(playlist.songs.first()).first())
+            assertEquals(4, repo.stats.first().getValue("local-old").rating)
+            val rows = db.userData().allRecordings().associateBy { it.id }
+            assertEquals("ytm://video", rows.getValue("online-old").toSong().references.single().uri)
+            assertEquals("Music/song.flac", rows.getValue("local-old").toSong().references.single().path)
+            assertEquals(null, rows.getValue("local-old").toSong().references.single().uri)
+            assertEquals(emptyList<RecordingSourceEntity>(), rows.getValue("metadata-only").sources)
+            assertEquals("online-old", db.userData().canonicalId("online-old"))
+            db.openHelper.readableDatabase.query("SELECT definition FROM smart_playlists WHERE id=9").use {
+                org.junit.Assert.assertTrue(it.moveToFirst()); assertEquals("unchanged-definition", it.getString(0))
+            }
+        } finally { db.close() }
+    }
+
 }

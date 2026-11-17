@@ -626,6 +626,19 @@ internal class YouTubeMusic(
                 if (online.durationMs > 0 && song.durationMs > 0) kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
                 else versionOf(song.title) == versionOf(online.title)
             }?.maxByOrNull { it.format?.rank ?: 0 }
+
+            /** A confirmed substitution retains the requested video as a reserve, with its own art. */
+            fun preferLocal(online: Track): Track {
+                val file = copyOf(online) ?: return online
+                val source = ua.olex.music.model.RecordingSource.from(file) ?: return online
+                val saved = ua.olex.music.model.SavedSong.from(online)
+                val alreadyLinked = saved.references.any { it.key == source.key }
+                if (!alreadyLinked && (online.durationMs <= 0 || file.durationMs <= 0)) return online
+                val incoming = (listOf(source) + saved.references + file.sources).distinctBy { it.key }
+                val candidate = ua.olex.music.model.RecordingCandidate(saved.id, saved.createdAt, saved.references)
+                if (ua.olex.music.model.RecordingMatcher.group(incoming, listOf(candidate)).isEmpty()) return online
+                return saved.bind(file)
+            }
         }
 
         // Extras like "(Remastered 2011)" or "- 2009 Mix" are dropped; words that make a different

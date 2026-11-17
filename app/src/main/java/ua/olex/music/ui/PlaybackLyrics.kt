@@ -2,25 +2,29 @@ package ua.olex.music.ui
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import ua.olex.music.AppGraph
 import ua.olex.music.model.Track
 
 /** One source order for the app and the session: edited, sidecar, downloaded/embedded, online. */
-internal suspend fun AppGraph.resolveLyrics(track: Track): LocalLyricsState = withContext(Dispatchers.IO) {
-    downloadedLyrics.edited(track)?.let(ua.olex.music.lyrics.Lyrics::parse)?.takeIf { it.lines.isNotEmpty() }?.let {
+internal suspend fun AppGraph.resolveLyrics(request: Track): LocalLyricsState = withContext(Dispatchers.IO) {
+    val recording = userLibrary.reference(request).first()
+    val track = recording?.bind(request) ?: request
+    val aliases = recording?.let { userLibrary.aliases(it.id) }.orEmpty()
+    downloadedLyrics.edited(track, aliases)?.let(ua.olex.music.lyrics.Lyrics::parse)?.takeIf { it.lines.isNotEmpty() }?.let {
         return@withContext LocalLyricsState(it, "Your timing", mediaId = track.id.value, edited = true)
     }
     // A YouTube Music song has no file: its lyrics come from the internet, found by themselves
     // and kept, so they show at once the next time.
     if (YouTubeMusic.isOnline(track)) {
-        val kept = downloadedLyrics.read(track)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
-        val found = kept ?: runCatching { downloadedLyrics.fetch(track)?.let { ua.olex.music.lyrics.Lyrics.parse(it.text) } }.getOrNull()
+        val kept = downloadedLyrics.read(track, aliases)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
+        val found = kept ?: runCatching { downloadedLyrics.fetch(userLibrary.keepReference(track).bind(track))?.let { ua.olex.music.lyrics.Lyrics.parse(it.text) } }.getOrNull()
         return@withContext if (found != null && found.lines.isNotEmpty()) LocalLyricsState(found, "Found online", mediaId = track.id.value)
             else LocalLyricsState(ua.olex.music.lyrics.Lyrics.EMPTY, "No lyrics found online", mediaId = track.id.value)
     }
     val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
-    val downloaded = downloadedLyrics.read(track)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
+    val downloaded = downloadedLyrics.read(track, aliases)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
     val fallback = if (downloaded != null && (embedded.lines.isEmpty() || downloaded.sync.ordinal >= embedded.sync.ordinal))
         LocalLyricsState(downloaded, "Downloaded lyrics", mediaId = track.id.value)
         else LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)

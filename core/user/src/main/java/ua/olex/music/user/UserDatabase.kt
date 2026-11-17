@@ -8,8 +8,8 @@ import ua.olex.music.model.SavedSong
 /** User data has an exported schema and no destructive migration fallback. */
 @Database(
     entities = [UserSongEntity::class, FavouriteEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class, HistoryEntity::class, LyricOffsetEntity::class,
-        RatingEntity::class, SmartPlaylistEntity::class],
-    version = 3, exportSchema = true,
+        RatingEntity::class, SmartPlaylistEntity::class, RecordingSourceEntity::class, RecordingAliasEntity::class],
+    version = 4, exportSchema = true,
     // Version 2 only adds tables (ratings, smart playlists): Room migrates it from the exported schemas.
     // Version 3 keys playlist entries by position so a song can be added twice (MIGRATION_2_3).
     autoMigrations = [AutoMigration(from = 1, to = 2)],
@@ -19,7 +19,36 @@ abstract class UserDatabase : RoomDatabase() {
 
     companion object {
         fun open(context: Context): UserDatabase = Room.databaseBuilder(context.applicationContext, UserDatabase::class.java, "user.db")
-            .addMigrations(MIGRATION_2_3).build()
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4).build()
+
+        /** Preserve every legacy ID and relation while giving recordings independent source links. */
+        val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE saved_songs ADD COLUMN createdAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE lyric_offsets ADD COLUMN updatedAt INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS song_sources (
+                    songId TEXT NOT NULL, sourceKey TEXT NOT NULL, kind INTEGER NOT NULL, songKey TEXT NOT NULL,
+                    uri TEXT, path TEXT, durationMs INTEGER NOT NULL, musicBrainzId TEXT, qualityRank INTEGER NOT NULL,
+                    clipStartMs INTEGER, clipEndMs INTEGER, artworkUri TEXT, addedAt INTEGER NOT NULL,
+                    PRIMARY KEY(songId, sourceKey), FOREIGN KEY(songId) REFERENCES saved_songs(id) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_song_sources_songId ON song_sources(songId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_song_sources_sourceKey ON song_sources(sourceKey)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_song_sources_songKey ON song_sources(songKey)")
+                db.execSQL("""CREATE TABLE IF NOT EXISTS recording_aliases (
+                    aliasId TEXT NOT NULL PRIMARY KEY, songId TEXT NOT NULL,
+                    FOREIGN KEY(songId) REFERENCES saved_songs(id) ON UPDATE NO ACTION ON DELETE CASCADE)""")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_recording_aliases_songId ON recording_aliases(songId)")
+                db.execSQL("INSERT INTO recording_aliases(aliasId, songId) SELECT id, id FROM saved_songs")
+                // Legacy local snapshots contain a path, not a current MediaStore URI. Never guess one.
+                db.execSQL("""INSERT INTO song_sources(songId, sourceKey, kind, songKey, uri, path, durationMs,
+                    musicBrainzId, qualityRank, clipStartMs, clipEndMs, artworkUri, addedAt)
+                    SELECT id, CASE WHEN path LIKE 'ytm://%' THEN 'youtube:' || substr(path, 7) ELSE 'file:' || path END,
+                    CASE WHEN path LIKE 'ytm://%' THEN 1 WHEN id LIKE 'm3u8-path:%' THEN 2 ELSE 0 END, songKey,
+                    CASE WHEN path LIKE 'ytm://%' THEN path ELSE NULL END,
+                    CASE WHEN path LIKE 'ytm://%' THEN NULL ELSE path END,
+                    MAX(durationMs, 0), NULL, 0, NULL, NULL, artworkUri, 0 FROM saved_songs WHERE path <> ''""")
+            }
+        }
 
         /** Same rows, new primary key (playlistId, position); the old unique position index becomes the key. */
         val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
@@ -36,7 +65,7 @@ abstract class UserDatabase : RoomDatabase() {
     }
 }
 
-/** Metadata survives deletion: normal identities use SongKey/path; unresolved imports use path identity. */
+/** Recording metadata survives source loss; legacy primary keys remain valid after migration. */
 @Entity(tableName = "saved_songs", indices = [Index("songKey")])
 data class UserSongEntity(
     @PrimaryKey val id: String,
@@ -47,11 +76,42 @@ data class UserSongEntity(
     val album: String?,
     val durationMs: Long,
     val artworkUri: String?,
+    @ColumnInfo(defaultValue = "0") val createdAt: Long = 0,
 ) {
-    fun toSong() = SavedSong(id, songKey, path, title, artist, album, durationMs, artworkUri)
+    fun toSong(sources: List<ua.olex.music.model.RecordingSource> = emptyList()) = SavedSong(id, songKey, path, title, artist, album, durationMs, artworkUri, sources, createdAt)
     companion object {
-        fun from(song: SavedSong) = UserSongEntity(song.id, song.songKey, song.path, song.title, song.artist, song.album, song.durationMs, song.artworkUri)
+        fun from(song: SavedSong) = UserSongEntity(song.id, song.songKey, song.path, song.title, song.artist, song.album, song.durationMs, song.artworkUri, song.createdAt)
     }
+}
+
+/** Child rows retain unavailable files and online reserves independently of display metadata. */
+@Entity(tableName = "song_sources", primaryKeys = ["songId", "sourceKey"],
+    indices = [Index("songId"), Index("sourceKey"), Index("songKey")],
+    foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
+data class RecordingSourceEntity(
+    val songId: String, val sourceKey: String, val kind: Int, val songKey: String, val uri: String?, val path: String?,
+    val durationMs: Long, val musicBrainzId: String?, val qualityRank: Long, val clipStartMs: Long?, val clipEndMs: Long?,
+    val artworkUri: String?, val addedAt: Long,
+) {
+    fun toSource() = ua.olex.music.model.RecordingSource(ua.olex.music.model.RecordingSourceKind.entries.first { it.value == kind },
+        songKey, uri, path, durationMs, musicBrainzId, qualityRank, clipStartMs, clipEndMs, artworkUri)
+    companion object {
+        fun from(id: String, source: ua.olex.music.model.RecordingSource, at: Long) = RecordingSourceEntity(id, source.key,
+            source.kind.value, source.songKey, source.uri, source.path, source.durationMs, source.musicBrainzId,
+            source.qualityRank, source.clipStartMs, source.clipEndMs, source.artworkUri, at)
+    }
+}
+
+/** Old durable IDs remain valid after two confirmed records become one recording. */
+@Entity(tableName = "recording_aliases", indices = [Index("songId")],
+    foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
+data class RecordingAliasEntity(@PrimaryKey val aliasId: String, val songId: String)
+
+/** Room reads identity and every source within the same transaction. */
+data class RecordingRelations(@Embedded val song: UserSongEntity,
+    @Relation(parentColumn = "id", entityColumn = "songId") val sources: List<RecordingSourceEntity>) {
+    val id: String get() = song.id
+    fun toSong() = song.toSong(sources.sortedWith(compareBy<RecordingSourceEntity> { it.addedAt }.thenBy { it.sourceKey }).map { it.toSource() })
 }
 
 /** A saved favourite, separate from its metadata so refreshes cannot reset user choices. */
@@ -79,7 +139,7 @@ data class HistoryEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val 
 
 /** A signed per-song lyrics adjustment; its lifetime is independent of rescanning music. */
 @Entity(tableName = "lyric_offsets", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
-data class LyricOffsetEntity(@PrimaryKey val songId: String, val offsetMs: Long)
+data class LyricOffsetEntity(@PrimaryKey val songId: String, val offsetMs: Long, @ColumnInfo(defaultValue = "0") val updatedAt: Long = 0)
 
 /** A song's star rating, 1 to 5; no row means unrated. Kept apart from metadata, like favourites. */
 @Entity(tableName = "ratings", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
@@ -89,36 +149,90 @@ data class RatingEntity(@PrimaryKey val songId: String, val stars: Int, val rate
 @Entity(tableName = "smart_playlists")
 data class SmartPlaylistEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val definition: String, val createdAt: Long)
 
-/** Listening per song identity (SongKey): plays, the last one, and the rating, for smart playlists. */
-data class SongKeyStats(val songKey: String, val plays: Int, val lastPlayedAt: Long?, val rating: Int?)
+/** Counts are attached to a durable recording, so alternate sources never multiply its totals. */
+data class RecordingStats(val songId: String, val songKey: String, val plays: Int, val lastPlayedAt: Long?, val rating: Int?)
 
 /** Room loads both relations under the same transaction; entry order is applied by the repository. */
 data class PlaylistRelations(
     @Embedded val playlist: PlaylistEntity,
     @Relation(parentColumn = "id", entityColumn = "playlistId") val entries: List<PlaylistEntryEntity>,
-    @Relation(parentColumn = "id", entityColumn = "id", associateBy = Junction(value = PlaylistEntryEntity::class, parentColumn = "playlistId", entityColumn = "songId"))
-    val songs: List<UserSongEntity>,
+    @Relation(parentColumn = "id", entityColumn = "id", entity = UserSongEntity::class, associateBy = Junction(value = PlaylistEntryEntity::class, parentColumn = "playlistId", entityColumn = "songId"))
+    val songs: List<RecordingRelations>,
 )
 
 /** One history event joined to its durable display metadata. */
-data class HistoryRow(val eventId: Long, val playedAt: Long, @Embedded val song: UserSongEntity)
+data class HistoryRow(val eventId: Long, val playedAt: Long, @Embedded val song: UserSongEntity,
+    @Relation(parentColumn = "id", entityColumn = "songId") val sources: List<RecordingSourceEntity>) {
+    fun toSong() = song.toSong(sources.sortedWith(compareBy<RecordingSourceEntity> { it.addedAt }.thenBy { it.sourceKey }).map { it.toSource() })
+}
 
 /** All writes involving multiple tables are orchestrated in UserRepository transactions. */
 @Dao
 interface UserDao {
     @Query("""
+        SELECT s.id AS songId, s.songKey,
+            (SELECT COUNT(*) FROM play_history h WHERE h.songId = s.id) AS plays,
+            (SELECT MAX(h.playedAt) FROM play_history h WHERE h.songId = s.id) AS lastPlayedAt,
+            (SELECT stars FROM ratings r WHERE r.songId = s.id) AS rating
+        FROM saved_songs s
+    """)
+    fun recordingStats(): Flow<List<RecordingStats>>
+    @Transaction @Query("SELECT * FROM saved_songs ORDER BY createdAt, id")
+    suspend fun allRecordings(): List<RecordingRelations>
+
+    @Transaction @Query("""
+        SELECT * FROM saved_songs WHERE id IN (:ids)
+        OR id IN (SELECT songId FROM recording_aliases WHERE aliasId IN (:ids))
+        OR songKey IN (:keys)
+        OR id IN (SELECT songId FROM song_sources WHERE songKey IN (:keys) OR sourceKey IN (:sources))
+        ORDER BY createdAt, id
+    """)
+    suspend fun recordingCandidates(ids: List<String>, keys: List<String>, sources: List<String>): List<RecordingRelations>
+
+    @Transaction @Query("""
+        SELECT * FROM saved_songs WHERE id IN (:ids)
+        OR id IN (SELECT songId FROM recording_aliases WHERE aliasId IN (:ids))
+        OR songKey IN (:keys)
+        OR id IN (SELECT songId FROM song_sources WHERE songKey IN (:keys) OR sourceKey IN (:sources))
+        ORDER BY createdAt, id
+    """)
+    fun observeCandidates(ids: List<String>, keys: List<String>, sources: List<String>): Flow<List<RecordingRelations>>
+
+    @Query("SELECT id FROM saved_songs WHERE id = :id UNION SELECT songId FROM recording_aliases WHERE aliasId = :id LIMIT 1")
+    suspend fun canonicalId(id: String): String?
+    @Query("SELECT aliasId FROM recording_aliases WHERE songId = :id ORDER BY aliasId")
+    suspend fun aliases(id: String): List<String>
+    @Query("SELECT * FROM recording_aliases") fun recordingAliases(): Flow<List<RecordingAliasEntity>>
+    @Query("SELECT id FROM saved_songs WHERE id = :id UNION SELECT songId FROM recording_aliases WHERE aliasId = :id LIMIT 1")
+    fun observeCanonicalId(id: String): Flow<String?>
+    @Transaction @Query("SELECT * FROM saved_songs WHERE id = :id") fun observeRecording(id: String): Flow<RecordingRelations?>
+
+    @Upsert suspend fun saveSources(sources: List<RecordingSourceEntity>)
+    @Upsert suspend fun saveAliases(aliases: List<RecordingAliasEntity>)
+    @Query("UPDATE recording_aliases SET songId = :keep WHERE songId IN (:others)") suspend fun redirectAliases(keep: String, others: List<String>)
+    @Query("UPDATE playlist_entries SET songId = :keep WHERE songId IN (:others)") suspend fun redirectPlaylistEntries(keep: String, others: List<String>)
+    @Query("UPDATE play_history SET songId = :keep WHERE songId IN (:others)") suspend fun redirectHistory(keep: String, others: List<String>)
+    @Query("DELETE FROM saved_songs WHERE id IN (:ids)") suspend fun deleteRecordings(ids: List<String>)
+    @Query("SELECT MAX(addedAt) FROM favourites WHERE songId IN (:ids)") suspend fun latestFavourite(ids: List<String>): Long?
+    @Query("SELECT * FROM ratings WHERE songId IN (:ids) ORDER BY ratedAt DESC, (songId = :keep) DESC, songId LIMIT 1")
+    suspend fun latestRating(ids: List<String>, keep: String): RatingEntity?
+    @Query("SELECT * FROM lyric_offsets WHERE songId IN (:ids) ORDER BY updatedAt DESC, (songId = :keep) DESC, songId LIMIT 1")
+    suspend fun latestOffset(ids: List<String>, keep: String): LyricOffsetEntity?
+    @Query("DELETE FROM ratings WHERE songId = :id") suspend fun clearRecordingRating(id: String)
+
+    @Transaction @Query("""
         SELECT * FROM saved_songs WHERE id IN (
             SELECT songId FROM favourites UNION SELECT songId FROM playlist_entries
-            UNION SELECT songId FROM play_history UNION SELECT songId FROM ratings
+            UNION SELECT songId FROM play_history UNION SELECT songId FROM ratings UNION SELECT songId FROM lyric_offsets
         ) ORDER BY id
     """)
-    fun catalogue(): Flow<List<UserSongEntity>>
+    fun catalogue(): Flow<List<RecordingRelations>>
 
-    @Query("SELECT saved_songs.* FROM saved_songs JOIN favourites ON saved_songs.id = favourites.songId ORDER BY favourites.addedAt DESC, saved_songs.id")
-    fun favourites(): Flow<List<UserSongEntity>>
+    @Transaction @Query("SELECT saved_songs.* FROM saved_songs JOIN favourites ON saved_songs.id = favourites.songId ORDER BY favourites.addedAt DESC, saved_songs.id")
+    fun favourites(): Flow<List<RecordingRelations>>
     @Transaction @Query("SELECT * FROM playlists ORDER BY createdAt DESC, id DESC")
     fun playlists(): Flow<List<PlaylistRelations>>
-    @Query("SELECT play_history.id AS eventId, play_history.playedAt, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId ORDER BY play_history.playedAt DESC, play_history.id DESC LIMIT :limit")
+    @Transaction @Query("SELECT play_history.id AS eventId, play_history.playedAt, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId ORDER BY play_history.playedAt DESC, play_history.id DESC LIMIT :limit")
     fun history(limit: Int): Flow<List<HistoryRow>>
     @Query("SELECT offsetMs FROM lyric_offsets WHERE songId = :songId") fun lyricOffset(songId: String): Flow<Long?>
 
@@ -136,20 +250,7 @@ interface UserDao {
     @Insert suspend fun addHistory(history: HistoryEntity)
     @Upsert suspend fun setOffset(offset: LyricOffsetEntity)
 
-    /**
-     * Plays and ratings grouped by song identity, so a moved or re-ripped file keeps its history.
-     * A song identity with several saved paths takes the sum of plays and the best rating.
-     */
-    @Query("""
-        SELECT s.songKey AS songKey,
-               (SELECT COUNT(*) FROM play_history h JOIN saved_songs s2 ON s2.id = h.songId WHERE s2.songKey = s.songKey) AS plays,
-               (SELECT MAX(h.playedAt) FROM play_history h JOIN saved_songs s2 ON s2.id = h.songId WHERE s2.songKey = s.songKey) AS lastPlayedAt,
-               (SELECT MAX(r.stars) FROM ratings r JOIN saved_songs s2 ON s2.id = r.songId WHERE s2.songKey = s.songKey) AS rating
-        FROM saved_songs s GROUP BY s.songKey
-    """)
-    fun stats(): Flow<List<SongKeyStats>>
     @Upsert suspend fun setRating(rating: RatingEntity)
-    @Query("DELETE FROM ratings WHERE songId IN (SELECT id FROM saved_songs WHERE songKey = :songKey)") suspend fun clearRatings(songKey: String)
     @Query("SELECT * FROM smart_playlists ORDER BY createdAt, id") fun smartPlaylists(): Flow<List<SmartPlaylistEntity>>
     @Insert suspend fun addSmartPlaylist(p: SmartPlaylistEntity): Long
     @Query("UPDATE smart_playlists SET definition = :definition WHERE id = :id") suspend fun updateSmartPlaylist(id: Long, definition: String)

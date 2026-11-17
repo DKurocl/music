@@ -47,7 +47,7 @@ internal class PlaybackMix(
         val local = localLibrary()
         val more = withContext(Dispatchers.Default) {
             val index = YouTubeMusic.indexOf(local)
-            Mix.clean(page.tracks, active?.seed ?: seed, seen).map { index.copyOf(it) ?: it }
+            Mix.clean(page.tracks, active?.seed ?: seed, seen).map { index.preferLocal(it) }
         }
         return QueueExtension(more) {
             if (run !== expected) false else {

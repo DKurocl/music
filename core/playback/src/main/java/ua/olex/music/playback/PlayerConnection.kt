@@ -37,6 +37,7 @@ data class PlayerState(
     val connected: Boolean = false,
     val connecting: Boolean = false,
     val mediaId: String? = null,
+    val track: Track? = null,
     val title: String = "",
     val artist: String = "",
     val album: String? = null,
@@ -71,7 +72,7 @@ data class PlayerState(
 }
 
 /** Stable per-occurrence identity keeps repeated songs distinct while reordering a queue. */
-data class QueueItem(val key: String, val mediaId: String, val title: String, val artist: String, val artworkUri: String?)
+data class QueueItem(val key: String, val mediaId: String, val title: String, val artist: String, val artworkUri: String?, val track: Track? = null)
 
 /** UI-level repeat policy, independent of Media3 constants. */
 enum class RepeatMode { OFF, ALL, ONE }
@@ -356,13 +357,14 @@ class PlayerConnection(context: Context) {
             val queued = player.getMediaItemAt(index)
             val metadata = queued.mediaMetadata
             QueueItem(metadata.extras?.getString(QUEUE_KEY) ?: "$index:${queued.mediaId}", queued.mediaId,
-                metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString())
+                metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString(), track(queued))
         }
         val item = player.currentMediaItem
         val meta = player.mediaMetadata
         _state.value = PlayerState(
             connected = true,
             mediaId = item?.mediaId,
+            track = item?.let(::track),
             title = meta.title?.toString().orEmpty(),
             artist = meta.artist?.toString().orEmpty(),
             album = meta.albumTitle?.toString(),
@@ -397,6 +399,25 @@ class PlayerConnection(context: Context) {
         internal const val PATH_KEY = "ua.olex.music.path"
         internal const val QUEUE_KEY = "ua.olex.music.queue_id"
         const val CONTEXT_KEY = "ua.olex.music.playback_context"
+        internal const val RECORDING_KEY = "ua.olex.music.recording_id"
+        internal const val SOURCES_KEY = "ua.olex.music.sources"
+
+        /** Decode source evidence identically for history, radio, lyrics and the visible player. */
+        fun track(item: MediaItem): Track {
+            val meta = item.mediaMetadata
+            val extras = meta.extras
+            val clip = item.clippingConfiguration
+            val clipped = clip.startPositionMs > 0 || clip.endPositionMs != C.TIME_END_OF_SOURCE
+            return Track(ua.olex.music.model.TrackId(item.mediaId),
+                (item.requestMetadata.mediaUri ?: item.localConfiguration?.uri)?.toString().orEmpty(),
+                meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(),
+                album = meta.albumTitle?.toString(), albumArtist = meta.albumArtist?.toString(),
+                durationMs = meta.durationMs ?: 0, artworkUri = meta.artworkUri?.toString(),
+                trackNumber = meta.trackNumber, discNumber = meta.discNumber, path = extras?.getString(PATH_KEY),
+                clipStartMs = clip.startPositionMs.takeIf { clipped }, clipEndMs = clip.endPositionMs.takeIf { clipped && it != C.TIME_END_OF_SOURCE },
+                recordingId = extras?.getString(RECORDING_KEY),
+                sources = runCatching { ua.olex.music.model.RecordingSourcesCodec.decode(extras?.getString(SOURCES_KEY)) }.getOrDefault(emptyList()))
+        }
         /** A track as the session carries it: its id, where to open it, and what to show. */
         fun mediaItem(track: Track, queueKey: String? = null, playbackContext: String? = null): MediaItem {
             val uri = track.uri.takeIf { it.isNotEmpty() }?.let(Uri::parse)
@@ -417,6 +438,9 @@ class PlayerConnection(context: Context) {
                         .setTrackNumber(track.trackNumber).setDiscNumber(track.discNumber)
                         .setDurationMs(track.durationMs.takeIf { it > 0 })
                         .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, queueKey ?: UUID.randomUUID().toString()); putString(CONTEXT_KEY, playbackContext)
+                            putString(RECORDING_KEY, track.recordingId)
+                            val sources = (listOfNotNull(ua.olex.music.model.RecordingSource.from(track)) + track.sources.sortedBy { if (it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE) 0 else 1 }).distinctBy { it.key }
+                            putString(SOURCES_KEY, ua.olex.music.model.RecordingSourcesCodec.encode(sources.take(ua.olex.music.model.RecordingSourcesCodec.MAX_SOURCES)))
                             track.metadata?.let { tags -> putString(ReplayGainCodec.TAGS, ReplayGainCodec.encodeTags(ua.olex.music.dsp.ReplayGainTags(
                                 tags.trackGainDb?.toDouble(), tags.trackPeak?.toDouble(), tags.albumGainDb?.toDouble(), tags.albumPeak?.toDouble()))) } })
                         .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)

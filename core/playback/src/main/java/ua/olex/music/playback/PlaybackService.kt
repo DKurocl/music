@@ -210,12 +210,7 @@ class PlaybackService : MediaLibraryService() {
         val items = (from until player.mediaItemCount).map(player::getMediaItemAt)
         refill = scope.launch {
             try {
-                val tracks = items.map { item ->
-                    val meta = item.mediaMetadata
-                    Track(TrackId(item.mediaId), (item.requestMetadata.mediaUri ?: item.localConfiguration?.uri)?.toString().orEmpty(),
-                        meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(), album = meta.albumTitle?.toString(),
-                        durationMs = meta.durationMs ?: 0, artworkUri = meta.artworkUri?.toString(), path = meta.extras?.getString(PlayerConnection.PATH_KEY))
-                }
+                val tracks = items.map(PlayerConnection::track)
                 val extension = owner.extendPlaybackQueue(tracks, current - from) ?: return@launch
                 if (player.currentTimeline !== timeline || player.currentMediaItemIndex != current) return@launch
                 if (extension.commit() && extension.tracks.isNotEmpty()) QueueCommand.enqueue(player, extension.tracks.map { item ->
@@ -241,13 +236,7 @@ class PlaybackService : MediaLibraryService() {
         val occurrence = meta.extras?.getString(PlayerConnection.QUEUE_KEY) ?: item.mediaId
         val owner = application as? PlaybackHistoryOwner ?: return
         if (item.mediaId.isBlank() || !historyGate.shouldRecord(occurrence, player.isPlaying)) return
-        val track = Track(
-            TrackId(item.mediaId), item.requestMetadata.mediaUri?.toString().orEmpty(),
-            meta.title?.toString().orEmpty(), meta.artist?.toString().orEmpty(),
-            album = meta.albumTitle?.toString(), albumArtist = meta.albumArtist?.toString(),
-            durationMs = meta.durationMs ?: player.duration.coerceAtLeast(0),
-            path = meta.extras?.getString(PlayerConnection.PATH_KEY), artworkUri = meta.artworkUri?.toString(),
-        )
+        val track = PlayerConnection.track(item).let { it.copy(durationMs = it.durationMs.takeIf { ms -> ms > 0 } ?: player.duration.coerceAtLeast(0)) }
         scope.launch {
             try { owner.recordPlayback(track) }
             catch (cancelled: CancellationException) { throw cancelled }
