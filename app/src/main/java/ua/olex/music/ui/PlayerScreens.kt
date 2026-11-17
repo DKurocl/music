@@ -166,7 +166,8 @@ internal fun TrackRow(
     /** In an album: the track number instead of the cover, and the artist only when it differs. */
     number: Int? = null, albumArtist: String? = null, showQuality: Boolean = true, onClick: () -> Unit,
 ) {
-    if ((onPlayNext == null && onQueue == null) || selecting) { TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick); return }
+    val marked = current || track.matchesPlayback(LocalPlayingTrack.current)
+    if ((onPlayNext == null && onQueue == null) || selecting) { TrackRowContent(track, marked, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick); return }
     // Swipe right: play next. Swipe left: add to queue. The row follows the finger with growing
     // resistance (it never leaves the screen), the action shows underneath, a tick marks the point
     // of no return, and on release the row springs back into place.
@@ -219,7 +220,7 @@ internal fun TrackRow(
                     scope.launch { offset.snapTo(shown) }
                 }
             }) {
-            TrackRowContent(track, current, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick, lifted = offset.value != 0f)
+            TrackRowContent(track, marked, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick, lifted = offset.value != 0f)
         }
     }
 }
@@ -231,13 +232,14 @@ private fun TrackRowContent(
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    // Where the song plays from, and whether it can play now: an online song the stream cache does
-    // not keep can't play without internet, so it is greyed out (and Play skips it) until it can.
+    // Confirmed current files and complete stream cache copies are separate offline sources.
+    // Keep the original online request for every action; only the source mark uses the file.
     val online = YouTubeMusic.isOnline(track)
     val network = LocalNetwork.current
     val cacheRevision = if (online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
     val kept = if (online) remember(track.uri, current, network, cacheRevision) { ua.olex.music.playback.CacheBudget.isStreamCached(track.uri) } else false
-    val unavailable = online && !network && !kept
+    val owned = if (online) LocalOwnedSources.current[track.uri] else null
+    val unavailable = online && !network && !kept && owned == null
     // Rows sit as soft rounded segments; the playing one is a tonal pill, the selected ones stronger.
     val container by animateColorAsState(when {
         selecting && checked -> cs.secondaryContainer
@@ -259,7 +261,7 @@ private fun TrackRowContent(
                 // second line and grows the row, which is what made rows with a tag taller.
                 if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                 else Text(clock(track.durationMs), maxLines = 1, modifier = Modifier.alignByBaseline())
-                if (showQuality) SourceMark(track, Modifier.alignByBaseline(), kept = kept, unavailable = unavailable)
+                if (showQuality) SourceMark(owned ?: track, Modifier.alignByBaseline(), kept = kept, unavailable = unavailable)
             }
         },
         leadingContent = {

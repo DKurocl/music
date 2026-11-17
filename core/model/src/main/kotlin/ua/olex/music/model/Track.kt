@@ -97,6 +97,14 @@ data class Track(
     val key: SongKey by lazy(LazyThreadSafetyMode.PUBLICATION) { SongKey.of(artist, title) }
     /** Unsaved tracks can still use a unique legacy key until their first durable reference exists. */
     val statsKey: String get() = recordingId ?: key.value
+
+    /** UI identity after source substitution; shared titles alone never mark another take playing. */
+    fun matchesPlayback(playing: Track?): Boolean = playing != null &&
+        (id == playing.id || id.value == playing.requestedId ||
+            (recordingId != null && recordingId == playing.recordingId) ||
+            (uri.startsWith(SavedSong.ONLINE_PREFIX) && playing.sources.any {
+                it.kind == RecordingSourceKind.YOUTUBE && it.uri == uri
+            }))
 }
 
 /** File-derived information retained for gain, gapless, artwork and lyrics consumers. Unknown stays null. */

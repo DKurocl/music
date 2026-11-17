@@ -60,6 +60,10 @@ internal fun PlaylistCover(tracks: List<Track>, size: Dp, corner: Dp = 16.dp) {
 /** Whether music is playing now: the playing row's bars move only then. Provided by the app's root. */
 internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { false }
 
+/** Actual playback identity and confirmed files; rows retain the original request for every action. */
+internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
+internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
+
 /**
  * The playing song's mark, over its cover: a soft scrim and three rounded bars that dance while the
  * music plays and rest, still, when it is paused.
