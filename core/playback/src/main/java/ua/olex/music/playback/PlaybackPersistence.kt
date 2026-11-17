@@ -20,6 +20,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     private var clock: Job? = null
     private var changed = false
     private var restoreSuperseded = false
+    private var intentGeneration = 0L
     private var closed = false
     private var capturedTimeline: androidx.media3.common.Timeline? = null
     private var pendingResumption: PlaybackCheckpoint? = null
@@ -70,6 +71,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
 
     /** Serialize system resumption with startup restore; explicit user selections take precedence. */
     suspend fun resumption(): PlaybackCheckpoint? {
+        val generation = intentGeneration
         val disk = initial.await()
         if (closed) return null
         val timeline = player.currentTimeline
@@ -78,13 +80,13 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
             snapshot?.copy(index = player.currentMediaItemIndex.coerceAtLeast(0), positionMs = player.currentPosition.coerceAtLeast(0))
         } else if (!changed && !restoreSuperseded) disk else null
         val resolved = saved?.copy(items = resolveSources(saved.items))
-        if (closed || player.currentTimeline !== timeline) return null
+        if (closed || generation != intentGeneration || player.currentTimeline !== timeline) return null
         pendingResumption = resolved
         return resolved
     }
 
     /** Mark intent before a slow explicit selection mutates the timeline. */
-    fun supersedeRestore() { restoreSuperseded = true; pendingResumption = null }
+    fun supersedeRestore() { intentGeneration++; restoreSuperseded = true; pendingResumption = null }
 
     /** An accepted empty selection must also clear a not-yet-restored disk queue. */
     fun acceptClear() {
