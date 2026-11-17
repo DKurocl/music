@@ -5,26 +5,27 @@ older items marked done in that report have not all been independently reverifie
 
 ## Current batch (Codex, 2026-11-17)
 
-- 50/51 [код, verification pending]: a shared catalogue of files and actively saved online songs.
+- 50 (partial), 51 [код, CI 44114015206]: a shared catalogue of files and actively saved online songs.
   Saved metadata comes from user.db, including history older than the 200-event UI window and
   rated songs. Home, browsing, statistics and smart playlists use it. Saved songs participate in
   local prefix search before network results arrive; network deduplication updates when saved data
   changes, without repeating HTTP requests. Local matches suppress their online duplicate; stored
   YouTube links remain intact. Filesystem folders retain only actual local files.
-- 60 [код, verification pending]: complete account playlist pagination; playlist track occurrences
+- 60 [код, CI 44114015206]: complete account playlist pagination; playlist track occurrences
   survive parsing and continuation boundaries. In-flight continuation requests are shared. Failed
   pages retain their token and partial account lists are never cached. Token cycles stop the load.
 - Regression found while composing the catalogue: LibraryIndex must not split an already clipped
   CUE track a second time. Covered by SavedCatalogTest.
 
-## Expanded package requested by the owner (verification pending)
+## Expanded package requested by the owner (code bc99d27, CI 44114015206 passed)
 
 - 8: Coil, embedded covers and artist photos now divide the image share instead of each keeping
   a separate unlimited allowance. A changed limit rebuilds Coil and trims images/motion; audio
   eviction is scheduled off main immediately, without waiting for the next write.
 - 21: the playback service requests radio/autoplay continuation from an application-owned mix
   cursor. UI disconnection no longer stops refill. The queue must still match the requesting
-  timeline and occurrence before a loaded page can commit. Recent snapshots are bounded to 100
+  timeline and occurrence before a loaded page can commit. A new manual queue or shuffle clears
+  the old mix label and cursor, rejecting an old continuation still in flight. Recent snapshots are bounded to 100
   preceding songs when preparing the service request. Process-death persistence of the radio
   continuation remains open under 74.
 - 32/33: app and lock-screen lyrics use one resolver for edited, sidecar, downloaded, embedded
@@ -42,6 +43,10 @@ older items marked done in that report have not all been independently reverifie
   keys. Playing context is checkpointed with each media item and returned to the UI after restart.
 - 45 (partial): artist photos, biographies and Apple motion lookups share two auxiliary permits;
   audio resolution does not wait for these permits. Bandwidth/QoS on the phone is not measured.
+
+Software evidence: 406 tests passed, debug/release lint and APK builds passed, owner signature
+verified. Only component renders were reviewed. Phone measurements and live account pagination
+are not verified. Source-only statuses do not stand in for physical acceptance.
 
 ## Still open after this batch
 

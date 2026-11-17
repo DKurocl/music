@@ -1,19 +1,67 @@
-# Active continuation (Codex, 2026-11-17)
+# Current continuation (Codex, 2026-11-17): start here
 
-Branch: `agent/unified-library-continuation`, based on `origin/main` `4c3da63`.
-Expanded package is in progress; do not promote before its green CI. Local machine has no Android SDK.
-First catalogue/pagination package `4784a19` passed full CI 44105534320; the expanded code has not yet been verified.
+Code `bc99d27` is integrated into `main` from `agent/unified-library-continuation`.
+Branch CI passed: https://github.com/DKurocl/music/actions/runs/44114015206
+Main delivery passed: https://github.com/DKurocl/music/actions/runs/44116900021
+Published: https://github.com/DKurocl/music/releases/tag/music-v1109 (versionCode 1109, code bc99d27).
+Downloaded APK verified: ua.olex.music, min/target 37, arm64-v8a, existing owner certificate;
+SHA-256 c0e7b1251025e15fc1e67a36fb69d9a936d61d8af91f306b8febd9746db80e44 matches the release asset.
+Installation on the phone is not verified. The owner asked to continue after this release while asleep.
 
-Shared saved-song catalogue for Home, browsing, statistics, smart playlists and prefix search;
-account playlist pagination; preserved playlist occurrences with serialized continuation loads.
-Expanded at the owner's request: service mix refill, shared session lyrics, draw-phase word timing,
-offline queue retention, cache events/budgets, saved-system search, and serialized system resumption.
-No user.db schema change. Full remaining audit list: `docs/AUDIT_CONTINUATION.md`.
+## Implemented and checked in code
 
-Verification so far: `python3 /workspace/toolchains/music-jvm/check.py` passed 164 tests before
-final CUE regression coverage. Full Android checks and final test evidence are pending CI.
-Pinned artifacts resolved with pixel-apk `check_versions.py --network`; no versions changed.
-No phone, emulator, reviewed golden comparison, accessibility or physical audio measurement yet.
+Eight of the owner's remaining points: 8, 21, 33, 34, 51, 53, 54, 60. Partial: 45, 50, 74.
+Also completed the online lyric timing save path (32) and widened the system catalogue (66).
+These counts refer to implementation and software checks, not physical-device acceptance.
+
+- Active saved online metadata joins scanned files in Home, library browsing, statistics, smart
+  playlists and prefix search, including songs beyond the 200-event history page. Local files win
+  without rewriting stored YouTube references. CUE tracks do not split twice during projection.
+- Account playlist discovery follows all continuations. Ordered song pages retain deliberate
+  repeated video ids, share concurrent loads, preserve retry tokens and reject token cycles.
+- Radio/autoplay refill lives in the playback service with an application-owned cursor, independent
+  of UI connection. Loaded pages commit only against the requesting queue. Manual selections
+  and shuffles clear the previous mix context and invalidate its pending continuation.
+  The radio cursor is not persisted through process death yet. No UI controller is kept connected for background work.
+- App and lock-screen lyrics share source selection and offsets. Online timing edits save too.
+  The owner's lyric-as-artist option (73) stays. Word clocks use Compose's infinite frame policy;
+  only drawing reads the clock, and cached text paths avoid per-word row recomposition.
+- Offline selection keeps all queue occurrences, staging a paused queue if none are available;
+  the service skips unavailable items without deleting them. Cache span revisions update marks.
+- Coil, local artwork and artist metadata split the image share. Budget changes trim audio off
+  main, close Coil's disk cache before replacement, and finish safely if Settings closes. Artist
+  and Apple-motion lookups share two auxiliary permits, independently of stream resolution.
+- Startup and system resumption share one journal read. Live selections win, matching occurrence
+  keys guard shuffle/repeat recovery, and playback context survives checkpoint round trips.
+
+## Verification
+
+- `python3 /workspace/toolchains/music-jvm/check.py`: 165 tests passed (final pure model code).
+- CI `44114015206`, code `bc99d27`: `gradle test -PminSdk=35 --continue --no-daemon`, then
+  `gradle :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon` passed.
+  Downloaded XML: 406 distinct tests / 406 executions, zero failures, errors or skips. Includes
+  21 added regression tests. APKs keep minSdk 37; Robolectric uses API 35.
+- Owner-signature verification passed, matching the certificate in the prior successful CI.
+- Inspected `lyrics-words.png` and `gallery/27-lyrics.png` from both 4784a19 and 2f565ad artifacts.
+  These are component/gallery renders; no approved golden diff or actual phone screenshot.
+- First expanded CI found a non-idling word clock in DesignGalleryTest. Standard infinite animation
+  policy fixed it; added a manually advanced playback-clock test and a draw-without-parent-
+  recomposition test. A cache coroutine receiver type error was fixed before the final green run.
+  The first main publication was cancelled to include a final manual-selection regression guard.
+  No test was disabled and no dependency pin was changed.
+- Local machine has no Android SDK or device. No new Pixel/XM5, API 37 runtime, accessibility,
+  battery, cold-start, audio-path or frame-time measurement. No physical performance claim.
+
+## Next
+
+The full remaining list is `docs/AUDIT_CONTINUATION.md`; 28 points are still open/partial or
+intentionally retained, including the seven phone gates and option 73. Next code work: recording
+IDs with multiple sources and a safe user.db migration (47/48/63), durable album/artist pages
+(49/64), service source selection (52), bidirectional likes and playlist sync (56/58/59).
+Navigation, system favourite actions, UI consistency and acceptance remain open too.
+Run the concrete continuation scenarios in `docs/PHONE_CHECK.md` on the actual phone.
+
+# Previous handoff
 
 # Current state (Claude, 2026-11-17): start here
 
