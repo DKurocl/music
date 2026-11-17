@@ -22,6 +22,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Rule
 import org.junit.Test
@@ -354,6 +356,14 @@ class DesignGalleryTest {
         repeat(10) { Thread.sleep(150); compose.mainClock.advanceTimeBy(100); compose.waitForIdle() }
         val image = compose.onRoot().captureToImage().asAndroidBitmap()
         File("build/reports/ui-previews/gallery").apply { mkdirs() }.resolve("$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
+    @Test fun homeMood() {
+        compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
+            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.onNodeWithText("Relax").performClick()
+        shot("01c-home-mood")
     }
 
     @Test fun home() {

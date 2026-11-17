@@ -131,9 +131,15 @@ internal object Mix {
         "sleep" to listOf("ambient", "classical", "piano", "new age", "drone", "lo-fi", "lofi", "modern classical"),
     )
 
-    /** Library songs whose genre suits [mood]; empty when the library's genres say nothing about it. */
+    private val aliases = mapOf("chill" to "relax", "energy" to "energize", "energy boosters" to "energize", "gym" to "workout",
+        "love" to "romance", "sleepy" to "sleep", "happy" to "feel good", "good vibes" to "feel good", "study" to "focus")
+
+        /** Library songs whose genre suits [mood]; empty when the library's genres say nothing about it. */
     fun moodSongs(mood: String, songs: List<Track>): List<Track> {
-        val wanted = moodGenres[TextFold.fold(mood)] ?: return emptyList()
+        val key = TextFold.fold(mood)
+        // YouTube Music also shows genre chips ("Rock", "Hip-hop", "Chill"): those match the genre itself.
+        val wanted = moodGenres[key] ?: moodGenres[aliases[key]] ?: listOf(key.replace("-", " ")).filter { it.length >= 3 }
+        if (wanted.isEmpty()) return emptyList()
         return songs.filter { t -> t.genres.any { g -> val f = TextFold.fold(g); wanted.any { f.contains(it) } } }
     }
 }
