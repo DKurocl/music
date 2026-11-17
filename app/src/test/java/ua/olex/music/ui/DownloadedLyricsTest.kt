@@ -52,4 +52,16 @@ class DownloadedLyricsTest {
         store.delete(track)
         assertEquals("", store.read(track)!!.first)
     }
+
+    @Test fun concurrentTimingWritesLeaveOneCompleteEdit() {
+        val store = DownloadedLyrics(context)
+        val track = file.copy(recordingId = "recording:one")
+        val edits = (1..30).map { "[00:01.00]Edit $it " + "words ".repeat(100) }
+        val writers = java.util.concurrent.Executors.newFixedThreadPool(4)
+        try {
+            val work = edits.map { text -> writers.submit { store.saveEdited(track, text) } }
+            work.forEach { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+            assertTrue(DownloadedLyrics(context).edited(track) in edits)
+        } finally { writers.shutdownNow() }
+    }
 }
