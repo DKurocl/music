@@ -36,6 +36,10 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Continue the 80-point audit (Codex, 2026-11-17, `agent/unified-library-continuation`):
+      shared saved-song catalogue for Home, smart playlists and search (50/51), complete account
+      playlist pagination and preserve repeated playlist occurrences (60). See `AUDIT_CONTINUATION.md`.
+
 1. Accurate library: integrate the existing tag reader, embedded/folder artwork, incremental scans
    and chosen music roots. Preserve all credited artists and honest audio properties.
 2. Audio: album/track ReplayGain with clipping guard, verify gapless and the 24-bit path on the Pixel.

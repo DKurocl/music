@@ -106,7 +106,7 @@ import ua.olex.music.playback.PlayerState
  */
 @Composable
 fun MusicRoot(model: LibraryViewModel) {
-    val library by model.library.collectAsStateWithLifecycle()
+    val library by model.catalogue.collectAsStateWithLifecycle()
     val tracks = library?.songs
     val query by model.query.collectAsStateWithLifecycle()
     val search by model.search.collectAsStateWithLifecycle()

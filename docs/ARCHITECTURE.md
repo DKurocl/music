@@ -290,3 +290,16 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     via Media3 replaceMediaItem while retaining source/occurrence/gain data. Physical continuity and
     notification behavior remain acceptance checks. The private provider is not an external-client
     URI-sharing contract; future external clients need explicit integration.
+
+47. The UI catalogue projects active durable song references from user.db (favourites, playlist
+    entries, all history and ratings) over the scanned local index. SavedCatalog resolves local
+    copies first, adds remaining online snapshots once per video id, and preserves the local folder
+    tree. Home, library browsing, statistics, smart playlists and saved search consume this snapshot,
+    built on Dispatchers.Default. This is a read projection, not the future recording/source schema:
+    no user.db migration or rewriting of saved YouTube links. Album/artist pages themselves are still
+    session caches. Prefix search over saved online metadata works without network access.
+48. Playlist rows represent occurrences, so ordered YouTube pages retain repeated video ids. Search
+    continues to deduplicate results. Album continuation requests share in-flight work, commit the
+    next token only with an accepted page, and reject token cycles. Account playlist discovery walks
+    every continuation and caches only a complete answer. Test transports and dispatchers exercise
+    failures, cancellation and concurrent loads without contacting a live account.

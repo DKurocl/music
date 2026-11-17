@@ -1,3 +1,17 @@
+# Active continuation (Codex, 2026-11-17)
+
+Branch: `agent/unified-library-continuation`, based on `origin/main` `4c3da63`.
+Implementation is in progress; do not promote before green CI. Local machine has no Android SDK.
+
+Shared saved-song catalogue for Home, browsing, statistics, smart playlists and prefix search;
+account playlist pagination; preserved playlist occurrences with serialized continuation loads.
+No user.db schema change. Full remaining audit list: `docs/AUDIT_CONTINUATION.md`.
+
+Verification so far: `python3 /workspace/toolchains/music-jvm/check.py` passed 164 tests before
+final CUE regression coverage. Full Android checks and final test evidence are pending CI.
+Pinned artifacts resolved with pixel-apk `check_versions.py --network`; no versions changed.
+No phone, emulator, reviewed golden comparison, accessibility or physical audio measurement yet.
+
 # Current state (Claude, 2026-11-17): start here
 
 ## YouTube Music as part of the library (Claude, 2026-11-17)

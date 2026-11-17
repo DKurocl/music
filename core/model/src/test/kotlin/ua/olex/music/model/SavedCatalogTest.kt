@@ -1,0 +1,61 @@
+package ua.olex.music.model
+
+import org.junit.Assert.*
+import org.junit.Test
+
+class SavedCatalogTest {
+    private val online = Track(TrackId("yt:one"), "ytm://one", "Halo", "Beyoncé", album = "I Am", durationMs = 260_000)
+    private val file = online.copy(id = TrackId("local:1"), uri = "content://1", path = "Music/Halo.flac", format = AudioFormat("flac"))
+
+    @Test fun savedSongsWorkWithoutFilesAndAppearInCollectionsAndSmartLists() {
+        val saved = listOf(SavedSong.from(online), SavedSong.from(online))
+        val catalogue = SavedCatalog.merge(LibraryIndex.EMPTY, saved)
+        assertEquals(listOf(online), catalogue.songs)
+        assertEquals(listOf(online), catalogue.albums.single().tracks)
+        assertEquals("Beyoncé", catalogue.artists.single().name)
+        assertTrue(catalogue.folders.isEmpty())
+        val smart = SmartPlaylist("Played", listOf(SmartRule(SmartField.PLAYS, SmartOp.AT_LEAST, "1")))
+        assertEquals(listOf(online), smart.evaluate(catalogue.songs, { SongStats(plays = 3) }, { true }, 0))
+        assertEquals(3, LibraryStats.of(catalogue) { SongStats(plays = 3) }.plays)
+    }
+
+    @Test fun downloadingAndRemovingAFilePreservesTheOnlineFallbackWithoutDuplicates() {
+        val saved = listOf(SavedSong.from(online))
+        val local = LibraryIndex.build(listOf(file))
+        assertSame(local, SavedCatalog.merge(local, saved))
+        assertEquals(listOf(online), SavedCatalog.merge(LibraryIndex.EMPTY, saved).songs)
+        assertEquals("ytm://one", saved.single().path)
+    }
+
+    @Test fun differentRecordingAndDurationDoNotHideSavedOnlineSongs() {
+        val live = file.copy(title = "Halo (Live)")
+        val long = file.copy(id = TrackId("local:2"), durationMs = 280_000)
+        val catalogue = SavedCatalog.merge(LibraryIndex.build(listOf(live, long)), listOf(SavedSong.from(online)))
+        assertEquals(setOf(live.id, long.id, online.id), catalogue.byId.keys)
+        assertEquals(2, catalogue.folders.single().tracks.size)
+    }
+
+    @Test fun missingLocalSnapshotsNeverBecomePlayableAndOnlineSearchIsLiteral() {
+        val catalogue = SavedCatalog.merge(LibraryIndex.EMPTY, listOf(SavedSong.from(file), SavedSong.from(online)))
+        assertEquals(listOf(online), SavedCatalog.searchOnline(catalogue, "beyon hal"))
+        assertEquals(listOf(online), SavedCatalog.searchOnline(catalogue, "I am HAL"))
+        assertTrue(SavedCatalog.searchOnline(catalogue, "eyon").isEmpty())
+        assertTrue(SavedCatalog.searchOnline(catalogue, "* \" ").isEmpty())
+        assertEquals(listOf(online), catalogue.songs)
+    }
+
+    @Test fun mergingSavedSongsDoesNotSplitAlreadyExpandedCueTracksAgain() {
+        val cue = """
+            TRACK 01 AUDIO
+              TITLE "First"
+              INDEX 01 00:00:00
+            TRACK 02 AUDIO
+              TITLE "Second"
+              INDEX 01 02:00:00
+        """.trimIndent()
+        val local = LibraryIndex.build(listOf(file.copy(metadata = FileMetadata(cueSheet = cue))))
+        val merged = SavedCatalog.merge(local, listOf(SavedSong.from(online)))
+        assertEquals(local.songs, merged.songs.filter { it.id.value.startsWith("local:") })
+        assertEquals(3, merged.songs.size)
+    }
+}
