@@ -385,10 +385,21 @@ internal fun LibraryBrowser(
                             if (onlineOn) {
                                 item(key = "online-title") { SearchHeading("YouTube Music") }
                                 val found = online?.takeIf { it.query == query }
+                                if (found != null && found.artists.isNotEmpty()) {
+                                    item(key = "online-artists-h") { SearchSubheading("Artists") }
+                                    item(key = "online-artists") { YouTubeCards(found.artists, size = 104.dp) }
+                                }
+                                if (found != null && found.albums.isNotEmpty()) {
+                                    item(key = "online-albums-h") { SearchSubheading("Albums") }
+                                    item(key = "online-albums") { YouTubeCards(found.albums, size = 120.dp) }
+                                }
+                                if (found != null && (found.artists.isNotEmpty() || found.albums.isNotEmpty()) && found.tracks.isNotEmpty())
+                                    item(key = "online-songs-h") { SearchSubheading("Songs") }
                                 when {
-                                    found == null -> item(key = "online-wait") { BrowserMessage("Searching YouTube Music…") }
+                                    found == null -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
                                     found.failed -> item(key = "online-failed") { BrowserMessage("YouTube Music didn't answer. Check the connection.") }
-                                    found.tracks.isEmpty() -> item(key = "online-none") { BrowserMessage("Nothing more on YouTube Music.") }
+                                    found.tracks.isEmpty() && found.artists.isEmpty() && found.albums.isEmpty() -> item(key = "online-none") { BrowserMessage("Nothing more on YouTube Music.") }
+                                    found.tracks.isEmpty() -> {}
                                     else -> itemsIndexed(found.tracks, key = { _, t -> "online-" + t.id.value }) { i, t ->
                                         TrackRow(t, current = t.id.value == currentId, onMore = { onTrackActions(t) },
                                             onPlayNext = { onEnqueue(listOf(t), true) }, onQueue = { onEnqueue(listOf(t), false) }) { onSearchUsed(query); nav.play(found.tracks, i, "Search") }
@@ -987,3 +998,8 @@ private fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: androi
         }
     }
 }
+
+/** A small heading inside a search section ("Artists", "Albums", "Songs"). */
+@Composable
+private fun SearchSubheading(text: String) = Text(text, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 8.dp))

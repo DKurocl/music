@@ -1,5 +1,37 @@
 # Current state (Claude, 2026-11-17): start here
 
+## M10 built (Claude, 2026-11-17, evening)
+
+Built and checked in the container (unit tests, lint debug and release, release build, gallery
+screenshots looked at). **Nothing below was measured on the phone yet**: the "Done when" numbers in
+`docs/specs/M10_ONLINE.md` (frame times, time to first audio) still need `dumpsys gfxinfo` on the
+Pixel.
+
+- D4 `[код]`: the library index (`YouTubeMusic.indexOf`) is built once per library on
+  `Dispatchers.Default` (LibraryViewModel init); pages use `rememberOwned` (lookups only, or the build
+  off the main thread). No composable calls `localCopy`. Artist, album and artist-id answers are kept
+  in a 48-page LRU for the session (`peek*`, `cached`); a cached page draws in its first frame. The
+  header comes from the card (`OnlineTarget.Album.cover/subtitle`), placeholder rows of real height
+  replace the spinner. `warm()` resolves the first online song's stream when the page opens.
+  Not done: playlist continuations (pages longer than one answer), pull to refresh.
+- D5 `[код]`: online pages use the shell's top bar (Back, title after the header scrolls away); the
+  pages' own back buttons are gone; 16 dp under the header buttons. Not done: restoring the exact
+  scroll position of the screen under an online page.
+- D3 `[код]`: `format()` is codec and bitrate only; no "YouTube Music" fallback. "Playing from" is
+  `mixLabel ?: playingFrom ?: album ?: Your queue/Your library` (`LibraryViewModel.playFrom`).
+- D2 `[код]`: `SourceMark` in every song row: quality tag for files, `cloud` / `cloud_done`
+  (`CacheBudget.isStreamCached`, never opens the cache itself) / a ring while Soulseek downloads.
+  Rows have one height: the tag is baseline-aligned (two baselines made ListItem a three-line item),
+  2 dp above and below each row. Symbols font re-subset with the new glyphs (`docs/design/symbols.py`).
+- D1 `[код]`: `searchAll` = plain search + artists-only search in parallel; Search shows YouTube
+  Music artists and albums (minus ones the library has) above online songs. Artist pages parse
+  singles and "Fans also like" from shelf titles (`parseHome` on the artist answer) and the monthly
+  listeners. The library artist page's YouTube Music part shows Popular (owned songs swapped in, with
+  marks), More albums, Singles and EPs, Fans also like. Fixture `ytm-search-artists.json` is a live
+  answer from 2026-11-17; album search and artist browse were blocked from the build machine, so
+  album cards in search and singles/related were not checked against a live answer.
+
+
 - **On the phone:** release music-v1083 (`938eedb`, "Music 1.0"), installed through Obtainium. The
   owner uses it daily. Commits after it are docs only.
 - **What the app is:** a local lossless player first (library, tags, lyrics, equalizer, ReplayGain,

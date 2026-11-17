@@ -73,4 +73,21 @@ class YouTubeMusicTest {
         // Built once per library: the same object until the library changes.
         assertTrue(YouTubeMusic.indexOf(library) === index && YouTubeMusic.builtIndex(library) === index)
     }
+
+    @Test fun aRealArtistSearchGivesArtistCardsWithPhotos() {
+        val json = javaClass.classLoader!!.getResource("ytm-search-artists.json")!!.readText()
+        val cards = YouTubeMusic.searchCards(json)
+        assertTrue(cards.size >= 5)
+        assertTrue(cards.all { it.kind == YouTubeMusic.Card.Kind.ARTIST && it.id.startsWith("UC") && it.cover?.startsWith("https://") == true })
+        assertEquals("Air", cards.first().title)
+        // The kind word is dropped: "7.76M monthly audience", not "Artist \u2022 ...".
+        assertTrue(cards.first().subtitle?.startsWith("Artist") == false)
+    }
+
+    @Test fun anArtistPageWithoutSinglesOrRelatedStillParses() {
+        val json = javaClass.classLoader!!.getResource("ytm-artist.json")!!.readText()
+        val artist = YouTubeMusic.parseArtist("UCGz", json)!!
+        assertTrue(artist.related.none { it.id == "UCGz" })
+        assertTrue(artist.singles.none { s -> artist.albums.any { it.id == s.id } })
+    }
 }

@@ -2,6 +2,7 @@ package ua.olex.music.ui
 
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -46,7 +47,24 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     }
 
     /** An artist on YouTube Music: photo, a few lines about them, top songs, albums and videos. */
-    data class OnlineArtist(val id: String, val name: String, val photo: String?, val about: String?, val songs: List<Track>, val albums: List<OnlineAlbum>, val videos: List<Track>)
+    data class OnlineArtist(val id: String, val name: String, val photo: String?, val about: String?, val songs: List<Track>, val albums: List<OnlineAlbum>, val videos: List<Track>,
+        val singles: List<OnlineAlbum> = emptyList(), val related: List<Card> = emptyList(), val listeners: String? = null)
+
+    /** Artists and albums YouTube Music finds for a query, beside its songs (Search). */
+    data class Found(val songs: List<Track>, val artists: List<Card>, val albums: List<Card>)
+
+    /**
+     * Songs, artists and albums for a query: the plain search (songs, its top result and any albums
+     * it lists) and the artists-only search, asked at the same time.
+     */
+    suspend fun searchAll(query: String): Found = kotlinx.coroutines.coroutineScope {
+        val artists = async(Dispatchers.IO) { post("search", """"query":${quote(query)},"params":"$ARTISTS_ONLY"""")?.let(::searchCards).orEmpty() }
+        val plain = withContext(Dispatchers.IO) { post("search", """"query":${quote(query)}""") }
+        val cards = plain?.let(::searchCards).orEmpty()
+        Found(plain?.let(::parseSearch).orEmpty(),
+            (cards.filter { it.kind == Card.Kind.ARTIST } + artists.await()).distinctBy { it.id }.take(8),
+            cards.filter { it.kind == Card.Kind.ALBUM }.take(10))
+    }
     data class OnlineAlbum(val id: String, val title: String, val subtitle: String?, val cover: String?)
 
     /** The artist's YouTube Music page id for a name: the search's artist whose name matches best. */
@@ -174,6 +192,35 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
 
         fun isOnline(track: Track) = track.id.value.startsWith("yt:")
 
+        /** The search filter YouTube Music's web app sends for "Artists". */
+        private const val ARTISTS_ONLY = "EgWKAQIgAWoKEAoQAxAEEAkQBQ%3D%3D"
+
+        /** Artists and albums in a search answer (its rows and its top result card), in its order. */
+        fun searchCards(json: String): List<Card> {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
+            val top = collect(root, "musicCardShelfRenderer").mapNotNull { card ->
+                card(dump(card["title"]) + dump(card["onTap"]), text(card["title"]), text(card["subtitle"]), biggestImage(card["thumbnail"]))
+            }
+            val rows = collect(root, "musicResponsiveListItemRenderer").mapNotNull { row ->
+                val columns = (row["flexColumns"] as? List<*>).orEmpty().map { text(((it as? Map<*, *>)?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>)?.get("text")) }
+                card(dump(row["navigationEndpoint"]), columns.firstOrNull().orEmpty(), columns.getOrNull(1).orEmpty(), biggestImage(row["thumbnail"]))
+            }
+            return (top + rows).distinctBy { it.id }
+        }
+
+        private fun card(nav: String, title: String, subtitle: String, cover: String?): Card? {
+            if (title.isEmpty()) return null
+            val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return null
+            val kind = when {
+                nav.contains("MUSIC_PAGE_TYPE_ARTIST") -> Card.Kind.ARTIST
+                nav.contains("MUSIC_PAGE_TYPE_ALBUM") -> Card.Kind.ALBUM
+                else -> return null
+            }
+            // "Artist \u2022 7.76M monthly audience" reads as the audience; "Album \u2022 Air \u2022 1998" as "Air \u2022 1998".
+            val sub = subtitle.split(" \u2022 ").drop(1).joinToString(" \u2022 ").replace(" monthly audience", " listeners").replace(" monthly listeners", " listeners").ifEmpty { null }
+            return Card(id, title, sub, cover, kind)
+        }
+
         private fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\""
 
         /** Every object under [key] anywhere in a parsed answer, in document order. */
@@ -223,7 +270,13 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
                 val videoId = Regex(""""videoId"\s*:\s*"([A-Za-z0-9_-]{11})"""").find(dump(card["navigationEndpoint"]))?.groupValues?.get(1) ?: return@mapNotNull null
                 Track(TrackId("yt:$videoId"), "${OnlineStreams.SCHEME}://$videoId", text(card["title"]), name, artworkUri = biggestImage(card["thumbnailRenderer"]))
             }.distinctBy { it.id }
-            return OnlineArtist(id, name, biggestImage(header?.get("thumbnail")), about, songs.filterNot { s -> videos.any { it.id == s.id } }, albums, videos)
+            // Shelves by their titles: "Singles & EPs" apart from albums; "Fans might also like" for related artists.
+            val shelves = parseHome(json)
+            val singleIds = shelves.filter { it.title.contains("single", true) }.flatMap { it.cards }.mapTo(HashSet()) { it.id }
+            val related = shelves.flatMap { it.cards }.filter { it.kind == Card.Kind.ARTIST && it.id != id }.distinctBy { it.id }
+            val listeners = text(header?.get("monthlyListenerCount")).ifEmpty { null }
+            return OnlineArtist(id, name, biggestImage(header?.get("thumbnail")), about, songs.filterNot { s -> videos.any { it.id == s.id } },
+                albums.filterNot { it.id in singleIds }, videos, albums.filter { it.id in singleIds }, related, listeners)
         }
 
         /** An album page: its title, artist and cover, then its songs in order. */
