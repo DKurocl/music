@@ -31,6 +31,24 @@ class AppGraph(context: Context) {
     /** YouTube Music in search and playback; the owner can turn it off in Settings. */
     val youTubeOn by lazy { kotlinx.coroutines.flow.MutableStateFlow(onlinePrefs.getBoolean("youtube", true)) }
     fun setYouTube(on: Boolean) { onlinePrefs.edit().putBoolean("youtube", on).apply(); youTubeOn.value = on }
+    /**
+     * Whether the phone has a working internet connection now. Without one, YouTube Music songs the
+     * stream cache does not keep are greyed out and skipped by Play; everything else works as before.
+     */
+    val network: kotlinx.coroutines.flow.StateFlow<Boolean> by lazy {
+        val flow = kotlinx.coroutines.flow.MutableStateFlow(true)
+        runCatching {
+            val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+            fun ok(caps: android.net.NetworkCapabilities?) = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            flow.value = ok(cm.getNetworkCapabilities(cm.activeNetwork))
+            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) { flow.value = ok(caps) }
+                override fun onLost(network: android.net.Network) { flow.value = false }
+            })
+        }
+        flow
+    }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
     val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles) }
     val player by lazy { PlayerConnection(app) }

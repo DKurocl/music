@@ -28,10 +28,21 @@ import ua.olex.music.model.Track
 
 /** A YouTube Music page to show over the current place: an artist (by name or id) or an album. */
 internal sealed interface OnlineTarget {
-    data class Artist(val name: String, val id: String? = null) : OnlineTarget
+    /** An artist; [full] opens the YouTube Music page even when the library has them ("See all"). */
+    data class Artist(val name: String, val id: String? = null, val full: Boolean = false) : OnlineTarget
     /** An album, or a playlist when [playlist] (no album download for a playlist of many artists). */
     data class Album(val id: String, val title: String, val playlist: Boolean = false, val cover: String? = null, val subtitle: String? = null) : OnlineTarget
     data class Mood(val mood: YouTubeMusic.Mood) : OnlineTarget
+}
+
+/**
+ * The library's own page for an online target, when there is one: an artist the owner has opens his
+ * artist page (which carries the YouTube Music sections too), so an artist is one page wherever it
+ * is opened from. Albums stay online pages: they list every song, the owner's files marked in place.
+ */
+internal fun libraryTwin(target: OnlineTarget, library: LibraryIndex): Pair<String, String>? = when (target) {
+    is OnlineTarget.Artist -> if (target.full) null else TextFold.fold(target.name).let { name -> library.artists.firstOrNull { TextFold.fold(it.name) == name } }?.let { "ARTISTS" to it.id }
+    else -> null
 }
 
 /** What online pages can do in the app: open another page, play, show a song's actions, open the owner's own artist. */
@@ -138,8 +149,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 placeholders(cover = true)
             }
             Load.Failed -> item {
-                EmptyState(Glyph.SEARCH, "Couldn't open ${target.name}", "YouTube Music didn't answer. Check the connection and try again.",
-                    actions = { Button(onClick = { retry++ }) { Text("Try again") } })
+                OnlineFailed(target.name, Glyph.SEARCH) { retry++ }
             }
             is Load.Done -> {
                 val artist = state.value
@@ -214,7 +224,14 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
     val state = rememberLoad(target, retry, graph.youTube.peekAlbum(target.id)) { graph.youTube.album(target.id) }
-    val loaded = (state as? Load.Done)?.value
+    // A long playlist arrives in parts: the rest is fetched in the background and added under what is
+    // on screen, so nothing moves while the owner reads or plays.
+    var grown by remember(target) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
+    LaunchedEffect(target, state is Load.Done) {
+        if (state !is Load.Done) return@LaunchedEffect
+        while (true) { grown = runCatching { graph.youTube.albumMore(target.id) }.getOrNull() ?: break }
+    }
+    val loaded = grown ?: (state as? Load.Done)?.value
     val songs = rememberOwned(loaded?.second.orEmpty(), library)
     WarmFirst(songs)
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -255,8 +272,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
         when (state) {
             Load.Wait -> placeholders(cover = mixed)
             Load.Failed -> item {
-                EmptyState(Glyph.ALBUM, "Couldn't open ${target.title}", "YouTube Music didn't answer. Check the connection and try again.",
-                    actions = { Button(onClick = { retry++ }) { Text("Try again") } })
+                OnlineFailed(target.title, Glyph.ALBUM) { retry++ }
             }
             is Load.Done -> itemsIndexed(songs, key = { i, t -> "a-$i-" + t.id.value }) { i, t ->
                 TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, title) }
@@ -290,7 +306,7 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
         if (popular.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.weight(1f)) { OnlineHeading("Popular") }
-                TextButton(onClick = { nav.open(OnlineTarget.Artist(artist.name, artist.id)) }) { Text("See all") }
+                TextButton(onClick = { nav.open(OnlineTarget.Artist(artist.name, artist.id, full = true)) }) { Text("See all") }
             }
             popular.forEachIndexed { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(popular, i, artist.name) } }
         }
@@ -298,6 +314,22 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
         if (singles.isNotEmpty()) { OnlineHeading("Singles and EPs"); YouTubeCards(singles) }
         if (artist.related.isNotEmpty()) { OnlineHeading("Fans also like"); YouTubeCards(artist.related) }
     }
+}
+
+/**
+ * An online page that didn't load. Offline it says so plainly and opens by itself once the phone is
+ * back online; online it offers to try again.
+ */
+@Composable
+private fun OnlineFailed(name: String, glyph: Glyph, retry: () -> Unit) {
+    val network = LocalNetwork.current
+    val again by rememberUpdatedState(retry)
+    // Only when the connection comes back, not on every failure (that would retry in a loop).
+    var wasOffline by remember { mutableStateOf(!network) }
+    LaunchedEffect(network) { if (network && wasOffline) again(); wasOffline = !network }
+    if (!network) EmptyState(Glyph.CLOUD_OFF, "You're offline", "Your own songs still play. $name opens as soon as the phone is back online.")
+    else EmptyState(glyph, "Couldn't open $name", "YouTube Music didn't answer. Try again in a moment.",
+        actions = { Button(onClick = retry) { Text("Try again") } })
 }
 
 @Composable
@@ -431,7 +463,7 @@ internal fun MoodRow(moods: List<YouTubeMusic.Mood>, modifier: Modifier = Modifi
  * when YouTube Music lists nothing here: it grows a mix from the owner's songs of that mood.
  */
 @Composable
-internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: PaddingValues, onTitleShown: (Boolean) -> Unit = {}) {
+internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: PaddingValues, library: LibraryIndex = LibraryIndex.EMPTY, onTitleShown: (Boolean) -> Unit = {}) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
@@ -439,6 +471,7 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
     val on by graph.youTubeOn.collectAsState()
     val state = rememberLoad(target, 0) { if (on) graph.youTube.mood(target.mood) ?: YouTubeMusic.MoodPage(emptyList(), emptyList()) else YouTubeMusic.MoodPage(emptyList(), emptyList()) }
     val page = (state as? Load.Done)?.value
+    val moodSongs = rememberOwned(page?.songs.orEmpty(), library)
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
@@ -479,11 +512,39 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
                 }
                 if (page.songs.isNotEmpty()) {
                     item(key = "s-h") { OnlineHeading("Songs") }
-                    itemsIndexed(page.songs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(page.songs, i, target.mood.label) } }
+                    itemsIndexed(moodSongs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(moodSongs, i, target.mood.label) } }
                 }
             }
         }
     }
+}
+
+/**
+ * A YouTube Music artist or album in Search, drawn as the library's own result rows (same size,
+ * same left edge) with a cloud after the subtitle, so both sources read as one list.
+ */
+@Composable
+internal fun OnlineResultRow(card: YouTubeMusic.Card, onOpened: () -> Unit = {}) {
+    val nav = LocalOnlineNav.current
+    val artist = card.kind == YouTubeMusic.Card.Kind.ARTIST
+    ListItem(
+        headlineContent = { Text(card.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        supportingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                card.subtitle?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)) }
+                Symbol(Glyph.CLOUD, size = 16.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = "On YouTube Music" })
+            }
+        },
+        leadingContent = {
+            if (artist) Artwork(card.cover, Modifier.size(56.dp).clip(androidx.compose.foundation.shape.CircleShape), 28.dp)
+            else Artwork(card.cover, Modifier.size(56.dp), 12.dp)
+        },
+        modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable {
+            onOpened()
+            if (artist) nav.open(OnlineTarget.Artist(card.title, card.id))
+            else nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
+        },
+    )
 }
 
 /**
