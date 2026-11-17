@@ -570,13 +570,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 val state = playing.value
                 val online = state.queue.drop(state.queueIndex.coerceAtLeast(0)).filter { it.mediaId.startsWith("yt:") }
                 if (online.isEmpty()) return@collect
-                val index = kotlinx.coroutines.withContext(Dispatchers.Default) { localIndex() } ?: return@collect
                 // All at once (one queue change, not one per song), each keeping its place; the song
                 // playing now keeps playing from the stream (PlayerConnection.replaceQueueItems).
-                val swaps = online.mapNotNull { item ->
-                    val duration = if (item.mediaId == state.mediaId) state.durationMs else 0L
-                    index.preferLocal(item.track ?: Track(TrackId(item.mediaId), "ytm://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, durationMs = duration)).takeUnless(YouTubeMusic::isOnline)?.let { item.key to it }
-                }.toMap()
+                val swaps = kotlinx.coroutines.withContext(Dispatchers.Default) {
+                    val index = localIndex() ?: return@withContext emptyMap<String, Track>()
+                    online.mapNotNull { item ->
+                        val duration = if (item.mediaId == state.mediaId) state.durationMs else 0L
+                        index.preferLocal(item.track ?: Track(TrackId(item.mediaId), "ytm://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, durationMs = duration)).takeUnless(YouTubeMusic::isOnline)?.let { item.key to it }
+                    }.toMap()
+                }
                 player.replaceQueueItems(swaps)
             }
         }

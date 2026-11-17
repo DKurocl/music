@@ -35,7 +35,12 @@ internal class RecordingRegistrar private constructor(
         val candidates = ids.mapNotNull { records[it] }.map { row ->
             RecordingCandidate(row.id, row.song.createdAt, row.toSong().references, row.song.songKey, row.song.durationMs)
         }
-        val group = RecordingMatcher.group(incoming, candidates).map { records.getValue(it.id) }
+        val named = records[snapshot.id] ?: if (snapshot.persistent) dao.canonicalId(snapshot.id)?.let(records::get) else null
+        val pinned = candidates.firstOrNull { it.id == named?.id }
+            ?.takeIf { RecordingMatcher.group(incoming, listOf(it)).isNotEmpty() }
+        val matched = RecordingMatcher.group(incoming, candidates)
+        val selected = if (pinned != null && matched.none { it.id == pinned.id }) listOf(pinned) else matched
+        val group = selected.map { records.getValue(it.id) }
         val keep = group.firstOrNull()?.id ?: newId()
         require(!keep.startsWith(SavedSong.SNAPSHOT_PREFIX))
         val existing = group.flatMap { row -> row.sources.ifEmpty { row.toSong().references.map { RecordingSourceEntity.from(row.id, it, row.song.createdAt) } } }
