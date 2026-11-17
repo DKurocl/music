@@ -188,6 +188,19 @@ class DesignGalleryTest {
         shot("42-online-playlist")
     }
 
+    /** The same playlist offline: the owner's files play, streams the cache doesn't keep are greyed out. */
+    @Test fun onlinePlaylistOffline() {
+        val app = androidx.test.core.app.ApplicationProvider.getApplicationContext<ua.olex.music.MusicApp>()
+        val mine = library.songs.take(2)
+        val online = listOf("Sexy Boy" to 297, "Kelly Watch the Stars" to 225, "Playground Love" to 213).mapIndexed { i, (title, sec) ->
+            ua.olex.music.model.Track(ua.olex.music.model.TrackId("yt:q$i"), "ytm://q$i", title, "Air", album = "Moon Safari", durationMs = sec * 1000L, artworkUri = library.albums[i % library.albums.size].artworkUri)
+        }
+        app.graph.youTube.keep("album:PLo", YouTubeMusic.OnlineAlbum("PLo", "Evening chill", "Playlist \u00b7 5 songs", library.albums[1].artworkUri) to listOf(online[0], mine[0], online[1], mine[1], online[2]))
+        compose.setContent { Shell(" ", Place.HOME) { pad -> CompositionLocalProvider(LocalNetwork provides false) {
+            OnlineAlbumPage(OnlineTarget.Album("PLo", "Evening chill", playlist = true), library, mine[0].id.value, pad) } } }
+        shot("42c-online-offline")
+    }
+
     /** The same page before YouTube Music answers: the header from the card, rows of real height. */
     @Test fun onlineLoading() {
         compose.setContent { Shell(" ", Place.HOME) { pad -> Column(Modifier.fillMaxSize().padding(pad)) { repeat(8) { PlaceholderRow() } } } }

@@ -78,7 +78,31 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     suspend fun artist(id: String): OnlineArtist? = cached("artist:$id") { post("browse", """"browseId":${quote(id)}""")?.let { parseArtist(id, it) } }
 
     /** An album's songs, in order, with the album's cover and artist on each. */
-    suspend fun album(id: String): Pair<OnlineAlbum, List<Track>>? = cached("album:$id") { post("browse", """"browseId":${quote(id)}""")?.let { parseAlbum(id, it) } }
+    suspend fun album(id: String): Pair<OnlineAlbum, List<Track>>? = cached("album:$id") {
+        post("browse", """"browseId":${quote(id)}""")?.let { json -> parseAlbum(id, json)?.also { more[id] = continuationOf(json) } }
+    }
+
+    /**
+     * The next part of a long playlist (YouTube Music answers about a hundred songs at a time): the
+     * whole list so far, or null when it has no more. Kept in the session cache with the rest.
+     */
+    suspend fun albumMore(id: String): Pair<OnlineAlbum, List<Track>>? = withContext(Dispatchers.IO) {
+        val token = more[id] ?: return@withContext null
+        val have = peekAlbum(id) ?: return@withContext null
+        if (have.second.size >= 2_000) return@withContext null
+        // The current form (continuation in the body), then the older one (in the address).
+        val json = post("browse", """"continuation":${quote(token)}""")?.takeIf { parseSearch(it, keepOrder = true).isNotEmpty() }
+            ?: post("browse", "", "&ctoken=$token&continuation=$token&type=next")
+        val page = json?.let { parseSearch(it, fallbackArtist = have.second.firstOrNull()?.artist, keepOrder = true) }.orEmpty()
+        val seen = have.second.mapTo(HashSet()) { it.id }
+        val added = page.filter { it.id !in seen }.map { it.copy(album = it.album ?: have.first.title, artworkUri = it.artworkUri ?: have.first.cover) }
+        more[id] = json?.let(::continuationOf)?.takeIf { it != token && added.isNotEmpty() }
+        if (added.isEmpty()) return@withContext null
+        (have.first to have.second + added).also { keep("album:$id", it) }
+    }
+    private val more = java.util.concurrent.ConcurrentHashMap<String, String?>().let { map ->
+        object { operator fun get(k: String) = map[k]; operator fun set(k: String, v: String?) { if (v == null) map.remove(k) else map[k] = v } }
+    }
 
     /** A page already loaded this session, for drawing it in the first frame when it opens again. */
     @Suppress("UNCHECKED_CAST")
@@ -156,9 +180,9 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
     }
 
     /** One call to YouTube Music, as its web app makes it. */
-    private fun post(endpoint: String, fields: String): String? {
-        val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}},$fields}"""
-        val request = okhttp3.Request.Builder().url("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false")
+    private fun post(endpoint: String, fields: String, query: String = ""): String? {
+        val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}}${if (fields.isEmpty()) "" else ",$fields"}}"""
+        val request = okhttp3.Request.Builder().url("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false$query")
             .post(body.toRequestBody("application/json".toMediaTypeOrNull()))
             .header("User-Agent", USER_AGENT).header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/")
             // Signed in: the owner's own home, mixes and radio (YouTubeAccount).
@@ -191,6 +215,11 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
         const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
         fun isOnline(track: Track) = track.id.value.startsWith("yt:")
+
+        /** The token for the rest of a long list, in either form YouTube Music sends it. */
+        fun continuationOf(json: String): String? =
+            Regex(""""continuationCommand"\s*:\s*\{[^{}]*?"token"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+                ?: Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
 
         /** The search filter YouTube Music's web app sends for "Artists". */
         private const val ARTISTS_ONLY = "EgWKAQIgAWoKEAoQAxAEEAkQBQ%3D%3D"
@@ -325,7 +354,7 @@ internal class YouTubeMusic(private val account: () -> Map<String, String>? = { 
                 if (title.isEmpty()) return@mapNotNull null
                 rank to Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", title, artist, album = album, durationMs = duration * 1000, artworkUri = cover)
             }
-            return (if (keepOrder) ranked else ranked.sortedBy { it.first }).map { it.second }.distinctBy { it.id }.take(if (keepOrder) 200 else 20)
+            return (if (keepOrder) ranked else ranked.sortedBy { it.first }).map { it.second }.distinctBy { it.id }.take(if (keepOrder) 2_000 else 20)
         }
 
         /** A radio answer: each queued song (title, "Artist • Album • Year", length, cover) and the continuation. */
