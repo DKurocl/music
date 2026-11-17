@@ -4,6 +4,7 @@ import android.os.Looper
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.util.UnstableApi
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -144,6 +145,29 @@ class PlaybackPersistenceTest {
         shadowOf(Looper.getMainLooper()).idle()
         assertTrue(player.shuffleModeEnabled)
         assertEquals(Player.REPEAT_MODE_ALL, player.repeatMode)
+    }
+
+    @Test fun aNewPlaybackIntentRejectsResumptionBeforeTheNewTimelineIsReady() = runTest {
+        persistence = PlaybackPersistence(player, journal, backgroundScope)
+        runCurrent(); journal.read(); runCurrent()
+        player.setMediaItems(listOf(item(9)))
+        shadowOf(Looper.getMainLooper()).idle()
+        persistence?.close()
+        val allow = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val started = kotlinx.coroutines.CompletableDeferred<Unit>()
+        persistence = PlaybackPersistence(player, journal, backgroundScope) { items ->
+            if (started.isCompleted) allow.await() else started.complete(Unit)
+            items
+        }
+        runCurrent(); journal.read(); runCurrent()
+        val result = kotlinx.coroutines.CompletableDeferred<PlaybackCheckpoint?>()
+        backgroundScope.launch { result.complete(persistence?.resumption()) }
+        runCurrent()
+        assertFalse(result.isCompleted)
+        persistence?.supersedeRestore()
+        allow.complete(Unit); runCurrent()
+        assertNull(result.await())
+        assertEquals("local:9", player.currentMediaItem?.mediaId)
     }
 
 }
