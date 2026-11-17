@@ -47,6 +47,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Null until the first read from the database: the list shows nothing rather than "empty". */
     val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    /** The scanned files plus durable online songs; never built in composition or from network pages. */
+    val catalogue: StateFlow<LibraryIndex?> = combine(library, graph.userLibrary.catalogue) { local, saved ->
+        ua.olex.music.model.SavedCatalog.merge(local ?: LibraryIndex.EMPTY, saved)
+    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val sortPreferences = app.getSharedPreferences("library-sort-v1", android.content.Context.MODE_PRIVATE)
     private val prefs = app.getSharedPreferences("library-options", android.content.Context.MODE_PRIVATE)
     private val _sortOrders = MutableStateFlow(TrackSortScope.entries.associateWith { scope ->
@@ -67,7 +71,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         .combine(searchRetry) { text, _ -> text }
         .flatMapLatest { text ->
             if (text.isBlank()) flowOf(LibrarySearchResult(text, emptyList()))
-            else graph.library.search(text).map { LibrarySearchResult(text, it) }
+            else combine(graph.library.search(text), catalogue) { local, saved ->
+                LibrarySearchResult(text, (local + ua.olex.music.model.SavedCatalog.searchOnline(saved ?: LibraryIndex.EMPTY, text)).distinctBy { it.id })
+            }.flowOn(Dispatchers.Default)
                 .catch { emit(LibrarySearchResult(text, emptyList(), failed = true)) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -76,31 +82,35 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /**
      * YouTube Music's songs for the same query, a moment after typing stops. Songs the owner already
-     * has are left out here (the library section above shows them, and they play from the file).
+     * has saved are left out here; the library section shows their file or durable online reference.
      */
     internal val online: StateFlow<OnlineSearch?> = query
         .debounce { if (it.isBlank()) 0 else 450 }
         .combine(graph.youTubeOn) { text, on -> text to on }
+        .combine(searchRetry) { request, _ -> request }
         .mapLatest { (text, on) ->
             if (!on || text.trim().length < 2) return@mapLatest null
-            val index = library.value ?: LibraryIndex.EMPTY
             try {
                 val found = graph.youTube.searchAll(text.trim())
-                // An artist the owner has appears once, as theirs (the library section above); albums too.
-                val mineArtists = index.artists.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
-                // An album is the owner's only when the title and the artist both match: a namesake by
-                // someone else ("Greatest Hits") still shows.
-                val mineAlbums = index.albums.groupBy({ ua.olex.music.model.TextFold.fold(it.name) }, { ua.olex.music.model.TextFold.fold(it.subtitle.orEmpty()) })
-                OnlineSearch(text, found.songs.filter { YouTubeMusic.localCopy(it, index) == null },
-                    artists = found.artists.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineArtists },
-                    albums = found.albums.filterNot { card ->
-                        val by = ua.olex.music.model.TextFold.fold(card.subtitle.orEmpty())
-                        mineAlbums[ua.olex.music.model.TextFold.fold(card.title)].orEmpty().any { artist -> artist.isNotBlank() && by.contains(artist.substringBefore(",").trim()) }
-                    })
+                OnlineSearch(text, found.songs, artists = found.artists, albums = found.albums)
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { OnlineSearch(text, emptyList(), failed = true) }
-        }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        }.combine(catalogue) { found, catalogue ->
+            if (found == null) return@combine null
+            val index = catalogue ?: LibraryIndex.EMPTY
+            val owned = YouTubeMusic.indexOf(index)
+            val mineArtists = index.artists.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
+            val mineAlbums = index.albums.groupBy({ ua.olex.music.model.TextFold.fold(it.name) }, { ua.olex.music.model.TextFold.fold(it.subtitle.orEmpty()) })
+            found.copy(
+                tracks = found.tracks.filter { it.id !in index.byId && owned.copyOf(it) == null },
+                artists = found.artists.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineArtists },
+                albums = found.albums.filterNot { card ->
+                    val by = ua.olex.music.model.TextFold.fold(card.subtitle.orEmpty())
+                    mineAlbums[ua.olex.music.model.TextFold.fold(card.title)].orEmpty().any { artist -> artist.isNotBlank() && by.contains(artist.substringBefore(",").trim()) }
+                },
+            )
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
     val personal: StateFlow<PersonalLibraryState> = combine(library, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
@@ -297,7 +307,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun changeRatingsToFiles(on: Boolean) { ratingsToFiles = on; prefs.edit().putBoolean("ratings_to_files", on).apply() }
 
     /** Built-in and the owner's smart playlists, worked out off the main thread whenever their inputs change. */
-    val smart: StateFlow<List<SmartPlaylistUi>> = combine(library, stats, graph.userLibrary.smartPlaylists.catch { emit(emptyList()) }, personal) { index, stats, own, personal ->
+    val smart: StateFlow<List<SmartPlaylistUi>> = combine(catalogue, stats, graph.userLibrary.smartPlaylists.catch { emit(emptyList()) }, personal) { index, stats, own, personal ->
         val songs = index?.songs ?: return@combine emptyList()
         val now = System.currentTimeMillis()
         val seed = now / 86_400_000L // a shuffled list keeps its order for the day

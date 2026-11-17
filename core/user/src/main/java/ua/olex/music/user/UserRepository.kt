@@ -2,6 +2,7 @@ package ua.olex.music.user
 
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import ua.olex.music.model.HistoryEntry
 import ua.olex.music.model.SavedSong
 import ua.olex.music.model.Track
@@ -10,6 +11,8 @@ import ua.olex.music.model.UserPlaylist
 /** Durable personal library. Cache scans never write here, and file loss never removes saved songs. */
 class UserRepository(private val database: UserDatabase, private val now: () -> Long = System::currentTimeMillis) {
     private val dao = database.userData()
+    /** Saved metadata for every collected, rated or played song, independent of the history page limit. */
+    val catalogue = dao.catalogue().map { rows -> rows.map(UserSongEntity::toSong) }.distinctUntilChanged()
     val favourites = dao.favourites().map { rows -> rows.map(UserSongEntity::toSong) }
     val playlists = dao.playlists().map { rows -> rows.map { row ->
         val songs = row.songs.associateBy { it.id }

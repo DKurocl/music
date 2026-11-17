@@ -39,6 +39,22 @@ class UserRepositoryTest {
 
     @After fun close() { database.close(); context.deleteDatabase("user-test.db") }
 
+    @Test fun catalogueIncludesSavedOnlineSongsBeyondRecentHistoryAndSurvivesReopen() = runBlocking {
+        val online = a.copy(id = TrackId("yt:online"), uri = "ytm://online", path = null)
+        repository.recordPlay(online)
+        repeat(201) { repository.recordPlay(b) }
+        repository.toggleFavourite(c)
+        val playlist = repository.createPlaylist("Saved", listOf(a))
+        assertFalse(repository.history.first().any { it.song.path == "ytm://online" })
+        assertEquals(4, repository.catalogue.first().size)
+        database.close()
+        reopen()
+        assertEquals("ytm://online", repository.catalogue.first().single { it.path.startsWith("ytm://") }.path)
+        repository.deletePlaylist(playlist)
+        repository.toggleFavourite(c)
+        assertEquals(setOf(SavedSong.from(online).id, SavedSong.from(b).id), repository.catalogue.first().map { it.id }.toSet())
+    }
+
     @Test fun duplicatesOnPurposeAndPositionalEdits() = runBlocking {
         val id = repository.createPlaylist("Loop", listOf(a))
         repository.addToPlaylist(id, listOf(b, a), duplicates = true)

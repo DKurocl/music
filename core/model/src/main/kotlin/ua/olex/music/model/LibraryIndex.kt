@@ -50,8 +50,9 @@ data class LibraryIndex(
         fun build(tracks: List<Track>): LibraryIndex {
             // A one-file album with a cue sheet becomes its tracks; everything else stays as it is.
             @Suppress("NAME_SHADOWING")
-            val tracks = if (tracks.none { it.metadata?.cueSheet != null }) tracks else tracks.flatMap { t ->
-                t.metadata?.cueSheet?.let(CueSheet::parse)?.split(t)?.takeIf { it.isNotEmpty() } ?: listOf(t)
+            val tracks = if (tracks.none { it.metadata?.cueSheet != null && it.clipStartMs == null }) tracks else tracks.flatMap { t ->
+                if (t.clipStartMs != null) listOf(t)
+                else t.metadata?.cueSheet?.let(CueSheet::parse)?.split(t)?.takeIf { it.isNotEmpty() } ?: listOf(t)
             }
             // Normalize once per track, rather than allocating strings in every sort comparison.
             val entries = tracks.map(::Entry)

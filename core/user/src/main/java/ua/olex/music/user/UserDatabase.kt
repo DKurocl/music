@@ -106,6 +106,14 @@ data class HistoryRow(val eventId: Long, val playedAt: Long, @Embedded val song:
 /** All writes involving multiple tables are orchestrated in UserRepository transactions. */
 @Dao
 interface UserDao {
+    @Query("""
+        SELECT * FROM saved_songs WHERE id IN (
+            SELECT songId FROM favourites UNION SELECT songId FROM playlist_entries
+            UNION SELECT songId FROM play_history UNION SELECT songId FROM ratings
+        ) ORDER BY id
+    """)
+    fun catalogue(): Flow<List<UserSongEntity>>
+
     @Query("SELECT saved_songs.* FROM saved_songs JOIN favourites ON saved_songs.id = favourites.songId ORDER BY favourites.addedAt DESC, saved_songs.id")
     fun favourites(): Flow<List<UserSongEntity>>
     @Transaction @Query("SELECT * FROM playlists ORDER BY createdAt DESC, id DESC")
