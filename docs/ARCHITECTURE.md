@@ -324,7 +324,8 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     Reconciliation requires compatible known durations and recording evidence, rejects conflicting
     takes/MBIDs and duration bridges, and never guesses a URI for old metadata-only rows. Confirmed
     merges keep the oldest identity and permanent aliases, redirect playlist positions/history events
-    in one transaction, OR favourites and select the latest rating/offset. No destructive migration.
+    in one transaction, OR favourites and select the latest rating/offset. A dated zero rating and explicit lyric reset
+    markers prevent old values from reappearing. No destructive migration.
 53. SavedCatalog binds every current local copy to its recording but displays the best copy once;
     folders retain their physical file rows. The app graph reconciles saved references off main.
     Statistics use recording IDs (plus durable aliases and unique legacy SongKey fallbacks). Queue

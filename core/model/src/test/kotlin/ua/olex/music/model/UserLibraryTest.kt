@@ -47,4 +47,14 @@ class UserLibraryTest {
         assertEquals(setOf("ytm://abc123", "content://9"), linked.sources.map { it.uri }.toSet())
         assertEquals(online.uri, SavedSong.from(linked).online()?.uri)
     }
+
+    @Test fun anOnlineReserveNeverBorrowsTheFilesArtworkWhenItsOwnIsMissing() {
+        val online = original.copy(id = TrackId("yt:none"), uri = "ytm://none", path = null)
+        val file = original.copy(artworkUri = "content://file-cover")
+        val saved = SavedSong.from(online).copy(id = "recording:one").bind(file)
+        val afterFileLoss = SavedSong.from(saved).online()!!
+        assertEquals(online.uri, afterFileLoss.uri)
+        assertNull(afterFileLoss.artworkUri)
+    }
+
 }

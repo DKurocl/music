@@ -56,11 +56,16 @@ internal class RecordingRegistrar private constructor(
             )
             mergedSources[source.key] = RecordingSourceEntity.from(keep, refreshed, old?.addedAt ?: at)
         }
-        val sourceRows = mergedSources.values.sortedWith(compareBy<RecordingSourceEntity> { it.addedAt }.thenBy { it.sourceKey })
+        val primary = incoming.first()
+        val sourceRows = mergedSources.values.map { row ->
+            if (primary.kind == RecordingSourceKind.LOCAL && row.kind == RecordingSourceKind.MISSING_LOCAL.value)
+                RecordingSourceEntity.from(keep, row.toSource().copy(kind = RecordingSourceKind.LOCAL,
+                    songKey = primary.songKey, durationMs = primary.durationMs, musicBrainzId = primary.musicBrainzId), row.addedAt)
+            else row
+        }.sortedWith(compareBy<RecordingSourceEntity> { it.addedAt }.thenBy { it.sourceKey })
         val oldMetadata = group.maxWithOrNull(compareBy<RecordingRelations> { row ->
             if (row.toSong().references.any { it.kind == RecordingSourceKind.LOCAL }) 1 else 0
         }.thenBy { row -> row.sources.maxOfOrNull { it.qualityRank } ?: 0 })?.toSong()
-        val primary = incoming.first()
         val previousRank = existing.filter { it.kind == RecordingSourceKind.LOCAL.value }.maxOfOrNull { it.qualityRank } ?: 0
         val hasLocal = existing.any { it.kind == RecordingSourceKind.LOCAL.value }
         val metadata = if (oldMetadata == null || (!hasLocal && primary.kind != RecordingSourceKind.MISSING_LOCAL) ||

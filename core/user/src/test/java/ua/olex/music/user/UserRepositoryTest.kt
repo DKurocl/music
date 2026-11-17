@@ -109,8 +109,8 @@ class UserRepositoryTest {
     }
 
     @Test fun movedFavouriteCanBeRemovedUsingItsOriginalReference() = runBlocking {
-        repository.toggleFavourite(a)
-        repository.toggleFavourite(a.copy(path = "Moved/song.flac"), idOf(a))
+        assertTrue(repository.toggleFavourite(a))
+        assertFalse(repository.toggleFavourite(a.copy(path = "Moved/song.flac"), idOf(a)))
         assertTrue(repository.favourites.first().isEmpty())
     }
 
@@ -276,6 +276,56 @@ class UserRepositoryTest {
         val before = changes()
         repeat(3) { repository.keepReference(a) }
         assertEquals(before, changes())
+    }
+
+
+    @Test fun scanReconciliationKeepsAReserveAndDoesNotWriteOnItsOwnFeedback() = runBlocking {
+        val online = a.copy(id = TrackId("yt:scan"), uri = "ytm://scan", path = null)
+        repository.toggleFavourite(online)
+        val id = idOf(online)
+        val index = ua.olex.music.model.LibraryIndex.build(listOf(a, b))
+        repository.reconcile(index, repository.catalogue.first())
+        val first = repository.catalogue.first()
+        assertEquals(1, first.size)
+        assertEquals(id, first.single().id)
+        assertEquals(setOf("ytm://scan", a.uri), first.single().references.map { it.uri }.toSet())
+        fun changes(): Long = database.openHelper.writableDatabase.query("SELECT total_changes()").use { it.moveToFirst(); it.getLong(0) }
+        val before = changes()
+        repository.reconcile(index, first)
+        assertEquals(before, changes())
+        assertEquals("ytm://scan", first.single().resolve(ua.olex.music.model.LibraryIndex.EMPTY)!!.uri)
+    }
+
+
+    @Test fun latestClearCannotResurrectAnOlderRatingDuringAMerge() = runBlocking {
+        val dao = database.userData()
+        val legacy = SavedSong.from(a).copy(id = "old-rated", createdAt = 0)
+        dao.saveSongs(listOf(UserSongEntity.from(legacy)))
+        dao.setRating(RatingEntity(legacy.id, 5, 100))
+        val online = a.copy(id = TrackId("yt:clear"), uri = "ytm://clear", path = null)
+        val other = SavedSong.from(online).copy(id = "new-cleared", createdAt = 1)
+        dao.saveSongs(listOf(UserSongEntity.from(other)))
+        dao.setRating(RatingEntity(other.id, 0, 200))
+        val recording = repository.keepReference(online)
+        assertEquals(legacy.id, recording.id)
+        assertEquals(0, repository.stats.first().getValue(recording.id).rating)
+        assertTrue(repository.stats.first().getValue(recording.id).ratingSet)
+    }
+
+
+    @Test fun anImportedRelativePathGetsIdentityOnceAndCannotClaimAReplacementTake() = runBlocking {
+        val missing = ua.olex.music.model.M3uPlaylist.resolve(
+            ua.olex.music.model.M3uPlaylist.parse("#EXTINF:120,Old artist - Old title\nAlbum/1.flac"),
+            ua.olex.music.model.LibraryIndex.EMPTY).songs.single()
+        repository.importPlaylist("Import", listOf(missing))
+        val before = repository.playlists.first().single().songs.single().id
+        val arrived = a.copy(path = "Music/Album/1.flac")
+        repository.reconcile(ua.olex.music.model.LibraryIndex.build(listOf(arrived)), repository.catalogue.first())
+        val saved = repository.playlists.first().single().songs.single()
+        assertEquals(before, saved.id)
+        assertEquals(a.title, saved.title)
+        assertFalse(saved.references.any { it.kind == ua.olex.music.model.RecordingSourceKind.MISSING_LOCAL })
+        assertNull(saved.resolve(ua.olex.music.model.LibraryIndex.build(listOf(arrived.copy(title = "Another recording")))))
     }
 
 }

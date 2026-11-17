@@ -23,27 +23,35 @@ Owner asked to continue while asleep. Nothing in this block is delivered yet.
   event IDs and timestamps. Favourite is OR, rating takes latest ratedAt, offset takes latest updatedAt
   (prefer canonical on ties, since old offsets had no timestamp). No destructive migration.
 
-## Implementation sequence
+## Implemented, final CI pending
 
-1. Pure RecordingSource, conservative RecordingMatcher and bounded versioned queue codec. Added
-   ten tests; 175 pure tests passed before the later SavedSong/reference changes.
-2. user.db v4: sources, aliases, saved createdAt and offset updatedAt. Genuine KSP-generated 4.json
-   already exists from the standalone user harness. DAO/registrar/repository draft compiles there.
-3. Complete repository tests using durable references instead of provisional snapshot IDs. Add
-   migration fixtures for all personal relations, linked source fallback, merges and refusal of
-   ambiguous takes. Alias reconciliation must not multiply history or discard playlist duplicates.
-4. Add efficient local-source binding to SavedCatalog and source reconciliation on library changes.
-   Do not rewrite unchanged rows or trigger a read/write loop. Keep duplicate-file management based
-   on the scanned source index. Use recording IDs for catalogue rows/stats and both source IDs for likes.
-5. Preserve links through local-first substitution, PlayerConnection metadata and PlaybackStore.
-   New queue metadata remains optional for old checkpoints. Do not replace a playing source mid-song.
-6. Lyric files use recording IDs. Read old SongKey files and merged alias IDs as fallbacks. Prefer
-   the most recent explicit edit, including an empty reset marker, without deleting another alias's
-   only text. Ensure timing edits resolve the durable identity before writing.
-7. Central source selection in PlaybackService for app, queue commands, browser and recovery. Keep
-   requested identity and occurrence keys, select available file first, else the YouTube reserve.
-   Expose actual selected source URI separately so lyrics, format and cache marks describe reality.
-8. Full tests, lints, R8/signature and artifact checks before main/release. No phone claims.
+- RecordingSource, conservative matcher and bounded versioned queue codec. Source ID remains
+  separate from recording ID and queue occurrence. Unknown-length automatic substitutions do not link.
+- user.db v4 and genuinely generated schema: sources, aliases, createdAt and offset updatedAt.
+  Registrar merges relations transactionally, chunks large IN lists, ignores stale secondary snapshots
+  and performs no writes for an unchanged registration. An explicit zero rating retains its timestamp.
+- Indexed catalogue binding, local reconciliation and best-copy projection. Physical folder rows
+  and duplicate-file management remain available; every linked source shares favourite state/stats.
+  Unresolved imported paths acquire real tags only on unambiguous resolution; that weak placeholder
+  is then promoted, preventing a later different take from claiming its old import automatically.
+- Local-first substitutions, PlayerConnection and v1 checkpoints retain identity and reserves.
+  Current playback is not re-prepared on download. Source references are bounded in queue metadata.
+- Recording-keyed lyric writes, legacy SongKey/merged-ID reads, latest explicit edits and reset
+  markers. Online timing controls are visible. Offset/statistics use the same durable identity.
+- Linked local hearts queue outbound YouTube likes too. Sending is serialized and an old response
+  cannot clear a newer pending intent. Inbound/account-scoped sync remains a later block.
+
+First complete Android CI 44166893313 (`648bd85`): 431 tests, both lints, debug/release APKs and
+owner signing verification passed, including migration 3 -> 4. Final follow-up CI is required.
+
+## Next blocks
+
+1. Central source selection in PlaybackService for app, enqueue, browser and recovery (52).
+   Select an available file first, else the retained YouTube source, preserving occurrence identity.
+2. Persistent online pages and stable album/artist links (49/64).
+3. Account-scoped bidirectional likes, unified playlists and conflict-aware operation journals
+   (56/58/59). Current outbound like preferences still need account scoping.
+4. Phone acceptance remains separate from source/CI evidence.
 
 ## Local verification environment
 
@@ -52,17 +60,6 @@ real model/user sources and Room KSP. Same pinned Kotlin/KSP/Room/Robolectric as
 is absent. Set only the test worker's Java user.home into its writable test-home for the Robolectric
 lock/download cache; shell HOME is untouched. Force the actual SQLite Android 2.6.2 variant in the
 harness, excluding its incompatible JVM variant. No production dependency change or assertion bypass.
-A real native SQLite UserRepository reopen baseline passed. Need asset configuration for migration
-fixtures; no migration gate has passed yet. Use CI if a genuine local gate cannot be reproduced.
-
-## Current caveats to finish before delivery
-
-- New schema and repository are drafts, not a completed migration. Existing tests still assume
-  path-derived IDs and need assertions against registered identities and source metadata instead.
-- RecordingRegistrar must avoid stale secondary-source snapshots overwriting fresher primary data,
-  skip no-op alias writes, and chunk large IN lists. Read-only reference lookups must be bounded too.
-- Shared favourites must include all currently resolved local source IDs and linked YouTube IDs.
-- Source substitution must carry the original YouTube reference even if the first play uses a file.
-- New persistent recording IDs must be used throughout lyrics and stats; do not leave old per-path
-  lookups mixed with the new model. Saved-page persistence and full album/artist identities are later
-  blocks (49/64), followed by account-scoped bidirectional sync (56/58/59).
+Native SQLite repository tests pass. The standalone harness cannot package schema assets for
+MigrationTestHelper, so those tests are verified in the real Android CI instead. Host SQLite separately
+executed the exact migration SQL and matched the exported v4 columns, indexes and foreign keys.

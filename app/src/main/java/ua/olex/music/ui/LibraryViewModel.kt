@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserRepository
 import kotlinx.coroutines.launch
@@ -177,6 +179,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         viewModelScope.launch(Dispatchers.IO) { graph.downloadedLyrics.deleteEdited(graph.userLibrary.keepReference(track).bind(track)) }
     }
     private fun lyricTrackNow() = playingTrack()
+    /** Current source tags plus the queue's recording identity and reserves. */
+    fun currentTrack() = playingTrack()
 
     /** Songs kept in more than one file, best copy first in each group (worked out off the main thread). */
     val duplicates: StateFlow<List<List<Track>>> = library.map { index -> index?.let { ua.olex.music.model.Duplicates.find(it.songs) }.orEmpty() }
@@ -265,12 +269,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         editUserData { setLyricOffset(track, offsetMs.coerceIn(-60_000, 60_000)) }
     }
 
-    /** Plays and ratings per song identity (SongKey value). */
+    /** Plays and ratings per recording, with unique legacy keys for unsaved files. */
     /** Ratings in the files count when the app has none of its own, so they survive a reinstall. */
     val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, catalogue) { own, index ->
         val fromFiles = index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.statsKey to it } }.orEmpty()
         if (fromFiles.isEmpty()) own else own.toMutableMap().apply {
-            for ((key, stars) in fromFiles) { val s = get(key) ?: ua.olex.music.model.SongStats.NONE; if (s.rating == 0) put(key, s.copy(rating = stars)) }
+            for ((key, stars) in fromFiles) { val s = get(key) ?: ua.olex.music.model.SongStats.NONE; if (!s.ratingSet) put(key, s.copy(rating = stars, ratingSet = true)) }
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
@@ -301,27 +305,38 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         add = { id, tracks, duplicates -> editUserData { addToPlaylist(id, tracks, duplicates) } },
         remove = { id, song, position -> editUserData { removeFromPlaylist(id, song, position) } },
         move = { id, song, delta, position -> editUserData { moveInPlaylist(id, song, delta, position) } },
-        removeFavourite = { id -> editUserData { removeFavourite(id) } },
+        removeFavourite = { id -> editUserData {
+            val sources = reference(id).first()?.references.orEmpty()
+            removeFavourite(id)
+            queueLikes(sources, false)
+            sendLikes()
+        } },
     )
 
     fun toggleFavourite(track: Track) {
         val saved = personal.value.favouriteByTrackId[track.id.value]
-        editUserData { toggleFavourite(track, saved?.id) }
-        // A YouTube Music song: the same heart on the owner's YouTube Music account, when signed in.
-        // Kept as pending until YouTube Music confirms it, and sent again when the network returns.
-        if (YouTubeMusic.isOnline(track)) {
-            val id = track.id.value.removePrefix("yt:")
-            pendingLikes.edit().putBoolean(id, saved == null).apply()
-            viewModelScope.launch { sendLikes() }
+        editUserData {
+            val liked = toggleFavourite(track, saved?.id)
+            val sources = reference(track).first()?.references.orEmpty()
+            queueLikes(sources, liked)
+            sendLikes()
         }
     }
 
     private val pendingLikes = getApplication<Application>().getSharedPreferences("pending_likes", android.content.Context.MODE_PRIVATE)
-    private suspend fun sendLikes() {
-        if (!graph.youTubeAccount.signedIn.value || !graph.network.value) return
+    private fun queueLikes(sources: List<ua.olex.music.model.RecordingSource>, liked: Boolean) {
+        val pending = pendingLikes.edit()
+        sources.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE }.forEach { source ->
+            pending.putBoolean(source.uri!!.removePrefix(ua.olex.music.model.SavedSong.ONLINE_PREFIX), liked)
+        }
+        pending.apply()
+    }
+    private val likeSync = kotlinx.coroutines.sync.Mutex()
+    private suspend fun sendLikes() = likeSync.withLock {
+        if (!graph.youTubeAccount.signedIn.value || !graph.network.value) return@withLock
         for ((id, liked) in pendingLikes.all) {
             if (liked !is Boolean) continue
-            if (graph.youTube.like(id, liked)) pendingLikes.edit().remove(id).apply()
+            if (graph.youTube.like(id, liked) && pendingLikes.all[id] == liked) pendingLikes.edit().remove(id).apply()
         }
     }
     init {

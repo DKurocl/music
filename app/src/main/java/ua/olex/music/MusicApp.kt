@@ -86,7 +86,7 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
     override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int) = graph.mix.extend(queue, current)
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
-        val file = graph.library.index.first().byId[track.id]
+        val file = graph.library.index.first().byId[track.id]?.takeIf { it.uri == track.uri }
         val known = file?.let { track.copy(metadata = it.metadata, path = it.path) } ?: track
         val lyrics = graph.resolveLyrics(known).lyrics
         val offset = graph.userLibrary.lyricOffset(ua.olex.music.model.SavedSong.from(known)).first()
