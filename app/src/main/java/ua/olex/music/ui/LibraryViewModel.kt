@@ -113,8 +113,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
-    val personal: StateFlow<PersonalLibraryState> = combine(catalogue, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history) { index, favourites, playlists, history ->
-        PersonalLibraryState.resolve(index ?: LibraryIndex.EMPTY, favourites, playlists, history)
+    val personal: StateFlow<PersonalLibraryState> = combine(catalogue, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history, graph.userLibrary.recordingIds) { index, favourites, playlists, history, aliases ->
+        PersonalLibraryState.resolve(index ?: LibraryIndex.EMPTY, favourites, playlists, history, aliases)
     }.flowOn(Dispatchers.Default).catch {
         userError = "Couldn't open your personal library. Your saved data has not been reset."
         emit(PersonalLibraryState())
@@ -241,7 +241,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
     fun rescanManually() = refreshLocalFiles(rescan = true)
     private fun refreshLocalFiles(rescan: Boolean) { viewModelScope.launch {
-        try { graph.musicFiles.refresh(); if (rescan) refresh() }
+        try { graph.musicFiles.refresh(); if (rescan) refresh(force = true) }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { userError = "Couldn't refresh local files. Try again." }
     } }
@@ -288,7 +288,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         val now = System.currentTimeMillis()
         val seed = now / 86_400_000L // a shuffled list keeps its order for the day
         (ua.olex.music.model.SmartPlaylist.BUILT_IN + own).map { p ->
-            SmartPlaylistUi(p, p.evaluate(songs, { stats[it.statsKey] ?: ua.olex.music.model.SongStats.NONE }, { it.id.value in personal.favouriteByTrackId }, now, seed))
+            SmartPlaylistUi(p, p.evaluate(songs, { stats[it.statsKey] ?: ua.olex.music.model.SongStats.NONE }, { (it.recordingId ?: it.id.value) in personal.favouriteByTrackId }, now, seed))
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -314,7 +314,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     )
 
     fun toggleFavourite(track: Track) {
-        val saved = personal.value.favouriteByTrackId[track.id.value]
+        val saved = personal.value.favouriteByTrackId[track.recordingId ?: track.id.value]
         editUserData {
             val liked = toggleFavourite(track, saved?.id)
             val sources = reference(track).first()?.references.orEmpty()
@@ -358,11 +358,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private var watchJob: Job? = null
     private var watchingRequested = false
     private var rescanPending = false
+    private var pendingForcedScan = false
 
     val positionMs: Long get() = player.positionMs
 
     /** Called when the app comes forward and after the permission dialog. */
-    fun refresh() {
+    fun refresh(force: Boolean = false) {
         allowed = hasAccess()
         if (!allowed) {
             scanJob?.cancel()
@@ -373,15 +374,18 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
         if (scanning) {
             rescanPending = true
+            pendingForcedScan = pendingForcedScan || force
             return
         }
         rescanPending = false
+        val forced = force || pendingForcedScan
+        pendingForcedScan = false
         scanning = true
         scanError = null
         if (watchingRequested) startWatching()
         scanJob = viewModelScope.launch {
             try {
-                graph.library.rescan()
+                if (forced) graph.library.rescan() else graph.library.refresh()
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: SecurityException) {
@@ -392,7 +396,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             } finally {
                 scanning = false
                 // File changes arriving during a scan need one more pass after its snapshot.
-                if (rescanPending && watchJob?.isActive == true) refresh()
+                if (rescanPending && watchJob?.isActive == true) refresh(force = pendingForcedScan)
             }
         }
     }
@@ -422,28 +426,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         if (index !in list.indices) return
         graph.mix.stop()
         playingFrom = from
-        // The last choice wins: a slower earlier one (an online list still being matched) is dropped,
-        // so it can never replace what the owner picked after it.
-        playJob?.cancel()
-        // All online: swap in the owner's files off the main thread (the index may still be building
-        // right after a start); a list of files plays at once.
-        if (list.none(YouTubeMusic::isOnline)) { playJob = null; player.play(list, index, from); return }
-        playJob = viewModelScope.launch {
-            val songs = kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(list) }
-            kotlinx.coroutines.yield()
-            playChecked(songs, index)
-        }
+        playChecked(list, index)
     }
-    private var playJob: Job? = null
 
     private fun playChecked(songs: List<Track>, index: Int) {
-        if (graph.network.value || songs.none(YouTubeMusic::isOnline)) { player.play(songs, index, playingFrom); return }
-        // Keep every occurrence in place. Only the starting index changes while offline.
-        val playable = songs.withIndex().filter { (_, t) -> !YouTubeMusic.isOnline(t) || ua.olex.music.playback.CacheBudget.isStreamCached(t.uri) }
-        if (playable.isEmpty()) { player.play(songs, index, playingFrom, startPlayback = false); offlineNotice++; return }
-        val start = playable.firstOrNull { it.index >= index }?.index ?: playable.first().index
-        player.play(songs, start, playingFrom)
-        if (playable.size < songs.size) offlineNotice++
+        // Source selection, offline staging and latest-request arbitration belong to the service.
+        player.play(songs, index, playingFrom)
     }
 
     /** Bumped when the player should open (a tap on the media notification). */
@@ -456,14 +444,6 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** What the queue was started from, when the screen that started it said; null for the owner's own album lists. */
     var playingFrom by mutableStateOf<String?>(null); private set
 
-    private fun localFirst(list: List<Track>): List<Track> {
-        if (list.none(YouTubeMusic::isOnline)) return list
-        val index = localIndex() ?: return list
-        return list.map { if (YouTubeMusic.isOnline(it)) index.preferLocal(it) else it }
-    }
-
-    // The library indexed by title and artist (YouTubeMusic.indexOf), rebuilt only when the library itself changes.
-    private fun localIndex(): YouTubeMusic.Companion.Index? = library.value?.let(YouTubeMusic::indexOf)
     // "Start mix": YouTube Music's radio for a song, cleaned (see Mix), endless while it plays.
     private var mixRun: PlaybackMix.Run?
         get() = graph.mix.run
@@ -520,13 +500,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 val (online, upcoming) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                     val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
                     val songs = library.value?.songs.orEmpty()
-                    online to localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats, recent))
+                    online to (if (online.size >= 5) online else Mix.local(seed, songs, stats, recent))
                 }
                 if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return@launch }
                 seen += upcoming.map(Mix::songKey)
                 val state = playing.value
                 val current = state.mediaId
-                val seedHere = localFirst(listOf(seed)).first()
+                val seedHere = seed
                 if (current != null && (current == seedHere.id.value || current == seed.id.value)) {
                     // Keep the song playing; replace what follows it.
                     player.clearUpcoming()
@@ -548,7 +528,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 if (tracks.isEmpty()) { userError = "YouTube Music didn't answer. Check the connection."; return@launch }
                 val first = tracks.first()
                 val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
-                val queue = localFirst(listOf(first) + Mix.clean(tracks.drop(1), first, seen))
+                val queue = (listOf(first) + Mix.clean(tracks.drop(1), first, seen))
                 seen += queue.map(Mix::songKey)
                 player.play(queue, 0)
                 mixRun = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
@@ -557,32 +537,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
     }
 
-    // The title/artist index of each new library is built here, off the main thread, so online pages
-    // and Search only look songs up in it (YouTubeMusic.indexOf) and never build it while drawing.
-    init { viewModelScope.launch(Dispatchers.Default) { library.collect { it?.let(YouTubeMusic::indexOf) } } }
 
-    // A song downloaded while it plays (or waits in the queue) switches to the file by itself, at the
-    // same second: the library sees the new file, and every online song it now has is swapped.
-    init {
-        viewModelScope.launch {
-            library.collect { lib ->
-                if (lib == null) return@collect
-                val state = playing.value
-                val online = state.queue.drop(state.queueIndex.coerceAtLeast(0)).filter { it.mediaId.startsWith("yt:") }
-                if (online.isEmpty()) return@collect
-                // All at once (one queue change, not one per song), each keeping its place; the song
-                // playing now keeps playing from the stream (PlayerConnection.replaceQueueItems).
-                val swaps = kotlinx.coroutines.withContext(Dispatchers.Default) {
-                    val index = localIndex() ?: return@withContext emptyMap<String, Track>()
-                    online.mapNotNull { item ->
-                        val duration = if (item.mediaId == state.mediaId) state.durationMs else 0L
-                        index.preferLocal(item.track ?: Track(TrackId(item.mediaId), "ytm://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, durationMs = duration)).takeUnless(YouTubeMusic::isOnline)?.let { item.key to it }
-                    }.toMap()
-                }
-                player.replaceQueueItems(swaps)
-            }
-        }
-    }
+    // Deferred source changes are observed by PlaybackService even with no UI bound.
 
     /**
      * Plays a mood: its first YouTube Music playlist, cleaned like a mix, flowing into the radio of
@@ -597,7 +553,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 if (listed.size >= 5) {
                     val first = listed.first()
                     val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
-                    val queue = localFirst(listOf(first) + Mix.clean(listed.drop(1), first, seen))
+                    val queue = (listOf(first) + Mix.clean(listed.drop(1), first, seen))
                     seen += queue.map(Mix::songKey)
                     player.play(queue, 0)
                     mixRun = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
@@ -641,15 +597,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
     fun enqueue(tracks: List<Track>, next: Boolean) {
-        if (tracks.none(YouTubeMusic::isOnline)) player.enqueue(tracks, next)
-        else viewModelScope.launch { player.enqueue(kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(tracks) }, next) }
+        player.enqueue(tracks, next)
     }
     fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) = player.setEqualizer(routeKey, settings)
     fun setReplayGain(settings: ua.olex.music.dsp.ReplayGainSettings) = player.setReplayGain(settings)
     fun dismissQueueError() = player.dismissQueueError()
 
-    private fun hasAccess() =
-        getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+    private fun hasAccess(): Boolean {
+        val permitted = getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        graph.audioAccess.value = permitted
+        return permitted
+    }
 }
 
 /** Results carry their query so the screen never labels old matches as a newer search. */

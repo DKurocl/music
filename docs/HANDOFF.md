@@ -1,3 +1,47 @@
+# Active service-source policy (Codex, 2026-11-17)
+
+Branch `agent/service-source-policy` starts at main `45be07f`. Foundation is integrated, verified
+by CI 44172917731 (441 tests, zero failures/errors/skips, both lints, both APK builds, owner signature).
+Published music-v1116: https://github.com/DKurocl/music/releases/tag/music-v1116
+Main CI 44175207911 succeeded for 45be07f. Downloaded checks: 441 distinct cases/executions,
+0 failures/errors/skips, all four exported-schema migration cases passed. Actual APK verified:
+package ua.olex.music, min/target37, arm64-v8a, version1116, existing owner certificate
+5c2e57db99715e0fc65befdcf8febd1a00222a104a24d635f27f97d949abc107. APK SHA256
+4e244d46835faab55504d7bf7c6c326a4ebd59f6ec0a6873bff71957a8eaadf2 equals the release asset digest.
+Three player/lyrics/queue component renders reviewed; the gallery is not a phone/layout golden gate.
+Installation, Pixel/Sony audio/focus/Bluetooth, startup/battery and live account are unverified.
+Old recording-sources branch is fully merged and deleted locally and remotely.
+
+Owner asked to continue while asleep and repeated "continue". Active task is 52, with the
+41 generation-skip refinement. The draft routes set/add/enqueue/radio refill, paused startup and
+system resumption through one bulk source policy built from all saved recording evidence. It
+preserves requested video IDs, queue occurrence keys/context and real shuffle traversal. Unavailable
+occurrences retain their position and expose a reason; their guarded URI cannot open an unrelated
+file. Recovery is bounded by occurrence/source, and a healthy playing source is not replaced when
+its downloaded file appears. Same-occurrence source changes do not count as another listen.
+Explicit selection supersedes pending restore and rejects stale selection results.
+
+All-recording evidence now prevents a metadata-only row or near-duration intermediary from merging
+incompatible takes. Personal settings resolve known canonical IDs without re-registering a weak UI
+snapshot. Search/credit hints require complete artist names, known durations and matching version
+annotations; named remixes and live venues remain distinct. Source matching and queue conversion run
+off main. MediaStore version/generation checks skip unchanged scans; manual Rescan stays forced,
+unknown generation falls back to a full scan, and a change during a scan triggers the next refresh.
+This is not a complete incremental MediaStore scanner.
+
+Local verification before full Android CI:
+- pure JVM harness: 201 tests passed;
+- actual Room/native SQLite UserRepositoryTest: 25 passed, zero skipped/failures/errors;
+- actual Room/native SQLite LibraryRepositoryTest: 9 passed, zero skipped/failures/errors;
+- git diff --check passed. No dependency, schema or SDK pin changed.
+The additional conservative YouTube index test and Android playback tests await complete branch CI.
+No Android compilation for this branch yet. Next: push this coherent draft, fix any full CI findings,
+review the signed artifact, fast-forward main only after every gate passes, then verify delivery.
+
+Still open: durable online pages and album/artist identity (49/64), inbound/account-scoped likes and
+playlist synchronization (56/58/59), remaining audit/UI/device work in AUDIT_CONTINUATION.md.
+Do not promote these local checks into Pixel/Sony, startup, battery or complete UI acceptance.
+
 # Active recording/source continuation (Codex, 2026-11-17)
 
 Branch `agent/recording-sources`, based on main `d2ef360` after music-v1109. Owner asked to keep

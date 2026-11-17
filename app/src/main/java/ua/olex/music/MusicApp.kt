@@ -12,6 +12,10 @@ import ua.olex.music.ui.resolveLyrics
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserDatabase
 import ua.olex.music.user.UserRepository
@@ -22,6 +26,7 @@ import ua.olex.music.user.UserRepository
  */
 class AppGraph(context: Context) {
     private val app = context.applicationContext
+    val audioAccess = kotlinx.coroutines.flow.MutableStateFlow(app.checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
     val musicFiles by lazy { ua.olex.music.library.LocalMusicFiles(app) }
     val downloadedLyrics by lazy { ua.olex.music.ui.DownloadedLyrics(app) }
     val artistImages by lazy { ua.olex.music.ui.ArtistImages(app) }
@@ -62,13 +67,14 @@ class AppGraph(context: Context) {
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
     /** Reconciliation is idempotent and never adds unrelated scanned files to the saved library. */
     val catalogue by lazy {
-        combine(library.index, userLibrary.catalogue) { local, saved ->
-            userLibrary.reconcile(local, saved)
-            ua.olex.music.model.SavedCatalog.merge(local, saved)
+        combine(library.index, userLibrary.catalogue, userLibrary.recordings) { local, saved, evidence ->
+            userLibrary.reconcile(local, evidence)
+            ua.olex.music.model.SavedCatalog.merge(local, saved, evidence)
         }.flowOn(Dispatchers.Default)
     }
 }
 
+@OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams, ua.olex.music.playback.PlaybackLyricsOwner, ua.olex.music.playback.PlaybackQueueOwner,
     coil3.SingletonImageLoader.Factory {
     /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
@@ -80,10 +86,40 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     /** The audio stream of an online song, found when the player opens it. */
     override fun resolve(id: String): android.net.Uri? = graph.youTube.audio(id)
     override fun forget(id: String) = graph.youTube.forget(id)
-    override fun available(uri: String): Boolean = !uri.startsWith("ytm://") || graph.network.value || ua.olex.music.playback.CacheBudget.isStreamCached(uri)
+    override fun available(uri: String): Boolean = !uri.startsWith("ytm://") ||
+        (graph.youTubeOn.value && graph.network.value) || ua.olex.music.playback.CacheBudget.isStreamCached(uri)
     override val localArtwork get() = graph.artwork
     val graph by lazy { AppGraph(this) }
+    override val playbackSourceChanges get() = merge(
+        graph.library.tracks.map { Unit }, graph.network.map { Unit }, graph.youTubeOn.map { Unit },
+        ua.olex.music.playback.CacheBudget.revision.map { Unit },
+        graph.audioAccess.flatMapLatest { granted ->
+            if (!granted) kotlinx.coroutines.flow.emptyFlow() else graph.library.changes.debounce(500).map {
+                try { graph.library.refresh() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (failure: Exception) { android.util.Log.w("MusicLibrary", "Could not refresh sources: ${failure.javaClass.simpleName}") }
+                Unit
+            }
+        },
+    ).debounce(300)
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
+    override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {
+        val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        graph.audioAccess.value = permitted
+        if (permitted) graph.library.refresh()
+        // Hidden library folders still remain legitimate playlist/playback sources.
+        val local = if (permitted) ua.olex.music.model.LibraryIndex.build(graph.library.tracks.first()) else ua.olex.music.model.LibraryIndex.EMPTY
+        val policy = graph.userLibrary.sourcePolicy(local)
+        val credits = ua.olex.music.ui.YouTubeMusic.indexOf(local)
+        val availability: (String) -> Boolean = ::available
+        tracks.map { track ->
+            val original = policy.requested(track)
+            val proposed = if (ua.olex.music.ui.YouTubeMusic.isOnline(original)) credits.copyOf(original)?.takeIf {
+                original.durationMs > 0 && it.durationMs > 0
+            } else null
+            policy.select(original, rejected, allowDirect, availability, proposedLocal = proposed)
+        }
+    }
     override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int) = graph.mix.extend(queue, current)
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
         val file = graph.library.index.first().byId[track.id]?.takeIf { it.uri == track.uri }

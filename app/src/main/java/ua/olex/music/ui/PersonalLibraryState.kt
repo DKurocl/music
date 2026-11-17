@@ -23,20 +23,22 @@ data class PersonalLibraryState(
 ) {
     val favouriteByTrackId = linkedFavourites + buildMap {
         for (row in favourites) {
-            row.track?.let { put(it.id.value, row.song) }
+            put(row.song.id, row.song)
+            if (!row.song.persistent) row.track?.let { put(it.id.value, row.song) }
             row.song.references.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE }
                 .forEach { put("yt:${it.uri!!.removePrefix(SavedSong.ONLINE_PREFIX)}", row.song) }
         }
     }
 
     companion object {
-        fun resolve(library: LibraryIndex, favourites: List<SavedSong>, playlists: List<UserPlaylist>, history: List<HistoryEntry>): PersonalLibraryState {
+        fun resolve(library: LibraryIndex, favourites: List<SavedSong>, playlists: List<UserPlaylist>, history: List<HistoryEntry>, aliases: Map<String, String> = emptyMap()): PersonalLibraryState {
             fun row(song: SavedSong) = SavedSongRow(song, song.resolve(library))
             val byRecording = favourites.associateBy { it.id }
             val physical = (library.songs + library.folders.flatMap { it.tracks }).distinctBy { it.id }
-            val linked = ua.olex.music.model.SavedCatalog.bindLocal(library.copy(songs = physical), favourites).mapNotNull { track ->
-                byRecording[track.recordingId]?.let { track.id.value to it }
-            }.toMap()
+            val linked = physical.mapNotNull { track ->
+                val id = track.recordingId?.let { aliases[it] ?: it }
+                byRecording[id]?.let { track.id.value to it }
+            }.toMap() + aliases.mapNotNull { (alias, target) -> byRecording[target]?.let { alias to it } }.toMap()
             return PersonalLibraryState(
                 favourites.map(::row),
                 playlists.map { PlaylistUi(it.id, it.name, it.songs.map(::row)) },

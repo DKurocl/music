@@ -3,6 +3,7 @@ package ua.olex.music.playback
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -10,17 +11,20 @@ import androidx.media3.exoplayer.source.ShuffleOrder
 import kotlinx.coroutines.*
 import java.util.UUID
 
-/** Restores paused, checkpoints active playback every 15 seconds, and does no periodic work while paused. */
+/** Restores paused, checkpoints active playback every 60 seconds, and does no periodic work while paused. */
 @OptIn(UnstableApi::class)
-internal class PlaybackPersistence(private val player: ExoPlayer, private val journal: PlaybackJournal, private val serviceScope: CoroutineScope) : Player.Listener {
+internal class PlaybackPersistence(private val player: ExoPlayer, private val journal: PlaybackJournal, private val serviceScope: CoroutineScope,
+    private val resolveSources: suspend (List<MediaItem>) -> List<MediaItem> = { it },
+) : Player.Listener {
     private var snapshot: PlaybackCheckpoint? = null
     private var clock: Job? = null
     private var changed = false
+    private var restoreSuperseded = false
     private var closed = false
     private var capturedTimeline: androidx.media3.common.Timeline? = null
     private var pendingResumption: PlaybackCheckpoint? = null
     private val initial = serviceScope.async {
-        try { journal.read() }
+        try { journal.read()?.let { it.copy(items = resolveSources(it.items)) } }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { Log.w("MusicPlayback", "Could not restore playback: ${failure.javaClass.simpleName}"); null }
     }
@@ -30,7 +34,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         serviceScope.launch {
             val saved = initial.await()
             // An explicit selection always wins over the asynchronous disk read.
-            if (closed || changed || player.mediaItemCount > 0 || saved == null || saved.items.isEmpty()) return@launch
+            if (closed || restoreSuperseded || changed || player.mediaItemCount > 0 || saved == null || saved.items.isEmpty()) return@launch
             player.setMediaItems(saved.items, saved.index, saved.positionMs)
             player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
             player.shuffleModeEnabled = saved.shuffle
@@ -58,7 +62,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         val modes = pendingResumption ?: return
         pendingResumption = null
         val items = (0 until player.mediaItemCount).map(player::getMediaItemAt)
-        if (items.map { it.mediaId to it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) } != modes.items.map { it.mediaId to it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) }) return
+        if (items.map { it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) } != modes.items.map { it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) }) return
         player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(modes.shuffleOrder.toIntArray(), System.nanoTime()))
         player.shuffleModeEnabled = modes.shuffle
         player.repeatMode = modes.repeat
@@ -68,12 +72,27 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     suspend fun resumption(): PlaybackCheckpoint? {
         val disk = initial.await()
         if (closed) return null
+        val timeline = player.currentTimeline
         val saved = if (player.mediaItemCount > 0) {
             captureQueue()
             snapshot?.copy(index = player.currentMediaItemIndex.coerceAtLeast(0), positionMs = player.currentPosition.coerceAtLeast(0))
-        } else if (!changed) disk else null
-        pendingResumption = saved
-        return saved
+        } else if (!changed && !restoreSuperseded) disk else null
+        val resolved = saved?.copy(items = resolveSources(saved.items))
+        if (closed || player.currentTimeline !== timeline) return null
+        pendingResumption = resolved
+        return resolved
+    }
+
+    /** Mark intent before a slow explicit selection mutates the timeline. */
+    fun supersedeRestore() { restoreSuperseded = true; pendingResumption = null }
+
+    /** An accepted empty selection must also clear a not-yet-restored disk queue. */
+    fun acceptClear() {
+        supersedeRestore()
+        changed = true
+        capturedTimeline = player.currentTimeline
+        snapshot = PlaybackCheckpoint(UUID.randomUUID().toString(), emptyList(), emptyList(), player.shuffleModeEnabled, player.repeatMode, 0, 0)
+        snapshot?.let(journal::write)
     }
 
     private fun captureQueue() {

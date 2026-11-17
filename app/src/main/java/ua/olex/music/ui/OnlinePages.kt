@@ -64,19 +64,6 @@ internal class OnlineNav(
 internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
 
 /**
- * Songs the owner has as files, shown (and played) as those files: quality tag and all. Looked up in
- * the library's index (built off the main thread by LibraryViewModel), once per list and library;
- * when the index is not ready yet it is built on a background thread and the list shows as it came.
- */
-@Composable
-internal fun rememberOwned(songs: List<Track>, library: LibraryIndex): List<Track> {
-    val ready = remember(songs, library) { YouTubeMusic.builtIndex(library)?.let { index -> songs.map { index.preferLocal(it) } } }
-    return produceState(ready ?: songs, songs, library) {
-        value = ready ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { YouTubeMusic.indexOf(library).let { index -> songs.map { index.preferLocal(it) } } }
-    }.value
-}
-
-/**
  * A value worked out from the library on a background thread: [initial] until it is ready, then the
  * result, recomputed when a key changes. For anything that walks every song, album or artist.
  */
@@ -144,7 +131,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     val cs = MaterialTheme.colorScheme
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
-    val songs = rememberOwned((state as? Load.Done)?.value?.songs.orEmpty(), library)
+    val songs = (state as? Load.Done)?.value?.songs.orEmpty()
     WarmFirst(songs)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         when (state) {
@@ -241,7 +228,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
         while (true) { grown = runCatching { graph.youTube.albumMore(target.id) }.getOrNull() ?: break }
     }
     val loaded = grown ?: (state as? Load.Done)?.value
-    val songs = rememberOwned(loaded?.second.orEmpty(), library)
+    val songs = loaded?.second.orEmpty()
     WarmFirst(songs)
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
@@ -303,7 +290,7 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
     val nav = LocalOnlineNav.current
     val state = rememberLoad(name, 0) { graph.youTube.artistId(name)?.let { graph.youTube.artist(it) } }
     val artist = (state as? Load.Done)?.value
-    val popular = rememberOwned(artist?.songs.orEmpty(), library).take(5)
+    val popular = artist?.songs.orEmpty().take(5)
     if (artist == null) return
     // Albums the owner already has open from his library above; only the others are offered here.
     val owned = remember(library) { library.albums.mapTo(HashSet()) { TextFold.fold(it.name) } }
@@ -495,7 +482,7 @@ internal fun rememberMoodView(mood: YouTubeMusic.Mood, library: LibraryIndex): M
     var tried by remember(mood) { mutableStateOf(cached != null) }
     LaunchedEffect(page) { if (page != null) tried = true }
     LaunchedEffect(mood, network) { kotlinx.coroutines.delay(8_000); tried = true }
-    return MoodView(page, rememberOwned(mine, library), rememberOwned(page?.songs.orEmpty(), library), waiting && !tried)
+    return MoodView(page, mine, page?.songs.orEmpty(), waiting && !tried)
 }
 
 /** The mood's part of Home: a big Play, YouTube Music's playlists, the owner's fitting songs, more songs. */
@@ -572,7 +559,7 @@ internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: Pad
     val on by graph.youTubeOn.collectAsState()
     val state = rememberLoad(target, 0) { if (on) graph.youTube.mood(target.mood) ?: YouTubeMusic.MoodPage(emptyList(), emptyList()) else YouTubeMusic.MoodPage(emptyList(), emptyList()) }
     val page = (state as? Load.Done)?.value
-    val moodSongs = rememberOwned(page?.songs.orEmpty(), library)
+    val moodSongs = page?.songs.orEmpty()
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {

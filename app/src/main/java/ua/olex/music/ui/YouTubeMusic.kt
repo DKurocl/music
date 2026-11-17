@@ -215,8 +215,8 @@ internal class YouTubeMusic(
     }
 
     /** The song on YouTube Music for a file in the library: the best match of a search for artist and title. */
-    suspend fun find(track: Track): Track? = search("${track.artist.substringBefore(",")} ${track.title}").let { found ->
-        found.firstOrNull { sameSong(it, track) } ?: found.firstOrNull { TextFold.fold(it.artist).contains(TextFold.fold(track.artist.substringBefore(",").trim())) }
+    suspend fun find(track: Track): Track? = search("${track.artist} ${track.title}").let { found ->
+        found.firstOrNull { sameSong(it, track) }
     }
 
     /** A mood of YouTube Music's home ("Energize", "Sad", "Sleep"): its label and the filter that opens it. */
@@ -609,10 +609,10 @@ internal class YouTubeMusic(
         fun builtIndex(library: LibraryIndex): Index? = indexed?.takeIf { it.first === library }?.second
 
         /** Keys under which a library song can be found by an online one (each of its artists). */
-        fun keysOf(song: Track): List<String> = (song.artists + song.artist + song.artist.substringBefore(",")).map { clean(song.title) + "\u0000" + clean(it.substringBefore(",")) }.distinct()
+        fun keysOf(song: Track): List<String> = (song.artists + song.artist).map { clean(song.title) + "\u0000" + clean(it) }.distinct()
 
         /** The key an online song is looked up by. */
-        fun keyOf(online: Track): String = clean(online.title) + "\u0000" + clean(online.artist.substringBefore(","))
+        fun keyOf(online: Track): String = clean(online.title) + "\u0000" + clean(online.artist)
 
         /**
          * The library indexed for [localCopy]: built once per library, so matching a mix of fifty
@@ -621,24 +621,13 @@ internal class YouTubeMusic(
         class Index(songs: List<Track>) {
             private val byKey = HashMap<String, MutableList<Track>>().apply { songs.filterNot(::isOnline).forEach { s -> keysOf(s).forEach { getOrPut(it) { ArrayList(1) } += s } } }
             // The best file of the same recording: lengths within three seconds when both are known (an
-            // unknown length on one side needs the same version words on both), the best quality first.
+            // unknown length needs an existing source link), the best quality first.
             fun copyOf(online: Track): Track? = byKey[keyOf(online)]?.filter { song ->
-                if (online.durationMs > 0 && song.durationMs > 0) kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
-                else versionOf(song.title) == versionOf(online.title)
+                sameTitle(online, song) && if (online.durationMs > 0 && song.durationMs > 0) kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
+                else song.sources.any { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE && it.uri == online.uri }
             }?.maxByOrNull { it.format?.rank ?: 0 }
 
-            /** A confirmed substitution retains the requested video as a reserve, with its own art. */
-            fun preferLocal(online: Track): Track {
-                val file = copyOf(online) ?: return online
-                val source = ua.olex.music.model.RecordingSource.from(file) ?: return online
-                val saved = ua.olex.music.model.SavedSong.from(online)
-                val alreadyLinked = saved.references.any { it.key == source.key }
-                if (!alreadyLinked && (online.durationMs <= 0 || file.durationMs <= 0)) return online
-                val incoming = (listOf(source) + saved.references + file.sources).distinctBy { it.key }
-                val candidate = ua.olex.music.model.RecordingCandidate(saved.id, saved.createdAt, saved.references)
-                if (ua.olex.music.model.RecordingMatcher.group(incoming, listOf(candidate)).isEmpty()) return online
-                return saved.bind(file)
-            }
+
         }
 
         // Extras like "(Remastered 2011)" or "- 2009 Mix" are dropped; words that make a different
@@ -653,12 +642,14 @@ internal class YouTubeMusic(
             return if (kept.isEmpty()) base else "$base [$kept]"
         }
 
-        /** The same recording: artist and title alike once extras are dropped, lengths within three seconds. */
-        fun sameSong(online: Track, song: Track): Boolean {
-            val title = clean(online.title); val artist = clean(online.artist.substringBefore(","))
-            return clean(song.title) == title && (clean(song.artist) == artist || song.artists.any { clean(it) == artist } || clean(song.artist.substringBefore(",")) == artist) &&
-                (online.durationMs <= 0 || song.durationMs <= 0 || kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000)
-        }
+        private fun sameTitle(a: Track, b: Track): Boolean =
+            a.key.value.substringAfter('|') == b.key.value.substringAfter('|')
+
+        /** Conservative search evidence; the service validates it against all known recordings. */
+        fun sameSong(online: Track, song: Track): Boolean = sameTitle(online, song) &&
+            keysOf(song).contains(keyOf(online)) && online.durationMs > 0 && song.durationMs > 0 &&
+            kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
+
     }
 
     /** NewPipe's network calls, over OkHttp. */

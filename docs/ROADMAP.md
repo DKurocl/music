@@ -41,9 +41,16 @@ Poweramp and Symfonium as the reference for a local player.
       (21), shared session lyrics and draw-phase word timing (33/34), cache budgets/events (8/54),
       offline queue retention (53). Auxiliary priority and resumption remain partial (45/74).
       Full backlog and limits: `AUDIT_CONTINUATION.md`; physical acceptance: `PHONE_CHECK.md`.
-- [~] Next unified-library block (Codex, 2026-11-17, `agent/recording-sources`): stable recording IDs with local and YouTube sources (47/48/63),
-      safe user.db migration, durable album/artist pages and identities (49/64), service source
-      selection (52), bidirectional likes and playlist operation/conflict sync (56/58/59).
+- [x] Recording/source foundation (Codex, 2026-11-17, `45be07f`, CI 44172917731): user.db v4,
+      durable recording IDs and source reserves, shared settings/lyrics/stats (47/48/63 foundation).
+      441 tests, both lints, debug/release builds and owner signing passed. Released as music-v1116; APK and existing signer verified.
+- [~] Service source policy (52, Codex, 2026-11-17, `agent/service-source-policy`): apply the same
+      full-evidence selection to app/browser/enqueue/recovery; retain unavailable occurrences and
+      reject ambiguous local substitutions. Include recording-matcher refinement for metadata bridges,
+      history/recovery guards and generation-aware refresh (41). Local: 201 pure, 25 user SQLite,
+      9 library SQLite tests passed; full Android CI pending.
+- [ ] Persistent online pages and album/artist identities (49/64).
+- [ ] Account-scoped bidirectional likes and playlist operation/conflict sync (56/58/59).
 
 1. Accurate library: integrate the existing tag reader, embedded/folder artwork, incremental scans
    and chosen music roots. Preserve all credited artists and honest audio properties.

@@ -364,4 +364,39 @@ class UserRepositoryTest {
         assertTrue(repository.stats.first().getValue(id).ratingSet)
     }
 
+
+    @Test fun playbackPolicyUsesUncollectedEvidenceToRejectAnAmbiguousSubstitution() = runBlocking {
+        val first = a.copy(id = TrackId("yt:a"), uri = "ytm://a", path = null, durationMs = 200_000)
+        val second = first.copy(id = TrackId("yt:b"), uri = "ytm://b", durationMs = 205_000)
+        repository.setRating(first, 0); repository.setRating(second, 0)
+        assertTrue(repository.catalogue.first().isEmpty())
+        val physical = a.copy(durationMs = 202_000)
+        val policy = repository.sourcePolicy(ua.olex.music.model.LibraryIndex.build(listOf(physical)))
+        assertEquals(first.uri, policy.select(first).track.uri)
+        assertEquals(second.uri, policy.select(second).track.uri)
+    }
+
+
+    @Test fun reconciliationAndPreferencesDoNotMergeAnAmbiguousUnresolvedFile() = runBlocking {
+        val a = this@UserRepositoryTest.a.copy(id = TrackId("yt:a"), uri = "ytm://a", path = null, durationMs = 200_000)
+        val b = a.copy(id = TrackId("yt:b"), uri = "ytm://b", durationMs = 205_000)
+        val file = this@UserRepositoryTest.a.copy(durationMs = 202_000)
+        repository.toggleFavourite(a); repository.setRating(b, 0)
+        repeat(2) { repository.recordPlay(file) }
+        val rawId = idOf(file)
+        val aId = idOf(a)
+        val weak = repository.reference(a).first()!!.bind(file)
+        repository.setRating(weak, 4)
+        assertEquals(3, database.userData().allRecordings().size)
+        assertEquals(2, repository.stats.first().getValue(rawId).plays)
+        assertEquals(4, repository.stats.first().getValue(aId).rating)
+        repository.reconcile(ua.olex.music.model.LibraryIndex.build(listOf(file)), repository.recordings.first())
+        assertEquals(3, database.userData().allRecordings().size)
+        val selected = repository.sourcePolicy(ua.olex.music.model.LibraryIndex.build(listOf(file))).select(a)
+        assertEquals(a.uri, selected.track.uri)
+        repository.recordPlay(selected.track)
+        assertEquals(aId, repository.history.first().first().song.id)
+        assertEquals(2, repository.stats.first().getValue(rawId).plays)
+    }
+
 }

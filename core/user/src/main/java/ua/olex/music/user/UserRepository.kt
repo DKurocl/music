@@ -19,6 +19,8 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     private val dao = database.userData()
     /** Saved metadata for every collected, rated or played song, independent of the history page limit. */
     val catalogue = dao.catalogue().map { rows -> rows.map(RecordingRelations::toSong) }.distinctUntilChanged()
+    val recordings = dao.observeRecordings().map { it.map(RecordingRelations::toSong) }.distinctUntilChanged()
+    val recordingIds = dao.recordingAliases().map { rows -> rows.associate { it.aliasId to it.songId } }.distinctUntilChanged()
     val favourites = dao.favourites().map { rows -> rows.map(RecordingRelations::toSong) }
     val playlists = dao.playlists().map { rows -> rows.map { row ->
         val songs = row.songs.associateBy { it.id }
@@ -56,10 +58,15 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         }.distinctUntilChanged()
     }
 
+    private suspend fun personalReference(track: Track, at: Long): SavedSong {
+        val known = track.recordingId?.let { dao.canonicalId(it) }?.let { dao.recording(it) }
+        return known?.toSong() ?: register(listOf(SavedSong.from(track)), at).single()
+    }
+
     suspend fun toggleFavourite(track: Track, existingId: String? = null) = database.withTransaction {
         val at = now()
-        val song = register(listOf(SavedSong.from(track)), at).single()
-        val id = existingId?.let { dao.canonicalId(it) } ?: song.id
+        val song = personalReference(track, at)
+        val id = existingId?.let { dao.canonicalId(it) }?.takeIf { it == song.id } ?: song.id
         if (dao.isFavourite(id)) { dao.removeFavourite(id); false }
         else { dao.addFavourite(FavouriteEntity(song.id, at)); true }
     }
@@ -77,7 +84,7 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     /** 0 clears this recording's rating, including every linked file and online source. */
     suspend fun setRating(track: Track, stars: Int) = database.withTransaction {
         val at = now()
-        val song = register(listOf(SavedSong.from(track)), at).single()
+        val song = personalReference(track, at)
         require(stars in 0..5)
         // Keep a dated clear, otherwise a later source merge could resurrect an older rating.
         dao.setRating(RatingEntity(song.id, stars, at))
@@ -160,19 +167,19 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
 
     suspend fun setLyricOffset(track: Track, offsetMs: Long) = database.withTransaction {
         val at = now()
-        val song = register(listOf(SavedSong.from(track)), at).single()
+        val song = personalReference(track, at)
         dao.setOffset(LyricOffsetEntity(song.id, offsetMs, at))
     }
 
     /** Assign identity before writing source-independent lyrics, without adding a history event. */
-    suspend fun keepReference(track: Track): SavedSong = database.withTransaction { register(listOf(SavedSong.from(track)), now()).single() }
+    suspend fun keepReference(track: Track): SavedSong = database.withTransaction { personalReference(track, now()) }
 
     /** Confirm only indexed matches to saved recordings; a scan never collects unrelated files. */
     suspend fun reconcile(local: ua.olex.music.model.LibraryIndex, saved: List<SavedSong>) = database.withTransaction {
         val bound = ua.olex.music.model.SavedCatalog.bindLocal(local, saved).filter { it.recordingId != null }
         val snapshots = bound.groupBy { it.recordingId }.values.map { copies ->
             val preferred = copies.maxBy { it.format?.rank ?: 0 }
-            SavedSong.from(preferred.copy(sources = (copies.mapNotNull(ua.olex.music.model.RecordingSource::from) + preferred.sources).distinctBy { it.key }))
+            SavedSong.from(preferred.copy(recordingId = null, sources = (copies.mapNotNull(ua.olex.music.model.RecordingSource::from) + preferred.sources).distinctBy { it.key }))
         }
         register(snapshots, now())
         Unit
@@ -180,6 +187,16 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
 
     /** Superseded IDs remain lyric-file lookup aliases after a confirmed recording merge. */
     suspend fun aliases(id: String): List<String> = dao.aliases(dao.canonicalId(id) ?: id)
+
+    /** One coherent bulk snapshot, including old played/uncollected rows that disambiguate versions. */
+    suspend fun sourcePolicy(local: ua.olex.music.model.LibraryIndex): ua.olex.music.model.PlaybackSources {
+        val snapshot = database.withTransaction {
+            dao.allRecordings().map(RecordingRelations::toSong) to dao.allAliases().associate { it.aliasId to it.songId }
+        }
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            ua.olex.music.model.PlaybackSources(local, snapshot.first, snapshot.second)
+        }
+    }
 
     private suspend fun replaceEntries(id: Long, songs: List<String>) {
         dao.clearEntries(id)

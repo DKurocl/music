@@ -73,7 +73,7 @@ class YouTubeMusicTest {
         val index = YouTubeMusic.indexOf(library)
         fun online(title: String, artist: String, ms: Long) = Track(TrackId("yt:$title"), "ytm://x", title, artist, durationMs = ms)
         assertEquals(eventually, index.copyOf(online("Eventually (Remastered)", "Tame Impala", 319_000)))
-        assertEquals(eventually, index.copyOf(online("Eventually [Remastered]", "TAME IMPALA", 0)))
+        assertNull(index.copyOf(online("Eventually [Remastered]", "TAME IMPALA", 0)))
         // A live take is another recording: never swapped for the studio file.
         assertNull(index.copyOf(online("Eventually [Live]", "TAME IMPALA", 0)))
         assertEquals(cafe, index.copyOf(online("Cafe del Mar (feat. Someone)", "Energy 52", 241_000)))
@@ -129,21 +129,34 @@ class YouTubeMusicTest {
         fun online(title: String, ms: Long) = Track(TrackId("yt:$title$ms"), "ytm://x", title, "Radiohead", durationMs = ms)
         assertEquals(flac, index.copyOf(online("Creep", 238_200)))
         assertEquals(flac, index.copyOf(online("Creep (Remastered 2008)", 238_200)))
-        assertEquals(live, index.copyOf(online("Creep (Live at Glastonbury)", 0)))
+        assertNull(index.copyOf(online("Creep (Live at Glastonbury)", 0)))
         assertNull(index.copyOf(online("Creep (Acoustic)", 0)))
     }
 
     @Test fun preferredLocalPlaybackRetainsItsVideoWithoutGuessingUnknownDuration() {
         val file = Track(TrackId("local:reserve"), "content://reserve", "Song", "Artist", durationMs = 200_000, path = "Music/song.flac")
         val online = Track(TrackId("yt:reserve"), "ytm://reserve", "Song", "Artist", durationMs = 201_000, artworkUri = "https://own-cover")
-        val index = YouTubeMusic.Companion.Index(listOf(file))
-        val selected = index.preferLocal(online)
+        val policy = ua.olex.music.model.PlaybackSources(LibraryIndex.build(listOf(file)), emptyList())
+        val selected = policy.select(online).track
         assertEquals(file.uri, selected.uri)
         val reserve = ua.olex.music.model.SavedSong.from(selected).online()!!
         assertEquals(online.uri, reserve.uri)
         assertEquals(online.artworkUri, reserve.artworkUri)
-        assertEquals(online.copy(durationMs = 0), index.preferLocal(online.copy(durationMs = 0)))
-        assertEquals(online.copy(title = "Song (Live)"), index.preferLocal(online.copy(title = "Song (Live)")))
+        assertEquals(online.uri, policy.select(online.copy(durationMs = 0)).track.uri)
+        assertEquals(online.uri, policy.select(online.copy(title = "Song (Live)")).track.uri)
+    }
+
+    @Test fun differentVenuesRemixNamesAndBandPrefixesAreNotOwnedCopies() {
+        val file = Track(TrackId("local:live"), "content://live", "Song (Live at Wembley)", "Earth, Wind & Fire", durationMs = 200_000)
+        val index = YouTubeMusic.Companion.Index(listOf(file))
+        val online = file.copy(id = TrackId("yt:live"), uri = "ytm://live")
+        assertEquals(file, index.copyOf(online))
+        assertNull(index.copyOf(online.copy(title = "Song (Live at Glastonbury)")))
+        assertNull(index.copyOf(online.copy(artist = "Earth")))
+        val remix = file.copy(title = "Song (Blue Remix)")
+        assertNull(YouTubeMusic.Companion.Index(listOf(remix)).copyOf(online.copy(title = "Song (Red Remix)")))
+        assertFalse(YouTubeMusic.sameSong(online.copy(durationMs = 0), file))
+        assertFalse(YouTubeMusic.sameSong(online.copy(title = "Song (Live at Glastonbury)"), file))
     }
 
 }

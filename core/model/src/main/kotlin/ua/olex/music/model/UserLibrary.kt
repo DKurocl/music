@@ -48,6 +48,17 @@ data class SavedSong(
             sources = refs.takeIf { persistent || it.size > 1 }.orEmpty(), addedAt = createdAt.takeIf { it > 0 })
     }
 
+    /** Honest metadata for an unavailable recording, without borrowing an unrelated request's file. */
+    fun displayTrack(): Track {
+        online()?.let { return it }
+        val source = references.firstOrNull { it.path == path } ?: references.firstOrNull()
+        return Track(TrackId(id), source?.uri.orEmpty(), title, artist, album = album,
+            durationMs = source?.durationMs?.takeIf { it > 0 } ?: durationMs,
+            artworkUri = source?.artworkUri ?: artworkUri, path = source?.path,
+            clipStartMs = source?.clipStartMs, clipEndMs = source?.clipEndMs,
+            recordingId = id.takeIf { persistent }, sources = references)
+    }
+
     /** Attach identity and reserves without changing the file's playback address, tags or quality. */
     fun bind(track: Track): Track {
         val refs = (listOfNotNull(RecordingSource.from(track)) + references + track.sources).distinctBy { it.key }

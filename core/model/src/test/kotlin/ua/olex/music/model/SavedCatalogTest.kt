@@ -87,4 +87,16 @@ class SavedCatalogTest {
         assertEquals(online.uri, bridge.resolve(LibraryIndex.build(listOf(file, file.copy(id = TrackId("local:2"), durationMs = 265_000))))!!.uri)
     }
 
+
+    @Test fun uncollectedEvidenceDisambiguatesFilesWithoutAddingHiddenOnlineRows() {
+        val a = SavedSong.from(online.copy(durationMs = 260_000)).copy(id = "recording:a")
+        val b = SavedSong.from(online.copy(id = TrackId("yt:two"), uri = "ytm://two", durationMs = 265_000)).copy(id = "recording:b")
+        val actual = file.copy(durationMs = 262_000)
+        val raw = SavedSong.from(actual).copy(id = "recording:raw")
+        val result = SavedCatalog.merge(LibraryIndex.build(listOf(actual)), listOf(a, raw), listOf(a, b, raw))
+        assertEquals(setOf(actual.id, online.id), result.byId.keys)
+        assertEquals(raw.id, result.byId.getValue(actual.id).recordingId)
+        assertFalse(result.songs.any { it.id == TrackId("yt:two") })
+    }
+
 }

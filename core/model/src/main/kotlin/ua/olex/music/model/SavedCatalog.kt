@@ -30,9 +30,9 @@ object SavedCatalog {
     }
 
     /** Build off main. Files win when they match; unavailable files do not become playable snapshots. */
-    fun merge(local: LibraryIndex, saved: List<SavedSong>): LibraryIndex {
-        if (saved.isEmpty()) return local
-        val bound = bindLocal(local, saved)
+    fun merge(local: LibraryIndex, saved: List<SavedSong>, evidence: List<SavedSong> = saved): LibraryIndex {
+        if (saved.isEmpty() && evidence.isEmpty()) return local
+        val bound = bindLocal(local, evidence)
         val represented = bound.mapNotNullTo(HashSet()) { it.recordingId }
         val linkedSources = HashMap<String, MutableList<RecordingCandidate>>()
         for (track in bound) if (track.sources.isNotEmpty()) {

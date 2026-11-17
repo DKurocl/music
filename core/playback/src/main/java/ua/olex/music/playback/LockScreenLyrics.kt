@@ -27,7 +27,7 @@ import java.io.File
  * The app's own screens, history and widget read the real player, never this line.
  */
 @OptIn(UnstableApi::class)
-internal class LyricLinePlayer(private val real: Player) : ForwardingPlayer(real) {
+internal class LyricLinePlayer(private val real: Player, private val explicitPlay: () -> Unit = {}) : ForwardingPlayer(real) {
     private val listeners = ArrayList<Player.Listener>()
     var line: String? = null
         set(value) {
@@ -37,6 +37,9 @@ internal class LyricLinePlayer(private val real: Player) : ForwardingPlayer(real
             val events = Player.Events(FlagSet.Builder().add(Player.EVENT_MEDIA_METADATA_CHANGED).build())
             for (l in listeners.toList()) { l.onMediaMetadataChanged(meta); l.onEvents(this, events) }
         }
+
+    override fun play() { explicitPlay(); if (real.playerError != null) super.prepare(); super.play() }
+    override fun prepare() { explicitPlay(); super.prepare() }
 
     override fun addListener(listener: Player.Listener) { listeners += listener; super.addListener(listener) }
     override fun removeListener(listener: Player.Listener) { listeners -= listener; super.removeListener(listener) }
