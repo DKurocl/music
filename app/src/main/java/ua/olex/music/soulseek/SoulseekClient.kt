@@ -141,7 +141,7 @@ class SoulseekClient(
     private suspend fun fileConnection(socket: Socket) {
         val token = runCatching { withTimeout(30_000) { socket.getInputStream().readExactly(4) } }.getOrNull()?.let { In(it).u32() }
         val waiting = token?.let { files[it] }
-        if (waiting == null || waiting.isCompleted) socket.close() else waiting.complete(socket)
+        if (waiting?.complete(socket) != true) socket.close()
     }
 
     /** Reads peer messages on a P connection: search results and the transfer handshake. */
@@ -206,16 +206,32 @@ class SoulseekClient(
             }
             val (token, size) = accepted ?: throw IOException("The peer didn't start the upload in time")
             val fileSocket = files.getOrPut(token) { CompletableDeferred() }
-            val data = withTimeoutOrNull(120_000) { fileSocket.await() }.also { files.remove(token) } ?: throw IOException("The peer didn't connect to send the file")
-            data.use { s ->
-                s.getOutputStream().apply { write(Out().u64(0).toByteArray()); flush() }
-                val input = s.getInputStream(); val buffer = ByteArray(64 * 1024); var got = 0L
-                while (got < size) {
-                    val n = input.read(buffer, 0, minOf(buffer.size.toLong(), size - got).toInt())
-                    if (n < 0) break
-                    target.write(buffer, 0, n); got += n; progress(got, size)
+            val data = try { withTimeoutOrNull(120_000) { fileSocket.await() } }
+            finally { files.remove(token); fileSocket.cancel() }
+                ?: throw IOException("The peer didn't connect to send the file")
+            data.use { socket ->
+                // A blocked socket read won't see coroutine cancellation until the socket closes.
+                kotlinx.coroutines.coroutineScope {
+                    val closer = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                        try { kotlinx.coroutines.awaitCancellation() }
+                        finally { runCatching { socket.close() } }
+                    }
+                    try {
+                        socket.soTimeout = 30_000
+                        socket.getOutputStream().apply { write(Out().u64(0).toByteArray()); flush() }
+                        val input = socket.getInputStream()
+                        val buffer = ByteArray(64 * 1024)
+                        var got = 0L
+                        while (got < size) {
+                            val n = input.read(buffer, 0, minOf(buffer.size.toLong(), size - got).toInt())
+                            if (n < 0) break
+                            target.write(buffer, 0, n)
+                            got += n
+                            progress(got, size)
+                        }
+                        if (got < size) throw IOException("The transfer stopped at ${got * 100 / size.coerceAtLeast(1)}%")
+                    } finally { closer.cancel() }
                 }
-                if (got < size) throw IOException("The transfer stopped at ${got * 100 / size.coerceAtLeast(1)}%")
             }
         } finally { offers.remove(k); refusals.remove(k) }
     }

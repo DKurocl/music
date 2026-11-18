@@ -6,7 +6,12 @@ import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
 import android.provider.MediaStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,20 +37,39 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     private var idle: kotlinx.coroutines.Job? = null
 
     /** One download as the app shows it. [key] names what is being fetched, so a button finds its own job. */
-    data class Job(val id: Int, val key: String, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false) {
-        val running get() = !done && !failed
+    data class Job(val id: Int, val key: String, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false, val cancelled: Boolean = false) {
+        val running get() = !done && !failed && !cancelled
     }
-    private val again = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
+    private val active = HashMap<Int, kotlinx.coroutines.Job>()
+    private val lock = Any()
+    private var starting: Int? = null
+    private var migrating = false
+    private val retriesAfterCancellation = HashSet<Int>()
+    private fun record(id: Int) = "download:$id"
+    private fun stored(id: Int) = prefs.getString(record(id), null)?.let { runCatching { org.json.JSONObject(it) }.getOrNull() }
     private val _jobs = MutableStateFlow<List<Job>>(emptyList())
     val jobs: StateFlow<List<Job>> = _jobs
+
+    init {
+        _jobs.value = prefs.all.keys.mapNotNull { name ->
+            if (!name.startsWith("download:")) return@mapNotNull null
+            val id = name.substringAfter(':').toIntOrNull() ?: return@mapNotNull null
+            stored(id)?.let { data ->
+                val key = data.optString("key").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val state = data.optString("state")
+                Job(id, key, data.optString("title", "Download"), data.optString("status", "Waiting…"),
+                    done = state == "done", failed = state == "failed", cancelled = state == "cancelled")
+            }
+        }.sortedBy { it.id }
+    }
 
     var account: Pair<String, String>?
         get() = prefs.getString("user", null)?.let { u -> prefs.getString("password", null)?.let { u to it } }
         set(value) { prefs.edit().apply { if (value == null) { remove("user"); remove("password") } else { putString("user", value.first); putString("password", value.second) } }.apply(); client.disconnect() }
 
     /** Finds and saves one song in the best quality the network has. */
-    fun song(artist: String, title: String, album: String?, durationMs: Long): Unit = start(songKey(artist, title), "$artist · $title", { song(artist, title, album, durationMs) },
-        listOf("s", artist, title, album.orEmpty(), durationMs.toString()).joinToString(SEP)) { update ->
+    fun song(artist: String, title: String, album: String?, durationMs: Long): Unit = start(songKey(artist, title), "$artist · $title",
+        listOf("s", artist, title, album.orEmpty(), durationMs.toString()).joinToString(SEP)) { id, update ->
         // From exact to loose; the first search with a good copy wins.
         val phrases = queries(artist, title)
         val results = ArrayList<SoulseekClient.Result>()
@@ -56,12 +80,12 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             best = chooseSong(results, title, durationMs / 1000)
             if (best != null) break
         }
-        save(best ?: error("Not on Soulseek in lossless or 320 kbps"), artist, album ?: "Singles", update, 1, 1)
+        save(id, best ?: error("Not on Soulseek in lossless or 320 kbps"), artist, album ?: "Singles", update, 1, 1)
     }
 
     /** Finds the best copy of a whole album (one peer's folder) and saves every song in it. */
-    fun album(artist: String, album: String): Unit = start(albumKey(artist, album), "$artist · $album", { album(artist, album) },
-        listOf("a", artist, album).joinToString(SEP)) { update ->
+    fun album(artist: String, album: String): Unit = start(albumKey(artist, album), "$artist · $album",
+        listOf("a", artist, album).joinToString(SEP)) { id, update ->
         update("Searching Soulseek…", null)
         var files: List<SoulseekClient.Result>? = null
         for (q in queries(artist, album)) {
@@ -69,7 +93,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             if (files != null) break
         }
         if (files == null) error("This album isn't on Soulseek in lossless or 320 kbps")
-        files.forEachIndexed { i, f -> save(f, artist, album, update, i + 1, files.size) }
+        files.forEachIndexed { i, f -> save(id, f, artist, album, update, i + 1, files.size) }
     }
 
     /** For screenshots and tests: shows these jobs as if they ran. */
@@ -79,63 +103,210 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     /** The latest job for [key], running or finished. */
     fun job(key: String): Job? = _jobs.value.lastOrNull { it.key == key }
 
-    /** Runs a failed download again, the same way it was asked for. */
-    fun retry(job: Job) { again[job.key]?.invoke() }
-
-    /** Forgets finished and failed downloads; running ones stay. */
-    fun clearFinished() { _jobs.value = _jobs.value.filter { it.running } }
-
-    // Downloads asked for and not yet finished, kept on disk: when Android stops the app mid-way they
-    // start again the next time the app runs, instead of silently disappearing.
-    private fun pending(): Set<String> = prefs.getStringSet("pending", emptySet()).orEmpty()
-    private fun remember(request: String, keep: Boolean) = synchronized(prefs) {
-        prefs.edit().putStringSet("pending", if (keep) pending() + request else pending() - request).apply()
+    /** Retry the same durable request, keeping already published album files. */
+    fun retry(job: Job) = retry(job.id)
+    fun retry(id: Int) {
+        synchronized(lock) {
+            val old = _jobs.value.firstOrNull { it.id == id && (it.failed || it.cancelled) } ?: return
+            val data = stored(id) ?: return
+            write(data, old.copy(status = "Waiting…", failed = false, cancelled = false))
+            if (id in active) retriesAfterCancellation.add(id)
+        }
+        requestResume()
     }
-    /** Starts again what was still downloading when the app was stopped. */
-    fun resume() {
-        for (request in pending()) {
-            val f = request.split(SEP)
-            when (f.firstOrNull()) {
-                "s" -> if (f.size >= 5) song(f[1], f[2], f[3].ifEmpty { null }, f[4].toLongOrNull() ?: 0L)
-                "a" -> if (f.size >= 3) album(f[1], f[2])
-            }
+
+    /** Cancel both queued and active work. Completed files stay in the library. */
+    fun cancel(id: Int) {
+        synchronized(lock) {
+            val old = _jobs.value.firstOrNull { it.id == id && it.running } ?: return
+            val data = stored(id) ?: return
+            write(data, old.copy(status = "Cancelled", cancelled = true))
+            active[id]?.cancel()
         }
     }
 
-    private fun start(key: String, title: String, redo: () -> Unit, request: String, work: suspend (update: (String, Float?) -> Unit) -> Unit) {
-        // A second tap while it runs changes nothing: one download per song or album at a time.
-        if (job(key)?.running == true) return
-        remember(request, keep = true)
-        again[key] = redo
-        val id = (System.nanoTime() % 1_000_000).toInt().let { if (it < 0) -it else it }
-        fun set(job: Job) { _jobs.value = (_jobs.value.filterNot { it.id == id || (it.key == key && !it.running) } + job).takeLast(20); notify(job) }
-        set(Job(id, key, title, "Waiting…"))
-        idle?.cancel()
-        scope.launch {
-            one.withLock {
-                try {
-                    val (user, password) = account ?: error("Add your Soulseek account in Settings")
-                    if (client.state.value !is SoulseekClient.State.Online) { set(Job(id, key, title, "Signing in to Soulseek…")); client.login(user, password) }
-                    work { status, progress -> set(Job(id, key, title, status, progress)) }
-                    set(Job(id, key, title, "Saved to Music/Soulseek" + (lastKind?.let { " \u00b7 $it" } ?: ""), 1f, done = true))
-                    onSaved()
-                    remember(request, keep = false)
-                } catch (e: kotlinx.coroutines.CancellationException) { throw e
-                } catch (e: Exception) {
-                    set(Job(id, key, title, e.message ?: "The download failed", failed = true))
-                    remember(request, keep = false)
+    fun clearFinished() {
+        synchronized(lock) {
+            val finished = _jobs.value.filterNot { it.running || it.id in active }
+            val edit = prefs.edit()
+            finished.forEach { job ->
+                edit.remove(record(job.id))
+                edit.remove("completed:${job.id}")
+                if (prefs.contains("file:${job.id}")) scope.launch { runCatching { cleanInterruptedFile(job.id) } }
+                context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_BASE + job.id)
+            }
+            edit.apply()
+            _jobs.update { rows -> rows - finished.toSet() }
+        }
+    }
+
+    /** Start only from a visible app or an explicit notification interaction. */
+    fun requestResume() {
+        if (!_jobs.value.any { it.running } && prefs.getStringSet("pending", emptySet()).isNullOrEmpty()) return
+        runCatching { context.startForegroundService(android.content.Intent(context, DownloadService::class.java)) }
+            .onFailure {
+                synchronized(lock) {
+                    _jobs.value.filter { it.running && it.id !in active }.forEach { job ->
+                        stored(job.id)?.let { write(it, job.copy(status = "Waiting for Music to open")) }
+                    }
                 }
             }
-            if (_jobs.value.none { it.running }) {
-                idle?.cancel()
-                idle = scope.launch { kotlinx.coroutines.delay(120_000); if (_jobs.value.none { it.running }) client.disconnect() }
+    }
+
+    /** Called by the foreground service once it has promoted itself. */
+    internal fun resume() {
+        synchronized(lock) {
+            migrating = true
+            try {
+                prefs.getStringSet("pending", emptySet()).orEmpty().toList().forEach(::dispatch)
+                prefs.edit().remove("pending").apply()
+            } finally {
+                migrating = false
+            }
+            _jobs.value.filter { it.running }.forEach { job ->
+                stored(job.id)?.optString("request")?.let { request ->
+                    startStored(job.id, request)
+                }
             }
         }
+    }
+
+    internal fun suspendTransfers() {
+        synchronized(lock) {
+            retriesAfterCancellation.clear()
+            _jobs.value.filter { it.id in active && it.running }.forEach { job ->
+                stored(job.id)?.let { write(it, job.copy(status = "Paused. Open Music to resume", progress = null)) }
+            }
+            active.values.toList().forEach { it.cancel() }
+        }
+    }
+
+    private fun startStored(id: Int, request: String) {
+        starting = id
+        try { dispatch(request) } finally { starting = null }
+    }
+
+    private fun dispatch(request: String) {
+        val parts = request.split(SEP)
+        when (parts.firstOrNull()) {
+            "s" -> if (parts.size >= 5) song(parts[1], parts[2], parts[3].ifEmpty { null }, parts[4].toLongOrNull() ?: 0L)
+            "a" -> if (parts.size >= 3) album(parts[1], parts[2])
+        }
+    }
+
+    private fun write(data: org.json.JSONObject, job: Job) {
+        val state = when {
+            job.cancelled -> "cancelled"
+            job.failed -> "failed"
+            job.done -> "done"
+            else -> "waiting"
+        }
+        data.put("state", state).put("status", job.status)
+        prefs.edit().putString(record(job.id), data.toString()).apply()
+        showStatus(job)
+    }
+
+    private fun showStatus(job: Job) {
+        _jobs.update { rows -> (rows.filterNot { it.id == job.id } + job).sortedBy { it.id } }
+        notify(job)
+    }
+
+    private fun start(
+        key: String, title: String, request: String,
+        work: suspend (Int, (String, Float?) -> Unit) -> Unit,
+    ) {
+        synchronized(lock) {
+            val resumedId = starting
+            if (resumedId == null) {
+                if (_jobs.value.any { it.key == key && it.running }) return
+                val id = prefs.getInt("next-id", 0) + 1
+                val data = org.json.JSONObject().put("key", key).put("title", title).put("request", request)
+                prefs.edit().putInt("next-id", id).apply()
+                write(data, Job(id, key, title, "Waiting…"))
+                if (!migrating) requestResume()
+                return
+            }
+            val id = resumedId
+            if (id in active) return
+            val data = stored(id) ?: return
+            val task = scope.launch(start = CoroutineStart.LAZY) {
+                one.withLock {
+                    try {
+                        cleanInterruptedFile(id)
+                        val (user, password) = account ?: error("Add your Soulseek account in Settings")
+                        if (client.state.value !is SoulseekClient.State.Online) {
+                            progress(id, key, title, "Signing in to Soulseek…", null)
+                            client.login(user, password)
+                        }
+                        work(id) { status, fraction -> progress(id, key, title, status, fraction) }
+                        synchronized(lock) {
+                            if (_jobs.value.any { it.id == id && it.running }) {
+                                write(data, Job(id, key, title, "Saved to Music/Soulseek" + (lastKind?.let { " · $it" } ?: ""), 1f, done = true))
+                            }
+                        }
+                        onSaved()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        currentCoroutineContext().ensureActive()
+                        synchronized(lock) {
+                            if (_jobs.value.any { it.id == id && it.running }) {
+                                write(data, Job(id, key, title, failure.message ?: "The download failed", failed = true))
+                            }
+                        }
+                    }
+                }
+            }
+            active[id] = task
+            idle?.cancel()
+            task.invokeOnCompletion {
+                synchronized(lock) {
+                    active.remove(id, task)
+                    if (retriesAfterCancellation.remove(id) && _jobs.value.any { it.id == id && it.running }) {
+                        stored(id)?.optString("request")?.let { startStored(id, it) }
+                    }
+                    if (active.isEmpty()) {
+                        idle?.cancel()
+                        idle = scope.launch { kotlinx.coroutines.delay(120_000); synchronized(lock) { if (active.isEmpty()) client.disconnect() } }
+                    }
+                }
+            }
+            task.start()
+        }
+    }
+
+    private fun progress(id: Int, key: String, title: String, status: String, fraction: Float?) {
+        synchronized(lock) {
+            if (_jobs.value.any { it.id == id && it.running }) showStatus(Job(id, key, title, status, fraction))
+        }
+    }
+
+    private fun cleanInterruptedFile(id: Int) {
+        val raw = prefs.getString("file:$id", null) ?: return
+        val uri = android.net.Uri.parse(raw)
+        val resolver = context.contentResolver
+        val pending = resolver.query(uri, arrayOf(MediaStore.Audio.Media.IS_PENDING), null, null)?.use {
+            it.moveToFirst() && it.getInt(0) == 1
+        } ?: false
+        if (pending) resolver.delete(uri, null, null)
+        val finished = prefs.getString("file-key:$id", null)
+        val exists = !pending && resolver.query(uri, arrayOf(MediaStore.Audio.Media._ID), null, null)?.use { it.moveToFirst() } == true
+        val edit = prefs.edit().remove("file:$id").remove("file-key:$id")
+        if (exists && finished != null) {
+            val completed = prefs.getStringSet("completed:$id", emptySet()).orEmpty()
+            edit.putStringSet("completed:$id", completed + finished)
+        }
+        edit.apply()
     }
 
     @Volatile private var lastKind: String? = null
 
-    private suspend fun save(file: SoulseekClient.Result, artist: String, album: String, update: (String, Float?) -> Unit, n: Int, of: Int) {
+    private suspend fun save(id: Int, file: SoulseekClient.Result, artist: String, album: String, update: (String, Float?) -> Unit, n: Int, of: Int) {
+        currentCoroutineContext().ensureActive()
+        val checkpoint = "completed:$id"
+        val fileKey = "${file.name}/${file.size}"
+        val completed = prefs.getStringSet(checkpoint, emptySet()).orEmpty()
+        if (fileKey in completed) return
         lastKind = if (file.extension in LOSSLESS) file.extension.uppercase() else "${file.extension.uppercase()} ${file.bitrate ?: ""}".trim()
         val resolver = context.contentResolver
         val safe = { s: String -> s.replace(Regex("""[\\/:*?"<>|]"""), "_").trim().ifEmpty { "Unknown" } }
@@ -145,6 +316,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values) ?: error("Couldn't create the file")
+        prefs.edit().putString("file:$id", uri.toString()).putString("file-key:$id", fileKey).apply()
         val prefix = if (of > 1) "$n of $of · " else ""
         try {
             update("${prefix}Waiting for ${file.username}…", null)
@@ -155,34 +327,47 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                     if (percent != shown) { shown = percent; update("${prefix}$percent% of ${megabytes(size)}", got.toFloat() / size) }
                 })
             }
+            currentCoroutineContext().ensureActive()
             resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
-        } catch (e: Exception) { resolver.delete(uri, null, null); throw e }
+            prefs.edit().putStringSet(checkpoint, completed + fileKey).remove("file:$id").remove("file-key:$id").apply()
+        } catch (failure: Exception) {
+            runCatching { resolver.delete(uri, null, null) }
+            prefs.edit().remove("file:$id").remove("file-key:$id").apply()
+            throw failure
+        }
     }
 
     private val lastShown = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+    internal fun channel(): String {
+        context.getSystemService(NotificationManager::class.java)
+            ?.createNotificationChannel(NotificationChannel(CHANNEL, "Downloads", NotificationManager.IMPORTANCE_LOW))
+        return CHANNEL
+    }
+
     private fun notify(job: Job) {
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
-        manager.createNotificationChannel(NotificationChannel(CHANNEL, "Downloads", NotificationManager.IMPORTANCE_LOW))
-        val n = Notification.Builder(context, CHANNEL).setSmallIcon(android.R.drawable.stat_sys_download)
-            .setContentTitle(job.title).setContentText(job.status).setOnlyAlertOnce(true)
-            .setOngoing(!job.done && !job.failed)
-            .apply { if (!job.done && !job.failed) setProgress(100, ((job.progress ?: 0f) * 100).toInt(), job.progress == null) }
-            .apply { if (job.done) setSmallIcon(android.R.drawable.stat_sys_download_done) }
-            // A tap opens the app (the download's state shows in Settings and on its album).
-            .apply { context.packageManager.getLaunchIntentForPackage(context.packageName)?.let { setContentIntent(android.app.PendingIntent.getActivity(context, 1, it, android.app.PendingIntent.FLAG_IMMUTABLE)) } }
-            .setGroup(CHANNEL)
-            .build()
-        // Progress updates at most twice a second (the notification shade doesn't need more); the end always.
         val now = android.os.SystemClock.elapsedRealtime()
-        if (!job.done && !job.failed && now - (lastShown[job.id] ?: 0L) < 500) return
-        lastShown[job.id] = now
-        // One notification per download for the whole session: ids never wrap onto another download.
+        if (job.running && now - (lastShown[job.id] ?: -500L) < 500) return
+        if (job.running) lastShown[job.id] = now else lastShown.remove(job.id)
+        val n = Notification.Builder(context, channel()).setSmallIcon(
+            if (job.done) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_sys_download,
+        ).setContentTitle(job.title).setContentText(job.status).setOnlyAlertOnce(true)
+            .setOngoing(job.running).setAutoCancel(!job.running).setContentIntent(DownloadActions.open(context, job.id))
+            .setGroup(CHANNEL)
+            .apply {
+                if (job.running) {
+                    setProgress(100, ((job.progress ?: 0f) * 100).toInt(), job.progress == null)
+                    addAction(Notification.Action.Builder(null, "Cancel", DownloadActions.action(context, job.id, retry = false)).build())
+                } else if (job.failed || job.cancelled) {
+                    addAction(Notification.Action.Builder(null, "Retry", DownloadActions.action(context, job.id, retry = true)).build())
+                }
+            }.build()
         runCatching { manager.notify(NOTIFICATION_BASE + job.id, n) }
     }
 
     companion object {
         const val CHANNEL = "downloads"
-        const val NOTIFICATION_BASE = 4_000
+        const val NOTIFICATION_BASE = 20_000_000
         private const val SEP = "\u0001"
         fun megabytes(bytes: Long): String = if (bytes >= 1_000_000_000) String.format(java.util.Locale.ROOT, "%.1f GB", bytes / 1e9) else "${(bytes + 500_000) / 1_000_000} MB"
         fun songKey(artist: String, title: String) = "song:" + TextFold.fold(artist) + "\u0000" + TextFold.fold(title)

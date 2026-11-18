@@ -154,8 +154,12 @@ internal fun SettingsPage(
             val job = recent[i]
             val haptics = rememberHaptics()
             Row(when { job.done -> Glyph.CHECK; job.failed -> Glyph.INFO; else -> Glyph.DOWNLOAD }, job.title, job.status, last = i == recent.lastIndex,
-                trailing = if (job.failed) ({
-                    androidx.compose.material3.IconButton(onClick = { haptics.tick(); soulseek.retry(job) }, modifier = Modifier.semantics { contentDescription = "Try again" }) { Symbol(Glyph.REFRESH) }
+                trailing = if (!job.done) ({
+                    val label = if (job.running) "Cancel download" else "Try again"
+                    androidx.compose.material3.IconButton(
+                        onClick = { haptics.tick(); if (job.running) soulseek.cancel(job.id) else soulseek.retry(job) },
+                        modifier = Modifier.semantics { contentDescription = label },
+                    ) { Symbol(if (job.running) Glyph.CLOSE else Glyph.REFRESH) }
                 }) else null,
                 below = if (job.running) ({
                     androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))

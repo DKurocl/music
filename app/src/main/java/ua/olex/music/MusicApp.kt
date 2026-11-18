@@ -44,7 +44,7 @@ class AppGraph(context: Context) {
     internal val mix by lazy { ua.olex.music.ui.PlaybackMix(this) }
     internal fun excludedRecommendations(): Set<String> = app.getSharedPreferences("not_recommended", Context.MODE_PRIVATE).getStringSet("keys", emptySet()).orEmpty()
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
-    val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {}.also { if (it.account != null) it.resume() } }
+    val soulseek by lazy { ua.olex.music.soulseek.SoulseekDownloads(app) {} }
     private val onlinePrefs by lazy { app.getSharedPreferences("online", Context.MODE_PRIVATE) }
     /** YouTube Music in search and playback; the owner can turn it off in Settings. */
     val youTubeOn by lazy { kotlinx.coroutines.flow.MutableStateFlow(onlinePrefs.getBoolean("youtube", true)) }
