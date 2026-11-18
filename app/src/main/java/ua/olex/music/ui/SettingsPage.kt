@@ -20,6 +20,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.Role
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.ui.semantics.semantics
 import ua.olex.music.playback.FadingPlayer
 import ua.olex.music.playback.HeadsetRules
@@ -66,12 +73,7 @@ internal fun SettingsPage(
         item { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
 
         item { Group("Playback") }
-        item {
-            var tint by remember { mutableStateOf(CoverColours.on(context)) }
-            Toggle(Glyph.PHOTO, "Colours from the cover", "The player takes a soft tint of the song's cover", tint, first = true) {
-                tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
-        }
-        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in a quarter second and out faster, instead of cutting", fades, last = headphones.isEmpty()) {
+        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in a quarter second and out faster, instead of cutting", fades, first = true, last = headphones.isEmpty()) {
             fades = it; prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, it).apply() } }
         headphones.forEachIndexed { i, name ->
             item(key = "hp-$name") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {
@@ -79,7 +81,7 @@ internal fun SettingsPage(
         }
 
         // The phone taps with the kick drum and the bass, timed to what is heard (MusicHaptics).
-        item { Group("Feel") }
+        item { Group("Music haptics") }
         item {
             var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
             var strength by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.strength(context)) }
@@ -107,13 +109,42 @@ internal fun SettingsPage(
             }
         }
 
+        item { Group("Appearance and artwork") }
+        item {
+            var tint by remember { mutableStateOf(CoverColours.on(context)) }
+            Toggle(Glyph.PHOTO, "Colours from the cover", "The player takes a soft tint of the song's cover", tint, first = true) {
+                tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
+        }
+        item { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
+        // Moving covers from Apple Music, with the owner's own MusicKit key.
+
+        item {
+            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
+            var on by remember { mutableStateOf(apple.enabled) }
+            Toggle(Glyph.MOTION, "Moving covers from Apple Music", "Each album is fetched once (about 4 MB) and kept as one file. Unofficial: may stop working",
+                on) { on = it; apple.enabled = it }
+        }
+        item {
+            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
+            var key by remember { mutableStateOf(apple.key) }
+            var editing by remember { mutableStateOf(false) }
+            Row(Glyph.LOCK, "Own MusicKit key", key?.let { "In use · key ${it.keyId}: the official Apple Music API" }
+                ?: "Optional. With an Apple Developer key the official API is used instead") { editing = true }
+            if (editing) AppleKeyDialog(key, onDismiss = { editing = false }) { new -> apple.key = new; key = new; editing = false }
+        }
+        item {
+            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
+            var wifi by remember { mutableStateOf(apple.wifiOnly) }
+            Toggle(Glyph.SPEAKER, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
+        }
+
         item { Group("Library") }
         item { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
         item { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
             else folders.joinToString(" · "), onClick = onAddFolder) }
         if (folders.isNotEmpty()) item { Row(Glyph.CLOSE, "Forget folder access", "Lyrics and covers beside the files stop loading", onClick = onClearFolders) }
         item { Row(Glyph.HIDDEN, "Hidden folders", if (hidden == 0) "None. Hide recordings or ringtones from Library, Folders" else "$hidden hidden. Show them again in Library, Folders") }
-        item { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
+
         item { Toggle(Glyph.STAR, "Save ratings in the files", "Stars go into the tags (FLAC RATING, MP3 POPM), so other players see them", ratingsToFiles, onChange = onRatingsToFiles) }
         item { Row(Glyph.EDIT, "Change files without asking", if (manage) "Allowed: tag edits and ratings are written straight away" else "Android asks before each change; allow once here", last = true) {
             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:" + context.packageName))) } } }
@@ -124,6 +155,26 @@ internal fun SettingsPage(
 
         // YouTube Music as a second source, the owner's files always first.
         item { Group("YouTube Music") }
+        item {
+            val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
+            val on by graph.youTubeOn.collectAsStateWithLifecycle()
+            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have show under yours. Yours always play from the file",
+                on, first = true, last = !on) { graph.setYouTube(it) }
+            androidx.compose.animation.AnimatedVisibility(on) { Column {
+                val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
+                var confirm by remember { mutableStateOf(false) }
+                Spacer(Modifier.height(4.dp))
+                Row(Glyph.PERSON, "YouTube Music account", if (signedIn) "Signed in: your own home, mixes and radio. Tap to sign out"
+                    else "Sign in on Google's page for your own home, mixes and radio. The app never sees your password", last = !signedIn) {
+                    if (signedIn) confirm = true else context.startActivity(android.content.Intent(context, YouTubeLogin::class.java))
+                }
+                if (confirm) AppDialog(onDismissRequest = { confirm = false }, title = { Text("Sign out of YouTube Music?") },
+                    text = { Text("Home and mixes go back to everyone's. Your music stays as it is.") },
+                    confirmButton = { TextButton(onClick = { graph.youTubeAccount.signOut(); confirm = false }) { Text("Sign out") } },
+                    dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
+            } }
+        }
+
         item(key = "sync-youtube-likes") {
             val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
             val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
@@ -131,31 +182,11 @@ internal fun SettingsPage(
             val status by graph.youtubeFavourites.status.collectAsStateWithLifecycle()
             val syncScope = rememberCoroutineScope()
             if (signedIn && enabled) Row(Glyph.REFRESH, "Sync YouTube Music likes",
-                status ?: "Refresh likes and send waiting changes",
+                status ?: "Refresh likes and send waiting changes", last = true,
                 onClick = { syncScope.launch { graph.youtubeFavourites.refresh(force = true) } })
         }
-        item {
-            val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
-            val on by graph.youTubeOn.collectAsStateWithLifecycle()
-            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have show under yours. Yours always play from the file",
-                on, first = true, last = !on) { graph.setYouTube(it) }
-            if (on) {
-                val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
-                var confirm by remember { mutableStateOf(false) }
-                Spacer(Modifier.height(4.dp))
-                Row(Glyph.PERSON, "YouTube Music account", if (signedIn) "Signed in: your own home, mixes and radio. Tap to sign out"
-                    else "Sign in on Google's page for your own home, mixes and radio. The app never sees your password", last = true) {
-                    if (signedIn) confirm = true else context.startActivity(android.content.Intent(context, YouTubeLogin::class.java))
-                }
-                if (confirm) AppDialog(onDismissRequest = { confirm = false }, title = { Text("Sign out of YouTube Music?") },
-                    text = { Text("Home and mixes go back to everyone's. Your music stays as it is.") },
-                    confirmButton = { TextButton(onClick = { graph.youTubeAccount.signOut(); confirm = false }) { Text("Sign out") } },
-                    dismissButton = { TextButton(onClick = { confirm = false }) { Text("Cancel") } })
-            }
-        }
-
         // Soulseek: lossless copies of songs and albums found online, saved into the library.
-        item { Group("Soulseek") }
+        item { Group("Downloads") }
         item(key = "soulseek-account") {
             val downloads = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
             var account by remember { mutableStateOf(downloads.account) }
@@ -177,28 +208,6 @@ internal fun SettingsPage(
                 soulseekJobs.isEmpty() -> "Songs and albums you save for offline listening"
                 else -> "View recent transfers"
             }, last = true, onClick = onDownloads)
-        }
-
-        // Moving covers from Apple Music, with the owner's own MusicKit key.
-        item { Group("Moving covers") }
-        item {
-            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
-            var on by remember { mutableStateOf(apple.enabled) }
-            Toggle(Glyph.MOTION, "Moving covers from Apple Music", "Each album is fetched once (about 4 MB) and kept as one file. Unofficial: may stop working",
-                on, first = true) { on = it; apple.enabled = it }
-        }
-        item {
-            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
-            var key by remember { mutableStateOf(apple.key) }
-            var editing by remember { mutableStateOf(false) }
-            Row(Glyph.LOCK, "Own MusicKit key", key?.let { "In use · key ${it.keyId}: the official Apple Music API" }
-                ?: "Optional. With an Apple Developer key the official API is used instead") { editing = true }
-            if (editing) AppleKeyDialog(key, onDismiss = { editing = false }) { new -> apple.key = new; key = new; editing = false }
-        }
-        item {
-            val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
-            var wifi by remember { mutableStateOf(apple.wifiOnly) }
-            Toggle(Glyph.SPEAKER, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
         }
 
         // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
@@ -241,21 +250,30 @@ internal fun SettingsPage(
 }
 
 @Composable
-private fun Group(title: String) = Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-    modifier = Modifier.padding(start = 16.dp, top = 24.dp, bottom = 8.dp))
+private fun Group(title: String) = Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
+    modifier = Modifier.semantics { heading() }.padding(start = 12.dp, top = 22.dp, bottom = 6.dp))
 
 /** A row in a group: the first and last rows round the group's outer corners. */
 @Composable
 private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = false, last: Boolean = false, trailing: (@Composable () -> Unit)? = null,
-                below: (@Composable () -> Unit)? = null, onClick: (() -> Unit)? = null) {
-    val big = 24.dp; val small = 4.dp
+                below: (@Composable () -> Unit)? = null, checked: Boolean? = null, onClick: (() -> Unit)? = null) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val inset by animateDpAsState(if (pressed && !LocalPowerSave.current) 4.dp else 0.dp, label = "Setting press")
+    val big = 24.dp - inset
+    val small = 4.dp + inset
     val shape = RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)
-    // As Android's own Settings: groups a step lighter than the page, each icon in a circle whose
-    // colour says what it is about (measured on the owner's phone: page #181920, groups #2A2C34).
     val (circle, onCircle) = tint(glyph)
-    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerHigh, onClick = onClick ?: {}, enabled = onClick != null, modifier = Modifier.fillMaxWidth()) {
+    val action = when {
+        onClick == null -> Modifier
+        checked != null -> Modifier.toggleable(checked, interactionSource = interaction,
+            indication = androidx.compose.foundation.LocalIndication.current, role = Role.Switch) { onClick() }
+        else -> Modifier.clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current,
+            role = Role.Button, onClick = onClick)
+    }
+    Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
         // A ListItem pins its icon to the top once the text runs to three lines; settings keep it centred.
-        androidx.compose.foundation.layout.Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp).heightIn(min = 48.dp),
+        androidx.compose.foundation.layout.Row(action.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp).heightIn(min = 48.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Surface(shape = androidx.compose.foundation.shape.CircleShape, color = circle, contentColor = onCircle, modifier = Modifier.size(40.dp)) {
                 androidx.compose.foundation.layout.Box(contentAlignment = androidx.compose.ui.Alignment.Center) { Symbol(glyph, size = 22.dp, color = onCircle, filled = true) }
@@ -266,7 +284,8 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 below?.invoke()
             }
-            if (trailing != null) { androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp)); trailing() }
+            if (trailing != null) { Spacer(Modifier.width(12.dp)); trailing() }
+            else if (onClick != null) Symbol(Glyph.CHEVRON, size = 18.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -289,7 +308,7 @@ private fun tint(glyph: Glyph): Pair<androidx.compose.ui.graphics.Color, android
 @Composable
 private fun Toggle(glyph: Glyph, title: String, subtitle: String, on: Boolean, first: Boolean = false, last: Boolean = false, onChange: (Boolean) -> Unit) {
     val haptics = rememberHaptics()
-    Row(glyph, title, subtitle, first, last, trailing = { Switch(on, { haptics.toggle(it); onChange(it) }) }) { haptics.toggle(!on); onChange(!on) }
+    Row(glyph, title, subtitle, first, last, checked = on, trailing = { Switch(on, onCheckedChange = null) }) { haptics.toggle(!on); onChange(!on) }
 }
 
 /** Team ID, Key ID and the .p8 private key of a MusicKit key; kept only in the app's private storage. */
