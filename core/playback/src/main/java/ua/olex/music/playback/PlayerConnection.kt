@@ -8,6 +8,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.media3.session.SessionResult
@@ -30,6 +31,7 @@ import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+import ua.olex.music.model.AudioFormat
 import ua.olex.music.model.Track
 
 /** What is playing, as screens need it. Position is asked for ([PlayerConnection.positionMs]), not pushed. */
@@ -67,6 +69,9 @@ data class PlayerState(
     val equalizer: EqualizerState = EqualizerState(),
     val equalizerError: String? = null,
     val replayGain: ua.olex.music.dsp.ReplayGainSettings = ua.olex.music.dsp.ReplayGainSettings(),
+    /** Properties of the selected input track, before decoding or output processing. */
+    val inputFormat: AudioFormat? = null,
+    val seekable: Boolean = durationMs > 0,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -358,6 +363,8 @@ class PlayerConnection(context: Context) {
 
     private var lastPublishedItem: MediaItem? = null
     private var lastPublishedTrack: Track? = null
+    private var lastInputTracks: Tracks? = null
+    private var lastInputFormat: AudioFormat? = null
 
     private fun publish(player: Player, updateQueue: Boolean = false) {
         if (updateQueue) queueSnapshot = (0 until player.mediaItemCount).map { index ->
@@ -372,6 +379,11 @@ class PlayerConnection(context: Context) {
             lastPublishedTrack = item?.let(::track)
         }
         val meta = player.mediaMetadata
+        val inputTracks = player.currentTracks
+        if (lastInputTracks !== inputTracks) {
+            lastInputTracks = inputTracks
+            lastInputFormat = inputTracks.selectedAudioFormat()
+        }
         _state.value = PlayerState(
             connected = true,
             mediaId = item?.mediaId,
@@ -403,6 +415,8 @@ class PlayerConnection(context: Context) {
             equalizer = (player as? MediaController)?.sessionExtras?.let(EqualizerCommand::fromExtras) ?: EqualizerState(),
             equalizerError = _state.value.equalizerError,
             replayGain = (player as? MediaController)?.sessionExtras?.let(ReplayGainCommand::fromExtras) ?: ua.olex.music.dsp.ReplayGainSettings(),
+            inputFormat = lastInputFormat.takeIf { item != null },
+            seekable = player.isCurrentMediaItemSeekable,
         )
     }
 

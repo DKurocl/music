@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.map
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -404,15 +405,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(Modifier.size(48.dp)) {
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = !covered,
-                        enter = androidx.compose.animation.EnterTransition.None,
-                        exit = androidx.compose.animation.ExitTransition.None,
-                    ) {
-                        Artwork(state.artworkUri, Modifier.fillMaxSize().playerCoverTransition(state.mediaId, this), 14.dp)
-                    }
-                }
+                Artwork(state.artworkUri, Modifier.size(48.dp), 14.dp)
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = when {
@@ -483,21 +476,21 @@ internal fun PlayerPage(
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val cs = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
-    // The cover settles back a little while paused and comes forward when the music plays.
-    // The cover keeps its size when paused: the play button says the state, the cover doesn't jump.
-    val coverScale = 1f
     // Text colours follow the theme (a page drawn outside a Surface would otherwise inherit black).
     // Swipe up anywhere on the page (once it has nowhere left to scroll) opens the queue.
     val density = androidx.compose.ui.platform.LocalDensity.current
     val queueHaptics = rememberHaptics()
-    val upToQueue = remember(onQueue) {
+    val openQueue by rememberUpdatedState(onQueue)
+    val upToQueue = remember(density, queueHaptics) {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             var pulled = 0f
             override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput || available.y >= 0f) return androidx.compose.ui.geometry.Offset.Zero
+                if (source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) return androidx.compose.ui.geometry.Offset.Zero
+                if (consumed.y != 0f || available.y > 0f) pulled = 0f
+                if (available.y >= 0f) return androidx.compose.ui.geometry.Offset.Zero
                 pulled -= available.y
-                if (pulled > with(density) { 72.dp.toPx() }) { pulled = Float.NEGATIVE_INFINITY; queueHaptics.threshold(); onQueue() }
+                if (pulled > with(density) { 72.dp.toPx() }) { pulled = Float.NEGATIVE_INFINITY; queueHaptics.threshold(); openQueue() }
                 return androidx.compose.ui.geometry.Offset(0f, available.y)
             }
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity { pulled = 0f; return androidx.compose.ui.unit.Velocity.Zero }
@@ -512,9 +505,11 @@ internal fun PlayerPage(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            val hasLyricsTools = lyricsShown && inlineLyrics != null && onLyricsTools != null
+            val headerSide = if (hasLyricsTools) 96.dp else 48.dp
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Equal sides keep "Playing from" centred whether the lyrics options show or not.
-                Box(Modifier.width(96.dp)) {
+                Box(Modifier.width(headerSide)) {
                     IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Symbol(Glyph.COLLAPSE, size = 28.dp) }
                 }
                 // Where the music comes from; a tap opens that album.
@@ -523,11 +518,13 @@ internal fun PlayerPage(
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     // What is really playing: the playlist, artist, mix or mood the queue came from, else the
                     // song's album, else the queue itself. Never the service's name.
-                    Text(from ?: state.album ?: if (state.mediaId?.startsWith("yt:") == true) "Your queue" else "Your library", style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(from ?: state.album ?: if (state.mediaId?.startsWith("yt:") == true) "Your queue" else "Your library",
+                        style = MaterialTheme.typography.titleSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                Row(Modifier.width(96.dp), horizontalArrangement = Arrangement.End) {
+                Row(Modifier.width(headerSide), horizontalArrangement = Arrangement.End) {
                     // With the lyrics on, their options (timing, sources, online) sit up here, clear of the text.
-                    androidx.compose.animation.AnimatedVisibility(lyricsShown && inlineLyrics != null && onLyricsTools != null,
+                    androidx.compose.animation.AnimatedVisibility(hasLyricsTools,
                         enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.6f),
                         exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.6f)) {
                         IconButton(onClick = { onLyricsTools?.invoke() }, modifier = Modifier.semantics { contentDescription = "Lyrics options" }) { Symbol(Glyph.TUNE) }
@@ -554,26 +551,31 @@ internal fun PlayerPage(
             val nextArt = state.queue.getOrNull(state.nextIndex)?.artworkUri
             val previousArt = state.queue.getOrNull(state.previousIndex)?.artworkUri
             var skipping by remember { mutableStateOf(false) }
-            var seenId by remember { mutableStateOf(state.mediaId) }
-            var seenIndex by remember { mutableIntStateOf(state.queueIndex) }
+            val occurrence = state.queue.getOrNull(state.queueIndex)?.key
+            val nextOccurrence = state.queue.getOrNull(state.nextIndex)?.key
+            val previousOccurrence = state.queue.getOrNull(state.previousIndex)?.key
+            var seenItem by remember { mutableStateOf(occurrence to state.mediaId) }
+            var neighbours by remember { mutableStateOf(previousOccurrence to nextOccurrence) }
             // The next and previous covers are decoded ahead, so a skip shows its cover at once.
             val context = LocalContext.current
-            LaunchedEffect(state.queueIndex, state.queue.size, coverWidth) {
-                if (coverWidth <= 1) return@LaunchedEffect
-                listOf(state.nextIndex, state.previousIndex).mapNotNull { state.queue.getOrNull(it)?.artworkUri }.forEach { uri ->
+            DisposableEffect(nextArt, previousArt, coverWidth, lyricsShown) {
+                val preloads = if (coverWidth <= 1 || lyricsShown) emptyList() else listOfNotNull(nextArt, previousArt).distinct().map { uri ->
                     coil3.SingletonImageLoader.get(context).enqueue(coil3.request.ImageRequest.Builder(context)
                         .data(ua.olex.music.library.ArtworkUris.variant(uri, context.packageName, ArtworkPlan.LARGE)).size(coverWidth).build())
                 }
+                onDispose { preloads.forEach { it.dispose() } }
             }
-            LaunchedEffect(state.mediaId) {
-                if (state.mediaId == seenId) return@LaunchedEffect
-                val forward = state.queueIndex >= seenIndex
-                seenId = state.mediaId; seenIndex = state.queueIndex
+            LaunchedEffect(occurrence, state.mediaId) {
+                val current = occurrence to state.mediaId
+                if (current == seenItem) return@LaunchedEffect
+                val backward = occurrence != null && occurrence == neighbours.first && occurrence != neighbours.second
+                seenItem = current
                 // After a swipe the neighbour already stands in place: it simply becomes this cover.
                 // A button skip slides the strip the same way, from the side the song came from.
                 if (skipping) { skipping = false; swipe.snapTo(0f) }
-                else if (coverWidth > 1) { swipe.snapTo(if (forward) step else -step); swipe.animateTo(0f, spatial) }
+                else if (coverWidth > 1) { swipe.snapTo(if (backward) -step else step); swipe.animateTo(0f, spatial) }
             }
+            LaunchedEffect(previousOccurrence, nextOccurrence) { neighbours = previousOccurrence to nextOccurrence }
             // The Lyrics button swaps the cover for the lyrics, in the same place and size.
             if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f))
             else Box(contentAlignment = Alignment.Center) {
@@ -589,7 +591,7 @@ internal fun PlayerPage(
             }
             Artwork(
                 state.artworkUri,
-                Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f).playerCoverTransition(state.mediaId)
+                Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
                     .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
                     .pointerInput(onFavourite, onMore) {
                         detectTapGestures(
@@ -623,7 +625,7 @@ internal fun PlayerPage(
                         // Nothing next: the cover still follows, but resists and springs back.
                         val x = if (!state.hasNext && swipe.value < 0) rubber(swipe.value, 60.dp.toPx()) else swipe.value
                         // Leaving, the cover steps back a little, as the arriving one steps forward.
-                        val k = coverScale * (1f - 0.1f * (kotlin.math.abs(swipe.value) / step).coerceIn(0f, 1f))
+                        val k = 1f - 0.1f * (kotlin.math.abs(swipe.value) / step).coerceIn(0f, 1f)
                         scaleX = k; scaleY = k; translationX = x
                     }
                     .shadow(24.dp, RoundedCornerShape(32.dp), clip = false, ambientColor = androidx.compose.ui.graphics.Color.Black, spotColor = androidx.compose.ui.graphics.Color.Black),
@@ -647,10 +649,9 @@ internal fun PlayerPage(
             state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(20.dp))
             PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp))
-            Spacer(Modifier.height(4.dp))
-            SignalPath(format, onAudioPath)
+            SignalPath(format, state.buffering && state.error == null, onAudioPath)
             state.sleepDeadlineMs?.let { deadline -> SleepCountdown(deadline, onTimer) }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(12.dp))
             Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
             Spacer(Modifier.height(28.dp))
             // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
@@ -779,12 +780,15 @@ private fun ToggleAction(glyph: Glyph, label: String, on: Boolean, enabled: Bool
 
 /** The file's format and bitrate, quiet under the seek bar; a tap opens the full audio path. */
 @Composable
-private fun SignalPath(format: String?, onClick: () -> Unit) {
+private fun SignalPath(format: String?, loading: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    Text(
-        format ?: "Audio path", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.clip(CircleShape).clickable(onClickLabel = "Audio path", onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
-    )
+    Row(Modifier.clip(CircleShape).clickable(onClickLabel = "Open audio path", onClick = onClick)
+        .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(format ?: if (loading) "Reading audio format…" else "Format unavailable",
+            style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Symbol(Glyph.CHEVRON, size = 16.dp, color = cs.onSurfaceVariant)
+    }
 }
 
 /**
@@ -837,15 +841,20 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     // Two clocks: [at] moves every frame but is read only by the handle's layout and the line's
     // drawing; [seconds] changes once a second for the time label. A frame recomposes nothing.
-    val at = remember(state.mediaId) { androidx.compose.runtime.mutableLongStateOf(position()) }
-    var seconds by remember(state.mediaId) { mutableLongStateOf(position() / 1_000) }
-    var dragged by remember(state.mediaId) { mutableStateOf<Float?>(null) }
-    val slider = remember { androidx.compose.material3.SliderState(0f, 0, 0f..1f) }
+    val occurrence = state.queue.getOrNull(state.queueIndex)?.key
+    val at = remember(state.mediaId, occurrence) { androidx.compose.runtime.mutableLongStateOf(position()) }
+    var seconds by remember(state.mediaId, occurrence) { mutableLongStateOf(position() / 1_000) }
+    var dragged by remember(state.mediaId, occurrence) { mutableStateOf<Float?>(null) }
     val duration = state.durationMs.coerceAtLeast(1)
+    val slider = remember(state.mediaId, occurrence) {
+        androidx.compose.material3.SliderState((at.longValue.toFloat() / duration).coerceIn(0f, 1f), 0, 0f..1f)
+    }
+    val canSeek = state.seekable && state.durationMs > 0
     fun show(ms: Long) { at.longValue = ms; if (dragged == null) slider.value = (ms.toFloat() / duration).coerceIn(0f, 1f); (ms / 1_000).let { if (it != seconds) seconds = it } }
     // Every display frame (120 a second on a 120 Hz screen) the position moves on from the last
     // reading by the time passed; the player itself is asked once a second to stay exact.
-    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs) {
+    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, occurrence, state.positionMs, state.durationMs, canSeek) {
+        if (!canSeek) dragged = null
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             show(position())
             if (!state.isPlaying) return@repeatOnLifecycle
@@ -864,7 +873,7 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
         // Material's own slider: the expressive track with the handle in a gap, nothing imitated.
         val touch = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
         androidx.compose.material3.Slider(
-            state = slider, enabled = state.durationMs > 0, interactionSource = touch,
+            state = slider, enabled = canSeek, interactionSource = touch,
             // A detent every 2.5% (firmer when moving fast), a soft thud at either end.
             onValueChange = { v: Float ->
                 val before = dragged ?: slider.value
@@ -875,10 +884,16 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
                 }
                 dragged = v; slider.value = v
             },
-            onValueChangeFinished = { dragged?.let { onSeek((it * duration).toLong()); dragged = null; show((it * duration).toLong()) }; dragged = null; haptics.confirm() },
+            onValueChangeFinished = {
+                dragged?.let {
+                    val target = (it * duration).toLong()
+                    dragged = null
+                    if (canSeek) { onSeek(target); show(target); haptics.confirm() }
+                }
+            },
             modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Position"; stateDescription = "${clock(seconds * 1_000)} of ${clock(state.durationMs)}" },
             thumb = { _: androidx.compose.material3.SliderState ->
-                androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = state.durationMs > 0)
+                androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = canSeek)
             },
             track = { st: androidx.compose.material3.SliderState -> WaveTrack({ st.value }, wave = state.isPlaying && dragged == null) },
         )

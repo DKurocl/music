@@ -36,6 +36,9 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Now Playing follow-up (Codex, 2026-11-18): active input format, cohesive player
+      motion, and related gesture and audio path corrections.
+
 - [~] Remaining audit implementation (Codex, 2026-11-18): inbound likes, remote playlist edits,
       system favourite, playback origins and radio checkpoint, generation delta, buffering priority,
       gapless offload gating, adaptive transport and Home. See HANDOFF.md for limits and evidence.

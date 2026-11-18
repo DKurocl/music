@@ -1,3 +1,21 @@
+# Now Playing format and motion (Codex, 2026-11-18)
+
+[код] Now Playing reads the selected Media3 input format through its controller state, with
+matching local file metadata for properties such as FLAC bit depth. Only reported values are
+shown. The audio sheet identifies source versus app output and describes matching rates or
+disabled DSP without claiming an untouched Bluetooth signal. Its option rows have a single
+accessible switch, and the header and action buttons can wrap.
+
+[код] The page and cover move in one non-overshooting transition. Dismissal continues from the
+gesture offset. Motion covers mount after opening settles. The header gives long source names
+more space, neighbour preloads follow shuffle, duplicate queue occurrences reset seek state, and
+unseekable sources disable the scrubber. Lock-screen lyrics remain deferred.
+
+Run the regular GitHub Actions Android suite using `agent/player-motion-and-format`. On the
+physical Pixel still compare open, close, partial drag, cancelled predictive back, rapid repeats,
+and static versus motion artwork at 120 Hz. Verify the format line on local FLAC, YouTube Opus
+and AAC, and after a source replacement. The shell SDK/Gradle probe found neither toolchain.
+
 # Final audit software pass (Codex, 2026-11-18)
 
 [код] Player cover uses one media identity for its mini and expanded shared elements.
