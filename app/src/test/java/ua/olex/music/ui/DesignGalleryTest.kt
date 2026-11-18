@@ -117,7 +117,7 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun DemoHome(modifier: Modifier, small: Boolean = false, onToggle: () -> Unit = {}, onOpenPlaylist: (Long) -> Unit = {}) {
+    private fun DemoHome(modifier: Modifier, small: Boolean = false, onToggle: () -> Unit = {}, onPlay: (List<Track>, Int, String) -> Unit = { _, _, _ -> }, onOpenPlaylist: (Long) -> Unit = {}) {
         val local = androidx.compose.runtime.remember(small) { demoSongs.filterNot { YouTubeMusic.isOnline(it) }.take(if (small) 2 else 3) }
         val index = androidx.compose.runtime.remember(local) { LibraryIndex.build(local) }
         fun card(id: String, name: String, subtitle: String, cover: Int, kind: YouTubeMusic.Card.Kind) =
@@ -144,7 +144,7 @@ class DesignGalleryTest {
         }
         val playing = demoSongs.first().takeUnless { small }
         CompositionLocalProvider(LocalPlayingTrack provides playing) {
-            HomePage(index, local, emptyMap(), playing?.id?.value, modifier, { _, _, _ -> }, {}, youTubeHome = remote,
+            HomePage(index, local, emptyMap(), playing?.id?.value, modifier, onPlay, {}, youTubeHome = remote,
                 playlists = own, accountPlaylists = account, favourites = local.take(2), onOpenPlaylist = onOpenPlaylist,
                 transportPlaying = playing != null, onToggle = onToggle)
         }
@@ -810,9 +810,24 @@ class DesignGalleryTest {
 
     /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
     @Test fun homeMood() {
-        compose.setContent { Shell("Home", Place.HOME, demoNow) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
-        compose.onNodeWithTag("home-moods").performScrollToNode(hasText("Relax"))
+        var played: Pair<String, TrackId>? = null
+        compose.setContent { Shell("Home", Place.HOME, demoNow) { pad ->
+            DemoHome(Modifier.fillMaxSize().padding(pad), onPlay = { songs, i, name -> played = name to songs[i].id })
+        } }
+        val strip = compose.onNodeWithTag("home-moods")
+        strip.performScrollToNode(hasText("Relax"))
         compose.onNodeWithText("Relax").performClick()
+        strip.performScrollToNode(hasText("Focus"))
+        compose.onNodeWithText("Focus").performClick()
+        strip.performScrollToNode(hasText("Relax"))
+        compose.onNodeWithText("Relax").performClick()
+        val expected = demoSongs.first()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(hasText(expected.title) and hasAnyAncestor(hasTestTag("home-feed"))).fetchSemanticsNodes().size == 1
+        }
+        compose.onNodeWithTag("home-feed").performScrollToNode(hasText(expected.title))
+        compose.onNode(hasText(expected.title) and hasAnyAncestor(hasTestTag("home-feed"))).performClick()
+        org.junit.Assert.assertEquals("Relax" to expected.id, played)
         shot("01c-home-mood")
     }
 
