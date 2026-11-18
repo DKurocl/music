@@ -601,10 +601,10 @@ fun MusicRoot(model: LibraryViewModel) {
             mixFrom = model.mixLabel,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } }
                 // A YouTube Music song: its album page, when its row named one.
-                ?: onlineAlbumId?.let { albumId -> { onlineNav.open(OnlineTarget.Album(albumId, playing.album ?: playing.title)) } },
+                ?: onlineAlbumId?.let { albumId -> { onlineNav.open(OnlineTarget.Album(albumId, playing.album ?: playing.title, cover = playing.artworkUri, seed = currentTrack)) } },
             onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } }
                 ?: playing.artist.substringBefore(",").trim().takeIf { it.isNotEmpty() && playing.mediaId?.startsWith("yt:") == true }
-                    ?.let { artist -> { onlineNav.open(OnlineTarget.Artist(artist)) } },
+                    ?.let { artist -> { onlineNav.open(currentTrack?.let(::onlineArtistTarget) ?: OnlineTarget.Artist(artist)) } },
             fileRateHz = file?.sampleRateHz ?: input?.sampleRateHz,
         )
         }
@@ -637,9 +637,9 @@ fun MusicRoot(model: LibraryViewModel) {
                 model.dontRecommend(track); scope.launch { snackbar.showSnackbar("${track.title} won't be recommended again") }
             } else null,
             // An online song's album and artist open their pages (the owner's own artist page when he has them).
-            if (online) onlineAlbumId?.let { id -> TrackAction(Glyph.ALBUM, "Go to album") { actionTrack = null; onlineNav.open(OnlineTarget.Album(id, track.album ?: track.title, cover = track.artworkUri)) } }
+            if (online) onlineAlbumId?.let { id -> TrackAction(Glyph.ALBUM, "Go to album") { actionTrack = null; onlineNav.open(OnlineTarget.Album(id, track.album ?: track.title, cover = track.artworkUri, seed = track)) } }
                 else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
-            if (online) TrackAction(Glyph.PERSON, "Go to artist") { actionTrack = null; onlineNav.open(OnlineTarget.Artist(track.artist.substringBefore(",").trim())) }
+            if (online) TrackAction(Glyph.PERSON, "Go to artist") { actionTrack = null; onlineNav.open(onlineArtistTarget(track)) }
                 else TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
             // A song from YouTube Music, kept for good: Soulseek finds a lossless copy and the library plays it from then on.
             if (online) {
