@@ -82,7 +82,7 @@ internal fun MixRail(cards: List<YouTubeMusic.Card>) {
                         Artwork(card.cover, Modifier.size(86.dp), 17.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Symbol(if (radio) Glyph.RADIO else Glyph.PLAYLIST, size = 20.dp)
-                            Text(card.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(card.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             card.subtitle?.takeIf { it.isNotBlank() }?.let {
                                 Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
@@ -130,7 +130,7 @@ internal fun PersonalPlaylistRail(local: List<PlaylistUi>, remote: List<YouTubeM
                                     Row(Modifier.fillMaxSize().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         if (playlist != null) PlaylistCover(playlist.playable, 46.dp, 12.dp) else Artwork(card?.cover, Modifier.size(46.dp), 12.dp)
                                         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                                            Text(title, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                            Text(title, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             val detail = playlist?.let { songCount(it.songs.size) } ?: card?.subtitle
                                             if (!detail.isNullOrBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
                                                 maxLines = 1, overflow = TextOverflow.Ellipsis)

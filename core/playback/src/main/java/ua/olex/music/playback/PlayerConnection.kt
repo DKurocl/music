@@ -97,6 +97,7 @@ class PlayerConnection(context: Context) {
     val state: StateFlow<PlayerState> = _state.asStateFlow()
     private var controller: MediaController? = null
     private var connection: ListenableFuture<MediaController>? = null
+    private var pendingShuffle: Boolean? = null
     private var pendingPlay: Pair<List<Track>, Int>? = null
     private var pendingContext: String? = null
     private var pendingStart = true
@@ -145,7 +146,7 @@ class PlayerConnection(context: Context) {
                 publish(connected, updateQueue = true)
                 pendingPlay?.let { (tracks, index) ->
                     pendingPlay = null
-                    play(tracks, index, pendingContext, pendingStart)
+                    play(tracks, index, pendingContext, pendingStart, pendingShuffle)
                 }
             } catch (_: CancellationException) {
                 connectionFailed()
@@ -181,7 +182,7 @@ class PlayerConnection(context: Context) {
     val positionMs: Long get() = controller?.currentPosition?.coerceAtLeast(0) ?: _state.value.positionMs
 
     /** Replaces the queue with [tracks] and starts at [index], even during the initial connection. */
-    fun play(tracks: List<Track>, index: Int, context: String? = null, startPlayback: Boolean = true) {
+    fun play(tracks: List<Track>, index: Int, context: String? = null, startPlayback: Boolean = true, shuffle: Boolean? = null) {
         if (index !in tracks.indices) return
         dismissQueueError()
         val player = controller
@@ -189,6 +190,7 @@ class PlayerConnection(context: Context) {
             pendingPlay = tracks.toList() to index
             pendingContext = context
             pendingStart = startPlayback
+            pendingShuffle = shuffle
             connect()
             return
         }
@@ -204,6 +206,7 @@ class PlayerConnection(context: Context) {
                 if (controller !== player) return@withLock
                 if (!startPlayback) player.pause()
                 player.setMediaItems(items, index, C.TIME_UNSET)
+                if (shuffle != null && player.shuffleModeEnabled != shuffle) player.shuffleModeEnabled = shuffle
                 if (startPlayback) { player.prepare(); player.play() }
             }
         }
