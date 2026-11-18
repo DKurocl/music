@@ -71,6 +71,33 @@ class YouTubeMusicTest {
         assertEquals(2, calls)
     }
 
+    @Test fun linkedArtistAndAlbumRecoverConfirmedSongsOnBrowseFailure() = kotlinx.coroutines.runBlocking {
+        val artist = """{"text":"DJ ZUP RAIii","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}"""
+        fun row(id: String, release: String) = """{"musicResponsiveListItemRenderer":{
+            "navigationEndpoint":{"watchEndpoint":{"videoId":"$id"}},
+            "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"repeat"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[$artist,{"text":"repeat","navigationEndpoint":{
+                "browseEndpoint":{"browseId":"$release","pageType":"MUSIC_PAGE_TYPE_ALBUM"}}}]}}}]}}"""
+        val seed = YouTubeMusic.parseSearch(row("linked", "MPRErepeat")).single()
+        val result = """{"contents":[${row("same-release", "MPRErepeat")},${row("different-release", "MPREother")}]}"""
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            if (endpoint == "browse") {
+                assertTrue(fields.contains("UCcorrect") || fields.contains("MPRErepeat"))
+                throw java.io.IOException("Browse unavailable")
+            }
+            result
+        })
+        val album = source.albumPage(YouTubeMusic.OnlineAlbum("MPRErepeat", "repeat", null, null), seed, false)!!
+        assertTrue(album.first.partial)
+        assertEquals(listOf("yt:same-release", "yt:linked"), album.second.map { it.id.value })
+        assertNull(source.peekAlbum("MPRErepeat"))
+        val page = source.artistPage("DJ ZUP RAIii", null, seed, false)!!
+        assertTrue(page.partial)
+        assertEquals("UCcorrect", page.id)
+        assertEquals(3, page.songs.size)
+        assertNull(source.peekArtist("UCcorrect"))
+    }
+
     @Test fun publicArtistProfileAcceptsAlternateHeadersButRejectsErrorPages() {
         val shelf = """{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"song"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song title"}]}}}]}}]}}"""
         val modern = """{"pageHeaderRenderer":{"content":{"pageHeaderViewModel":{"title":{"dynamicTextViewModel":{"text":{"content":"Artist"}}}}}},"shelf":$shelf}"""

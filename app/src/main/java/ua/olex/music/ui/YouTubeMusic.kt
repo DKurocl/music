@@ -65,7 +65,7 @@ internal class YouTubeMusic(
 
     /** An artist on YouTube Music: photo, a few lines about them, top songs, albums and videos. */
     data class OnlineArtist(val id: String, val name: String, val photo: String?, val about: String?, val songs: List<Track>, val albums: List<OnlineAlbum>, val videos: List<Track>,
-        val singles: List<OnlineAlbum> = emptyList(), val related: List<Card> = emptyList(), val listeners: String? = null)
+        val singles: List<OnlineAlbum> = emptyList(), val related: List<Card> = emptyList(), val listeners: String? = null, val partial: Boolean = false)
 
     /** Artists and albums YouTube Music finds for a query, beside its songs (Search). */
     data class Found(val songs: List<Track>, val artists: List<Card>, val albums: List<Card>)
@@ -87,7 +87,7 @@ internal class YouTubeMusic(
             if (pageScope() == scope) withContext(ioDispatcher) { rememberAlbumLinks(scope, found.songs) }
         }
     }
-    data class OnlineAlbum(val id: String, val title: String, val subtitle: String?, val cover: String?)
+    data class OnlineAlbum(val id: String, val title: String, val subtitle: String?, val cover: String?, val partial: Boolean = false)
 
     /** Prefer an exact artist identity and keep confirmed links available offline. */
     suspend fun artistId(name: String, offline: Boolean = false): String? = withContext(ioDispatcher) {
@@ -102,11 +102,14 @@ internal class YouTubeMusic(
         }
         if (offline) return@withContext null
         val fields = """"query":${quote(name)}"""
-        val filtered = post("search", fields + ""","params":"$ARTISTS_ONLY"""", headers = null)
-            ?.let(::artistIds).orEmpty()
-        val exact = filtered.firstOrNull { TextFold.fold(it.second) == folded }
-            ?: post("search", fields, headers = null)?.let(::artistIds)
+        suspend fun exact(headers: Map<String, String>?, filtered: Boolean): Pair<String, String>? {
+            val args = if (filtered) fields + ",\"params\":\"$ARTISTS_ONLY\"" else fields
+            return catalogueRequest { post("search", args, headers = headers) }?.let(::artistIds)
                 ?.firstOrNull { TextFold.fold(it.second) == folded }
+        }
+        val headers = account()
+        val exact = exact(null, true) ?: exact(null, false)
+            ?: headers?.let { exact(it, false) }
         if (pageScope() != scope) return@withContext null
         exact?.let { (id, _) ->
             keep(memoryKey, id)
@@ -128,8 +131,11 @@ internal class YouTubeMusic(
             if (offline) return@cached saved
             saved?.let(onPage)
             val fresh = networkFallback(saved) {
-                val json = post("browse", """"browseId":${quote(id)}"""", headers = null) ?: return@networkFallback null
-                val initial = parseArtist(id, json, knownName) ?: return@networkFallback null
+                suspend fun browse(headers: Map<String, String>?): Pair<String, OnlineArtist>? {
+                    val json = catalogueRequest { post("browse", """"browseId":${quote(id)}"""", headers = headers) } ?: return null
+                    return parseArtist(id, json, knownName)?.let { json to it }
+                }
+                val (json, initial) = browse(null) ?: account()?.let { browse(it) } ?: return@networkFallback null
                 if (full) {
                     if (saved == null) onPage(initial)
                     expandArtist(initial, json, scope, onPage)
@@ -156,8 +162,8 @@ internal class YouTubeMusic(
             val fresh = networkFallback(saved) {
                 suspend fun browse(headers: Map<String, String>?): Pair<OnlineAlbum, List<Track>>? {
                     val browseId = if (id.startsWith("PL") || id == "LM" || id == "SE") "VL$id" else id
-                    val json = post("browse", """"browseId":${quote(browseId)}"""", headers = headers) ?: return null
-                    return parseAlbum(id, json, summary)?.also {
+                    val json = catalogueRequest { post("browse", """"browseId":${quote(browseId)}"""", headers = headers) } ?: return null
+                    return parseAlbum(id, json, summary)?.takeUnless { id.startsWith("MPRE") && it.second.isEmpty() && continuationOf(json) == null }?.also {
                         if (pageScope() == scope) rememberContinuation("$scope/$id", continuationOf(json))
                     }
                 }
@@ -168,6 +174,54 @@ internal class YouTubeMusic(
             if (fresh != null && fresh !== saved) saveAlbum(scope, id, fresh)
             fresh
         }
+    }
+
+    /** An incomplete view keeps confirmed tracks playable while a full browse can be retried. */
+    suspend fun albumPage(summary: OnlineAlbum, seed: Track?, offline: Boolean): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) {
+        val scope = pageScope()
+        album(summary.id, offline, summary)?.let { return@withContext it }
+        if (offline || !summary.id.startsWith("MPRE")) return@withContext null
+        val anchor = seed?.takeIf { isOnline(it) && albumOf(it) == summary.id }
+        val query = listOfNotNull(summary.title, anchor?.artist ?: summary.subtitle?.let(::artistOf)).joinToString(" ")
+        val found = catalogueSearch(query).filter { albumOf(it) == summary.id }
+        if (pageScope() != scope) return@withContext null
+        val songs = (found + listOfNotNull(anchor)).distinctBy { it.id }
+        songs.takeIf { it.isNotEmpty() }?.let { summary.copy(partial = true) to it }
+    }
+
+    /** Prefer the channel linked from the song. Search credits can recover a page with a failed browse. */
+    suspend fun artistPage(name: String, channelId: String?, seed: Track?, offline: Boolean,
+        onPage: (OnlineArtist) -> Unit = {}): OnlineArtist? = withContext(ioDispatcher) {
+        val scope = pageScope()
+        val id = channelId ?: seed?.let { artistOfTrack(it)?.first } ?: artistId(name, offline)
+        if (pageScope() != scope) return@withContext null
+        if (id != null) artist(id, offline, full = !offline, knownName = name, onPage = onPage)?.let { return@withContext it }
+        if (offline) return@withContext null
+        val folded = TextFold.fold(name)
+        fun matches(track: Track): Boolean {
+            val credit = artistOfTrack(track)
+            if (id != null && credit != null) return credit.first == id
+            return artistCredits(track).any { TextFold.fold(it) == folded }
+        }
+        val anchor = seed?.takeIf { isOnline(it) && matches(it) }
+        val found = catalogueSearch(name).filter(::matches)
+        if (pageScope() != scope) return@withContext null
+        val songs = (found + listOfNotNull(anchor)).distinctBy { it.id }
+        if (songs.isEmpty()) return@withContext null
+        OnlineArtist(id ?: songs.firstNotNullOfOrNull { artistOfTrack(it)?.first }.orEmpty(), name,
+            null, null, songs, emptyList(), emptyList(), partial = true)
+    }
+
+    private suspend fun catalogueSearch(query: String): List<Track> {
+        val args = """"query":${quote(query)}""""
+        val response = catalogueRequest { post("search", args) } ?: return emptyList()
+        return parseSearch(response)
+    }
+
+    private suspend fun <T> catalogueRequest(call: suspend () -> T?): T? = try {
+        call()
+    } catch (_: java.io.IOException) {
+        null
     }
 
     private suspend fun <T> networkFallback(saved: T?, fetch: suspend () -> T?): T? = try {
@@ -196,7 +250,7 @@ internal class YouTubeMusic(
         for (section in artistSections(json)) {
             if (pageScope() != scope) return initial
             val args = "\"browseId\":${quote(section.id)}" + (section.params?.let { ",\"params\":${quote(it)}" } ?: "")
-            var page = post("browse", args, headers = null) ?: continue
+            var page = catalogueRequest { post("browse", args, headers = null) } ?: continue
             val visited = HashSet<String>()
             while (pageScope() == scope) {
                 result = when (section.kind) {
@@ -207,9 +261,8 @@ internal class YouTubeMusic(
                 onPage(result)
                 val token = continuationOf(page) ?: break
                 if (!visited.add(token)) break
-                page = post("browse", "\"continuation\":${quote(token)}", headers = null)
-                    ?: post("browse", "", "&ctoken=${Uri.encode(token)}&continuation=${Uri.encode(token)}&type=next", headers = null)
-                    ?: break
+                page = catalogueRequest { post("browse", "\"continuation\":${quote(token)}", headers = null)
+                    ?: post("browse", "", "&ctoken=${Uri.encode(token)}&continuation=${Uri.encode(token)}&type=next", headers = null) } ?: break
             }
         }
         return result
@@ -661,6 +714,28 @@ internal class YouTubeMusic(
 
         internal fun rememberAlbum(video: String, album: String) { albumIds[video] = album }
 
+        private val artistIdsByVideo = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, Pair<String, String>>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, String>>?) = size > 5_000
+        })
+
+        fun artistOfTrack(track: Track): Pair<String, String>? = if (isOnline(track)) artistIdsByVideo[track.id.value.removePrefix("yt:")] else null
+
+        fun artistCredits(track: Track): List<String> =
+            if (track.artists.size > 1) track.artists else track.artist.split(",").map(String::trim)
+
+        private fun recordCatalogueLinks(video: String, runs: List<Map<*, *>>) {
+            for (run in runs) {
+                val endpoint = (run["navigationEndpoint"] as? Map<*, *>)?.get("browseEndpoint") as? Map<*, *> ?: continue
+                val id = endpoint["browseId"] as? String ?: continue
+                val type = dump(endpoint)
+                if (id.startsWith("MPRE") && type.contains("MUSIC_PAGE_TYPE_ALBUM")) rememberAlbum(video, id)
+                if (id.startsWith("UC") && (type.contains("MUSIC_PAGE_TYPE_ARTIST") || type.contains("MUSIC_PAGE_TYPE_USER_CHANNEL"))) {
+                    val name = text(run["text"])
+                    if (name.isNotBlank()) artistIdsByVideo.putIfAbsent(video, id to name)
+                }
+            }
+        }
+
         /** Playlist cards anywhere in an answer (a library grid, a shelf), in order, without the "New playlist" tile. */
         fun playlistCards(json: String): List<Card> {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
@@ -846,7 +921,9 @@ internal class YouTubeMusic(
         /** Song rows, already parsed, as tracks. */
         private fun songRows(rows: List<Map<*, *>>, fallbackArtist: String? = null, keepOrder: Boolean = false): List<Track> {
             val ranked = rows.mapNotNull { row ->
-                val id = ((row["playlistItemData"] as? Map<*, *>)?.get("videoId") as? String) ?: return@mapNotNull null
+                val id = ((row["playlistItemData"] as? Map<*, *>)?.get("videoId") as? String)
+                    ?: (collect(row["navigationEndpoint"], "watchEndpoint") + collect(row["overlay"], "watchEndpoint"))
+                        .firstNotNullOfOrNull { it["videoId"] as? String } ?: return@mapNotNull null
                 val kind = Regex(""""musicVideoType"\s*:\s*"([A-Z_]+)"""").find(dump(row["overlay"]))?.groupValues?.get(1) ?: "MUSIC_VIDEO_TYPE_ATV"
                 val rank = when (kind) { "MUSIC_VIDEO_TYPE_ATV" -> 0; "MUSIC_VIDEO_TYPE_OMV" -> 1; "MUSIC_VIDEO_TYPE_UGC" -> 2; else -> return@mapNotNull null }
                 val columns = (row["flexColumns"] as? List<*>).orEmpty().map { c ->
@@ -864,7 +941,7 @@ internal class YouTubeMusic(
                 val albumRun = runs.firstOrNull { page(it) == "MUSIC_PAGE_TYPE_ALBUM" }
                 val album = albumRun?.get("text") as? String
                 // Where "Go to album" leads for this song (its album page on YouTube Music).
-                albumRun?.let { Regex(""""browseId"\s*:\s*"([^"]+)"""").find(dump(it["navigationEndpoint"]))?.groupValues?.get(1) }?.let { albumIds[id] = it }
+                recordCatalogueLinks(id, runs)
                 val clock = Regex("""\d{1,2}(:\d{2}){1,2}""")
                 val fixed = Regex(""""text"\s*:\s*"(\d{1,2}(?::\d{2}){1,2})"""").find(dump(row["fixedColumns"]))?.groupValues?.get(1)
                 val duration = (plain.lastOrNull { it.matches(clock) } ?: fixed)?.split(':')?.fold(0L) { acc, p -> acc * 60 + p.toLong() } ?: 0L
@@ -872,7 +949,7 @@ internal class YouTubeMusic(
                 // Album art is served at any size: ask for one large enough for the player.
                 val cover = thumbs.lastOrNull()?.replace(Regex("""=w\d+-h\d+"""), "=w1080-h1080")
                 if (title.isEmpty()) return@mapNotNull null
-                rank to Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", title, artist, album = album, durationMs = duration * 1000, artworkUri = cover)
+                rank to Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", title, artist, album = album, durationMs = duration * 1000, artworkUri = cover, artists = artists.ifEmpty { listOf(artist) })
             }
             val songs = (if (keepOrder) ranked else ranked.sortedBy { it.first }).map { it.second }
             return if (keepOrder) songs else songs.distinctBy { it.id }.take(20)
@@ -893,10 +970,11 @@ internal class YouTubeMusic(
                 val (artist, song) = if (video) songFromVideo(title, parts.firstOrNull().orEmpty())
                     else (artists.joinToString(", ").ifEmpty { parts.firstOrNull() ?: return@mapNotNull null }) to title
                 val album = if (video) null else runs.firstOrNull { page(it) == "MUSIC_PAGE_TYPE_ALBUM" }?.get("text") as? String
+                if (!video) recordCatalogueLinks(id, runs)
                 val year = if (video) null else parts.lastOrNull()?.takeIf { it.matches(Regex("""\d{4}""")) }?.toInt()
                 val length = text(row["lengthText"]).split(':').mapNotNull { it.trim().toLongOrNull() }.fold(0L) { acc, p -> acc * 60 + p }
                 val cover = biggestImage(row["thumbnail"])
-                Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", song, artist, album = album, durationMs = length * 1000, year = year, artworkUri = cover)
+                Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", song, artist, album = album, durationMs = length * 1000, year = year, artworkUri = cover, artists = artists.ifEmpty { listOf(artist) })
             }.distinctBy { it.id }
             val token = Regex(""""nextRadioContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
                 ?: Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)

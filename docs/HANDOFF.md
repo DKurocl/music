@@ -1,3 +1,10 @@
+# YouTube Music browse recovery
+
+Artist routes retain the channel linked by the provider. Album and artist pages can recover
+confirmed tracks from YouTube Music Search when browse fails, keeping retry available. Release
+fallback matches the exact provider album ID. The workspace proxy denies live YouTube Music
+requests. CI uses controlled browse failures and recorded provider response shapes.
+
 # Home, playback and library follow-up (2026-11-18)
 
 The owner requested uniform playlist cards, stable mood and playback controls, a centered
