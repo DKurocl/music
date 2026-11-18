@@ -10,37 +10,51 @@ AAPT = 'xmlns:aapt="http://schemas.android.com/aapt"'
 SIZE = 'android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"'
 DURATION = 460
 
-# The lower edge follows the same record outline. Both layers share the playback cutout.
-FACE = ("M53,30 C66,30 77,39 78,51 C79,64 69,75 55,76 "
-        "C42,77 30,68 30,55 C29,42 39,31 53,30 Z")
-RIM = ("M30,54 C30,66 40,75 54,75 C67,75 77,65 78,53 "
-       "L77,60 C75,72 66,80 54,80 C41,80 31,72 30,60 Z")
-PLAY = ("M50,46 C50,44.4 51.8,43.5 53.2,44.4 L64.3,51.1 "
-        "C65.8,52 65.8,54 64.3,54.9 L53.2,61.6 "
-        "C51.8,62.5 50,61.6 50,60 Z")
-GROOVE = "M37.8,51 C38.6,44 43.5,39.7 49.5,38.1"
-FACE_STOPS = ((0.0, "#ED9178"), (0.44, "#D97760"), (1.0, "#BD5846"))
-EDGE = "#A9493A"
-SHEEN = "#FFE6DB"
-SCALE = 0.88
+# The dark rim sits just below the face. The spindle hole is cut from every layer.
+GROOVES = ("M35,49 A20,20 0 0 1 45,37 M63,71 A20,20 0 0 0 73,59 "
+           "M39,52 A15,15 0 0 1 47,41 M61,67 A15,15 0 0 0 69,56")
+FACE_STOPS = ((0.0, "#D27A6A"), (0.52, "#AD4E47"), (1.0, "#843438"))
+LABEL_STOPS = ((0.0, "#F3AB95"), (1.0, "#DD7C6A"))
+EDGE = "#783238"
+SHEEN = "#FBB9A6"
+SCALE = 0.90
+
+
+def circle(y, radius):
+    return f"M{54-radius},{y} a{radius},{radius} 0 1,0 {2*radius},0 a{radius},{radius} 0 1,0 {-2*radius},0 Z"
+
+
+HOLE = circle(53.5, 2.9)
+FACE = f"{circle(53.5, 24)} {HOLE}"
+RIM = f"{circle(55, 24)} {HOLE}"
+LABEL = f"{circle(53.5, 9.5)} {HOLE}"
+THEMED_GROOVE = ("M34,49 A21,21 0 0 1 45,36 Q47,35 47,37 "
+                 "A19,19 0 0 0 36,50 Q34,51 34,49 Z "
+                 "M74,58 A21,21 0 0 1 63,72 Q61,73 61,71 "
+                 "A19,19 0 0 0 72,57 Q74,56 74,58 Z")
+THEMED = f"{FACE} {THEMED_GROOVE}"
+
+
+def fill_gradient(path, stops, start, end):
+    items = "".join(f'<item android:offset="{n}" android:color="{c}"/>' for n, c in stops)
+    return (f'<path android:fillType="evenOdd" android:pathData="{path}"><aapt:attr name="android:fillColor">'
+            f'<gradient android:type="linear" android:startX="{start[0]}" android:startY="{start[1]}" '
+            f'android:endX="{end[0]}" android:endY="{end[1]}">{items}</gradient></aapt:attr></path>')
 
 
 def vector_body(animated=False, themed=False):
     motion_name = ' android:name="mark"' if animated else ""
     if themed:
-        paths = f'<path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{FACE} {PLAY}"/>'
+        paths = f'<path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{THEMED}"/>'
     else:
-        gradient = "".join(f'<item android:offset="{n}" android:color="{c}"/>' for n, c in FACE_STOPS)
-        paths = (f'<path android:fillColor="{EDGE}" android:pathData="{RIM}"/>'
-                 f'<path android:fillType="evenOdd" android:pathData="{FACE} {PLAY}">'
-                 '<aapt:attr name="android:fillColor"><gradient android:type="radial" '
-                 'android:centerX="63" android:centerY="35" android:gradientRadius="45">'
-                 f'{gradient}</gradient></aapt:attr></path>'
-                 f'<path android:pathData="{GROOVE}" android:strokeColor="{SHEEN}" android:strokeAlpha="0.72" '
-                 'android:strokeWidth="2.5" android:strokeLineCap="round"/>')
+        paths = (f'<path android:fillColor="{EDGE}" android:fillType="evenOdd" android:pathData="{RIM}"/>'
+                 f'{fill_gradient(FACE, FACE_STOPS, (33, 30), (70, 77))}'
+                 f'{fill_gradient(LABEL, LABEL_STOPS, (45, 43), (62, 63))}'
+                 f'<path android:pathData="{GROOVES}" android:strokeColor="{SHEEN}" android:strokeAlpha="0.55" '
+                 'android:strokeWidth="1.7" android:strokeLineCap="round"/>')
     return (f'<group{motion_name} android:pivotX="54" android:pivotY="54">'
             f'<group android:pivotX="54" android:pivotY="54" android:scaleX="{SCALE}" '
-            f'android:scaleY="{SCALE}" android:translateY="-1">{paths}</group></group>')
+            f'android:scaleY="{SCALE}" android:translateY="-0.5">{paths}</group></group>')
 
 
 def animator(prop, start, end):
@@ -57,27 +71,30 @@ def main():
     write("ic_launcher_foreground.xml", f'<vector {ANDROID} {AAPT} {SIZE}>{vector_body()}</vector>')
     write("ic_launcher_background.xml", f'<shape {ANDROID}><solid android:color="#FFFFFFFF"/></shape>')
     write("ic_launcher_monochrome.xml", f'<vector {ANDROID} {SIZE}>{vector_body(themed=True)}</vector>')
-    motion = (animator("scaleX", 0.86, 1) + animator("scaleY", 0.82, 1)
-              + animator("translationY", 5, 0) + animator("rotation", -9, 0))
+    motion = (animator("scaleX", 0.86, 1) + animator("scaleY", 0.86, 1)
+              + animator("translationY", 4, 0) + animator("rotation", -34, 0))
     write("splash_icon.xml", f'<animated-vector {ANDROID} {AAPT}><aapt:attr name="android:drawable">'
           f'<vector {SIZE}>{vector_body(animated=True)}</vector></aapt:attr>'
           f'<target android:name="mark"><aapt:attr name="android:animation"><set>{motion}</set></aapt:attr></target>'
           '</animated-vector>')
 
-    transform = f'translate(54 53) scale({SCALE}) translate(-54 -54)'
-    face = f'<path d="{FACE} {PLAY}" fill-rule="evenodd"'
-    mark = (f'<g transform="{transform}"><path d="{RIM}" fill="{EDGE}"/>'
-            f'{face} fill="url(#g)"/><path d="{GROOVE}" fill="none" stroke="{SHEEN}" '
-            'stroke-opacity=".72" stroke-width="2.5" stroke-linecap="round"/></g>')
+    transform = f'translate(54 53.5) scale({SCALE}) translate(-54 -54)'
+    face = f'<path d="{FACE}" fill-rule="evenodd"'
+    mark = (f'<g transform="{transform}"><path d="{RIM}" fill="{EDGE}" fill-rule="evenodd"/>'
+            f'{face} fill="url(#g)"/><path d="{LABEL}" fill="url(#l)" fill-rule="evenodd"/>'
+            f'<path d="{GROOVES}" fill="none" stroke="{SHEEN}" stroke-opacity=".55" '
+            'stroke-width="1.7" stroke-linecap="round"/></g>')
     panels = [
         '<circle cx="54" cy="54" r="36" fill="white"/>' + mark,
         '<rect x="18" y="18" width="72" height="72" rx="22" fill="white"/>' + mark,
-        '<circle cx="54" cy="54" r="36" fill="#2b2a33"/>' + f'{face} transform="{transform}" fill="#d0bcff"/>',
+        '<circle cx="54" cy="54" r="36" fill="#2b2a33"/>' + f'<path d="{THEMED}" fill-rule="evenodd" transform="{transform}" fill="#d0bcff"/>',
         mark,
     ]
-    stops = "".join(f'<stop offset="{n}" stop-color="{c}"/>' for n, c in FACE_STOPS)
+    def stops(values):
+        return "".join(f'<stop offset="{n}" stop-color="{c}"/>' for n, c in values)
     svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 312 72" width="1248" height="288">'
-           f'<defs><radialGradient id="g" cx="63" cy="35" r="45" gradientUnits="userSpaceOnUse">{stops}</radialGradient></defs>'
+           f'<defs><linearGradient id="g" x1="33" y1="30" x2="70" y2="77" gradientUnits="userSpaceOnUse">{stops(FACE_STOPS)}</linearGradient>'
+           f'<linearGradient id="l" x1="45" y1="43" x2="62" y2="63" gradientUnits="userSpaceOnUse">{stops(LABEL_STOPS)}</linearGradient></defs>'
            '<rect width="312" height="72" fill="#1b1b21"/>')
     svg += "".join(f'<g transform="translate({i * 80 - 18} -18)">{panel}</g>' for i, panel in enumerate(panels))
     (ROOT / "docs/design/icon-preview.svg").write_text(svg + "</svg>\n", encoding="utf-8")
