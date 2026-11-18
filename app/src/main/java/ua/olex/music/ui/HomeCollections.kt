@@ -8,7 +8,6 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -45,30 +44,19 @@ private fun MoodChip(label: String, glyph: Glyph, active: Boolean, onClick: () -
         if (still) snap() else motion.fastEffectsSpec(), label = "Mood surface")
     val ink by animateColorAsState(if (active) cs.onPrimary else cs.onSurfaceVariant,
         if (still) snap() else motion.fastEffectsSpec(), label = "Mood icon")
-    val pulse = remember { Animatable(0f) }
+    val phase = remember(glyph) { Animatable(1f) }
     var taps by remember { mutableIntStateOf(0) }
-    val settle = motion.fastSpatialSpec<Float>()
     LaunchedEffect(taps, still) {
-        if (!still && taps > 0) {
-            pulse.animateTo(1f, tween(90))
-            pulse.animateTo(0f, settle)
-        } else pulse.snapTo(0f)
+        if (still || taps == 0) phase.snapTo(1f) else {
+            phase.snapTo(0f)
+            phase.animateTo(1f, tween(moodDuration(glyph), easing = androidx.compose.animation.core.LinearEasing))
+        }
     }
     Surface(selected = active, onClick = { taps++; haptics.tick(); onClick() }, shape = CircleShape,
         color = paper, contentColor = ink, modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 3.dp).squish(0.025f)) {
         Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Symbol(glyph, size = 19.dp, color = ink, filled = active, bold = active, modifier = Modifier.graphicsLayer {
-                val t = pulse.value
-                when (glyph) {
-                    Glyph.RELAX, Glyph.SLEEP -> { rotationZ = -15f * t; translationY = -1.5.dp.toPx() * t }
-                    Glyph.ENERGY, Glyph.WORKOUT -> { translationY = -3.dp.toPx() * t; rotationZ = 8f * t }
-                    Glyph.COMMUTE -> translationX = 3.dp.toPx() * t
-                    Glyph.RAIN -> translationY = 3.dp.toPx() * t
-                    Glyph.HAPPY, Glyph.PARTY, Glyph.MIX -> rotationZ = 17f * t
-                    else -> { scaleX = 1f + 0.18f * t; scaleY = scaleX }
-                }
-            })
+            MoodMark(glyph, ink, Modifier.size(21.dp)) { phase.value }
             Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }
