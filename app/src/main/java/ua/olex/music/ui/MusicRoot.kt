@@ -370,11 +370,7 @@ fun MusicRoot(model: LibraryViewModel) {
                     if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) KickIconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { k -> Symbol(Glyph.SEARCH, kick = k) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
-                        KickIconButton(onClick = { page = Page.STATS }, modifier = Modifier.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
-                        // The gear turns as it opens Settings.
-                        var gear by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-                        androidx.compose.material3.FilledTonalIconButton(onClick = { gear++; page = Page.SETTINGS },
-                            shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp, kick = gear) }
+                        HomeActions(onStats = { page = Page.STATS }, onSettings = { page = Page.SETTINGS })
                     }
                 },
             )
@@ -923,6 +919,16 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
             )
         }
     }
+}
+
+/** Shared toolbar for Home and its rendered design previews. */
+@Composable
+internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit) {
+    KickIconButton(onClick = onStats, modifier = Modifier.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
+    // The gear turns as it opens Settings.
+    var gear by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.material3.FilledTonalIconButton(onClick = { gear++; onSettings() },
+    shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp, kick = gear) }
 }
 
 /** A tab arrives from its position in the bar. Content is readable on the first frame, even on rapid taps. */

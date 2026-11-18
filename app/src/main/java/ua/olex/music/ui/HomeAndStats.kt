@@ -4,11 +4,9 @@ package ua.olex.music.ui
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -70,18 +68,24 @@ internal fun HomePage(
         }.value
     }
     val haptics = rememberHaptics()
-    val still = LocalPowerSave.current
     val stateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val mode = if (!choosing) "picks" else mood?.label ?: "chooser"
     Arrival(mode, Place.HOME, deeper = choosing) {
         stateHolder.SaveableStateProvider(mode) {
             LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
                 item(key = "mode") {
-                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = !choosing, onClick = { haptics.tick(); choosing = false; label = null },
-                            label = { Text("Quick picks") }, leadingIcon = { Symbol(Glyph.PLAY, size = 18.dp, filled = !choosing) })
-                        FilterChip(selected = choosing, onClick = { haptics.tick(); choosing = true; label = null },
-                            label = { Text("Moods") }, leadingIcon = { Symbol(Glyph.MIX, size = 18.dp, filled = choosing) })
+                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (choosing) mood?.label ?: "Moods" else "Quick picks", Modifier.weight(1f),
+                            style = MaterialTheme.typography.headlineLargeEmphasized)
+                        FilledTonalButton(onClick = {
+                            haptics.tick()
+                            if (mood != null) label = null else choosing = !choosing
+                        }, contentPadding = PaddingValues(horizontal = 14.dp)) {
+                            Symbol(if (choosing && mood == null) Glyph.PLAY else Glyph.MIX, size = 18.dp)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (choosing && mood == null) "Quick picks" else "Moods")
+                        }
                     }
                 }
                 if (choosing && mood == null) {
@@ -95,33 +99,13 @@ internal fun HomePage(
                 }
                 val songs = queue.orEmpty()
                 val contextName = mood?.label ?: "Quick picks"
-                if (mood != null) item(key = "mood-title") { SectionTitle(mood.label) }
                 if (songs.isNotEmpty()) {
-                    val first = songs.first()
-                    item(key = "lead-" + first.id.value) {
-                        val shape = RoundedCornerShape(28.dp)
-                        Surface(shape = shape, color = MaterialTheme.colorScheme.primaryContainer,
-                            modifier = Modifier.fillMaxWidth().then(if (still) Modifier else Modifier.animateItem()).padding(horizontal = 16.dp, vertical = 6.dp)
-                                .squish(0.02f).clip(shape).combinedClickable(
-                                    onLongClickLabel = "Song actions", onLongClick = { haptics.longPress(); onTrackActions(first) },
-                                    onClickLabel = "Play ${first.title}", onClick = { haptics.confirm(); onPlay(songs, 0, contextName) })) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Artwork(first.artworkUri, Modifier.size(88.dp), 18.dp)
-                                Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
-                                    Text(first.title, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                    Text(first.artist, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                }
-                                Box(Modifier.size(42.dp).clip(androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape())
-                                    .background(MaterialTheme.colorScheme.primary), contentAlignment = Alignment.Center) {
-                                    Symbol(Glyph.PLAY, color = MaterialTheme.colorScheme.onPrimary, filled = true)
-                                }
-                            }
-                        }
+                    item(key = "spread") {
+                        CoverSpread(songs, currentId, { i -> onPlay(songs, i, contextName) }, onTrackActions)
                     }
-                    items(songs.size - 1, key = { "track-" + songs[it + 1].id.value }, contentType = { "song" }) { i ->
-                        val track = songs[i + 1]
-                        TrackRow(track, current = track.id.value == currentId, modifier = if (still) Modifier else Modifier.animateItem(),
-                            showQuality = false, onMore = { onTrackActions(track) }) { onPlay(songs, i + 1, contextName) }
+                    if (songs.size > 3) {
+                        item(key = "more-title") { SectionTitle("More picks") }
+                        item(key = "sleeves") { SleeveRail(songs, currentId, { i -> onPlay(songs, i, contextName) }, onTrackActions) }
                     }
                 } else if (queue == null || moodView?.loading == true) {
                     item(key = "loading") { repeat(3) { PlaceholderRow() } }
@@ -141,24 +125,6 @@ internal fun HomePage(
                     TextButton(onClick = onAllowFiles, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Include music on this device") }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun MoodTile(label: String, modifier: Modifier, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val glyph = moodGlyph(label)
-    val (accent, ink) = when (glyph) {
-        Glyph.RELAX, Glyph.SLEEP, Glyph.RAIN -> cs.secondaryContainer to cs.onSecondaryContainer
-        Glyph.FAVOURITE, Glyph.PARTY, Glyph.HAPPY -> cs.tertiaryContainer to cs.onTertiaryContainer
-        else -> cs.primaryContainer to cs.onPrimaryContainer
-    }
-    Surface(onClick = onClick, shape = RoundedCornerShape(24.dp), color = accent, contentColor = ink,
-        modifier = modifier.squish(0.035f)) {
-        Row(Modifier.heightIn(min = 76.dp).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Symbol(glyph, size = 28.dp)
-            Text(label, Modifier.padding(start = 10.dp), style = MaterialTheme.typography.titleMediumEmphasized)
         }
     }
 }
@@ -363,11 +329,19 @@ internal fun HomeSkeleton(modifier: Modifier) {
     val tone = MaterialTheme.colorScheme.surfaceContainerHigh
     val pulse = rememberLoadingPulse()
     Column(modifier.fillMaxSize().graphicsLayer { alpha = pulse() }.semantics { contentDescription = "Loading your library" }) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            repeat(2) { Box(Modifier.width(104.dp).height(40.dp).clip(RoundedCornerShape(50)).background(tone)) }
+        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Box(Modifier.width(168.dp).height(36.dp).clip(RoundedCornerShape(16.dp)).background(tone))
+            Box(Modifier.width(88.dp).height(36.dp).clip(RoundedCornerShape(50)).background(tone))
         }
-        Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().height(112.dp).clip(RoundedCornerShape(28.dp)).background(tone))
-        Spacer(Modifier.height(12.dp))
-        repeat(4) { PlaceholderRow() }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).aspectRatio(1.2f).clip(RoundedCornerShape(28.dp)),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Box(Modifier.weight(1.8f).fillMaxHeight().background(tone))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                repeat(2) { Box(Modifier.weight(1f).fillMaxWidth().background(tone)) }
+            }
+        }
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            repeat(2) { Box(Modifier.size(146.dp).clip(RoundedCornerShape(18.dp)).background(tone)) }
+        }
     }
 }
