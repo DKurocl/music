@@ -457,7 +457,11 @@ fun MusicRoot(model: LibraryViewModel) {
             place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
                 personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier.padding(insets),
                 onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
-                playlists = personal.playlists, accountPlaylists = homePlaylists,
+                playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
+                onOpenAlbum = { album ->
+                    clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME
+                    openInLibrary = "ALBUMS" to album.id; place = Place.SEARCH
+                },
                 onOpenPlaylist = { id -> clearOnline(Place.LIBRARY); go(Place.LIBRARY); returnTo = Place.HOME; openPlaylist = id },
                 onAllPlaylists = { clearOnline(Place.LIBRARY); go(Place.LIBRARY) },
                 moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
