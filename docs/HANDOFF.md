@@ -16,7 +16,9 @@ a running song or album, and notifications use one transfer screen with progress
 
 [код] App versionName is 2.0.0 with the existing package, signing key and monotonically increasing
 Obtainium versionCode. Player, navigation and Search focus passed CI 44261654025 before the
-combined release candidate. CI runs the complete suite for the batch. Physical device scenarios
+combined release candidate. CI 44264611204 passed the duplicate queue, search return and restored
+tab stack fixtures. Two existing checks expected the established Searching label. Restored that
+label before release. CI runs the complete suite for the batch. Physical device scenarios
 are in PHONE_CHECK.md. No Pixel frame time or actual Bluetooth measurements are available here.
 
 # Player cover continuity follow-up (Codex, 2026-11-18)

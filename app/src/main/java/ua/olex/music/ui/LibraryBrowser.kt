@@ -427,7 +427,7 @@ internal fun LibraryBrowser(
                     val localSongs = visible.orEmpty()
                     val webSongs = found?.tracks.orEmpty()
                     val groups = searchGroups.groupBy { it.first }
-                    if (local == null) item(key = "local-search") { BrowserMessage("Searching your library...") }
+                    if (local == null) item(key = "local-search") { BrowserMessage("Searching…") }
                     if (local?.failed == true) item(key = "local-failed") { ErrorNotice("Couldn't search your library.", onRetrySearch) }
                     for ((kind, hits) in groups) {
                         item(key = "group-title-$kind") { SearchHeading(if (kind == LibraryTab.ARTISTS) "Artists" else "Albums") }
