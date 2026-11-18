@@ -54,7 +54,8 @@ internal fun PlaylistBrowser(
     var namingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var create by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
-    var editingSong by rememberSaveable { mutableStateOf<Int?>(null) }
+    var editingSong by rememberSaveable(selectedId) { mutableStateOf<Int?>(null) }
+    var editingSongId by rememberSaveable(selectedId) { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbar = LocalSnackbar.current
@@ -80,7 +81,7 @@ internal fun PlaylistBrowser(
     var loadingDocument by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf<PlaylistDocuments.Loaded?>(null) }
     var documentMessage by remember { mutableStateOf<String?>(null) }
-    var exportSnapshot by remember { mutableStateOf<Pair<String, List<SavedSong>>?>(null) }
+    var exportText by remember { mutableStateOf<String?>(null) }
     var exportPlaylistId by rememberSaveable { mutableStateOf<Long?>(null) }
     val importFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch {
@@ -92,17 +93,20 @@ internal fun PlaylistBrowser(
         }
     }
     val exportFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri ->
-        val snapshot = exportSnapshot ?: playlists.firstOrNull { it.id == exportPlaylistId }?.let { playlist ->
-            playlist.name to playlist.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song }
-        }
-        exportSnapshot = null; exportPlaylistId = null
-        if (uri != null && snapshot == null) documentMessage = "The playlist is no longer available. Open it and try exporting again."
-        if (uri != null && snapshot != null) scope.launch {
+        val prepared = exportText
+        val source = playlists.firstOrNull { it.id == exportPlaylistId }
+        exportText = null; exportPlaylistId = null
+        if (uri != null && prepared == null && source == null) documentMessage = "The playlist is no longer available. Open it and try exporting again."
+        if (uri != null && (prepared != null || source != null)) scope.launch {
             loadingDocument = true
             try {
-                val text = withContext(Dispatchers.Default) { PlaylistDocuments.export(snapshot.first, snapshot.second) }
+                // Android may recreate the activity while the system document picker is open.
+                val text = prepared ?: withContext(Dispatchers.Default) {
+                    val playlist = requireNotNull(source)
+                    PlaylistDocuments.export(playlist.name, playlist.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song })
+                }
                 withContext(Dispatchers.IO) { PlaylistDocuments.write(context, uri, text) }
-                documentMessage = "Exported ${snapshot.second.size} songs. Missing file references are included; YouTube Music songs are saved as their music.youtube.com links."
+                documentMessage = "Playlist exported. Local file references and YouTube Music links are included."
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { documentMessage = "Couldn't complete the export. Some songs may lack a file path, or the destination could not be written. The selected document may be incomplete." }
             finally { loadingDocument = false }
@@ -120,12 +124,18 @@ internal fun PlaylistBrowser(
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val youTubeOn by graph.youTubeOn.collectAsStateWithLifecycle()
     val network = LocalNetwork.current
+    var remoteRetry by remember(accountScope) { mutableStateOf(0) }
+    var remoteFailed by remember(accountScope, youTubeOn) { mutableStateOf(false) }
+    var remoteLoading by remember(accountScope, youTubeOn) { mutableStateOf(false) }
     val youTubePlaylists = androidx.compose.runtime.key(accountScope, youTubeOn) {
-        val loaded by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network) {
+        val loaded by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network, remoteRetry) {
             if (accountScope != "public" && youTubeOn) {
+                remoteLoading = true
+                remoteFailed = false
                 value = try { graph.youTube.accountPlaylists(offline = !network) }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (_: Exception) { value }
+                catch (_: Exception) { remoteFailed = true; value }
+                finally { remoteLoading = false }
             }
         }
         loaded
@@ -151,7 +161,8 @@ internal fun PlaylistBrowser(
             confirmButton = { TextButton(onClick = { actions.delete(id); deleting = null; selectedId = null }) { Text("Delete") } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } })
     }
-    val editRow = editingSong?.let { selected?.songs?.getOrNull(it) }
+    val editRow = editingSong?.let { selected?.songs?.getOrNull(it) }?.takeIf { it.song.id == editingSongId }
+    androidx.compose.runtime.LaunchedEffect(editingSong, editRow) { if (editRow == null) editingSong = null }
     if (selected != null && editRow != null) {
         val index = editingSong!!
         AppDialog(onDismissRequest = { editingSong = null }, title = { Text(editRow.song.title) }, text = {
@@ -164,7 +175,9 @@ internal fun PlaylistBrowser(
         }, confirmButton = { TextButton(onClick = { editingSong = null }) { Text("Close") } })
     }
 
-    LazyColumn(modifier.libraryBackMotion(back), contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
+    val playlistList = androidx.compose.foundation.lazy.rememberLazyListState()
+    val songList = androidx.compose.runtime.key(selected?.id) { androidx.compose.foundation.lazy.rememberLazyListState() }
+    LazyColumn(modifier.libraryBackMotion(back), state = if (selected == null) playlistList else songList, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
             // Two starts as cards: make one, or bring one from another player (M3U8).
@@ -184,7 +197,9 @@ internal fun PlaylistBrowser(
                     }
                 }
             }
-            if (playlists.isEmpty() && youTubePlaylists.isEmpty()) item { EmptyState(Glyph.PLAYLIST, "No playlists yet", "Make one here, then add songs or whole albums from their menus.") }
+            if (remoteLoading) item(key = "loading-remote-playlists") { PlaceholderRow() }
+            if (remoteFailed) item(key = "retry-remote-playlists") { ErrorNotice("Couldn't load your YouTube Music playlists.") { remoteRetry++ } }
+            if (!remoteLoading && !remoteFailed && playlists.isEmpty() && youTubePlaylists.isEmpty()) item { EmptyState(Glyph.PLAYLIST, "No playlists yet", "Make one here, then add songs or whole albums from their menus.") }
             items(playlists, key = { it.id }) { playlist ->
                 ListItem(
                     headlineContent = { Text(playlist.name, style = MaterialTheme.typography.titleMedium) },
@@ -222,9 +237,18 @@ internal fun PlaylistBrowser(
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         androidx.compose.material3.AssistChip(enabled = !loadingDocument, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }, onClick = {
-                            exportPlaylistId = selected.id
-                            exportSnapshot = selected.name to selected.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song }
-                            exportFile.launch(PlaylistDocuments.filename(selected.name))
+                            loadingDocument = true
+                            scope.launch {
+                                try {
+                                    exportText = withContext(Dispatchers.Default) {
+                                        PlaylistDocuments.export(selected.name, selected.songs.map { row -> row.track?.let(SavedSong::from) ?: row.song })
+                                    }
+                                    exportPlaylistId = selected.id
+                                    exportFile.launch(PlaylistDocuments.filename(selected.name))
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { documentMessage = "Couldn't export this playlist. Check that each song has a file path or a YouTube Music link." }
+                                finally { loadingDocument = false }
+                            }
                         }, label = { Text("Export M3U8") })
                         androidx.compose.material3.AssistChip(leadingIcon = { Symbol(Glyph.EDIT, size = 18.dp) }, onClick = { namingId = selected.id }, label = { Text("Rename") })
                         androidx.compose.material3.AssistChip(leadingIcon = { Symbol(Glyph.DELETE, size = 18.dp) }, onClick = { deleting = selected.id }, label = { Text("Delete") })
@@ -236,7 +260,7 @@ internal fun PlaylistBrowser(
             itemsIndexed(selected.songs, key = { position, row -> "$position:${row.song.id}" }) { position, row ->
                 SavedSongItem(row, currentId, onPlay = {
                     if (row.track != null) playPlaylist(selected, selected.songs.take(position).count { it.track != null })
-                }, onMore = { editingSong = position })
+                }, onMore = { editingSongId = row.song.id; editingSong = position })
             }
         }
     }

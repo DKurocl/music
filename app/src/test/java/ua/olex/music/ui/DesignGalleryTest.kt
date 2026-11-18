@@ -629,6 +629,60 @@ class DesignGalleryTest {
         org.junit.Assert.assertEquals(1, consumed)
     }
 
+    @Test fun queueSearchRetainsOccurrenceNumbersAndCanReturnToCurrent() {
+        val queue = (0 until 22).map { i ->
+            val duplicate = i == 2 || i == 17
+            ua.olex.music.playback.QueueItem("entry-$i", if (duplicate) "song" else "song-$i",
+                if (duplicate) "Jóga" else "Song $i", "Björk", null)
+        }
+        var played: String? = null
+        compose.setContent { AppTheme { CompositionLocalProvider(LocalInlineSheets provides true) {
+            QueueSheet(PlayerState(connected = true, queue = queue, queueIndex = 8), {}, { played = it }, { _, _ -> }, {})
+        } } }
+        compose.onNodeWithContentDescription("Find in queue").performClick()
+        compose.onNode(hasSetTextAction()).performTextInput("bjork joga")
+        val duplicate = hasContentDescription("Jóga, Björk, queue item 18")
+        compose.waitUntil(5_000) { compose.onAllNodes(duplicate).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(duplicate).performClick()
+        org.junit.Assert.assertEquals("entry-17", played)
+        compose.onNodeWithContentDescription("Show current song").performClick()
+        compose.onNodeWithContentDescription("Song 8, Björk, queue item 9").assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+    }
+
+    @Test fun backingOutOfASearchAlbumRestoresTheQuery() {
+        compose.setContent { AppTheme { Images {
+            val query = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("ok comp") }
+            LibraryBrowser(library, PaddingValues(0.dp), query.value, LibrarySearchResult(query.value, emptyList()),
+                { query.value = it }, null, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH)
+        } } }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("OK Computer").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("OK Computer").performClick()
+        compose.onNodeWithContentDescription("Back to collections").performClick()
+        compose.onNode(hasSetTextAction()).assertTextContains("ok comp")
+    }
+
+    @Test fun onlineDestinationsSurviveRecreationWithIndependentBackStacks() {
+        val restore = androidx.compose.ui.test.junit4.StateRestorationTester(compose)
+        val album = OnlineTarget.Album("pl", "Mix", playlist = true, subtitle = "Owner")
+        val artist = OnlineTarget.Artist("Artist", "UC1", full = true)
+        lateinit var history: OnlineTabHistory
+        restore.setContent { history = androidx.compose.runtime.saveable.rememberSaveable(saver = OnlineTabHistory.saver) { OnlineTabHistory() } }
+        compose.runOnIdle {
+            history.open(Place.HOME, album)
+            history.open(Place.HOME, artist)
+            history.open(Place.HOME, artist)
+            history.open(Place.SEARCH, artist)
+        }
+        restore.emulateSavedInstanceStateRestore()
+        compose.runOnIdle {
+            org.junit.Assert.assertEquals(listOf(album, artist), history[Place.HOME])
+            history.back(Place.HOME)
+            org.junit.Assert.assertEquals(listOf(album), history[Place.HOME])
+            org.junit.Assert.assertEquals(listOf(artist), history[Place.SEARCH])
+        }
+    }
+
     @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
     fun playerLargeFont() {
         compose.setContent {

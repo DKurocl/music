@@ -1,5 +1,7 @@
 package ua.olex.music.ui
 
+import kotlinx.coroutines.launch
+
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -46,7 +48,7 @@ internal fun HomePage(
     moods: List<YouTubeMusic.Mood> = emptyList(),
     youTubeHome: List<YouTubeMusic.Shelf> = emptyList(),
     /** Set when the app may not read the owner's files: Home asks for them in place, above YouTube Music. */
-    onAllowFiles: (() -> Unit)? = null,
+    onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {}, cache: HomeCache = remember(library) { HomeCache() },
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -55,9 +57,9 @@ internal fun HomePage(
     // main thread. Until the first result the last one this process made is shown (or an empty Home
     // with the library's first album), so opening Home never waits on a pass over every song.
     val day = java.time.LocalDate.now().toEpochDay()
-    val data by androidx.compose.runtime.produceState(HomeCache.last ?: HomeData.EMPTY, library, history, stats, favourites, day) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { homeData(library, history, stats, favourites, day) }.also { HomeCache.last = it }
-    }
+    val data = androidx.compose.runtime.key(cache) { androidx.compose.runtime.produceState(cache.last ?: HomeData.EMPTY, library, history, stats, favourites, day) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { homeData(library, history, stats, favourites, day) }.also { cache.last = it }
+    }.value }
     val newest = data.newest; val artists = data.artists; val recentAlbums = data.recentAlbums; val addedAlbums = data.addedAlbums
     val mostPlayed = data.mostPlayed; val listened = data.listened; val quickPicks = data.quickPicks
     val hero = recentAlbums.firstOrNull() ?: addedAlbums.firstOrNull() ?: library.albums.firstOrNull()
@@ -67,12 +69,17 @@ internal fun HomePage(
     val mood = moods.firstOrNull { it.label == moodLabel }
     androidx.activity.compose.BackHandler(mood != null) { moodLabel = null }
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
-    androidx.compose.runtime.LaunchedEffect(moodLabel) { if (list.firstVisibleItemIndex > 0) list.animateScrollToItem(0) }
+    val scrollScope = androidx.compose.runtime.rememberCoroutineScope()
+    fun chooseMood(label: String?) {
+        moodLabel = label
+        scrollScope.launch { list.scrollToItem(0) }
+    }
     val moodView = mood?.let { m -> androidx.compose.runtime.key(m.label) { rememberMoodView(m, library) } }
 
     LazyColumn(modifier, state = list, contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
+        if (scanError != null) item(key = "scan-error") { ErrorNotice(scanError, onScanRetry) }
         // Moods first, as in YouTube Music: Energize, Relax, Sad, Sleep... a tap shows Home for that mood.
-        if (moods.isNotEmpty()) item(key = "moods") { MoodRow(moods, Modifier.padding(top = 4.dp, bottom = 4.dp), chosen = mood?.label) { moodLabel = it?.label } }
+        if (moods.isNotEmpty()) item(key = "moods") { MoodRow(moods, Modifier.padding(top = 4.dp, bottom = 4.dp), chosen = mood?.label) { chooseMood(it?.label) } }
         if (mood != null && moodView != null) { moodItems(mood, moodView, currentId); return@LazyColumn }
         // No files yet: YouTube Music's moods and shelves still make a Home (the library part waits).
         val noFiles = library.songs.isEmpty()
@@ -537,13 +544,13 @@ private fun BarRow(label: String, value: Int, max: Int, modifier: Modifier = Mod
 }
 
 /** What Home shows, worked out in one pass from the library, history, play counts and favourites. */
-private class HomeData(val newest: List<Track>, val artists: List<MusicCollection>, val recentAlbums: List<MusicCollection>, val addedAlbums: List<MusicCollection>,
+internal class HomeData(val newest: List<Track>, val artists: List<MusicCollection>, val recentAlbums: List<MusicCollection>, val addedAlbums: List<MusicCollection>,
     val mostPlayed: List<Track>, val listened: LibraryStats, val quickPicks: List<Track>) {
     companion object { val EMPTY = HomeData(emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), LibraryStats.of(LibraryIndex.EMPTY) { null }, emptyList()) }
 }
 
-/** The last Home worked out in this process: shown at once when Home opens again. */
-private object HomeCache { @Volatile var last: HomeData? = null }
+/** Keeps the current library and account snapshot ready while another tab is open. */
+internal class HomeCache { internal var last: HomeData? = null }
 
 private fun homeData(library: LibraryIndex, history: List<Track>, stats: Map<String, SongStats>, favourites: List<Track>, day: Long): HomeData {
     val newest = library.songs.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(100)

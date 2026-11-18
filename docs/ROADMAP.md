@@ -36,6 +36,10 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [x] Music 2.0 interaction and navigation (Codex, 2026-11-18, based on `d3b123c`).
+      End-to-end search, per-tab catalogue history, queue search, partial online pages, playlists
+      and downloads, plus the player and navigation work below. Physical validation remains open.
+
 - [x] Shared player cover, continuous swipe pages and transport icon motion (Codex, 2026-11-18,
       `a4ae9a9`, `a63be0f` and bottom navigation follow-up).
 
