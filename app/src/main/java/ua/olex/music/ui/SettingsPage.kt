@@ -114,6 +114,16 @@ internal fun SettingsPage(
 
         // YouTube Music as a second source, the owner's files always first.
         item { Group("YouTube Music") }
+        item(key = "sync-youtube-likes") {
+            val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
+            val signedIn by graph.youTubeAccount.signedIn.collectAsState()
+            val enabled by graph.youTubeOn.collectAsState()
+            val status by graph.youtubeFavourites.status.collectAsState()
+            val syncScope = rememberCoroutineScope()
+            if (signedIn && enabled) Row(Glyph.REFRESH, "Sync YouTube Music likes",
+                status ?: "Refresh likes and send waiting changes",
+                onClick = { syncScope.launch { graph.youtubeFavourites.refresh(force = true) } })
+        }
         item {
             val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
             val on by graph.youTubeOn.collectAsState()

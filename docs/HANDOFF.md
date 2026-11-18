@@ -1,3 +1,25 @@
+# Library, system playback and layout continuation (Codex, 2026-11-18)
+
+This branch includes the download package and fixes its nullable player-subtitle compile error.
+[код] Added two-way likes, a session-specific operation queue and a visible sync action. An inbound
+unlike can remove only the exact favourite imported by that session, identified by its original
+write time. Empty or incomplete remote snapshots cannot remove favourites.
+[код] Added a unified playlist list and remote edit sheet. Each change rechecks the ordered provider
+entry IDs before writing. Duplicate tracks retain separate occurrence IDs. Remote edits require a
+connected account and provider acceptance. The provider does not expose a compare-and-set write,
+so edits on another device between the read and write can still race.
+[код] Media notifications use the same favourites as the in-app player. Stable queue origins open
+their playlist or online page. Radio continuations are checkpointed against their original queue
+identity. The resume path for a mix that was started over the current song resumes after a new
+mix occurrence enters the journal.
+[код] Regular refresh on a single MediaStore volume requests changed generations and scans IDs only
+to detect deletion. Manual refresh, provider reset and multivolume changes still reconcile fully.
+Optional artist and motion work waits while audible playback is buffering. The sink exposes
+gapless hardware offload only when it is eligible and processing is disabled.
+[код] The transport fits narrow display widths and Home cards allow larger fonts. Android CI, live
+account mutations, Pixel/XM5 audio offload, real 120 Hz timing and final visual acceptance are
+separate checks. Lock-screen lyrics were not changed in this batch.
+
 # Download and player reliability batch (Codex, 2026-11-18)
 
 [код] Points 7/71: Soulseek runs in a data-sync foreground service while requests are queued.

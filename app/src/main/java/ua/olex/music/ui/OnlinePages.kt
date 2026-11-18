@@ -180,10 +180,10 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             val playable = songs.ifEmpty { artist.videos }
-                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, artist.name) }, modifier = Modifier.height(52.dp)) {
+                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, PlaybackOrigin("artist", artist.id, artist.name).encode()) }, modifier = Modifier.height(52.dp)) {
                                 Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
                             }
-                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, artist.name) },
+                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, PlaybackOrigin("artist", artist.id, artist.name).encode()) },
                                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
                             // The owner's own songs by this artist, one tap away.
                             mine?.let { local -> FilledTonalButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.height(52.dp)) {
@@ -197,7 +197,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 if (songs.isNotEmpty()) {
                     item(key = "songs-h") { OnlineHeading("Top songs") }
                     itemsIndexed(songs.take(10), key = { _, t -> "s-" + t.id.value }) { i, t ->
-                        TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, artist.name) }
+                        TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, PlaybackOrigin("artist", artist.id, artist.name).encode()) }
                     }
                 }
                 if (artist.albums.isNotEmpty()) {
@@ -262,6 +262,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     ReportTitle(list, onTitleShown)
     val album = loaded?.first
     val title = album?.title ?: target.title
+    val origin = PlaybackOrigin(if (target.playlist) "remote-playlist" else "album", target.id, title).encode()
     val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
     // A playlist mixes albums: its rows show covers. An album's rows show track numbers.
     val mixed = target.playlist || songs.mapTo(HashSet()) { it.album }.size > 1
@@ -276,10 +277,10 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 if (!target.playlist && artistName.isNotEmpty()) TextButton(onClick = { nav.open(OnlineTarget.Artist(artistName)) }) { Text(artistName) }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, title) }, modifier = Modifier.height(52.dp)) {
+                    Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, origin) }, modifier = Modifier.height(52.dp)) {
                         Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play all")
                     }
-                    FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, title) },
+                    FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, origin) },
                         modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
                     // The whole album in lossless from Soulseek, into the library. Nothing to fetch
                     // once every song plays from a file.
@@ -299,7 +300,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 OnlineFailed(target.title, Glyph.ALBUM) { retry++ }
             }
             is Load.Done -> itemsIndexed(songs, key = { i, t -> "a-$i-" + t.id.value }) { i, t ->
-                TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, title) }
+                TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, origin) }
             }
         }
     }

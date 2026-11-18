@@ -16,12 +16,22 @@ import ua.olex.music.dsp.ReplayGainTags
 
 /** Gain is applied to decoded PCM before sink buffering/conversion; old queued PCM keeps its gain. */
 @OptIn(UnstableApi::class)
-internal class ReplayGainAudioSink(delegate: AudioSink, private val settings: () -> ReplayGainSettings) : ForwardingAudioSink(delegate) {
+internal class ReplayGainAudioSink(
+    delegate: AudioSink,
+    private val settings: () -> ReplayGainSettings,
+    private val allowOffload: () -> Boolean,
+) : ForwardingAudioSink(delegate) {
+    constructor(delegate: AudioSink, settings: () -> ReplayGainSettings) : this(delegate, settings, { false })
     private var processor: PcmReplayGain? = null
-    // Always decode to PCM: changing normalization must never silently leave encoded passthrough active.
-    override fun supportsFormat(format: Format) = format.sampleMimeType == MimeTypes.AUDIO_RAW && super.supportsFormat(format)
-    override fun getFormatSupport(format: Format) = if (format.sampleMimeType == MimeTypes.AUDIO_RAW) super.getFormatSupport(format) else AudioSink.SINK_FORMAT_UNSUPPORTED
-    override fun getFormatOffloadSupport(format: Format) = AudioOffloadSupport.DEFAULT_UNSUPPORTED
+    override fun supportsFormat(format: Format) = getFormatSupport(format) != AudioSink.SINK_FORMAT_UNSUPPORTED
+    override fun getFormatSupport(format: Format): Int =
+        if (format.sampleMimeType == MimeTypes.AUDIO_RAW || getFormatOffloadSupport(format).isGaplessSupported)
+            super.getFormatSupport(format) else AudioSink.SINK_FORMAT_UNSUPPORTED
+
+    override fun getFormatOffloadSupport(format: Format): AudioOffloadSupport {
+        if (!allowOffload() || settings().mode != ua.olex.music.dsp.ReplayGainMode.OFF) return AudioOffloadSupport.DEFAULT_UNSUPPORTED
+        return super.getFormatOffloadSupport(format).takeIf { it.isGaplessSupported } ?: AudioOffloadSupport.DEFAULT_UNSUPPORTED
+    }
     override fun release() { processor = null; super.release() }
     override fun configure(audioSinkConfig: AudioSink.AudioSinkConfig) {
         val format = audioSinkConfig.format

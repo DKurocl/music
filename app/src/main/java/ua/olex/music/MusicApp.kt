@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import ua.olex.music.user.UserDatabase
 import ua.olex.music.user.UserRepository
 
@@ -41,6 +42,8 @@ class AppGraph(context: Context) {
             account = { youTubeAccount.headers() },
         )
     }
+    internal val youtubeFavourites by lazy { ua.olex.music.ui.YouTubeFavourites(app, this) }
+    internal val mixPreferences by lazy { app.getSharedPreferences("mix-cursor-v1", Context.MODE_PRIVATE) }
     internal val mix by lazy { ua.olex.music.ui.PlaybackMix(this) }
     internal fun excludedRecommendations(): Set<String> = app.getSharedPreferences("not_recommended", Context.MODE_PRIVATE).getStringSet("keys", emptySet()).orEmpty()
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
@@ -83,7 +86,7 @@ class AppGraph(context: Context) {
 
 @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams, ua.olex.music.playback.PlaybackLyricsOwner, ua.olex.music.playback.PlaybackQueueOwner,
-    coil3.SingletonImageLoader.Factory {
+    coil3.SingletonImageLoader.Factory, ua.olex.music.playback.PlaybackFavouriteOwner {
     /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
     override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
         .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("image_cache").absolutePath.toPath() })
@@ -110,6 +113,14 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             }
         },
     ).debounce(300).flowOn(Dispatchers.Default)
+    override val favouriteChanges get() = graph.userLibrary.favourites.map { Unit }
+    override suspend fun isPlaybackFavourite(track: Track) = graph.userLibrary.isFavourite(track)
+    private val accountWork = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    override suspend fun togglePlaybackFavourite(track: Track) {
+        graph.youtubeFavourites.toggle(track)
+        accountWork.launch { graph.youtubeFavourites.refresh() }
+    }
+
     override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
     override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {
         val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -129,7 +140,7 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             policy.select(original, rejected, allowDirect, availability, proposedLocal = proposed)
         }
     }
-    override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int) = graph.mix.extend(queue, current)
+    override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?) = graph.mix.extend(queue, current, context)
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
         val file = graph.library.index.first().byId[track.id]?.takeIf { it.uri == track.uri }
         val known = file?.let { track.copy(metadata = it.metadata, path = it.path) } ?: track
