@@ -12,6 +12,8 @@ import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
@@ -72,10 +74,12 @@ internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
     Box(modifier) {
-        Box(Modifier.align(Alignment.BottomEnd).padding(2.dp).size(22.dp)
-            .clip(androidx.compose.foundation.shape.CircleShape).background(cs.primary),
+        val shape = androidx.compose.foundation.shape.CircleShape
+        Box(Modifier.align(Alignment.BottomEnd).padding(2.dp).size(20.dp)
+            .clip(shape).background(if (playing) cs.primaryContainer else cs.surfaceContainerHighest)
+            .then(Modifier.semantics { stateDescription = if (playing) "Playing" else "Paused" }),
             contentAlignment = Alignment.Center) {
-            Symbol(if (playing) Glyph.PLAY else Glyph.PAUSE, size = 14.dp, color = cs.onPrimary, filled = true)
+            Symbol(if (playing) Glyph.PLAY else Glyph.PAUSE, size = 12.dp, color = if (playing) cs.onPrimaryContainer else cs.onSurface, filled = true)
         }
     }
 }

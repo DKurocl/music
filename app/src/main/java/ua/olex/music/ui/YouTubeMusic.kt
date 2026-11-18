@@ -91,26 +91,28 @@ internal class YouTubeMusic(
             return@withContext it
         }
         if (offline) return@withContext null
-        val text = post("search", """"query":${quote(name)}"""") ?: return@withContext null
+        val fields = """"query":${quote(name)}"""
+        val filtered = post("search", fields + ""","params":"$ARTISTS_ONLY"""")?.let(::artistIds).orEmpty()
+        val found = filtered.ifEmpty { post("search", fields)?.let(::artistIds).orEmpty() }
         if (pageScope() != scope) return@withContext null
-        val found = artistIds(text)
-        val exact = found.filter { TextFold.fold(it.second) == folded }.map { it.first }.distinct().singleOrNull()
-        exact?.also {
-            keep(memoryKey, it)
-            pageStore?.write(scope, key, org.json.JSONObject().put("id", it))
+        val exact = found.firstOrNull { TextFold.fold(it.second) == folded }
+        exact?.let { (id, _) ->
+            keep(memoryKey, id)
+            pageStore?.write(scope, key, org.json.JSONObject().put("id", id))
         }
+        exact?.first ?: found.firstOrNull()?.first
     }
 
-    suspend fun artist(id: String, offline: Boolean = false): OnlineArtist? = withContext(ioDispatcher) {
+    suspend fun artist(id: String, offline: Boolean = false, full: Boolean = false): OnlineArtist? = withContext(ioDispatcher) {
         val scope = pageScope()
-        val key = "artist:$id"
+        val key = if (full) "artist-full:$id" else "artist:$id"
         cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
             val saved = pageStore?.read(scope, key)?.let { runCatching { OnlinePageJson.artist(it) }.getOrNull() }
             if (offline) return@cached saved
             val fresh = networkFallback(saved) {
                 val json = post("browse", """"browseId":${quote(id)}"""") ?: return@networkFallback null
                 val initial = parseArtist(id, json) ?: return@networkFallback null
-                expandArtist(initial, json, scope)
+                if (full) expandArtist(initial, json, scope) else initial
             }
             if (pageScope() != scope) return@cached null
             if (fresh != null && fresh !== saved) {
@@ -162,22 +164,24 @@ internal class YouTubeMusic(
     /** Follow artist shelf links and continuation pages, retaining the initial shelf on failure. */
     private suspend fun expandArtist(initial: OnlineArtist, json: String, scope: String): OnlineArtist {
         var result = initial
-        for (section in artistSections(json)) {
-            if (pageScope() != scope) return initial
-            val args = "\"browseId\":${quote(section.id)}" + (section.params?.let { ",\"params\":${quote(it)}" } ?: "")
-            var page = post("browse", args) ?: continue
-            val visited = HashSet<String>()
-            while (true) {
-                val tracks = parseSearch(page, fallbackArtist = initial.name, keepOrder = true)
-                val releases = artistReleaseCards(page)
-                result = when (section.kind) {
-                    "songs" -> result.copy(songs = (result.songs + tracks).distinctBy { it.id })
-                    "albums" -> result.copy(albums = (result.albums + releases).distinctBy { it.id })
-                    else -> result.copy(singles = (result.singles + releases).distinctBy { it.id })
+        kotlinx.coroutines.withTimeoutOrNull(10_000) {
+            for (section in artistSections(json)) {
+                if (pageScope() != scope) return@withTimeoutOrNull
+                val args = "\"browseId\":${quote(section.id)}" + (section.params?.let { ",\"params\":${quote(it)}" } ?: "")
+                var page = post("browse", args) ?: continue
+                val visited = HashSet<String>()
+                while (true) {
+                    val tracks = parseSearch(page, fallbackArtist = initial.name, keepOrder = true)
+                    val releases = artistReleaseCards(page)
+                    result = when (section.kind) {
+                        "songs" -> result.copy(songs = (result.songs + tracks).distinctBy { it.id })
+                        "albums" -> result.copy(albums = (result.albums + releases).distinctBy { it.id })
+                        else -> result.copy(singles = (result.singles + releases).distinctBy { it.id })
+                    }
+                    val next = continuationOf(page) ?: break
+                    if (!visited.add(next) || pageScope() != scope) break
+                    page = post("browse", "\"continuation\":${quote(next)}") ?: break
                 }
-                val next = continuationOf(page) ?: break
-                if (!visited.add(next) || pageScope() != scope) break
-                page = post("browse", "\"continuation\":${quote(next)}") ?: break
             }
         }
         return result
@@ -698,7 +702,7 @@ internal class YouTubeMusic(
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
             return collect(root, "musicResponsiveListItemRenderer").mapNotNull { row ->
                 val nav = dump(row["navigationEndpoint"])
-                if (!nav.contains("MUSIC_PAGE_TYPE_ARTIST")) return@mapNotNull null
+                if (!nav.contains("MUSIC_PAGE_TYPE_ARTIST") && !nav.contains("MUSIC_PAGE_TYPE_USER_CHANNEL")) return@mapNotNull null
                 val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return@mapNotNull null
                 val name = (row["flexColumns"] as? List<*>)?.firstOrNull()?.let { text(((it as? Map<*, *>)?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>)?.get("text")) }.orEmpty()
                 id to name
@@ -740,9 +744,11 @@ internal class YouTubeMusic(
         fun parseArtist(id: String, json: String): OnlineArtist? {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
             val header = collect(root, "musicImmersiveHeaderRenderer").firstOrNull() ?: collect(root, "musicVisualHeaderRenderer").firstOrNull()
+                ?: collect(root, "musicResponsiveHeaderRenderer").firstOrNull()
+                ?: collect(root, "musicDetailHeaderRenderer").firstOrNull()
             val name = text(header?.get("title")).ifEmpty { return null }
             val about = collect(root, "musicDescriptionShelfRenderer").firstOrNull()?.let { text(it["description"]) }?.takeIf { it.isNotBlank() }
-            val songs = parseSearch(json, fallbackArtist = name).filter { it.durationMs > 0 || it.album != null }
+            val songs = parseSearch(json, fallbackArtist = name, keepOrder = true).distinctBy { it.id }
             val cards = collect(root, "musicTwoRowItemRenderer")
             val albums = cards.mapNotNull { card ->
                 val nav = dump(card["navigationEndpoint"])

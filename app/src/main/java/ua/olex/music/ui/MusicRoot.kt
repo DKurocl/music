@@ -374,6 +374,10 @@ fun MusicRoot(model: LibraryViewModel) {
                     else if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     else Text(page?.title ?: place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
                 }, scrollBehavior = scroll,
+                colors = if (onlineTop == null && place == Place.HOME && page == null) {
+                    TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface,
+                        scrolledContainerColor = MaterialTheme.colorScheme.surface)
+                } else TopAppBarDefaults.topAppBarColors(),
                 navigationIcon = {
                     if (onlineTop != null) KickIconButton(onClick = { popOnline() }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     else if (page != null) KickIconButton(onClick = { page = if (page == Page.DUPLICATES) Page.SETTINGS else null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
@@ -959,7 +963,8 @@ internal fun Arrival(key: Any, place: Place, deeper: Boolean, content: @Composab
     androidx.compose.runtime.SideEffect { lastRoute = key; lastPlace = place }
     val spec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
     LaunchedEffect(key, still) {
-        if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f, spec)
+        if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f,
+            if (key == "page:STATS") androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing) else spec)
     }
     val sign = if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) -1 else 1
     Box(Modifier.fillMaxSize().graphicsLayer {
@@ -967,10 +972,11 @@ internal fun Arrival(key: Any, place: Place, deeper: Boolean, content: @Composab
         if (key == "page:STATS") {
             val amount = remaining.coerceIn(0f, 1f)
             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (sign > 0) 0.9f else 0.1f, 0f)
-            scaleX = 1f - 0.035f * amount
+            scaleX = 1f - 0.055f * amount
             scaleY = scaleX
-            alpha = 1f - 0.32f * amount
-            translationY = -12.dp.toPx() * amount
+            alpha = (1f - amount) * (1f + amount)
+            translationX = 12.dp.toPx() * amount * sign
+            translationY = -16.dp.toPx() * amount
         } else {
             alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
             translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()

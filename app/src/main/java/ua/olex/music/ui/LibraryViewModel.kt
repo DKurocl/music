@@ -623,8 +623,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         cancelPendingPlay()
         graph.mix.stop()
         playingFrom = null
-        if (!playing.value.shuffle) player.toggleShuffle()
-        player.play(list, list.indices.random())
+        player.play(list, list.indices.random(), shuffle = true)
     }
     fun toggle() = player.toggle()
     fun next() = player.next()
