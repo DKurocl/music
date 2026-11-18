@@ -244,8 +244,8 @@ internal fun SettingsPage(
             LaunchedEffect(cleared, limit) {
                 sizes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     fun size(f: java.io.File): Long = if (f.isDirectory) f.listFiles()?.sumOf { size(it) } ?: 0L else f.length()
-                    val covers = context.cacheDir.listFiles { f -> f.name != "streams" }.orEmpty().sumOf { size(it) } + images.bytes()
-                    listOf(ua.olex.music.playback.CacheBudget.streamUse(context), covers, motion.bytes())
+                    val covers = listOf("image_cache", "local-artwork-v1").sumOf { size(context.cacheDir.resolve(it)) } + images.bytes()
+                    listOf(ua.olex.music.playback.CacheBudget.streamUse(context), covers, motion.fetchedBytes())
                 }
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
