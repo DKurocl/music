@@ -402,7 +402,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = when {
-                        state.error != null -> state.error
+                        state.error != null -> state.error.orEmpty()
                         state.playWhenReady && state.buffering -> "Getting ready…"
                         else -> state.artist
                     }
@@ -504,7 +504,7 @@ internal fun PlayerPage(
                     IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Symbol(Glyph.COLLAPSE, size = 28.dp) }
                 }
                 // Where the music comes from; a tap opens that album.
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = "Open album", onClick = onOpenAlbum) else Modifier)
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = if (from == null) "Open album" else "Open playing source", onClick = onOpenAlbum) else Modifier)
                     .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                     // What is really playing: the playlist, artist, mix or mood the queue came from, else the
@@ -666,38 +666,64 @@ internal fun PlayerPage(
 private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onShuffle: () -> Unit = {}, onRepeat: () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val playing = state.playWhenReady
-    val width by animateDpAsState(if (playing) 112.dp else 88.dp, MaterialTheme.motionScheme.fastSpatialSpec(), label = "width")
     val haptics = rememberHaptics()
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", switch = true, onClick = onShuffle)
-        SkipButton(Glyph.PREVIOUS, "Previous", true) { haptics.skip(false); onPrevious() }
-        androidx.compose.material3.FilledIconToggleButton(
-            checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
-            shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
-            colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
-                checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
-            modifier = Modifier.padding(horizontal = 6.dp).width(width).height(88.dp).semantics {
-                contentDescription = if (playing) "Pause" else "Play"; if (state.playWhenReady && state.buffering) stateDescription = "Getting ready" },
-        ) {
-            // Asked to play, still getting ready (a stream opening): a ring says it is on its way.
-            if (state.playWhenReady && state.buffering) CircularProgressIndicator(Modifier.size(64.dp), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
-            Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = 44.dp, filled = true)
+    androidx.compose.foundation.layout.BoxWithConstraints {
+        val compact = maxWidth < 372.dp
+        val separateModes = maxWidth < 282.dp
+        val modeSize = if (compact) 48.dp else 52.dp
+        val skipSize = if (compact) 48.dp else 64.dp
+        val gap = if (compact) 2.dp else 4.dp
+        val centerLimit = maxWidth - if (separateModes) skipSize * 2 + gap * 2 else (modeSize + skipSize) * 2 + gap * 4
+        val width by animateDpAsState(
+            minOf(if (playing) 112.dp else 88.dp, centerLimit).coerceAtLeast(48.dp),
+            MaterialTheme.motionScheme.fastSpatialSpec(), label = "width",
+        )
+        val shuffle: @Composable () -> Unit = {
+            ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", switch = true, size = modeSize, onClick = onShuffle)
         }
-        SkipButton(Glyph.NEXT, "Next", state.hasNext) { haptics.skip(true); onNext() }
-        ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
-            when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, onClick = onRepeat)
+        val repeat: @Composable () -> Unit = {
+            ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
+                when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, size = modeSize, onClick = onRepeat)
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
+                if (!separateModes) shuffle()
+                SkipButton(Glyph.PREVIOUS, "Previous", true, size = skipSize) { haptics.skip(false); onPrevious() }
+                androidx.compose.material3.FilledIconToggleButton(
+                    checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
+                    shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
+                    colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
+                        checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
+                    modifier = Modifier.width(width.coerceAtMost(centerLimit.coerceAtLeast(48.dp))).height(if (compact) 72.dp else 88.dp).semantics {
+                        contentDescription = if (playing) "Pause" else "Play"
+                        if (state.playWhenReady && state.buffering) stateDescription = "Getting ready"
+                    },
+                ) {
+                    if (state.playWhenReady && state.buffering) {
+                        CircularProgressIndicator(Modifier.size(minOf(64.dp, width - 8.dp)), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
+                    }
+                    Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = if (compact) 36.dp else 44.dp, filled = true)
+                }
+                SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
+                if (!separateModes) repeat()
+            }
+            if (separateModes) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                shuffle()
+                repeat()
+            }
+        }
     }
 }
 
 /** Previous and next: big bare icons (no tile behind), that give a little under the finger. */
 @Composable
-private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp = 64.dp, onClick: () -> Unit) {
     val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.82f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "skip")
     IconButton(onClick = onClick, enabled = enabled, interactionSource = source,
-        modifier = Modifier.size(64.dp).graphicsLayer { scaleX = scale; scaleY = scale }.semantics { contentDescription = label }) {
-        Symbol(glyph, size = 40.dp, filled = true)
+        modifier = Modifier.size(size).graphicsLayer { scaleX = scale; scaleY = scale }.semantics { contentDescription = label }) {
+        Symbol(glyph, size = minOf(40.dp, size - 12.dp), filled = true)
     }
 }
 
@@ -706,12 +732,12 @@ private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, onClick: (
  * it takes the accent and a small dot appears under it. The change fades, nothing jumps.
  */
 @Composable
-private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, switch: Boolean = false, onClick: () -> Unit) {
+private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, switch: Boolean = false, size: Dp = 52.dp, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
     val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
-    Box(Modifier.size(52.dp).clip(CircleShape)
+    Box(Modifier.size(size).clip(CircleShape)
         // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
         .then(if (switch) Modifier.toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { haptics.toggle(it); onClick() }
             else Modifier.clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { haptics.toggle(!on); onClick() })

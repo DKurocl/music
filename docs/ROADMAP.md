@@ -36,6 +36,11 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Remaining audit implementation (Codex, 2026-11-18): inbound likes, remote playlist edits,
+      system favourite, playback origins and radio checkpoint, generation delta, buffering priority,
+      gapless offload gating, adaptive transport and Home. See HANDOFF.md for limits and evidence.
+
+
 - [~] Download and player reliability (Codex, 2026-11-18): 7/71, 72 and 15 root routes.
       Confirm Android CI and phone behavior before marking complete.
 

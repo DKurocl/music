@@ -292,6 +292,91 @@ internal class YouTubeMusic(
         }.orEmpty()
     }
 
+    internal data class PlaylistOccurrence(val videoId: String, val entryId: String?, val title: String)
+    internal data class PlaylistSnapshot(val album: OnlineAlbum, val tracks: List<Track>, val entries: List<PlaylistOccurrence>)
+    internal data class PlaylistChange(val kind: Kind, val entry: PlaylistOccurrence? = null, val successor: String? = null, val videoId: String? = null) {
+        enum class Kind { ADD, REMOVE, MOVE }
+    }
+
+    /** Fetch all pages with one captured session. Mutations never operate on cached order. */
+    private suspend fun playlistSnapshot(id: String, headers: Map<String, String>): PlaylistSnapshot {
+        val first = post("browse", """"browseId":${quote(id)}"""", headers = headers)
+            ?: throw java.io.IOException("Couldn't open the YouTube Music playlist.")
+        val album = parseAlbum(id, first)?.first ?: throw java.io.IOException("Couldn't read the YouTube Music playlist.")
+        val tracks = ArrayList<Track>()
+        val entries = ArrayList<PlaylistOccurrence>()
+        val cursors = HashSet<String>()
+        var json = first
+        while (true) {
+            val root = ua.olex.music.lyrics.Json.parse(json) as? Map<*, *> ?: throw java.io.IOException("Invalid playlist page.")
+            tracks += parseSearch(json, keepOrder = true)
+            collect(root, "musicResponsiveListItemRenderer").forEach { row ->
+                val video = (row["playlistItemData"] as? Map<*, *>)?.get("videoId") as? String ?: return@forEach
+                val entry = collect(row["menu"], "playlistEditEndpoint").firstNotNullOfOrNull { endpoint ->
+                    (endpoint["actions"] as? List<*>)?.firstNotNullOfOrNull { (it as? Map<*, *>)?.get("setVideoId") as? String }
+                }
+                val title = text(row["flexColumns"]).ifBlank { video }
+                entries += PlaylistOccurrence(video, entry, title)
+            }
+            val token = continuationOf(json) ?: break
+            check(cursors.size < 100 && cursors.add(token)) { "YouTube Music returned an incomplete or repeated playlist." }
+            json = post("browse", """"continuation":${quote(token)}"""", headers = headers)
+                ?: throw java.io.IOException("Couldn't open the rest of the playlist.")
+        }
+        val names = tracks.associateBy { it.id.value.removePrefix("yt:") }
+        return PlaylistSnapshot(album, tracks, entries.map { it.copy(title = names[it.videoId]?.title ?: it.title) })
+    }
+
+    suspend fun likedPlaylist(scope: String): PlaylistSnapshot = remotePlaylist("VLLM", scope)
+
+    suspend fun remotePlaylist(id: String, scope: String): PlaylistSnapshot = withContext(ioDispatcher) {
+        val headers = sessionHeaders(scope)
+        playlistSnapshot(id, headers).also { check(pageScope() == scope) { "The YouTube Music account changed." } }
+    }
+
+    suspend fun editRemotePlaylist(
+        id: String, scope: String, expected: List<PlaylistOccurrence>, change: PlaylistChange,
+    ): PlaylistSnapshot = withContext(ioDispatcher) {
+        val headers = sessionHeaders(scope)
+        val before = playlistSnapshot(id, headers)
+        fun List<PlaylistOccurrence>.identity() = map { it.videoId to it.entryId }
+        check(before.entries.identity() == expected.identity()) { "The playlist changed on YouTube Music. Refresh it and try again." }
+        check(pageScope() == scope) { "The YouTube Music account changed." }
+        val action = org.json.JSONObject()
+        when (change.kind) {
+            PlaylistChange.Kind.ADD -> action.put("action", "ACTION_ADD_VIDEO").put("addedVideoId", requireNotNull(change.videoId))
+            PlaylistChange.Kind.REMOVE -> {
+                val entry = requireNotNull(change.entry)
+                check(entry in expected)
+                action.put("action", "ACTION_REMOVE_VIDEO").put("removedVideoId", entry.videoId).put("setVideoId", requireNotNull(entry.entryId))
+            }
+            PlaylistChange.Kind.MOVE -> {
+                val entry = requireNotNull(change.entry)
+                check(entry in expected)
+                check(change.successor == null || expected.any { it.entryId == change.successor })
+                action.put("action", "ACTION_MOVE_VIDEO_BEFORE").put("setVideoId", requireNotNull(entry.entryId))
+                change.successor?.let { action.put("movedSetVideoIdSuccessor", it) }
+            }
+        }
+        val fields = """"playlistId":${quote(id.removePrefix("VL"))},"actions":[${action}]"""
+        val response = post("browse/edit_playlist", fields, headers = headers)
+        val status = response?.let { ua.olex.music.lyrics.Json.parse(it) as? Map<*, *> }?.get("status")
+        check(status == "STATUS_SUCCEEDED") { "YouTube Music did not confirm the edit. Refresh before retrying." }
+        synchronized(pages) { pages.remove("$scope/album:$id"); pages.remove("$scope/offline/album:$id") }
+        more.remove("$scope/$id")
+        val updated = playlistSnapshot(id, headers)
+        check(pageScope() == scope) { "The YouTube Music account changed." }
+        saveAlbum(scope, id, updated.album to updated.tracks)
+        updated
+    }
+
+    private fun sessionHeaders(scope: String): Map<String, String> {
+        check(scope != "public" && pageScope() == scope) { "Sign in to YouTube Music first." }
+        val headers = account() ?: error("Sign in to YouTube Music first.")
+        check(pageScope() == scope) { "The YouTube Music account changed." }
+        return headers
+    }
+
     /** Forgets everything loaded for an account (its playlists, its own home): called on sign-in and sign-out. */
     fun forgetAccount() {
         synchronized(pages) { pages.keys.filter { it.startsWith("account-") || it.startsWith("mood:") }.forEach { pages.remove(it) } }

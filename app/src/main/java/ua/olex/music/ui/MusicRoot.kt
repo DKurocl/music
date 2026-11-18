@@ -162,6 +162,7 @@ fun MusicRoot(model: LibraryViewModel) {
     // Three places (Home, Library, Search) and pages over Home (Stats, Duplicates): docs/DESIGN_SYSTEM.md.
     var place by rememberSaveable { mutableStateOf(Place.HOME) }
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
+    var openPlaylist by rememberSaveable { mutableStateOf<Long?>(null) }
     var openInLibrary by remember { mutableStateOf<Pair<String, String>?>(null) }
     var collectionTitle by remember { mutableStateOf<String?>(null) }
     var openTile by remember { mutableStateOf<String?>(null) }
@@ -406,6 +407,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onEditTags = { editingTags = it }, onTrash = moveToTrash,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
+                openPlaylist = openPlaylist.takeIf { place == Place.LIBRARY }, onOpenedPlaylist = { openPlaylist = null }, onPlayWithOrigin = model::playFrom,
                 personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = songStats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             ) }
@@ -462,13 +464,27 @@ fun MusicRoot(model: LibraryViewModel) {
             }) {
         val motionCover by model.motionCover.collectAsStateWithLifecycle()
         val onlineAlbumId = rememberOnlineAlbumId(playing.mediaId, onlinePageScope)
+        val rawOrigin = playing.playbackContext ?: model.playingFrom
+        val origin = PlaybackOrigin.decode(rawOrigin)
+        val openOrigin: (() -> Unit)? = origin?.let { source ->
+            when (source.kind) {
+                "playlist" -> source.id.toLongOrNull()?.takeIf { id -> personal.playlists.any { it.id == id } }?.let { id ->
+                    { go(Place.LIBRARY); openPlaylist = id; expanded = false }
+                }
+                "remote-playlist", "album" -> ({ onlineNav.open(OnlineTarget.Album(source.id, source.title, playlist = source.kind == "remote-playlist")) })
+                "artist" -> ({ onlineNav.open(OnlineTarget.Artist(source.title, id = source.id)) })
+                else -> null
+            }
+        }
         NowPlaying(
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
                 listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") }
                 // A YouTube Music song: the stream's codec and bitrate, once the player picked it.
                 // Quality only, the same shape as a file's; nothing until the stream is chosen.
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { context.graph.youTube.format(it.removePrefix("yt:")) },
-            from = model.mixLabel ?: playing.playbackContext ?: model.playingFrom,
+            from = model.mixLabel ?: origin?.title ?: rawOrigin,
+            onOpenOrigin = openOrigin,
+            originIsMix = model.mixLabel != null || origin?.kind == "mix",
             position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
@@ -601,6 +617,7 @@ private fun NowPlaying(
     onFindLyricsOnline: () -> Unit = {}, onlineLyricsStatus: String? = null,
     onSaveLyricTiming: ((ua.olex.music.lyrics.Lyrics) -> Unit)? = null, onResetLyricTiming: () -> Unit = {},
     favourite: Boolean, onFavourite: (() -> Unit)?,
+    onOpenOrigin: (() -> Unit)? = null, originIsMix: Boolean = false,
     onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null, motionCover: String? = null,
 ) {
     val cs = MaterialTheme.colorScheme
@@ -642,7 +659,7 @@ private fun NowPlaying(
         onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
         // "Playing from" names a playlist or mix when there is one; a tap then must not open the song's
         // album under that name, so it opens the album only when the line shows the album.
-        onOpenAlbum = onOpenAlbum.takeIf { from == null }, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,
+        onOpenAlbum = onOpenOrigin ?: if (originIsMix) ({ queueSheet = true }) else onOpenAlbum.takeIf { from == null }, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,
         inlineLyrics = { mod ->
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
                 onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,

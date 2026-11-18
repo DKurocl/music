@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
     override fun onPostResume() {
         super.onPostResume()
         (application as MusicApp).graph.soulseek.requestResume()
+        model.refreshYouTubeLikes()
     }
 
     private var lastGeneration = Long.MIN_VALUE

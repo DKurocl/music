@@ -121,11 +121,14 @@ internal fun LibraryBrowser(
     focusSearch: Int = 0,
     /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
     openTile: String? = null,
+    openPlaylist: Long? = null, onOpenedPlaylist: () -> Unit = {},
+    onPlayWithOrigin: ((List<Track>, Int, String) -> Unit)? = null,
 ) {
     val nav = LocalOnlineNav.current
     val network = LocalNetwork.current
     val startTab = LocalStartTab.current
     var tabName by rememberSaveable { mutableStateOf(if (mode == BrowserMode.LIBRARY) LibraryTab.PLAYLISTS.name else startTab) }
+    LaunchedEffect(openPlaylist) { if (openPlaylist != null) tabName = LibraryTab.PLAYLISTS.name }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var missingFavourite by rememberSaveable { mutableStateOf<String?>(null) }
     val tab = LibraryTab.valueOf(tabName)
@@ -342,7 +345,8 @@ internal fun LibraryBrowser(
             SmartPlaylistBrowser(smart, currentId, Modifier.weight(1f), onPlay = onPlay, onShuffle = onShuffle, onTrackActions = onTrackActions,
                 onSave = onSaveSmart, onDelete = onDeleteSmart)
         } else if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
-            PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library)
+            PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library,
+                openPlaylist = openPlaylist, onOpenedPlaylist = onOpenedPlaylist, onPlayFrom = onPlayWithOrigin)
         } else Box(Modifier.weight(1f)) {
         val listState = androidx.compose.foundation.lazy.rememberLazyListState()
         val headerGone by remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex > 0 } }

@@ -27,7 +27,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserRepository
 import kotlinx.coroutines.launch
@@ -319,55 +318,28 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         add = { id, tracks, duplicates -> editUserData { addToPlaylist(id, tracks, duplicates) } },
         remove = { id, song, position -> editUserData { removeFromPlaylist(id, song, position) } },
         move = { id, song, delta, position -> editUserData { moveInPlaylist(id, song, delta, position) } },
-        removeFavourite = { id ->
-            val scope = graph.youTubeAccount.cacheScope.value
-            editUserData {
-                val sources = reference(id).first()?.references.orEmpty()
-                removeFavourite(id)
-                queueLikes(sources, false, scope)
-                sendLikes()
-            }
-        },
+        removeFavourite = { id -> editUserData {
+            graph.youtubeFavourites.remove(id)
+            graph.youtubeFavourites.refresh()
+        } },
     )
 
     fun toggleFavourite(track: Track) {
         val saved = personal.value.favouriteByTrackId[track.recordingId ?: track.id.value]
-        val scope = graph.youTubeAccount.cacheScope.value
         editUserData {
-            val liked = toggleFavourite(track, saved?.id)
-            val sources = reference(track).first()?.references.orEmpty()
-            queueLikes(sources, liked, scope)
-            sendLikes()
+            graph.youtubeFavourites.toggle(track, saved?.id)
+            graph.youtubeFavourites.refresh()
         }
     }
 
-    private val pendingLikes = getApplication<Application>().getSharedPreferences("pending_likes", android.content.Context.MODE_PRIVATE)
-    private fun queueLikes(sources: List<ua.olex.music.model.RecordingSource>, liked: Boolean, scope: String) {
-        if (scope == "public") return
-        val pending = pendingLikes.edit()
-        sources.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE }.forEach { source ->
-            val id = source.uri!!.removePrefix(ua.olex.music.model.SavedSong.ONLINE_PREFIX)
-            pending.putBoolean("$scope/$id", liked)
-        }
-        pending.apply()
+    fun refreshYouTubeLikes() {
+        viewModelScope.launch { graph.youtubeFavourites.refresh() }
     }
-    private val likeSync = kotlinx.coroutines.sync.Mutex()
-    private suspend fun sendLikes() = likeSync.withLock {
-        val scope = graph.youTubeAccount.cacheScope.value
-        if (scope == "public" || !graph.network.value) return@withLock
-        val prefix = "$scope/"
-        for ((key, liked) in pendingLikes.all) {
-            if (graph.youTubeAccount.cacheScope.value != scope) return@withLock
-            if (!key.startsWith(prefix) || liked !is Boolean) continue
-            if (graph.youTube.like(key.removePrefix(prefix), liked, scope) && pendingLikes.all[key] == liked) {
-                pendingLikes.edit().remove(key).apply()
-            }
-        }
-    }
+
     init {
         viewModelScope.launch {
-            combine(graph.network, graph.youTubeAccount.cacheScope) { online, scope -> scope.takeIf { online && it != "public" } }
-                .collectLatest { if (it != null) sendLikes() }
+            combine(graph.network, graph.youTubeAccount.cacheScope, graph.youTubeOn) { _, _, _ -> Unit }
+                .collectLatest { graph.youtubeFavourites.refresh() }
         }
     }
     fun dismissUserError() { userError = null }
@@ -560,13 +532,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         seen += upcoming.map(Mix::songKey)
         val state = playing.value
         val current = state.mediaId
+        val run = if (online.size >= 5) PlaybackMix.Run(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seed.id.value).toMutableSet()) else null
+        val origin = graph.mix.begin(run, label)
         if (current == seed.id.value) {
-            // Keep the song playing; replace what follows it.
             player.clearUpcoming()
-            player.enqueue(upcoming, false)
-        } else player.play(listOf(seed) + upcoming, 0)
-        mixRun = if (online.size >= 5) PlaybackMix.Run(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seed.id.value).toMutableSet()) else null
-        mixLabel = label
+            player.enqueue(upcoming, false, origin)
+        } else player.play(listOf(seed) + upcoming, 0, origin)
     }
 
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, cleaned and endless like any mix. */
@@ -581,9 +552,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             (listOf(first) + Mix.clean(tracks.drop(1), first, seen)) to seen
         }
         seen += queue.map(Mix::songKey)
-        player.play(queue, 0)
-        mixRun = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
-        mixLabel = label
+        val run = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
+        player.play(queue, 0, graph.mix.begin(run, label))
     }
 
 
@@ -604,9 +574,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 (listOf(first) + Mix.clean(listed.drop(1), first, seen)) to seen
             }
             seen += queue.map(Mix::songKey)
-            player.play(queue, 0)
-            mixRun = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
-            mixLabel = mood.label
+            val run = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
+            player.play(queue, 0, graph.mix.begin(run, mood.label))
             return@prepareMix
         }
         val songs = library.value?.songs.orEmpty()
