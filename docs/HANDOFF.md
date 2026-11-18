@@ -1,3 +1,12 @@
+# Listening screen and floating player (2026-11-18)
+
+The listening list now extends behind the shared mini player. Its trailing scroll padding
+keeps the library totals reachable. The dashboard uses the leading track sleeve and wallpaper
+colors, a sliding range selector, a zero-baseline chart and grouped playable track rankings.
+The gallery uses the same player placement as production and renders the overview and rankings.
+Checked with `git diff --check`. Android builds and rendered previews run in the main workflow.
+Physical Pixel appearance and motion remain unverified.
+
 # Launcher icon and startup motion (2026-11-18)
 
 Music uses the approved rounded Play mark with a white note and a yellow, orange and pink
