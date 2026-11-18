@@ -65,23 +65,36 @@ internal fun SettingsPage(
 
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
     val soulseekJobs by soulseek.jobs.collectAsStateWithLifecycle()
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        item { Group("Sound") }
-        item { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
-        item { Toggle(Glyph.BATTERY, "Battery saver", "The phone's audio chip decodes with the screen off, only while nothing processes the sound", offload) {
-            offload = it; prefs(UsbBitPerfect.PREFS).edit().putBoolean(PlaybackService.OFFLOAD_KEY, it).apply() } }
-        item { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
-
-        item { Group("Playback") }
-        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in a quarter second and out faster, instead of cutting", fades, first = true, last = headphones.isEmpty()) {
-            fades = it; prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, it).apply() } }
+    var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("All") }
+    key(section) { LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        item(key = "settings-sections") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("All", "Player", "Library", "Services").forEach { label ->
+                    FilterChip(selected = section == label, onClick = { section = label }, label = { Text(label) })
+                }
+            }
+        }
+        if (section == "All" || section == "Player") {
+        item(key = "group-Playback") { Group("Playback") }
+        item(key = "playback-fades") {
+            PlaybackFadeSetting(fades) { enabled ->
+                fades = enabled
+                prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, enabled).apply()
+            }
+        }
         headphones.forEachIndexed { i, name ->
             item(key = "hp-$name") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {
                 HeadsetRules.setResume(context, name, false); headphones = HeadsetRules.resumeDevices(context).sorted() } }
         }
 
+        item(key = "group-Sound") { Group("Sound") }
+        item { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
+        item { Toggle(Glyph.BATTERY, "Battery saver", "The phone's audio chip decodes with the screen off, only while nothing processes the sound", offload) {
+            offload = it; prefs(UsbBitPerfect.PREFS).edit().putBoolean(PlaybackService.OFFLOAD_KEY, it).apply() } }
+        item { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
+
         // The phone taps with the kick drum and the bass, timed to what is heard (MusicHaptics).
-        item { Group("Music haptics") }
+        item(key = "group-Music haptics") { Group("Music haptics") }
         item {
             var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
             var strength by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.strength(context)) }
@@ -109,7 +122,7 @@ internal fun SettingsPage(
             }
         }
 
-        item { Group("Appearance and artwork") }
+        item(key = "group-Appearance and artwork") { Group("Appearance and artwork") }
         item {
             var tint by remember { mutableStateOf(CoverColours.on(context)) }
             Toggle(Glyph.PHOTO, "Colours from the cover", "The player takes a soft tint of the song's cover", tint, first = true) {
@@ -138,7 +151,9 @@ internal fun SettingsPage(
             Toggle(Glyph.SPEAKER, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
         }
 
-        item { Group("Library") }
+        }
+        if (section == "All" || section == "Library") {
+        item(key = "group-Library") { Group("Library") }
         item { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
         item { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
             else folders.joinToString(" · "), onClick = onAddFolder) }
@@ -149,12 +164,16 @@ internal fun SettingsPage(
         item { Row(Glyph.EDIT, "Change files without asking", if (manage) "Allowed: tag edits and ratings are written straight away" else "Android asks before each change; allow once here", last = true) {
             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:" + context.packageName))) } } }
 
-        item { Group("Lyrics") }
+        }
+        if (section == "All" || section == "Player") {
+        item(key = "group-Lyrics") { Group("Lyrics") }
         item { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
             lockLyrics = it; LockScreenLyrics.set(context, it) } }
 
+        }
+        if (section == "All" || section == "Services") {
         // YouTube Music as a second source, the owner's files always first.
-        item { Group("YouTube Music") }
+        item(key = "group-YouTube Music") { Group("YouTube Music") }
         item {
             val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
             val on by graph.youTubeOn.collectAsStateWithLifecycle()
@@ -186,7 +205,7 @@ internal fun SettingsPage(
                 onClick = { syncScope.launch { graph.youtubeFavourites.refresh(force = true) } })
         }
         // Soulseek: lossless copies of songs and albums found online, saved into the library.
-        item { Group("Downloads") }
+        item(key = "group-Downloads") { Group("Downloads") }
         item(key = "soulseek-account") {
             val downloads = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
             var account by remember { mutableStateOf(downloads.account) }
@@ -210,8 +229,10 @@ internal fun SettingsPage(
             }, last = true, onClick = onDownloads)
         }
 
+        }
+        if (section == "All" || section == "Library") {
         // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
-        item { Group("Storage") }
+        item(key = "group-Storage") { Group("Storage") }
         item {
             // One budget for what the app keeps only to be quick; the owner's music, lyrics,
             // downloads and own moving covers are never part of it.
@@ -228,10 +249,9 @@ internal fun SettingsPage(
                 }
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
-            fun mb(b: Long) = when { b >= 1L shl 30 -> String.format(java.util.Locale.ROOT, "%.1f GB", b / 1073741824.0); b >= 1L shl 20 -> "${b shr 20} MB"; else -> "${b shr 10} KB" }
-            Row(Glyph.HISTORY, "Cache limit", ua.olex.music.playback.CacheBudget.label(limit) + (sizes?.let { (songs, covers, moving) ->
-                " · used ${mb(songs + covers + moving)}: songs ${mb(songs)}, covers ${mb(covers)}, moving covers ${mb(moving)}" } ?: ""),
-                first = true) { editing = true }
+            CacheUsageCard(sizes)
+            Spacer(Modifier.height(8.dp))
+            Row(Glyph.HISTORY, "Cache limit", ua.olex.music.playback.CacheBudget.label(limit), first = true) { editing = true }
             Spacer(Modifier.height(4.dp))
             Row(Glyph.DELETE, "Clear cache", "Streamed songs, covers, photos and fetched moving covers. Your music, lyrics and own moving covers stay", last = true) {
                 scope.launch {
@@ -245,8 +265,9 @@ internal fun SettingsPage(
             }
         }
 
+        }
         item { Text("Music $version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp, start = 16.dp)) }
-    }
+    } }
 }
 
 @Composable
@@ -296,11 +317,11 @@ private fun tint(glyph: Glyph): Pair<androidx.compose.ui.graphics.Color, android
     val cs = MaterialTheme.colorScheme
     // Light, saturated circles with a dark glyph in both themes, as Android's Settings: the "fixed"
     // tones (80) of the wallpaper's palette; online gets the red family, as YouTube's own colour.
-    val dark = cs.surface.luminance() < 0.5f
+
     return when (glyph) {
         Glyph.TUNE, Glyph.USB, Glyph.BATTERY, Glyph.SPEAKER -> cs.primaryFixedDim to cs.onPrimaryFixed
         Glyph.PLAY, Glyph.HEADPHONES, Glyph.WAVE, Glyph.STAR -> cs.tertiaryFixedDim to cs.onTertiaryFixed
-        Glyph.SEARCH, Glyph.PERSON, Glyph.MOTION, Glyph.LOCK -> if (dark) cs.error to cs.onError else cs.errorContainer to cs.onErrorContainer
+        Glyph.SEARCH, Glyph.PERSON, Glyph.MOTION, Glyph.LOCK -> cs.primaryContainer to cs.onPrimaryContainer
         else -> cs.secondaryFixedDim to cs.onSecondaryFixed
     }
 }
@@ -308,7 +329,7 @@ private fun tint(glyph: Glyph): Pair<androidx.compose.ui.graphics.Color, android
 @Composable
 private fun Toggle(glyph: Glyph, title: String, subtitle: String, on: Boolean, first: Boolean = false, last: Boolean = false, onChange: (Boolean) -> Unit) {
     val haptics = rememberHaptics()
-    Row(glyph, title, subtitle, first, last, checked = on, trailing = { Switch(on, onCheckedChange = null) }) { haptics.toggle(!on); onChange(!on) }
+    Row(glyph, title, subtitle, first, last, checked = on, trailing = { StateSwitch(on) }) { haptics.toggle(!on); onChange(!on) }
 }
 
 /** Team ID, Key ID and the .p8 private key of a MusicKit key; kept only in the app's private storage. */
