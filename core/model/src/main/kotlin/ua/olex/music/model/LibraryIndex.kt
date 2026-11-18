@@ -24,6 +24,10 @@ data class LibraryIndex(
     val folders: List<MusicCollection>,
 ) {
     val byId: Map<TrackId, Track> = songs.associateBy { it.id }
+    /** Folder views retain file copies that the shared catalogue projects to one recording. */
+    val localCopiesById: Map<TrackId, Track> by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        folders.asSequence().flatMap { it.tracks.asSequence() }.associateBy { it.id }
+    }
     val bySongKey: Map<String, List<Track>> by lazy(LazyThreadSafetyMode.PUBLICATION) { songs.groupBy { it.key.value } }
 
     val playlistPaths: PlaylistPathIndex by lazy(LazyThreadSafetyMode.PUBLICATION) { PlaylistPathIndex(songs) }

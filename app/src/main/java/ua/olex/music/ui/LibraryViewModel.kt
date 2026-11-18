@@ -76,7 +76,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         .flatMapLatest { text ->
             if (text.isBlank()) flowOf(LibrarySearchResult(text, emptyList()))
             else combine(graph.library.search(text), catalogue) { local, saved ->
-                LibrarySearchResult(text, (local + ua.olex.music.model.SavedCatalog.searchOnline(saved ?: LibraryIndex.EMPTY, text)).distinctBy { it.id })
+                val index = saved ?: LibraryIndex.EMPTY
+                val bound = local.map { track -> index.byId[track.id] ?: index.localCopiesById[track.id] ?: track }
+                val online = ua.olex.music.model.SavedCatalog.searchOnline(index, text)
+                LibrarySearchResult(text, (bound + online).distinctBy { it.recordingId ?: it.id.value })
             }.flowOn(Dispatchers.Default)
                 .catch { emit(LibrarySearchResult(text, emptyList(), failed = true)) }
         }
