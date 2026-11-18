@@ -111,7 +111,9 @@ internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int =
             contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
         // A moving cover plays over the still one once its first frame is ready, so nothing flashes.
-        if (motion != null && !LocalInspectionMode.current) MotionCover(motion, moving, Modifier.fillMaxSize())
+        if (motion != null && !LocalInspectionMode.current) androidx.compose.runtime.key(motion) {
+            MotionCover(motion, moving, Modifier.fillMaxSize())
+        }
     }
 }
 
@@ -136,7 +138,7 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
                 // The joined Apple video is a fragmented MP4 without a seek index, so the built-in
                 // repeat stops after one pass; starting it again by hand loops it for good.
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == androidx.media3.common.Player.STATE_ENDED) { seekTo(0); play() }
+                    if (playbackState == androidx.media3.common.Player.STATE_ENDED && playWhenReady) seekTo(0)
                 }
             })
             prepare()
