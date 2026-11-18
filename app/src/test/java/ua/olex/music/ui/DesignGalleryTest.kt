@@ -182,13 +182,12 @@ class DesignGalleryTest {
                     actions = { if (place == Place.HOME) HomeActions({}, {}) }) },
                 bottomBar = { PlacesBar(place) {} },
             ) { pad ->
-                // Same frame as the app: the page runs under the floating mini player, with a fade behind it.
+                // Match the production overlay: the list scrolls behind the shared floating player.
                 androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalPlayerInset provides 84.dp) { content(pad) }
-                    androidx.compose.foundation.layout.Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = pad.calculateBottomPadding()).fillMaxWidth()
-                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent,
-                            0.55f to MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), 1f to MaterialTheme.colorScheme.surface))) {
-                        androidx.compose.foundation.layout.Box(Modifier.padding(top = 20.dp)) { MiniPlayer(current, { 90_000 }, {}, {}, {}) }
+                    androidx.compose.foundation.layout.Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                        .padding(bottom = pad.calculateBottomPadding()).fillMaxWidth()) {
+                        MiniPlayer(current, { 90_000 }, {}, {}, {})
                     }
                 }
             }
@@ -943,18 +942,21 @@ class DesignGalleryTest {
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun statsPage() {
         val samples = (0..36).map { i ->
-            val track = library.albums[(i % 9) / 3].tracks[i % 3]
+            val track = demoSongs[if (i % 4 == 0) 0 else i % demoSongs.size]
             ua.olex.music.model.HistoryEntry(i.toLong(), ua.olex.music.model.SavedSong.from(track),
                 System.currentTimeMillis() - (i % 3) * 86_400_000L - i * 60_000L, 27_000L + i * 3_000)
         }
-        compose.setContent { Shell("Your listening", null) {
-            StatsPage(library, Modifier.fillMaxSize().padding(it), { _, _ -> }) { start ->
+        val catalog = LibraryIndex.build(demoSongs)
+        compose.setContent { Shell("Your listening", null, demoNow) {
+            StatsPage(catalog, Modifier.fillMaxSize().padding(it), { _, _ -> }) { start ->
                 kotlinx.coroutines.flow.flowOf(samples.filter { entry -> entry.playedAt >= start })
             }
         } }
         shot("12-stats")
         compose.onNodeWithTag("listening-cards").performScrollToIndex(2)
         shot("12b-stats-rankings")
+        compose.onNodeWithTag("listening-cards").performScrollToIndex(4)
+        shot("12c-stats-tracks")
     }
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
