@@ -10,6 +10,7 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -495,15 +496,19 @@ internal fun PlayerPage(
             val previousArt = state.queue.getOrNull(state.previousIndex)?.artworkUri
             val occurrence = state.queue.getOrNull(state.queueIndex)?.key ?: state.mediaId
             val canGoPrevious = state.hasPrevious
+            val latestOccurrence by rememberUpdatedState(occurrence)
             var gestureItem by remember { mutableStateOf(occurrence) }
             var skipping by remember { mutableStateOf(false) }
+            var dragOffset by remember { mutableStateOf<Float?>(null) }
             var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-            val visibleOffset = { if (gestureItem == occurrence) swipe.value else 0f }
+            val visibleOffset = { if (gestureItem == latestOccurrence) dragOffset ?: swipe.value else 0f }
+            val direction by remember { derivedStateOf { visibleOffset().compareTo(0f) } }
             val context = LocalContext.current
             val powerSave = LocalPowerSave.current
             LaunchedEffect(occurrence, lyricsShown) {
                 settleJob?.cancel()
                 skipping = false
+                dragOffset = null
                 swipe.snapTo(0f)
                 gestureItem = occurrence
             }
@@ -515,9 +520,8 @@ internal fun PlayerPage(
             }
             if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f))
             else Box(contentAlignment = Alignment.Center) {
-                val offset = visibleOffset()
-                val side = if (offset < 0f) 1 else -1
-                if (offset != 0f && (if (side > 0) state.hasNext else canGoPrevious)) {
+                val side = if (direction < 0) 1 else -1
+                if (direction != 0 && (if (side > 0) state.hasNext else canGoPrevious)) {
                     Artwork(if (side > 0) nextArt else previousArt,
                         Modifier.matchParentSize().graphicsLayer {
                             val x = visibleOffset()
@@ -547,33 +551,44 @@ internal fun PlayerPage(
                             )
                         }
                         .pointerInput(occurrence, state.hasNext, canGoPrevious, step, powerSave) {
-                            detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    if (!skipping) settleJob = scope.launch {
-                                        val x = visibleOffset()
-                                        val goNext = x < -coverWidth * 0.2f && state.hasNext
-                                        val goPrevious = x > coverWidth * 0.2f && canGoPrevious && position() < 3_000
-                                        if (goNext || goPrevious) {
-                                            haptics.skip(goNext)
-                                            skipping = true
-                                            try {
-                                                if (!powerSave) swipe.animateTo(if (goNext) -step else step, motion.fastEffectsSpec())
-                                                if (goNext) next() else previous()
-                                                delay(450)
-                                            } finally {
-                                                skipping = false
-                                            }
-                                        } else if (x > coverWidth * 0.2f) {
-                                            haptics.skip(false)
-                                            previous()
+                            fun finishDrag(commit: Boolean) {
+                                if (skipping) return
+                                val x = dragOffset ?: return
+                                settleJob = scope.launch {
+                                    swipe.snapTo(x)
+                                    dragOffset = null
+                                    val goNext = commit && x < -coverWidth * 0.2f && state.hasNext
+                                    val goPrevious = commit && x > coverWidth * 0.2f && canGoPrevious && position() < 3_000
+                                    if (goNext || goPrevious) {
+                                        haptics.skip(goNext)
+                                        skipping = true
+                                        try {
+                                            if (!powerSave) swipe.animateTo(if (goNext) -step else step, motion.fastEffectsSpec())
+                                            if (occurrence != latestOccurrence) return@launch
+                                            if (goNext) next() else previous()
+                                            delay(450)
+                                        } finally {
+                                            skipping = false
                                         }
-                                        swipe.animateTo(0f, spatial)
+                                    } else if (commit && x > coverWidth * 0.2f) {
+                                        haptics.skip(false)
+                                        previous()
+                                    }
+                                    swipe.animateTo(0f, spatial)
+                                }
+                            }
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    if (!skipping) {
+                                        settleJob?.cancel()
+                                        dragOffset = visibleOffset()
                                     }
                                 },
-                                onDragCancel = { if (!skipping) scope.launch { swipe.animateTo(0f, spatial) } },
+                                onDragEnd = { finishDrag(commit = true) },
+                                onDragCancel = { finishDrag(commit = false) },
                             ) { change, amount ->
                                 change.consume()
-                                if (!skipping) scope.launch { swipe.snapTo((swipe.value + amount).coerceIn(-step, step)) }
+                                if (!skipping) dragOffset = ((dragOffset ?: 0f) + amount).coerceIn(-step, step)
                             }
                         }
                         .graphicsLayer {
@@ -584,7 +599,7 @@ internal fun PlayerPage(
                             scaleY = scale
                         },
                     corner = 32.dp, pixels = ArtworkPlan.LARGE, motion = motionCover,
-                    moving = state.isPlaying && offset == 0f && !skipping,
+                    moving = state.isPlaying && direction == 0 && !skipping,
                 )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
                 modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })

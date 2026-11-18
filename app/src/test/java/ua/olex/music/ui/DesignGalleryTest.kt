@@ -20,6 +20,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.onNodeWithText
@@ -326,6 +327,65 @@ class DesignGalleryTest {
             personal = PersonalLibraryState(), personalActions = PersonalLibraryActions({ _, _ -> }, { _, _ -> }, {}, { _, _, _ -> }, { _, _, _ -> }, { _, _, _, _ -> }, {}),
             smart = ua.olex.music.model.SmartPlaylist.BUILT_IN.map { p -> SmartPlaylistUi(p, library.songs.take(5)) }) } }
         shot("31-playlists-empty")
+    }
+
+    @Test fun lyricActionsKeepTheirPositionsWhileLeaving() {
+        val showLyrics = androidx.compose.runtime.mutableStateOf(true)
+        compose.setContent { AppTheme {
+            PlayerHeader(now, "An album with a long title", showLyrics.value, {}, {}, {}, {})
+        } }
+        val lyrics = compose.onNodeWithContentDescription("Lyrics options")
+        val actions = compose.onNodeWithContentDescription("Song actions")
+        lyrics.assertHasClickAction()
+        val initialLyrics = lyrics.fetchSemanticsNode().boundsInRoot
+        val initialActions = actions.fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue(initialLyrics.right <= initialActions.left)
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnIdle { showLyrics.value = false }
+            compose.mainClock.advanceTimeBy(32)
+            org.junit.Assert.assertEquals(initialActions, actions.fetchSemanticsNode().boundsInRoot)
+            lyrics.assertDoesNotExist()
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.runOnIdle { showLyrics.value = true }
+        org.junit.Assert.assertEquals(initialLyrics, lyrics.fetchSemanticsNode().boundsInRoot)
+        org.junit.Assert.assertEquals(initialActions, actions.fetchSemanticsNode().boundsInRoot)
+    }
+
+    @Test
+    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
+    fun playerKeepsTheDecodedCoverWhileTheNextImageLoads() {
+        val first = "file:///first-cover.png"
+        val second = "file:///second-cover.png"
+        val cover = androidx.compose.runtime.mutableStateOf(first)
+        val nextRequested = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val nextReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val handler = coil3.compose.AsyncImagePreviewHandler { request ->
+            val next = request.data.toString().endsWith("second-cover.png")
+            if (next) { nextRequested.complete(Unit); nextReady.await() }
+            Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(if (next) android.graphics.Color.BLUE else android.graphics.Color.RED)
+            }.asImage()
+        }
+        compose.setContent { AppTheme {
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
+                coil3.compose.LocalAsyncImagePreviewHandler provides handler) {
+                PlayerArtwork(cover.value, Modifier.size(96.dp).testTag("cover"), 16.dp, 192)
+            }
+        } }
+        fun centre(): Int {
+            val image = compose.onNodeWithTag("cover").captureToImage().asAndroidBitmap()
+            return image.getPixel(image.width / 2, image.height / 2)
+        }
+        org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
+        compose.runOnIdle { cover.value = second }
+        compose.waitUntil { nextRequested.isCompleted }
+        org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
+        nextReady.complete(Unit)
+        compose.waitForIdle()
+        org.junit.Assert.assertEquals(android.graphics.Color.BLUE, centre())
     }
 
     @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")

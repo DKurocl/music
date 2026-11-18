@@ -19,6 +19,7 @@ import java.security.MessageDigest
 class MotionCovers(private val context: Context) {
     private val dir = File(context.filesDir, "motion").apply { mkdirs() }
     private val resolver = context.contentResolver
+    private val writes = Any()
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
@@ -52,7 +53,7 @@ class MotionCovers(private val context: Context) {
     suspend fun attach(track: Track, video: Uri): Boolean = withContext(Dispatchers.IO) {
         val key = key(track) ?: return@withContext false
         if (resolver.getType(video)?.startsWith("video/") != true) return@withContext false
-        val target = File(dir, "$key.mp4"); val tmp = File(dir, "$key.tmp")
+        val target = File(dir, "$key.mp4"); val tmp = File.createTempFile(key, ".tmp", dir)
         val ok = runCatching {
             resolver.openInputStream(video)?.use { input -> tmp.outputStream().use { out ->
                 val buffer = ByteArray(64 * 1024); var total = 0L
@@ -60,28 +61,50 @@ class MotionCovers(private val context: Context) {
             } } != null
         }.getOrDefault(false)
         // The owner's own video is theirs, not cache: marked so the budget never drops it.
-        if (ok && tmp.renameTo(target)) { File(dir, "$key.own").createNewFile(); _revision.value++; true } else { tmp.delete(); false }
+        try {
+            synchronized(writes) {
+                if (!ok || tmp.length() == 0L || !tmp.renameTo(target)) return@synchronized false
+                File(dir, "$key.own").createNewFile()
+                _revision.value++
+                true
+            }
+        } finally { tmp.delete() }
     }
 
     /** Keeps a joined video (from Apple Music) as the album's single file. */
     suspend fun attachBytes(track: Track, bytes: ByteArray): Boolean = withContext(Dispatchers.IO) {
         val key = key(track) ?: return@withContext false
-        if (bytes.size > MAX_BYTES) return@withContext false
-        val target = File(dir, "$key.mp4"); val tmp = File(dir, "$key.tmp")
-        tmp.writeBytes(bytes)
-        if (tmp.renameTo(target)) { File(dir, "$key.own").delete(); trim(); _revision.value++; true } else { tmp.delete(); false }
+        if (bytes.isEmpty() || bytes.size > MAX_BYTES) return@withContext false
+        val target = File(dir, "$key.mp4")
+        val tmp = File.createTempFile(key, ".tmp", dir)
+        try {
+            tmp.writeBytes(bytes)
+            synchronized(writes) {
+                // A manual attachment can finish while an automatic fetch is still downloading.
+                if (File(dir, "$key.own").exists() || !tmp.renameTo(target)) return@synchronized false
+                trim()
+                _revision.value++
+                target.exists()
+            }
+        } finally { tmp.delete() }
     }
 
-    fun remove(track: Track) { key(track)?.let { File(dir, "$it.own").delete() }; file(track)?.delete(); _revision.value++ }
+    fun remove(track: Track) = synchronized(writes) {
+        listOfNotNull(key(track), oldKey(track)).distinct().forEach {
+            File(dir, "$it.mp4").delete()
+            File(dir, "$it.own").delete()
+        }
+        _revision.value++
+    }
 
     /** Removes every fetched moving cover (Clear cache); the owner's own videos stay. */
-    fun clearFetched() {
+    fun clearFetched() = synchronized(writes) {
         dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }?.forEach { it.delete() }
         _revision.value++
     }
 
     /** Drops the fetched moving covers shown longest ago while they take more than their share of the budget. */
-    fun trim() {
+    fun trim() = synchronized(writes) {
         val limit = ua.olex.music.playback.CacheBudget.motionBytes(context)
         val fetched = dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }.orEmpty().sortedBy { it.lastModified() }
         var total = fetched.sumOf { it.length() }
