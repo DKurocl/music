@@ -3,13 +3,19 @@ package ua.olex.music.ui
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 import ua.olex.music.lyrics.Json
 import ua.olex.music.model.TextFold
 import ua.olex.music.model.Track
 import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 import java.net.URLEncoder
 import java.security.KeyFactory
 import java.security.Signature
@@ -24,7 +30,7 @@ import java.util.Base64
  * Each cover is a short HLS video; it is fetched once and joined into one file for the album
  * ([MotionCovers]), so every song of the album plays it and nothing streams again.
  */
-internal class AppleMotion(context: Context, private val get: (String, Map<String, String>) -> ByteArray? = ::fetch) {
+internal class AppleMotion(context: Context, private val get: suspend (String, Map<String, String>) -> ByteArray? = ::fetch) {
     private val prefs = context.getSharedPreferences("apple_motion", Context.MODE_PRIVATE)
 
     data class Key(val teamId: String, val keyId: String, val p8: String)
@@ -60,7 +66,7 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
      * (the official API), otherwise the token Apple's web player carries in its public script
      * (as LastWave does), kept until it expires. Unofficial: Apple can change it at any time.
      */
-    private fun access(): Pair<String, String>? {
+    private suspend fun access(): Pair<String, String>? {
         val now = System.currentTimeMillis() / 1000
         key?.let { k ->
             token?.let { (t, exp) -> if (now < exp - 3_600) return t to API }
@@ -109,7 +115,7 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
          * The web player's token: its page names a script, the script holds a JWT in quotes.
          * Returns the token and its expiry (seconds), read from the token itself.
          */
-        fun webToken(get: (String, Map<String, String>) -> ByteArray?): Pair<String, Long>? {
+        suspend fun webToken(get: suspend (String, Map<String, String>) -> ByteArray?): Pair<String, Long>? {
             val browser = mapOf("User-Agent" to "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Mobile Safari/537.36")
             val page = get("https://music.apple.com/us/new", browser)?.toString(Charsets.UTF_8) ?: return null
             val script = Regex("""/assets/index[^"']*\.js""").find(page)?.value ?: return null
@@ -178,7 +184,7 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
          * 1080 px (smallest above that otherwise), its init segment and every media segment, in
          * order. Encrypted streams are skipped. Null when anything is missing or it grows too big.
          */
-        fun joinHls(master: String, get: (String) -> ByteArray?): ByteArray? {
+        suspend fun joinHls(master: String, get: suspend (String) -> ByteArray?): ByteArray? {
             val masterText = get(master)?.toString(Charsets.UTF_8) ?: return null
             data class Variant(val url: String, val height: Int, val hevc: Boolean, val bandwidth: Long)
             val variants = Regex("""#EXT-X-STREAM-INF:([^\n]*)\n([^\n#]+)""").findAll(masterText).map { m ->
@@ -209,11 +215,29 @@ internal class AppleMotion(context: Context, private val get: (String, Map<Strin
 
         private fun resolve(base: String, ref: String): String = URI(base).resolve(ref).toString()
 
-        fun fetch(url: String, headers: Map<String, String>): ByteArray? = runCatching {
-            val c = URL(url).openConnection() as HttpURLConnection
-            c.connectTimeout = 8_000; c.readTimeout = 15_000
-            headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
-            try { if (c.responseCode in 200..299) c.inputStream.use { it.readNBytes(MAX_BYTES.toInt() + 1) } else null } finally { c.disconnect() }
-        }.getOrNull()
+        private val http = OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
+
+        private suspend fun fetch(url: String, headers: Map<String, String>): ByteArray? {
+            val request = Request.Builder().url(url).apply { headers.forEach { (k, v) -> header(k, v) } }.build()
+            val call = http.newCall(request)
+            return suspendCancellableCoroutine { result ->
+                result.invokeOnCancellation { call.cancel() }
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
+                        if (result.isActive) result.resumeWith(Result.success(null))
+                    }
+
+                    override fun onResponse(call: Call, response: Response) {
+                        val bytes = response.use {
+                            if (!it.isSuccessful || !result.isActive) null else runCatching {
+                                it.body?.byteStream()?.readNBytes(MAX_BYTES.toInt() + 1)?.takeIf { data -> data.size <= MAX_BYTES }
+                            }.getOrNull()
+                        }
+                        if (result.isActive) result.resumeWith(Result.success(bytes))
+                    }
+                })
+            }
+        }
     }
 }

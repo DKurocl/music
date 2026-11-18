@@ -68,9 +68,8 @@ private object SymbolFont {
 }
 
 /**
- * A Material Symbol that moves like the ones in Google's apps: [filled] fills it in, [bold]
- * thickens the stroke (a chosen or pressed control), and becoming filled or bold gives it a small
- * spring "pop". It animates only when one of those changes; nothing runs while it sits still.
+ * A Material Symbol with independent fill, weight and short press feedback. The animation stays
+ * inside the control so the visual motion cannot move its layout or touch target.
  */
 @Composable
 fun Symbol(
@@ -119,7 +118,7 @@ fun Symbol(
     }
 }
 
-private val LocalIconPressed = androidx.compose.runtime.compositionLocalOf { false }
+internal val LocalIconPressed = androidx.compose.runtime.compositionLocalOf { false }
 
 /** The same interaction drives the button's ripple and the glyph under the finger. */
 @Composable
