@@ -548,11 +548,14 @@ private object HomeCache { @Volatile var last: HomeData? = null }
 private fun homeData(library: LibraryIndex, history: List<Track>, stats: Map<String, SongStats>, favourites: List<Track>, day: Long): HomeData {
     val newest = library.songs.filter { it.addedAt != null }.sortedByDescending { it.addedAt }.take(100)
     val artists = library.artists.filter { it.name.isNotBlank() && !it.name.equals("Unknown artist", true) }
-        .sortedWith(compareByDescending<MusicCollection> { a -> a.tracks.sumOf { stats[it.statsKey]?.plays ?: 0 } }.thenByDescending { it.tracks.size })
-        .take(15)
+        .map { artist -> artist to artist.tracks.sumOf { stats[it.statsKey]?.plays ?: 0 } }
+        .sortedWith(compareByDescending<Pair<MusicCollection, Int>> { it.second }.thenByDescending { it.first.tracks.size })
+        .take(15).map { it.first }
     val albumOf = HashMap<ua.olex.music.model.TrackId, MusicCollection>().apply { library.albums.forEach { a -> a.tracks.forEach { put(it.id, a) } } }
     val recentAlbums = history.mapNotNull { albumOf[it.id] }.distinctBy { it.id }.take(12)
-    val addedAlbums = library.albums.filter { a -> a.tracks.any { it.addedAt != null } }.sortedByDescending { a -> a.tracks.maxOf { it.addedAt ?: 0 } }.take(12)
+    val addedAlbums = library.albums.mapNotNull { album ->
+        album.tracks.asSequence().mapNotNull { it.addedAt }.maxOrNull()?.let { album to it }
+    }.sortedByDescending { it.second }.take(12).map { it.first }
     val mostPlayed = library.songs.map { it to (stats[it.statsKey]?.plays ?: 0) }.filter { it.second > 0 }.sortedByDescending { it.second }.take(5).map { it.first }
     val listened = LibraryStats.of(library) { stats[it.statsKey] }
     // Quick picks (YouTube Music's opening shelf): today's mix of what the owner plays and likes,
