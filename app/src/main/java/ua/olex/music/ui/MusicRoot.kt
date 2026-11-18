@@ -205,28 +205,23 @@ fun MusicRoot(model: LibraryViewModel) {
     // from the library by genre).
     // Both start from what was last seen (read off the main thread), so Home is whole at once and
     // only refreshes; the network answer replaces them quietly.
-    val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) {
+    val network by context.graph.network.collectAsStateWithLifecycle()
+    val moods = androidx.compose.runtime.key(onlinePageScope, youTubeOn) { androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, network) {
         if (!youTubeOn) return@produceState
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedMoods() }?.let { value = it }
-        value = context.graph.youTube.moods()
-    }
+        if (network) context.graph.youTube.moods().takeIf { result -> result.any { it.params != null } }?.let { value = it }
+    }.value }
     // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
     // A different account (or none) never sees the last one's playlists, home or moods.
     androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
-    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>()) {
+    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), network) {
         if (!youTubeOn) { value = emptyList(); return@produceState }
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
-        runCatching { context.graph.youTube.home() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
+        if (network) runCatching { context.graph.youTube.home() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
     }.value }
-    val homeCache = remember(library, onlinePageScope) { HomeCache() }
+    val homeCache = remember(library, onlinePageScope, youTubeOn) { HomeCache() }
     val excluded = model.excluded
-    val visibleShelves = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
-        rememberOffMain(youTubeHome, excluded, initial = emptyList()) {
-            youTubeHome.map { shelf -> shelf.copy(songs = shelf.songs.filterNot { it.id.value in excluded || Mix.songKey(it) in excluded },
-                cards = shelf.cards.filterNot { it.kind == YouTubeMusic.Card.Kind.SONG && "yt:${it.id}" in excluded }) }
-        }
-    }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) {
@@ -289,7 +284,7 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             when {
                 onlineStack.isNotEmpty() -> popOnline()
-                page != null -> page = null
+                page != null -> page = if (page == Page.DUPLICATES) Page.SETTINGS else null
                 else -> go(Place.HOME)
             }
         } finally {
@@ -319,7 +314,6 @@ fun MusicRoot(model: LibraryViewModel) {
         )
     }
     val powerSave = rememberPowerSave()
-    val network by context.graph.network.collectAsStateWithLifecycle()
     // The Search shortcut: Search with the field focused.
     androidx.compose.runtime.LaunchedEffect(model.searchRequest) { if (model.searchRequest > 0) { expanded = false; clearOnline(Place.SEARCH); page = null; place = Place.SEARCH; focusSearch++; model.consumeSearchRequest() } }
     androidx.compose.runtime.LaunchedEffect(model.playerRequest, playing.hasTrack) {
@@ -365,17 +359,18 @@ fun MusicRoot(model: LibraryViewModel) {
                             style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     else if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    else Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
+                    else Text(page?.title ?: place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
                 }, scrollBehavior = scroll,
                 navigationIcon = {
                     if (onlineTop != null) KickIconButton(onClick = { popOnline() }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
-                    else if (page != null) KickIconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
+                    else if (page != null) KickIconButton(onClick = { page = if (page == Page.DUPLICATES) Page.SETTINGS else null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     else if (inCollection) KickIconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { k -> Symbol(Glyph.BACK, kick = k) }
                 },
                 actions = {
                     if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) KickIconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { k -> Symbol(Glyph.SEARCH, kick = k) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
+                        KickIconButton(onClick = { page = Page.STATS }, modifier = Modifier.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
                         // The gear turns as it opens Settings.
                         var gear by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                         androidx.compose.material3.FilledTonalIconButton(onClick = { gear++; page = Page.SETTINGS },
@@ -445,24 +440,16 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
-                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) })
+                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES })
             page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
-            place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
-                Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
-                onOpenAlbum = { clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME; openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
-                onOpenArtist = { clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME; openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
-                onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
-                onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
-                favourites = personal.favourites.mapNotNull { it.track },
+            place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
+                personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier.padding(insets),
+                onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
                 moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
-                youTubeHome = visibleShelves, cache = homeCache,
-                onSeeAll = { tab ->
-                    // Smart playlists live in Playlists; albums, artists and history are Search tiles.
-                    if (tab == "SMART") { clearOnline(Place.LIBRARY); returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
-                }) }
+                youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
             else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
@@ -936,11 +923,6 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
             )
         }
     }
-}
-
-/** Home's title: a greeting for the time of day, as Google's apps greet. */
-internal fun greeting(hour: Int = java.time.LocalTime.now().hour) = when (hour) {
-    in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..22 -> "Good evening"; else -> "Late night"
 }
 
 /** A tab arrives from its position in the bar. Content is readable on the first frame, even on rapid taps. */

@@ -45,6 +45,7 @@ internal fun SettingsPage(
     modifier: Modifier, folders: List<String>, scanning: Boolean, ratingsToFiles: Boolean,
     onRatingsToFiles: (Boolean) -> Unit, onEqualizer: () -> Unit, onRescan: () -> Unit,
     onAddFolder: () -> Unit, onClearFolders: () -> Unit, onDownloads: () -> Unit = {},
+    duplicateCount: Int = 0, onDuplicates: () -> Unit = {},
 ) {
     val context = LocalContext.current
     fun prefs(name: String) = context.getSharedPreferences(name, Context.MODE_PRIVATE)
@@ -158,6 +159,7 @@ internal fun SettingsPage(
         item { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
             else folders.joinToString(" · "), onClick = onAddFolder) }
         if (folders.isNotEmpty()) item { Row(Glyph.CLOSE, "Forget folder access", "Lyrics and covers beside the files stop loading", onClick = onClearFolders) }
+        if (duplicateCount > 0) item { Row(Glyph.DUPLICATES, "Duplicate recordings", "$duplicateCount with multiple files", onClick = onDuplicates) }
         item { Row(Glyph.HIDDEN, "Hidden folders", if (hidden == 0) "None. Hide recordings or ringtones from Library, Folders" else "$hidden hidden. Show them again in Library, Folders") }
 
         item { Toggle(Glyph.STAR, "Save ratings in the files", "Stars go into the tags (FLAC RATING, MP3 POPM), so other players see them", ratingsToFiles, onChange = onRatingsToFiles) }
