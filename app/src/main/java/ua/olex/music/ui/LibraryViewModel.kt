@@ -172,11 +172,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             val saved = graph.motionCovers.file(track)
             val sidecar = if (saved == null) graph.musicFiles.motionCover(track.path) else null
             val video = when {
-                saved != null -> MotionArtwork(android.net.Uri.fromFile(saved).toString(), covers)
+                saved != null -> MotionArtwork(android.net.Uri.fromFile(saved).toString(), covers.toLong())
                 sidecar != null -> MotionArtwork(sidecar, files)
                 else -> {
                     kotlinx.coroutines.delay(250)
-                    fetchAppleMotion(track)?.let { MotionArtwork(android.net.Uri.fromFile(it).toString(), graph.motionCovers.revision.value) }
+                    fetchAppleMotion(track)?.let { MotionArtwork(android.net.Uri.fromFile(it).toString(), graph.motionCovers.revision.value.toLong()) }
                 }
             }
             video?.let { PlaybackMotionCover(motionCoverOwner(track), it) }
