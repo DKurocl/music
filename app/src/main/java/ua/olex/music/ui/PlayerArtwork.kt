@@ -169,7 +169,7 @@ private val playerCoverShape = RoundedCornerShape(object : androidx.compose.foun
 
 /** A ready neighbour paints directly on the commit frame, without a second reveal animation. */
 @Composable
-internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false) {
+internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false, showMotion: Boolean = true) {
     var previous by remember { mutableStateOf<CoverFrame?>(null) }
     val frame = image.frame ?: previous.takeIf { image.loading }
     androidx.compose.runtime.SideEffect { previous = frame }
@@ -181,7 +181,7 @@ internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, 
         if (motion != null && !saving && !LocalInspectionMode.current) {
             val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
             if (lifecycle.isAtLeast(Lifecycle.State.RESUMED)) key(motion) {
-                MotionCover(motion.uri, moving, Modifier.fillMaxSize())
+                MotionCover(motion.uri, moving && showMotion, showMotion, Modifier.fillMaxSize())
             }
         }
     }
@@ -190,7 +190,7 @@ internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, 
 /** One muted decoder per active URI. The still image stays visible until a verified first frame. */
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
+private fun MotionCover(uri: String, moving: Boolean, visible: Boolean, modifier: Modifier) {
     var failed by remember { mutableStateOf(false) }
     if (failed) return
     val context = LocalContext.current
@@ -235,7 +235,7 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
         player.playWhenReady = moving
     }
     val alpha by androidx.compose.animation.core.animateFloatAsState(
-        if (ready) 1f else 0f, MaterialTheme.motionScheme.fastEffectsSpec(), label = "motion artwork",
+        if (ready && visible) 1f else 0f, MaterialTheme.motionScheme.fastEffectsSpec(), label = "motion artwork",
     )
     AndroidView(
         factory = { ctx -> CoverTexture(ctx).also(player::setVideoTextureView) },

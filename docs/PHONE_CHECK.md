@@ -195,3 +195,8 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
    animations disabled.
 6. Hold a queue row at the top or bottom edge without moving your finger. The list scrolls with
    the row still under your finger. Repeat at large font, and after an external edit to the queue.
+
+7. Open Now Playing by tap and swipe, then collapse with the chevron, downward drag and system
+   back. Cancel a back gesture halfway. Check the cover reaches the same thumbnail each time.
+   Repeat from inline lyrics and while a new video is preparing. Use two tracks with different
+   covers, repeat the swipe in both directions and watch the centre when the title changes.
