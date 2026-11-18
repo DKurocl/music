@@ -29,7 +29,7 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     } }
     val history = dao.history(200).map { rows -> rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt) } }
     fun historySince(start: Long) = dao.historySince(start).map { rows ->
-        rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt) }
+        rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt, it.listenedMs) }
     }
 
 
@@ -215,11 +215,13 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         replaceEntries(id, ids)
     }
 
-    suspend fun recordPlay(track: Track) = database.withTransaction {
-        val at = now()
+    suspend fun recordPlay(track: Track, observedAt: Long? = null) = database.withTransaction {
+        val at = observedAt ?: now()
         val song = register(listOf(SavedSong.from(track)), at).single()
-        dao.addHistory(HistoryEntity(songId = song.id, playedAt = at))
+        dao.addHistory(HistoryEntity(songId = song.id, playedAt = at, listenedMs = observedAt?.let { 0L }))
     }
+
+    suspend fun updateListening(id: Long, millis: Long) = dao.updateListening(id, millis)
 
     fun lyricOffset(song: SavedSong) = reference(song).flatMapLatest { recording ->
         if (recording == null) kotlinx.coroutines.flow.flowOf(0L) else dao.lyricOffset(recording.id).map { it ?: 0L }

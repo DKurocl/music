@@ -1,3 +1,12 @@
+# Listening dashboard (2026-11-18)
+
+Your listening uses local calendar ranges and contextual charts. The period applies to the
+summary, timeline, top artists/albums/tracks and concentration. Catalogue totals are separately
+labelled. Playback records monotonic elapsed time only while Media3 reports playing, with an
+early checkpoint and then a periodic write. The Room migration preserves all historical starts
+and leaves their measured time unknown. An event's time is attributed to the date it started.
+Existing history flows retain their start-only representation outside the dashboard.
+
 # YouTube Music browse recovery
 
 Artist routes retain the channel linked by the provider. Album and artist pages can recover

@@ -96,4 +96,4 @@ data class SavedSong(
 data class UserPlaylist(val id: Long, val name: String, val songs: List<SavedSong>, val createdAt: Long)
 
 /** One actual playback start, not a click or a pause/resume event. */
-data class HistoryEntry(val id: Long, val song: SavedSong, val playedAt: Long)
+data class HistoryEntry(val id: Long, val song: SavedSong, val playedAt: Long, val listenedMs: Long? = null)

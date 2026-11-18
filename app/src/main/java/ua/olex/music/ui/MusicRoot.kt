@@ -450,7 +450,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
                 onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES },
                 onLibraryOverview = { page = Page.LIBRARY_OVERVIEW }, initialQuery = settingsQuery)
-            page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play, context.graph.userLibrary::historySince)
+            page == Page.STATS -> StatsPage(requireNotNull(library), Modifier.padding(insets), model::play, context.graph.userLibrary::historySince)
             page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
                 onDuplicates = { page = Page.DUPLICATES }, onStorage = { settingsQuery = "cache"; page = Page.SETTINGS }, onTrash = moveToTrash)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
