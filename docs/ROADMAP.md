@@ -15,6 +15,10 @@ Milestones M1, M2 and M4 to M8 touch different modules and can run in parallel b
 Files many tasks touch (`AppGraph`, `settings.gradle.kts`, the version catalog) change in small
 separate commits to keep merges trivial.
 
+## Personal Home
+
+- [x] Codex, 2026-11-18: one playable feed and a separate mood chooser for the same library.
+
 ## What "the best it can be" means here (owner, 2026-11-14)
 
 Battery, sound quality, speed and features, each pushed as far as this phone allows, and each

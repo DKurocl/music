@@ -14,6 +14,7 @@ jobs:
       owner_key: ${{ steps.key.outputs.owner }}
       version_code: ${{ steps.version.outputs.code }}
     env:
+      JAVA_TOOL_OPTIONS: -Drobolectric.dependency.repo.url=https://repo.maven.apache.org/maven2
       OWNER_KEYSTORE_PASSWORD: ${{ secrets.OWNER_KEYSTORE_PASSWORD }}
       OWNER_KEY_ALIAS: ${{ secrets.OWNER_KEY_ALIAS }}
       OWNER_KEY_PASSWORD: ${{ secrets.OWNER_KEY_PASSWORD }}

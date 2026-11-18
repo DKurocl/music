@@ -1,3 +1,12 @@
+# Quick picks and Moods (Codex, 2026-11-18)
+
+Home opens to one queue. Recent plays, favourites, play counts and account-scoped YouTube
+recommendations contribute to it. The lead card starts the displayed queue. Moods opens a
+two-column chooser, with familiar genre matches and service recommendations in the same rows.
+The chart icon beside Settings opens listening stats. Duplicate recordings is in Settings,
+Library. This release also includes the gesture-driven player and the illustrated Settings.
+Physical gesture timing and the signed-in feed on the owner's Pixel need device acceptance.
+
 # Player motion and Settings (2026-11-18)
 
 [код] The floating cover and page crossfade have been replaced by a single opaque page

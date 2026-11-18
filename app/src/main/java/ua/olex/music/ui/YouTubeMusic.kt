@@ -454,20 +454,28 @@ internal class YouTubeMusic(
     /** What a mood offers: curated playlists, and songs when the page lists any. */
     data class MoodPage(val playlists: List<OnlineAlbum>, val songs: List<Track>)
 
-    @Volatile private var moodsCache: List<Mood>? = null
+    @Volatile private var moodsCache: Pair<String, List<Mood>>? = null
 
     /** The moods as YouTube Music's home lists them; the usual set (without filters) when it can't be reached. */
-    suspend fun moods(): List<Mood> = moodsCache ?: withContext(ioDispatcher) {
-        (runCatching { homeAnswer()?.let(::parseMoods) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@withContext DEFAULT_MOODS)
-            .also { moodsCache = it; storeMoods(it) }
+    suspend fun moods(): List<Mood> = withContext(ioDispatcher) {
+        val scope = pageScope()
+        moodsCache?.takeIf { it.first == scope }?.let { return@withContext it.second }
+        val found = runCatching { homeAnswer(scope)?.let(::parseMoods) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@withContext DEFAULT_MOODS
+        if (pageScope() != scope) return@withContext DEFAULT_MOODS
+        moodsCache = scope to found
+        storeMoods(scope, found)
+        found
     }
 
-    // Home and the moods come from the same answer: asked once (not once each), kept a minute.
+    // Home and its mood filters share one response per account.
     private val homeLock = kotlinx.coroutines.sync.Mutex()
-    @Volatile private var homeAt: Pair<Long, String>? = null
-    private suspend fun homeAnswer(): String? = homeLock.withLock {
+    private data class HomeResponse(val scope: String, val time: Long, val json: String)
+    private var homeAt: HomeResponse? = null
+    private suspend fun homeAnswer(scope: String): String? = homeLock.withLock {
+        if (pageScope() != scope) return@withLock null
         val now = android.os.SystemClock.elapsedRealtime()
-        homeAt?.takeIf { now - it.first < 60_000 }?.second ?: post("browse", """"browseId":"FEmusic_home"""")?.also { homeAt = now to it }
+        homeAt?.takeIf { it.scope == scope && now - it.time < 60_000 }?.json
+            ?: post("browse", """"browseId":"FEmusic_home"""")?.takeIf { pageScope() == scope }?.also { homeAt = HomeResponse(scope, now, it) }
     }
 
     /** Home's shelves as last seen for this account: drawn at once on the next start, then refreshed. */
@@ -484,32 +492,44 @@ internal class YouTubeMusic(
         (0 until list.length()).map { i -> list.getJSONObject(i).let { Mood(it.getString("label"), it.optString("params").ifEmpty { null }) } }.takeIf { it.isNotEmpty() }
     }.getOrNull()
 
-    private fun storeHome(shelves: List<Shelf>) = runCatching {
+    private fun storeHome(scope: String, shelves: List<Shelf>) = runCatching {
         val array = org.json.JSONArray()
         shelves.forEach { array.put(org.json.JSONObject().put("title", it.title).put("songs", OnlinePageJson.tracks(it.songs)).put("cards", OnlinePageJson.cards(it.cards))) }
-        pageStore?.write(pageScope(), "home", org.json.JSONObject().put("shelves", array))
+        pageStore?.write(scope, "home", org.json.JSONObject().put("shelves", array))
     }
-    private fun storeMoods(moods: List<Mood>) = runCatching {
+    private fun storeMoods(scope: String, moods: List<Mood>) = runCatching {
         val array = org.json.JSONArray()
         moods.forEach { array.put(org.json.JSONObject().put("label", it.label).put("params", it.params ?: "")) }
-        pageStore?.write(pageScope(), "moods", org.json.JSONObject().put("moods", array))
+        pageStore?.write(scope, "moods", org.json.JSONObject().put("moods", array))
     }
 
     /** One mood's page: YouTube Music's home filtered by it. */
     suspend fun mood(mood: Mood): MoodPage? {
         val params = mood.params ?: return null
-        return cached("mood:${mood.label}") { post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage)?.takeIf { it.playlists.isNotEmpty() || it.songs.isNotEmpty() } }
+        val scope = pageScope()
+        return cached("$scope/mood:$params") {
+            val page = post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage) ?: return@cached null
+            if (pageScope() != scope || (page.playlists.isEmpty() && page.songs.isEmpty())) return@cached null
+            if (page.songs.isNotEmpty()) page else {
+                val first = page.playlists.first()
+                page.copy(songs = album(first.id)?.second.orEmpty().take(24))
+            }
+        }
     }
-    fun peekMood(mood: Mood): MoodPage? = peek("mood:${mood.label}")
+    fun peekMood(mood: Mood): MoodPage? = peek("${pageScope()}/mood:${mood.params}")
 
     /** A home shelf: its title, and its songs or its cards. */
     data class Shelf(val title: String, val songs: List<Track>, val cards: List<Card>)
     /** A card on a shelf; a mix ([kind] MIX) plays as radio from its playlist id. */
-    data class Card(val id: String, val title: String, val subtitle: String?, val cover: String?, val kind: Kind) { enum class Kind { ALBUM, PLAYLIST, ARTIST, MIX, SONG } }
+    data class Card(val id: String, val title: String, val subtitle: String?, val cover: String?, val kind: Kind) {
+        enum class Kind { ALBUM, PLAYLIST, ARTIST, MIX, SONG }
+        fun song() = Track(ua.olex.music.model.TrackId("yt:$id"), "ytm://$id", title, artistOf(subtitle), artworkUri = cover)
+    }
 
     /** YouTube Music's home: the owner's own when signed in (quick picks, mixes, listen again...). */
     suspend fun home(): List<Shelf> = withContext(ioDispatcher) {
-        homeAnswer()?.let(::parseHome).orEmpty().also { if (it.isNotEmpty()) storeHome(it) }
+        val scope = pageScope()
+        homeAnswer(scope)?.let(::parseHome).orEmpty().takeIf { pageScope() == scope }.orEmpty().also { if (it.isNotEmpty()) storeHome(scope, it) }
     }
 
     /** A mix or other watch playlist, played as YouTube Music plays it ("My Mix 1"). */
