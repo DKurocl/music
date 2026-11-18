@@ -81,6 +81,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -323,34 +324,40 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
     val haptics = rememberHaptics()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     // Follows the finger sideways (skip) and upward (open), then springs back.
-    val dragX = remember { androidx.compose.animation.core.Animatable(0f) }
+    var dragX by remember { mutableFloatStateOf(0f) }
+    var settleX by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val next by rememberUpdatedState(onNext)
+    val previous by rememberUpdatedState(onPrevious)
     var dragUp by remember { mutableFloatStateOf(0f) }
     var cardWidth by remember { mutableIntStateOf(1) }
     val spring = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    fun releaseDrag() {
+        settleX?.cancel()
+        settleX = scope.launch {
+            androidx.compose.animation.core.animate(dragX, 0f, animationSpec = spring) { value, _ -> dragX = value }
+        }
+    }
     Surface(
         color = cs.surfaceContainerHigh, shape = RoundedCornerShape(24.dp), tonalElevation = 2.dp, shadowElevation = 3.dp,
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp).fillMaxWidth()
             .onSizeChanged { cardWidth = it.width.coerceAtLeast(1) }
             .graphicsLayer {
-                translationX = if (!state.hasNext && dragX.value < 0) rubber(dragX.value, 40.dp.toPx()) else dragX.value
+                translationX = rubber(dragX, 48.dp.toPx())
                 // Up opens the player; down has nowhere to go, so it stretches a little and springs back.
                 translationY = if (dragUp >= 0f) -dragUp * 0.3f else -rubber(dragUp, 16.dp.toPx())
-                alpha = 1f - (kotlin.math.abs(dragX.value) / cardWidth) * 0.6f
             }
             .pointerInput(state.hasNext) {
                 detectHorizontalDragGestures(
+                    onDragStart = { settleX?.cancel() },
                     onDragEnd = {
-                        val x = dragX.value
-                        scope.launch {
-                            when {
-                                x < -cardWidth * 0.3f && state.hasNext -> { haptics.skip(true); onNext() }
-                                x > cardWidth * 0.3f -> { haptics.skip(false); onPrevious() }
-                            }
-                            dragX.animateTo(0f, spring)
+                        when {
+                            dragX < -cardWidth * 0.3f && state.hasNext -> { haptics.skip(true); next() }
+                            dragX > cardWidth * 0.3f -> { haptics.skip(false); previous() }
                         }
+                        releaseDrag()
                     },
-                    onDragCancel = { scope.launch { dragX.animateTo(0f, spring) } },
-                ) { change, amount -> change.consume(); scope.launch { dragX.snapTo(dragX.value + amount) } }
+                    onDragCancel = ::releaseDrag,
+                ) { change, amount -> change.consume(); dragX += amount }
             }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
@@ -546,6 +553,10 @@ internal fun PlayerPage(
                     covers[currentArt] ?: emptyCover,
                     Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
                         .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
+                        .semantics {
+                            contentDescription = "Album artwork"
+                            if (tapMore != null) onLongClick("Song actions") { tapMore?.invoke(); true }
+                        }
                         .pointerInput(Unit) {
                             detectTapGestures(
                                 onDoubleTap = { tapFavourite?.let { action ->
