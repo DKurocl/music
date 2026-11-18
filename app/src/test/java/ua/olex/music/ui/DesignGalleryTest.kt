@@ -376,13 +376,13 @@ class DesignGalleryTest {
     @Test
     @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     fun playerKeepsTheDecodedCoverWhileTheNextImageLoads() {
-        val cover = androidx.compose.runtime.mutableStateOf("file:///first-cover.png")
-        val second = "file:///second-cover.png"
         val nextReady = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val nextRequested = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         val handler = coil3.compose.AsyncImagePreviewHandler { request ->
-            val next = request.data.toString().contains("second-cover.png")
-            if (next) { nextRequested.complete(Unit); nextReady.await() }
+            val model = request.data.toString()
+            requests.add(model)
+            val next = model.contains("second-cover.png")
+            if (next) nextReady.await()
             Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply {
                 eraseColor(if (next) android.graphics.Color.BLUE else android.graphics.Color.RED)
             }.asImage()
@@ -390,7 +390,15 @@ class DesignGalleryTest {
         compose.setContent { AppTheme {
             CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
                 coil3.compose.LocalAsyncImagePreviewHandler provides handler) {
-                PlayerArtwork(cover.value, Modifier.size(96.dp).testTag("cover"), 16.dp, 192)
+                val next = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                androidx.compose.foundation.layout.Column {
+                    androidx.compose.material3.Button(onClick = { next.value = true }) { Text("Next cover") }
+                    Text(if (next.value) "Second selected" else "First selected")
+                    PlayerArtwork(
+                        if (next.value) "file:///second-cover.png" else "file:///first-cover.png",
+                        Modifier.size(96.dp).testTag("cover"), 16.dp, 192,
+                    )
+                }
             }
         } }
         fun centre(): Int {
@@ -398,8 +406,10 @@ class DesignGalleryTest {
             return image.getPixel(image.width / 2, image.height / 2)
         }
         org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
-        compose.runOnIdle { cover.value = second }
-        compose.waitUntil(timeoutMillis = 2_000) { nextRequested.isCompleted }
+        org.junit.Assert.assertTrue("Initial requests: $requests", requests.any { "first-cover.png" in it })
+        compose.onNodeWithText("Next cover").performClick()
+        compose.onNodeWithText("Second selected").assertIsDisplayed()
+        org.junit.Assert.assertTrue("Requests after switching: $requests", requests.any { "second-cover.png" in it })
         org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
         nextReady.complete(Unit)
         compose.waitForIdle()
