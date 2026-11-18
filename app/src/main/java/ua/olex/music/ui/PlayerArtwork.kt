@@ -64,9 +64,9 @@ import ua.olex.music.library.ArtworkUris
 internal data class MotionArtwork(val uri: String, val revision: Long)
 
 @Composable
-internal fun ArtworkFrame(modifier: Modifier, corner: Dp, content: @Composable BoxScope.() -> Unit) {
+internal fun ArtworkFrame(modifier: Modifier, shape: androidx.compose.ui.graphics.Shape, content: @Composable BoxScope.() -> Unit) {
     Box(
-        modifier.clip(RoundedCornerShape(corner)).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+        modifier.clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
         contentAlignment = Alignment.Center,
         content = content,
     )
@@ -134,7 +134,10 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
     val preview = if (LocalInspectionMode.current) LocalAsyncImagePreviewHandler.current else null
     var failed by remember(uri, targetSize) { mutableStateOf(false) }
     val size = minOf(pixels, targetSize)
-    val frame = memory[uri]
+    // A full player can stay visible while queue edits cycle many neighbours through the cache.
+    var retained by remember(uri, memory) { mutableStateOf<CoverFrame?>(null) }
+    val frame = memory[uri] ?: retained
+    androidx.compose.runtime.SideEffect { retained = frame }
     // Keep the request independent of draw visibility and of the shared element's animated size.
     LaunchedEffect(uri, size, loader, preview, memory) {
         if (uri == null || size <= 0 || (memory[uri]?.pixels ?: 0) >= size) return@LaunchedEffect
@@ -144,7 +147,7 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
         if (painter != null) memory.put(uri, CoverFrame(painter, size))
         else failed = true
     }
-    return CoverImage(frame, uri != null && !failed)
+    return CoverImage(frame, frame == null && uri != null && !failed)
 }
 
 @Composable
@@ -155,6 +158,15 @@ internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels:
         .then(if (sharedVisible == null) Modifier else Modifier.sharedPlayerCover(sharedVisible)), corner)
 }
 
+/** Keep the outline continuous as the shared element grows from a thumbnail to the album sleeve. */
+private val playerCoverShape = RoundedCornerShape(object : androidx.compose.foundation.shape.CornerSize {
+    override fun toPx(shapeSize: androidx.compose.ui.geometry.Size, density: androidx.compose.ui.unit.Density): Float =
+        with(density) {
+            val fraction = ((shapeSize.minDimension - 48.dp.toPx()) / 272.dp.toPx()).coerceIn(0f, 1f)
+            (14.dp + 18.dp * fraction).toPx()
+        }
+})
+
 /** A ready neighbour paints directly on the commit frame, without a second reveal animation. */
 @Composable
 internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false) {
@@ -162,7 +174,7 @@ internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, 
     val frame = image.frame ?: previous.takeIf { image.loading }
     androidx.compose.runtime.SideEffect { previous = frame }
     val saving = LocalPowerSave.current
-    ArtworkFrame(modifier, corner) {
+    ArtworkFrame(modifier, if (LocalCoverTransition.current != null) playerCoverShape else RoundedCornerShape(corner)) {
         if (frame != null) Image(frame.painter, contentDescription = null,
             modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
         else Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
