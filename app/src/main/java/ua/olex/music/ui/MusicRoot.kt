@@ -306,6 +306,8 @@ fun MusicRoot(model: LibraryViewModel) {
             if (account != null) pending()
         }
     }
+    androidx.compose.animation.SharedTransitionLayout(Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalCoverTransition provides this, LocalPlayerCovers provides remember { PlayerCoverMemory() }) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
@@ -450,7 +452,6 @@ fun MusicRoot(model: LibraryViewModel) {
         }
         }
     }
-    }
 
     // The player follows the finger down from the top of its page and closes past a quarter of the
     // screen or on a quick flick; predictive back shrinks it toward the mini player.
@@ -491,9 +492,9 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     AnimatedVisibility(expanded && playing.hasTrack, enter = EnterTransition.None, exit = ExitTransition.None) {
-        // The entire page stays in one layer. On dismissal it travels only the remaining distance.
+        CompositionLocalProvider(LocalPlayerVisibility provides this) {
         val hidden by transition.animateFloat(
-            transitionSpec = { tween(if (targetState == androidx.compose.animation.EnterExitState.Visible) 300 else 240, easing = FastOutSlowInEasing) },
+            transitionSpec = { tween(if (powerSave) 0 else 340, easing = FastOutSlowInEasing) },
             label = "Player travel",
         ) { if (it == androidx.compose.animation.EnterExitState.Visible) 0f else 1f }
         val settled = transition.currentState == androidx.compose.animation.EnterExitState.Visible &&
@@ -501,7 +502,8 @@ fun MusicRoot(model: LibraryViewModel) {
         Box(Modifier.fillMaxSize().onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
             .graphicsLayer {
                 val offset = (dismiss + backProgress * 120.dp.toPx()).coerceIn(0f, size.height)
-                translationY = offset + (size.height - offset) * hidden
+                alpha = 1f - hidden
+                translationY = offset + 32.dp.toPx() * hidden
                 val s = 1f - backProgress * 0.08f; scaleX = s; scaleY = s
                 shape = RoundedCornerShape((backProgress * 40 + (dismiss / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
             }) {
@@ -571,6 +573,10 @@ fun MusicRoot(model: LibraryViewModel) {
         )
         }
     }
+    } // Player visibility scope
+    } // Cover memory
+    } // Shared transition layout
+    } // App composition locals
     model.downloadRequest?.let { requested ->
         DownloadsSheet(context.graph.soulseek, requested, onDismiss = model::dismissDownloads)
     }

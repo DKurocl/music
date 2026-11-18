@@ -5,7 +5,11 @@ package ua.olex.music.ui
 import android.content.Context
 import android.graphics.Matrix
 import android.view.TextureView
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.BoundsTransform
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -21,7 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,9 +58,6 @@ import coil3.request.ImageRequest
 import coil3.request.crossfade
 import coil3.request.SuccessResult
 import coil3.size.Scale
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import ua.olex.music.library.ArtworkUris
 
 /** The revision reopens a file replaced in place by an explicit cover edit. */
@@ -75,67 +76,85 @@ internal fun playerCoverRequest(context: Context, uri: String, pixels: Int, size
     ImageRequest.Builder(context).data(ArtworkUris.variant(uri, context.packageName, pixels))
         .crossfade(false).apply { if (size != null) size(size).scale(Scale.FILL) }.build()
 
-/** Load at the measured size independently of the layers drawing the previous and incoming covers. */
+/** A decoded still can move from a swipe neighbour to the centre or between player sizes. */
+internal data class CoverFrame(val painter: Painter, val pixels: Int)
+
+internal class PlayerCoverMemory {
+    private val frames = androidx.compose.runtime.mutableStateMapOf<String, CoverFrame>()
+    private val order = ArrayDeque<String>()
+
+    operator fun get(uri: String?): CoverFrame? = uri?.let(frames::get)
+
+    fun put(uri: String, frame: CoverFrame) {
+        if ((frames[uri]?.pixels ?: 0) >= frame.pixels) return
+        order.remove(uri)
+        order.addLast(uri)
+        frames[uri] = frame
+        if (order.size > 5) frames.remove(order.removeFirst())
+    }
+}
+
+internal val LocalPlayerCovers = staticCompositionLocalOf<PlayerCoverMemory?> { null }
+internal val LocalCoverTransition = staticCompositionLocalOf<SharedTransitionScope?> { null }
+internal val LocalPlayerVisibility = staticCompositionLocalOf<AnimatedVisibilityScope?> { null }
+private val coverTravel = BoundsTransform { _, _ -> tween(340, easing = FastOutSlowInEasing) }
+
+/** Only the current still participates. The queue can contain several occurrences of the same URI. */
+@Composable
+internal fun Modifier.sharedPlayerCover(visible: Boolean): Modifier {
+    val scope = LocalCoverTransition.current ?: return this
+    if (LocalPowerSave.current) return this
+    val page = LocalPlayerVisibility.current
+    return with(scope) {
+        val cover = rememberSharedContentState("current player cover")
+        if (page != null) sharedElement(cover, page, boundsTransform = coverTravel)
+        else sharedElementWithCallerManagedVisibility(cover, visible, boundsTransform = coverTravel)
+    }
+}
+
+internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean)
+
 @OptIn(ExperimentalCoilApi::class)
 @Composable
-internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int, motion: MotionArtwork? = null, moving: Boolean = true) {
+internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): CoverImage {
+    val memory = LocalPlayerCovers.current ?: remember { PlayerCoverMemory() }
     val context = LocalContext.current
-    val saving = LocalPowerSave.current
-    val latestSaving by rememberUpdatedState(saving)
     val loader = SingletonImageLoader.get(context)
     val preview = if (LocalInspectionMode.current) LocalAsyncImagePreviewHandler.current else null
-    var measured by remember { mutableStateOf(0) }
-    var lastDecoded by remember { mutableStateOf<Painter?>(null) }
-    var outgoing by remember(uri) { mutableStateOf(lastDecoded.takeIf { uri != null }) }
-    var incoming by remember(uri) { mutableStateOf<Painter?>(null) }
-    val alpha = remember(uri) { Animatable(0f) }
-    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-
-    LaunchedEffect(uri, loader, preview, pixels, measured) {
-        if (uri == null) {
-            lastDecoded = null
-            return@LaunchedEffect
-        }
-        if (measured == 0) return@LaunchedEffect
-        val request = playerCoverRequest(context, uri, pixels, measured)
-        val decoded = coroutineScope {
-            val timeout = launch {
-                delay(900)
-                // A slow remote request must not keep the preceding track's artwork indefinitely.
-                outgoing = null
-                if (incoming == null) lastDecoded = null
-            }
-            try {
-                if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
-                else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
-            } finally {
-                timeout.cancel()
-            }
-        }
-        if (decoded == null) {
-            outgoing = null
-            if (incoming == null) lastDecoded = null
-            return@LaunchedEffect
-        }
-        val animate = incoming == null && outgoing != null && !latestSaving
-        lastDecoded = decoded
-        if (!animate) alpha.snapTo(1f)
-        incoming = decoded
-        if (animate) alpha.animateTo(1f, effects)
-        outgoing = null
+    var failed by remember(uri, targetSize) { mutableStateOf(false) }
+    val size = minOf(pixels, targetSize)
+    val frame = memory[uri]
+    // Keep the request independent of draw visibility and of the shared element's animated size.
+    LaunchedEffect(uri, size, loader, preview, memory) {
+        if (uri == null || size <= 0 || (memory[uri]?.pixels ?: 0) >= size) return@LaunchedEffect
+        val request = playerCoverRequest(context, uri, pixels, size)
+        val painter = if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
+            else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
+        if (painter != null) memory.put(uri, CoverFrame(painter, size))
+        else failed = true
     }
+    return CoverImage(frame, uri != null && !failed)
+}
 
-    ArtworkFrame(modifier.onSizeChanged { measured = maxOf(it.width, it.height) }, corner) {
-        val previous = outgoing
-        if (previous != null) {
-            Image(previous, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else if (incoming == null) {
-            Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
-        }
-        incoming?.let { cover ->
-            Image(cover, contentDescription = null, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value })
-        }
+@Composable
+internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int, sharedVisible: Boolean? = null) {
+    var measured by remember { mutableStateOf(0) }
+    val image = rememberCoverImage(uri, pixels, measured)
+    PlayerCoverFace(image, modifier.onSizeChanged { measured = maxOf(it.width, it.height) }
+        .then(if (sharedVisible == null) Modifier else Modifier.sharedPlayerCover(sharedVisible)), corner)
+}
+
+/** A ready neighbour paints directly on the commit frame, without a second reveal animation. */
+@Composable
+internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false) {
+    var previous by remember { mutableStateOf<CoverFrame?>(null) }
+    val frame = image.frame ?: previous.takeIf { image.loading }
+    androidx.compose.runtime.SideEffect { previous = frame }
+    val saving = LocalPowerSave.current
+    ArtworkFrame(modifier, corner) {
+        if (frame != null) Image(frame.painter, contentDescription = null,
+            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        else Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
         if (motion != null && !saving && !LocalInspectionMode.current) {
             val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
             if (lifecycle.isAtLeast(Lifecycle.State.RESUMED)) key(motion) {
