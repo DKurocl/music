@@ -143,10 +143,12 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
                     if (playbackState == androidx.media3.common.Player.STATE_ENDED && playWhenReady) seekTo(0)
                 }
             })
-            prepare()
         }
     }
-    DisposableEffect(player) { onDispose { player.release() } }
+    DisposableEffect(player) {
+        player.prepare()
+        onDispose { player.release() }
+    }
     val saving = LocalPowerSave.current
     // Hardware video decoding is the moving cover's cost: it runs only while the music plays, the
     // app is on screen and Battery Saver is off; otherwise the still first frame stays.
@@ -839,6 +841,7 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     // Keep the frequent position updates out of artwork, metadata and controls. Composition may
     // survive screen-off, so the poller also follows lifecycle rather than only visibility.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val lifecycleState by lifecycle.currentStateFlow.collectAsState()
     // Two clocks: [at] moves every frame but is read only by the handle's layout and the line's
     // drawing; [seconds] changes once a second for the time label. A frame recomposes nothing.
     val occurrence = state.queue.getOrNull(state.queueIndex)?.key
@@ -895,7 +898,9 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
             thumb = { _: androidx.compose.material3.SliderState ->
                 androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = canSeek)
             },
-            track = { st: androidx.compose.material3.SliderState -> WaveTrack({ st.value }, wave = state.isPlaying && dragged == null) },
+            track = { st: androidx.compose.material3.SliderState ->
+                WaveTrack({ st.value }, wave = state.isPlaying && dragged == null && lifecycleState.isAtLeast(Lifecycle.State.STARTED))
+            },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(clock(dragged?.let { (it * duration).toLong() } ?: (seconds * 1_000)), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
