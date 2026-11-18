@@ -450,7 +450,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
                 onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES },
                 onLibraryOverview = { page = Page.LIBRARY_OVERVIEW }, initialQuery = settingsQuery)
-            page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
+            page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play, context.graph.userLibrary::historySince)
             page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
                 onDuplicates = { page = Page.DUPLICATES }, onStorage = { settingsQuery = "cache"; page = Page.SETTINGS }, onTrash = moveToTrash)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
@@ -585,7 +585,7 @@ fun MusicRoot(model: LibraryViewModel) {
                         "${ua.olex.music.playback.OnlineStreams.SCHEME}://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, artworkUri = item.artworkUri) else null
                 }.takeIf { it.isNotEmpty() }
             },
-            onEqualizer = { equalizerOpen = true },
+            onEqualizer = { equalizerOpen = true }, onPlaybackParameters = model::setPlaybackParameters,
             lyricsState = lyricsState, lyricOffset = lyricOffset, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
             onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
@@ -615,6 +615,8 @@ fun MusicRoot(model: LibraryViewModel) {
     model.downloadRequest?.let { requested ->
         DownloadsSheet(context.graph.soulseek, requested, onDismiss = model::dismissDownloads)
     }
+    var videoTrack by remember { mutableStateOf<Track?>(null) }
+    videoTrack?.let { track -> MusicVideoSheet(track) { videoTrack = null } }
     if (equalizerOpen) EqualizerSheet(playing.equalizer, playing.connected, playing.equalizerError,
         onApply = model::setEqualizer, onDismiss = { equalizerOpen = false },
         loudness = playing.replayGain, onLoudness = model::setReplayGain)
@@ -663,6 +665,7 @@ fun MusicRoot(model: LibraryViewModel) {
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
             if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
             if (online || '#' in track.id.value) null else TrackAction(Glyph.DELETE, "Move to trash") { moveToTrash(listOf(track)) },
+            if (youTubeOn && network) TrackAction(Glyph.MOTION, "Find music video") { actionTrack = null; videoTrack = track },
             TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
         ))
     }
@@ -710,7 +713,7 @@ private fun NowPlaying(
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onSleepTimer: (Int) -> Unit, from: String? = null, onExtendSleep: ((Long) -> Unit)? = null,
     onSaveQueue: (() -> Unit)? = null, onClearNext: (() -> Unit)? = null,
-    onEqualizer: () -> Unit,
+    onEqualizer: () -> Unit, onPlaybackParameters: (Float, Float) -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
     onMore: (() -> Unit)?,
@@ -728,6 +731,11 @@ private fun NowPlaying(
     val monitor = context.graph.output
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
+    val lyricsPrefs = remember { context.getSharedPreferences("lyrics_display", android.content.Context.MODE_PRIVATE) }
+    var lyricsScale by remember { androidx.compose.runtime.mutableFloatStateOf(lyricsPrefs.getFloat("text_scale", 1f)) }
+    var lyricsSynced by remember { mutableStateOf(lyricsPrefs.getBoolean("synced", true)) }
+    var lyricsRomanized by remember { mutableStateOf(lyricsPrefs.getBoolean("romanized", false)) }
+    var lyricsTranslated by remember { mutableStateOf(lyricsPrefs.getBoolean("translated", false)) }
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
     // A song without lyrics: with the player open, they are looked up online once, by themselves
     // (word-timed first), instead of waiting for the owner to find the button.
@@ -743,12 +751,17 @@ private fun NowPlaying(
         note = lyricsState.note.takeIf { lyricsState.mediaId == state.mediaId }, folders = musicFolders,
         onChooseFolder = onChooseMusicFolder, onClearFolders = onClearMusicFolders, onReload = onReloadLyrics,
         onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,
+        textScale = lyricsScale, onTextScale = { lyricsScale = it; lyricsPrefs.edit().putFloat("text_scale", it).apply() },
+        synced = lyricsSynced, onSynced = { lyricsSynced = it; lyricsPrefs.edit().putBoolean("synced", it).apply() },
+        romanized = lyricsRomanized, onRomanized = { lyricsRomanized = it; lyricsPrefs.edit().putBoolean("romanized", it).apply() },
+        translated = lyricsTranslated, onTranslated = { lyricsTranslated = it; lyricsPrefs.edit().putBoolean("translated", it).apply() },
         onSaveTiming = onSaveLyricTiming, onResetTiming = if (lyricsState.edited && lyricsState.mediaId == state.mediaId) onResetLyricTiming else null)
     var timerDialog by rememberSaveable { mutableStateOf(false) }
     var queueSheet by rememberSaveable { mutableStateOf(false) }
     var audioPath by rememberSaveable { mutableStateOf(false) }
-    var outputUnavailable by rememberSaveable { mutableStateOf(false) }
-    val changeOutput: () -> Unit = { outputUnavailable = !monitor.showOutputSwitcher() }
+    var devicesOpen by rememberSaveable { mutableStateOf(false) }
+    val changeOutput: () -> Unit = { audioPath = false; devicesOpen = true }
+    if (devicesOpen) PlaybackDevices(route, monitor::showOutputSwitcher) { devicesOpen = false }
     if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput, onEqualizer = { audioPath = false; onEqualizer() },
         sourceLabel = if (state.track?.uri?.startsWith("ytm://") == true || state.mediaId?.startsWith("yt:") == true)
             "YouTube Music input" else "File input",
@@ -757,7 +770,7 @@ private fun NowPlaying(
             state.equalizer.settings.channels.takeIf { !it.neutral }?.let { c -> listOfNotNull(if (c.mono) "mono" else null, if (c.swap) "left/right swapped" else null,
                 if (c.balance != 0f) "balance ${(c.balance * 100).toInt()}%" else null).joinToString(", ").replaceFirstChar(Char::uppercase) },
             state.replayGain.mode.takeIf { it != ua.olex.music.dsp.ReplayGainMode.OFF }?.let { "ReplayGain: ${it.name.lowercase()}" },
-        ))
+        ), controls = { TempoAndPitch(state, onPlaybackParameters) })
     if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove, mixFrom = mixFrom,
         onSave = onSaveQueue?.let { save -> { queueSheet = false; save() } }, onClearNext = onClearNext)
     if (timerDialog) {
@@ -780,15 +793,9 @@ private fun NowPlaying(
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
                 onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,
                 // Words fill at 60 frames a second: smooth to the eye, without holding the panel at 120 Hz.
-                modifier = mod.preferredFrameRate(60f))
+                modifier = mod.preferredFrameRate(60f), textScale = lyricsScale, synced = lyricsSynced)
         })
-    if (outputUnavailable) AppDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
-        text = { Text("Android didn't open its output picker here. Bluetooth settings list your headphones and speakers.") },
-        confirmButton = { TextButton(onClick = {
-            outputUnavailable = false
-            runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        }) { Text("Bluetooth settings") } },
-        dismissButton = { TextButton(onClick = { outputUnavailable = false }) { Text("Cancel") } })
+
 }
 
 /**
