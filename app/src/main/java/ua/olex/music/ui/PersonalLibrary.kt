@@ -53,6 +53,7 @@ internal fun PlaylistBrowser(
     }
     var namingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var create by rememberSaveable { mutableStateOf(false) }
+    var adding by rememberSaveable(selectedId) { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingSong by rememberSaveable(selectedId) { mutableStateOf<Int?>(null) }
     var editingSongId by rememberSaveable(selectedId) { mutableStateOf<String?>(null) }
@@ -227,16 +228,19 @@ internal fun PlaylistBrowser(
                     Row(Modifier.fillMaxWidth()) {
                         KickIconButton(onClick = { selectedId = null }, modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     }
-                    PlaylistCover(selected.playable, 200.dp, 28.dp)
+                    PlaylistCover(selected.playable, if (selected.songs.isEmpty()) 96.dp else 200.dp, 28.dp)
                     Text(selected.name, style = MaterialTheme.typography.headlineSmallEmphasized)
                     val missing = selected.songs.size - selected.playable.size
                     Text(listOfNotNull(if (selected.songs.size == 1) "1 song" else "${selected.songs.size} songs", if (missing > 0) "$missing unavailable" else null).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(enabled = selected.playable.isNotEmpty(), onClick = { playPlaylist(selected, 0) }, modifier = Modifier.height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.width(8.dp)); Text("Play all")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (selected.playable.isNotEmpty()) Button(onClick = { playPlaylist(selected, 0) }, modifier = Modifier.height(52.dp)) {
+                            Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.width(8.dp)); Text("Play all")
+                        }
+                        FilledTonalButton(onClick = { adding = true }, modifier = Modifier.height(52.dp)) { Text("Add songs") }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.AssistChip(enabled = !loadingDocument, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }, onClick = {
+                        androidx.compose.material3.AssistChip(enabled = !loadingDocument && selected.songs.isNotEmpty(), leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }, onClick = {
                             loadingDocument = true
                             scope.launch {
                                 try {
@@ -255,7 +259,26 @@ internal fun PlaylistBrowser(
                     }
                 }
             }
-            if (selected.songs.isEmpty()) item { EmptyState(Glyph.PLAYLIST_ADD, "Empty playlist", "Add songs from their menu, or a whole album with its Add button.") }
+            if (adding) item(key = "add-songs") {
+                var query by rememberSaveable { mutableStateOf("") }
+                val matches = rememberOffMain(library, query, initial = emptyList()) {
+                    val words = ua.olex.music.model.TextFold.fold(query).split(' ').filter { it.isNotBlank() }
+                    library.songs.asSequence().filter { track ->
+                        val name = ua.olex.music.model.TextFold.fold("${track.title} ${track.artist}")
+                        words.all { it in name }
+                    }.take(20).toList()
+                }
+                Column(Modifier.padding(16.dp)) {
+                    OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(), singleLine = true, label = { Text("Find songs to add") })
+                    matches.forEach { track ->
+                        ListItem(headlineContent = { Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            supportingContent = { Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            trailingContent = { IconButton(onClick = { actions.add(selected.id, listOf(track), false) },
+                                modifier = Modifier.semantics { contentDescription = "Add ${track.title}" }) { Symbol(Glyph.ADD) } })
+                    }
+                    TextButton(onClick = { adding = false }) { Text("Done") }
+                }
+            }
             // Keyed by position: the same song can be in a playlist twice.
             itemsIndexed(selected.songs, key = { position, row -> "$position:${row.song.id}" }) { position, row ->
                 SavedSongItem(row, currentId, onPlay = {
@@ -280,8 +303,10 @@ internal fun SavedSongItem(row: SavedSongRow, currentId: String?, onPlay: () -> 
 internal fun PlaylistNameDialog(title: String, initial: String = "", onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var name by rememberSaveable(initial) { mutableStateOf(initial) }
     AppDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = {
-        OutlinedTextField(name, onValueChange = { name = it }, label = { Text("Playlist name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()) }) { Text("Save") } },
+        OutlinedTextField(name, onValueChange = { name = it }, label = { Text("Playlist name") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { if (name.isNotBlank()) onSave(name.trim()) }))
+    }, confirmButton = { TextButton(enabled = name.isNotBlank(), onClick = { onSave(name.trim()) }) { Text(if (initial.isBlank()) "Create" else "Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
