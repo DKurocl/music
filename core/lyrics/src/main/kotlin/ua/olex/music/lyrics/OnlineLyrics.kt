@@ -11,8 +11,11 @@ data class FoundLyrics(val text: String, val source: String, val format: Format,
 
 /**
  * Looks lyrics up on the internet only when the owner asks (no key, no account):
- *  - Kugou first: word-timed KRC, the source LastWave uses;
+ *  - Kugou: word-timed KRC, the source LastWave uses;
+ *  - NetEase: word-timed YRC (read as KRC) for songs Kugou lacks, line-timed LRC otherwise;
  *  - LRCLIB: line-timed LRC and plain text, community maintained.
+ * Every source is asked for each name variant until word-timed lyrics are found; otherwise the best
+ * found wins (word-timed, then line-timed, then plain). A candidate must have the song's title.
  * A candidate is accepted only when its length is within [LENGTH_TOLERANCE_MS] of the song, so a
  * live or extended version is not taken for the studio one.
  */
@@ -23,11 +26,39 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
      * "A, B & C" until only the first artist is asked. The last try is LRCLIB's free search.
      */
     fun find(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? {
-        for ((a, t) in variants(artist, title)) {
-            runCatching { kugou(a, t, durationMs) }.getOrNull()?.let { return it }
-            runCatching { lrclib(a, t, album.takeIf { a == artist && t == title }, durationMs) }.getOrNull()?.let { return it }
+        var best: FoundLyrics? = null
+        fun rank(f: FoundLyrics) = when (f.lyrics.sync) { Sync.WORD -> 3; Sync.LINE -> 2; Sync.NONE -> 1 }
+        // True once word-timed lyrics are in hand: nothing better exists, so the search stops.
+        fun keep(found: FoundLyrics?): Boolean {
+            if (found == null || found.lyrics.lines.isEmpty()) return false
+            if (best == null || rank(found) > rank(best!!)) best = found
+            return found.lyrics.sync == Sync.WORD
         }
+        for ((a, t) in variants(artist, title)) {
+            if (keep(runCatching { kugou(a, t, durationMs) }.getOrNull())) return best
+            if (keep(runCatching { netease(a, t, durationMs) }.getOrNull())) return best
+            keep(runCatching { lrclib(a, t, album.takeIf { a == artist && t == title }, durationMs) }.getOrNull())
+        }
+        best?.let { return it }
         return runCatching { lrclibSearch("${variants(artist, title).last().first} ${variants(artist, title).last().second}", durationMs) }.getOrNull()
+    }
+
+    /** NetEase Cloud Music: word-timed YRC when it has it (converted to KRC), else its LRC. */
+    internal fun netease(artist: String, title: String, durationMs: Long): FoundLyrics? {
+        val body = http("https://music.163.com/api/search/get/web?s=${enc("$artist $title")}&type=1&limit=8") ?: return null
+        val songs = (((Json.parse(body) as? Map<*, *>)?.get("result") as? Map<*, *>)?.get("songs") as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
+        val hit = songs.firstOrNull { s -> sameTitle(s["name"]?.toString(), title) && close((s["duration"] as? Double)?.toLong(), durationMs) } ?: return null
+        val id = (hit["id"] as? Double)?.toLong() ?: return null
+        val answer = http("https://music.163.com/api/song/lyric?id=$id&lv=1&yv=1&tv=-1") ?: return null
+        val root = Json.parse(answer) as? Map<*, *> ?: return null
+        ((root["yrc"] as? Map<*, *>)?.get("lyric") as? String)?.takeIf { it.isNotBlank() }?.let { yrc ->
+            val krc = yrcToKrc(yrc)
+            val lyrics = KrcParser.parse(krc)
+            if (lyrics.lines.isNotEmpty()) return FoundLyrics(krc, "NetEase", FoundLyrics.Format.KRC, lyrics)
+        }
+        val lrc = ((root["lrc"] as? Map<*, *>)?.get("lyric") as? String)?.takeIf { it.isNotBlank() } ?: return null
+        val lyrics = LrcParser.parse(lrc)
+        return if (lyrics.lines.isEmpty()) null else FoundLyrics(lrc, "NetEase", FoundLyrics.Format.LRC, lyrics)
     }
 
     fun variants(artist: String, title: String): List<Pair<String, String>> {
@@ -51,7 +82,8 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
     internal fun kugou(artist: String, title: String, durationMs: Long): FoundLyrics? {
         val search = http("https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${enc("$artist - $title")}&duration=$durationMs&hash=") ?: return null
         val candidates = ((Json.parse(search) as? Map<*, *>)?.get("candidates") as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
-        val best = candidates.firstOrNull { c -> close((c["duration"] as? Double)?.toLong(), durationMs) } ?: return null
+        // The song itself, not just one of the same length: its title has to match.
+        val best = candidates.firstOrNull { c -> close((c["duration"] as? Double)?.toLong(), durationMs) && sameTitle(c["song"]?.toString(), title) } ?: return null
         val id = best["id"]?.toString()?.removeSuffix(".0") ?: return null
         val key = best["accesskey"]?.toString() ?: return null
         val download = http("https://lyrics.kugou.com/download?ver=1&client=pc&id=$id&accesskey=$key&fmt=krc&charset=utf8") ?: return null
@@ -75,11 +107,33 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
         return null
     }
 
+    /** The same title once case, accents, punctuation and "(Remastered)"-style extras are set aside. */
+    private fun sameTitle(candidate: String?, title: String): Boolean {
+        fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("""\p{M}+"""), "").replace(Regex("""\s*[(\[][^)\]]*[)\]]"""), "").replace(Regex("""[^\p{L}\p{N}]+"""), "")
+        val a = norm(candidate ?: return true); val b = norm(title)
+        return a.isEmpty() || b.isEmpty() || a == b || a.contains(b) || b.contains(a)
+    }
+
     private fun close(candidateMs: Long?, songMs: Long) = candidateMs == null || songMs <= 0 || kotlin.math.abs(candidateMs - songMs) <= LENGTH_TOLERANCE_MS
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
     companion object {
         const val LENGTH_TOLERANCE_MS = 4_000L
+
+        /**
+         * NetEase's YRC as KRC: `[start,length](wordStart,wordLength,0)word` with absolute word times
+         * becomes `[start,length]<offset,wordLength,0>word` with offsets from the line's start.
+         * Metadata lines (JSON objects) are left out.
+         */
+        fun yrcToKrc(yrc: String): String = yrc.lineSequence().mapNotNull { raw ->
+            val m = Regex("""^\[(\d+),(\d+)](.*)$""").matchEntire(raw.trim()) ?: return@mapNotNull null
+            val start = m.groupValues[1].toLong()
+            val words = Regex("""\((\d+),(\d+),\d+\)([^(]*)""").findAll(m.groupValues[3]).joinToString("") { w ->
+                "<${(w.groupValues[1].toLong() - start).coerceAtLeast(0)},${w.groupValues[2]},0>${w.groupValues[3]}"
+            }
+            if (words.isEmpty()) null else "[$start,${m.groupValues[2]}]$words"
+        }.joinToString("\n")
 
         /** A plain GET with short timeouts and an honest client name; null on any failure. */
         fun get(url: String): String? = runCatching {
