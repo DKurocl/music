@@ -33,9 +33,15 @@ import ua.olex.music.model.Track
 /** A YouTube Music page to show over the current place: an artist (by name or id) or an album. */
 internal sealed interface OnlineTarget {
     /** An artist; [full] opens the YouTube Music page even when the library has them ("See all"). */
-    data class Artist(val name: String, val id: String? = null, val full: Boolean = false) : OnlineTarget
+    data class Artist(val name: String, val id: String? = null, val full: Boolean = false, val seed: Track? = null) : OnlineTarget
     /** An album, or a playlist when [playlist] (no album download for a playlist of many artists). */
-    data class Album(val id: String, val title: String, val playlist: Boolean = false, val cover: String? = null, val subtitle: String? = null) : OnlineTarget
+    data class Album(val id: String, val title: String, val playlist: Boolean = false, val cover: String? = null, val subtitle: String? = null, val seed: Track? = null) : OnlineTarget
+}
+
+internal fun onlineArtistTarget(track: Track): OnlineTarget.Artist {
+    val credit = YouTubeMusic.artistOfTrack(track)
+    return OnlineTarget.Artist(credit?.second ?: YouTubeMusic.artistCredits(track).firstOrNull().orEmpty(),
+        id = credit?.first, seed = track.takeIf(YouTubeMusic::isOnline))
 }
 
 /** What online pages can do in the app: open another page, play, show a song's actions, open the owner's own artist. */
@@ -139,25 +145,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val state = key(target, accountScope, network) {
         produceState<Load<YouTubeMusic.OnlineArtist>>(Load.Wait, retry) {
-            val id = try {
-                target.id ?: graph.youTube.artistId(target.name, offline = !network)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (_: java.io.IOException) {
-                null
-            }
-            if (id == null) {
-                value = Load.Failed
-                return@produceState
-            }
-            val artist = try {
-                graph.youTube.artist(id, offline = !network, full = network, knownName = target.name) { value = Load.Done(it) }
-                    ?: graph.youTube.artist(id, offline = !network, knownName = target.name)
-            } catch (e: kotlinx.coroutines.CancellationException) {
-                throw e
-            } catch (_: java.io.IOException) {
-                null
-            }
+            val artist = graph.youTube.artistPage(target.name, target.id, target.seed, offline = !network) { value = Load.Done(it) }
             if (artist != null) value = Load.Done(artist)
             else if (value !is Load.Done) value = Load.Failed
         }.value
@@ -202,10 +190,10 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             val playable = songs.ifEmpty { artist.videos }
-                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, PlaybackOrigin("artist", artist.id, artist.name).encode()) }, modifier = Modifier.height(52.dp)) {
+                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name) }, modifier = Modifier.height(52.dp)) {
                                 Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
                             }
-                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, PlaybackOrigin("artist", artist.id, artist.name).encode()) },
+                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name) },
                                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
                             // The owner's own songs by this artist, one tap away.
                             mine?.let { local -> FilledTonalButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.height(52.dp)) {
@@ -215,15 +203,16 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                         Spacer(Modifier.height(16.dp))
                     }
                 }
+                if (artist.partial) item(key = "retry-artist") { ErrorNotice("Showing available tracks. The full artist page couldn't load.") { retry++ } }
                 artist.about?.let { about -> item(key = "about") { AboutCard(about) } }
                 if (songs.isNotEmpty()) {
                     item(key = "songs-h") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.weight(1f)) { OnlineHeading("Top songs") }
+                            Box(Modifier.weight(1f)) { OnlineHeading(if (artist.partial) "Available songs" else "Top songs") }
                         }
                     }
                     itemsIndexed(songs, key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
-                        TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, PlaybackOrigin("artist", artist.id, artist.name).encode()) }
+                        TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name) }
                     }
                 }
                 if (artist.albums.isNotEmpty()) {
@@ -267,7 +256,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val network = LocalNetwork.current
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val state = rememberLoad(Triple(target, accountScope, network), retry, graph.youTube.peekAlbum(target.id)) {
-        graph.youTube.album(target.id, offline = !network, summary = YouTubeMusic.OnlineAlbum(target.id, target.title, target.subtitle, target.cover))
+        graph.youTube.albumPage(YouTubeMusic.OnlineAlbum(target.id, target.title, target.subtitle, target.cover), target.seed, offline = !network)
     }
     // A long playlist arrives in parts: the rest is fetched in the background and added under what is
     // on screen, so nothing moves while the owner reads or plays.
@@ -308,17 +297,17 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 Text(title, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 (album?.subtitle ?: target.subtitle)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-                if (!target.playlist && artistName.isNotEmpty()) TextButton(onClick = { nav.open(OnlineTarget.Artist(artistName)) }) { Text(artistName) }
+                if (!target.playlist && artistName.isNotEmpty()) TextButton(onClick = { nav.open(onlineArtistTarget(songs.first())) }) { Text(artistName) }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, origin) }, modifier = Modifier.height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(if (loadingMore || moreFailed) "Play loaded songs" else "Play all")
+                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(if (loadingMore || moreFailed || album?.partial == true) "Play loaded songs" else "Play all")
                     }
                     KickFilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, origin) },
                         modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { taps -> Symbol(Glyph.SHUFFLE, kick = taps) }
                     // The whole album in lossless from Soulseek, into the library. Nothing to fetch
                     // once every song plays from a file.
-                    if (!target.playlist && songs.isNotEmpty()) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title),
+                    if (!target.playlist && songs.isNotEmpty() && album?.partial != true) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title),
                         owned = songs.none(YouTubeMusic::isOnline), what = "the album") {
                         nav.download { graph.soulseek.album(artistName, title) }
                     }
@@ -334,9 +323,12 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                     Text("Offline · ${songCount(songs.size)} in the saved list", style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
                 }
+                if (album?.partial == true) item(key = "retry-album") {
+                    ErrorNotice("Showing available tracks. The full release couldn't load.") { retry++ }
+                }
                 itemsIndexed(songs, key = { i, track -> "a-$i-" + track.id.value }, contentType = { _, _ -> "song" }) { i, track ->
                     TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { nav.actions(track) },
-                        number = if (mixed) null else i + 1, albumArtist = if (mixed) null else track.artist) { nav.play(songs, i, origin) }
+                        number = if (mixed || album?.partial == true) null else i + 1, albumArtist = if (mixed) null else track.artist) { nav.play(songs, i, origin) }
                 }
                 if (moreFailed) item(key = "retry-page") { ErrorNotice("Couldn't load the rest of this list.") { pageRetry++ } }
                 else if (loadingMore) item(key = "next-page") { PlaceholderRow(cover = mixed) }

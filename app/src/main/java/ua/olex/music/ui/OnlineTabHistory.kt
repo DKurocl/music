@@ -19,13 +19,19 @@ internal class OnlineTabHistory {
     fun clear(place: Place) { pages.remove(place) }
 
     companion object {
+        private fun encodeSeed(track: ua.olex.music.model.Track?): String? = track?.takeIf(YouTubeMusic::isOnline)?.let {
+            org.json.JSONObject().put("tracks", OnlinePageJson.tracks(listOf(it))).toString()
+        }
+
+
         val saver = Saver<OnlineTabHistory, Bundle>(
             save = { history -> Bundle().apply {
                 for (place in Place.entries) putParcelableArrayList(place.name, ArrayList(history[place].map { page ->
                     when (page) {
-                        is OnlineTarget.Artist -> bundleOf("artist" to page.name, "id" to page.id, "full" to page.full)
+                        is OnlineTarget.Artist -> bundleOf("artist" to page.name, "id" to page.id, "full" to page.full,
+                            "seed" to encodeSeed(page.seed))
                         is OnlineTarget.Album -> bundleOf("album" to page.title, "id" to page.id, "playlist" to page.playlist,
-                            "cover" to page.cover, "subtitle" to page.subtitle)
+                            "cover" to page.cover, "subtitle" to page.subtitle, "seed" to encodeSeed(page.seed))
                     }
                 }))
             } },
@@ -33,9 +39,12 @@ internal class OnlineTabHistory {
                 for (place in Place.entries) for (args in saved.getParcelableArrayList(place.name, Bundle::class.java).orEmpty()) {
                     val artist = args.getString("artist")
                     val id = args.getString("id")
-                    if (artist != null) open(place, OnlineTarget.Artist(artist, id, args.getBoolean("full")))
+                    val seed = args.getString("seed")?.let { json ->
+                        runCatching { OnlinePageJson.tracks(org.json.JSONObject(json), "tracks").singleOrNull() }.getOrNull()
+                    }
+                    if (artist != null) open(place, OnlineTarget.Artist(artist, id, args.getBoolean("full"), seed))
                     else if (id != null) open(place, OnlineTarget.Album(id, args.getString("album").orEmpty(),
-                        args.getBoolean("playlist"), args.getString("cover"), args.getString("subtitle")))
+                        args.getBoolean("playlist"), args.getString("cover"), args.getString("subtitle"), seed))
                 }
             } },
         )

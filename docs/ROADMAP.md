@@ -315,7 +315,7 @@ Owner's report from the phone, 2026-11-17. Do the tasks in this order; each keep
       mood or Search, never "YouTube Music".
 - [ ] D2: one source mark per row (quality tag, cloud, cloud_done, downloading with progress); one row
       height; covers on mixed playlists; Download in the row menu; marks update in place.
-- [ ] D1: one artist page merging library and YouTube Music (Popular, In your library, Albums,
+- [~] D1 (Codex, browse recovery): one artist page merging library and YouTube Music (Popular, In your library, Albums,
       Singles and EPs, Fans also like, About, Start radio); Search shows YouTube Music artists and
       albums. Parser tests on saved answers.
 - [ ] D6: design review of every state in the gallery, goldens committed.
