@@ -79,6 +79,7 @@ import androidx.compose.material3.toShape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
@@ -322,7 +323,8 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     PlayerCoverLayout {
     Scaffold(
-        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
+        modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
+            .then(if (expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
             if (onlineTop != null || place != Place.SEARCH || page != null) TopAppBar(
@@ -403,7 +405,7 @@ fun MusicRoot(model: LibraryViewModel) {
             page != null -> "page:${page!!.name}"
             else -> "place:${place.name}"
         }
-        Arrival(route, deeper = onlineStack.isNotEmpty() || page != null) {
+        Arrival(route, place, deeper = onlineStack.isNotEmpty() || page != null) {
         when {
             !model.allowed && !youTubeOn -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
             model.scanError != null && list.isNullOrEmpty() && !withoutFiles -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
@@ -512,7 +514,7 @@ fun MusicRoot(model: LibraryViewModel) {
         ) { if (it == androidx.compose.animation.EnterExitState.Visible) 0f else 1f }
         val settled = transition.currentState == androidx.compose.animation.EnterExitState.Visible &&
             transition.targetState == androidx.compose.animation.EnterExitState.Visible && !transition.isRunning
-        Box(Modifier.fillMaxSize().onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
+        Box(Modifier.fillMaxSize().then(if (!expanded) Modifier.clearAndSetSemantics {} else Modifier).onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
             .graphicsLayer {
                 val offset = (dismiss + backProgress * 120.dp.toPx()).coerceIn(0f, size.height)
                 alpha = 1f - hidden
@@ -920,21 +922,23 @@ internal fun greeting(hour: Int = java.time.LocalTime.now().hour) = when (hour) 
     in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..22 -> "Good evening"; else -> "Late night"
 }
 
-/**
- * The screen arriving: a new place fades through (in, with a slight grow), a page opened from it
- * comes in from the side, as Material's motion has them. The leaving screen is gone at once, so a
- * tap is answered in the same frame. Nothing moves in Battery Saver.
- */
+/** A tab arrives from its position in the bar. Content is readable on the first frame, even on rapid taps. */
 @Composable
-internal fun Arrival(key: Any, deeper: Boolean, content: @Composable () -> Unit) {
-    val progress = remember(key) { androidx.compose.animation.core.Animatable(0f) }
+internal fun Arrival(key: Any, place: Place, deeper: Boolean, content: @Composable () -> Unit) {
     val still = LocalPowerSave.current
-    val spec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
-    LaunchedEffect(key) { if (still) progress.snapTo(1f) else progress.animateTo(1f, spec) }
+    var lastRoute by remember { mutableStateOf(key) }
+    var lastPlace by remember { mutableStateOf(place) }
+    val direction = remember(key) { place.ordinal.compareTo(lastPlace.ordinal) }
+    val progress = remember(key) { androidx.compose.animation.core.Animatable(if (key == lastRoute || still) 1f else 0f) }
+    androidx.compose.runtime.SideEffect { lastRoute = key; lastPlace = place }
+    val spec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    LaunchedEffect(key, still) {
+        if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f, spec)
+    }
+    val sign = if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) -1 else 1
     Box(Modifier.fillMaxSize().graphicsLayer {
-        val t = progress.value.coerceIn(0f, 1f)
-        alpha = (t * 1.6f).coerceAtMost(1f)
-        if (deeper) translationX = (1f - progress.value) * 40.dp.toPx()
-        else { val k = 0.96f + 0.04f * progress.value; scaleX = k; scaleY = k }
+        val remaining = if (still) 0f else 1f - progress.value
+        alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
+        translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()
     }) { content() }
 }
