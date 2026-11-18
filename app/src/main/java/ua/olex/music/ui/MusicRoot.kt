@@ -432,6 +432,7 @@ fun MusicRoot(model: LibraryViewModel) {
     var dismiss by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var pageHeight by remember { androidx.compose.runtime.mutableIntStateOf(1) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val settle = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
     LaunchedEffect(expanded) { if (expanded) { dismiss = 0f; backProgress = 0f } }
     androidx.activity.compose.PredictiveBackHandler(expanded) { events ->
@@ -470,7 +471,8 @@ fun MusicRoot(model: LibraryViewModel) {
             transitionSpec = { tween(if (targetState == androidx.compose.animation.EnterExitState.Visible) 300 else 240, easing = FastOutSlowInEasing) },
             label = "Player travel",
         ) { if (it == androidx.compose.animation.EnterExitState.Visible) 0f else 1f }
-        val settled = !transition.isRunning && transition.targetState == androidx.compose.animation.EnterExitState.Visible
+        val settled = transition.currentState == androidx.compose.animation.EnterExitState.Visible &&
+            transition.targetState == androidx.compose.animation.EnterExitState.Visible && !transition.isRunning
         Box(Modifier.fillMaxSize().onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
             .graphicsLayer {
                 val offset = (dismiss + backProgress * 120.dp.toPx()).coerceIn(0f, size.height)
