@@ -1,3 +1,21 @@
+# Playback and artwork reliability (Codex, 2026-11-18)
+
+Integration branch `agent/integrate-service-policy` combines the verified service policy at
+`968a0ae` with the playback and artwork fixes. The merged source addresses the remaining app selection races,
+cold-start notification entry, widget ordering, motion cover replacement and local cover locks.
+The widget reads one preferences snapshot and serializes both submissions with its render generation.
+Cover reads, writes and eviction use fixed lock stripes so the same digest keeps one lock.
+Queue taps, shuffles, search and first mix pages supersede older app selections. Mix and search
+preparation and system browse/search page construction run off the UI dispatcher. Local radio
+uses recording-key statistics for ranking and recent-track exclusion. The player intent waits for a connected session with a track.
+
+Local diff check passed. Local APK compilation is unavailable: no Android SDK or Gradle, and the
+skill's version probe could not reach the artifact endpoints from the shell sandbox. Branch CI and
+physical Pixel/XM5, notification entry and motion playback acceptance are pending.
+The service selects sources for mixes as well as direct playback. Durable artist/album pages and
+account-scoped bidirectional sync remain open.
+See AUDIT_CONTINUATION.md for the previous backlog.
+
 # Service-source policy package (Codex, 2026-11-17)
 
 Branch `agent/service-source-policy` starts at main `45be07f`. Foundation is integrated, verified

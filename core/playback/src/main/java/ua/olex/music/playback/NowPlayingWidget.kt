@@ -46,20 +46,30 @@ internal object NowPlaying {
     fun title(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("title", null)
 
     fun render(context: Context, ids: IntArray) {
-        // One snapshot of the state, numbered: a slower earlier render (its cover still loading) can
-        // never overwrite a newer one. Title and buttons go out at once; the cover follows.
-        val generation = rendered.incrementAndGet()
-        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val title = prefs.getString("title", null); val artist = prefs.getString("artist", null)
-        val art = prefs.getString("art", null); val playing = prefs.getBoolean("playing", false)
         val manager = AppWidgetManager.getInstance(context)
+        val activeIds = manager.getAppWidgetIds(ComponentName(context, NowPlayingWidget::class.java))
+        val targets = if (activeIds.isEmpty()) ids else activeIds
+        val generation = synchronized(renderLock) { ++rendered }
+        val snapshot = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all
+        val title = snapshot["title"] as? String
+        val artist = snapshot["artist"] as? String
+        val art = snapshot["art"] as? String
+        val playing = snapshot["playing"] as? Boolean ?: false
+        fun submit(bitmap: Bitmap?) {
+            val content = views(context, title, artist, bitmap, playing, interactive = true)
+            synchronized(renderLock) {
+                if (generation == rendered) manager.updateAppWidget(targets, content)
+            }
+        }
         val known = lastArt?.takeIf { it.first == art }?.second
-        manager.updateAppWidget(ids, views(context, title, artist, known, playing, interactive = true))
+        submit(known)
         if (known != null || art == null) return
-        val bitmap = artwork(context, art) ?: return
-        if (rendered.get() == generation) manager.updateAppWidget(ids, views(context, title, artist, bitmap, playing, interactive = true))
+        artwork(context, art)?.let(::submit)
     }
-    private val rendered = java.util.concurrent.atomic.AtomicLong()
+
+    // Checking freshness and publishing have to be ordered together; artwork decoding stays outside.
+    private val renderLock = Any()
+    private var rendered = 0L
 
     private fun views(context: Context, title: String?, artist: String?, art: Bitmap?, playing: Boolean, interactive: Boolean): RemoteViews {
         fun layout(id: Int) = RemoteViews(context.packageName, id).apply {
