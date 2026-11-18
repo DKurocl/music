@@ -1,5 +1,7 @@
 package ua.olex.music.ui
 
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -89,3 +91,13 @@ internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
         }
     }
 }
+
+/** Fades the content out over its last [width] at the end, for a row that scrolls past the screen. */
+internal fun Modifier.fadeEnd(width: androidx.compose.ui.unit.Dp = 32.dp): Modifier =
+    graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            val w = width.toPx()
+            drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Transparent),
+                startX = size.width - w, endX = size.width), blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
+        }

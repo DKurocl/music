@@ -2,6 +2,8 @@
 
 package ua.olex.music.ui
 
+import coil3.toBitmap
+import androidx.compose.ui.draw.drawBehind
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import androidx.compose.foundation.selection.toggleable
@@ -166,14 +168,17 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
  */
 @Composable
 internal fun TrackRow(
-    track: Track, current: Boolean, onMore: (() -> Unit)? = null,
+    track: Track, current: Boolean,
+    /** For a row in a lazy list: Modifier.animateItem(), so rows glide when the list changes instead of jumping. */
+    modifier: Modifier = Modifier,
+    onMore: (() -> Unit)? = null,
     selecting: Boolean = false, checked: Boolean = false, onSelect: (() -> Unit)? = null,
     onPlayNext: (() -> Unit)? = null, onQueue: (() -> Unit)? = null,
     /** In an album: the track number instead of the cover, and the artist only when it differs. */
     number: Int? = null, albumArtist: String? = null, showQuality: Boolean = true, onClick: () -> Unit,
 ) {
     val marked = current || track.matchesPlayback(LocalPlayingTrack.current)
-    if ((onPlayNext == null && onQueue == null) || selecting) { TrackRowContent(track, marked, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick); return }
+    if ((onPlayNext == null && onQueue == null) || selecting) { Box(modifier) { TrackRowContent(track, marked, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick) }; return }
     // Swipe right: play next. Swipe left: add to queue. The row follows the finger with growing
     // resistance (it never leaves the screen), the action shows underneath, a tick marks the point
     // of no return, and on release the row springs back into place.
@@ -186,7 +191,7 @@ internal fun TrackRow(
     var armed by remember { mutableStateOf(false) }
     val cs = MaterialTheme.colorScheme
     val back = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-    Box(Modifier.fillMaxWidth().onSizeChanged { width = it.width.coerceAtLeast(1) }) {
+    Box(modifier.fillMaxWidth().onSizeChanged { width = it.width.coerceAtLeast(1) }) {
         val x = offset.value
         if (x != 0f) {
             val next = x > 0
@@ -262,12 +267,14 @@ private fun TrackRowContent(
         supportingContent = {
             // One line's height whatever the mark (a quality tag, a cloud, a ring): every row is the same height.
             val line = with(androidx.compose.ui.platform.LocalDensity.current) { MaterialTheme.typography.bodyMedium.lineHeight.toDp() }
-            Row(Modifier.heightIn(min = line), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Fixed, not a minimum: a baseline-aligned tag sits lower than the text and used to stretch the row.
+            Row(Modifier.height(line), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // The tag shares the text's baseline: ListItem reads two different baselines as a
                 // second line and grows the row, which is what made rows with a tag taller.
                 if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                 else Text(clock(track.durationMs), maxLines = 1, modifier = Modifier.alignByBaseline())
-                if (showQuality) SourceMark(owned ?: track, kept = kept && owned == null, unavailable = unavailable)
+                // On the text's baseline: two different baselines make ListItem a three-line (taller) row.
+                if (showQuality) SourceMark(owned ?: track, Modifier.alignByBaseline(), kept = kept && owned == null, unavailable = unavailable)
             }
         },
         leadingContent = {
@@ -426,13 +433,17 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                     if (preparing) CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 2.dp, color = cs.primary)
                     Symbol(if (state.playWhenReady) Glyph.PAUSE else Glyph.PLAY, size = 28.dp, filled = true)
                 }
-                IconButton(enabled = state.hasNext, onClick = onNext, modifier = Modifier.semantics { contentDescription = "Next" }) {
-                    Symbol(Glyph.NEXT, filled = true)
+                var nextKick by remember { mutableIntStateOf(0) }
+                IconButton(enabled = state.hasNext, onClick = { nextKick++; onNext() }, modifier = Modifier.semantics { contentDescription = "Next" }) {
+                    Symbol(Glyph.NEXT, filled = true, kick = nextKick)
                 }
             }
             // Progress along the bottom edge, inside the card's rounded corners.
             Box(Modifier.align(Alignment.BottomStart).padding(horizontal = 20.dp).fillMaxWidth().height(2.dp).clip(CircleShape).background(cs.outlineVariant.copy(alpha = 0.4f))) {
-                Box(Modifier.fillMaxHeight().fillMaxWidth(progress()).background(cs.primary))
+                // Drawn, not measured: reading the progress while drawing redraws only this line each
+                // second, not the whole mini player.
+                val bar = cs.primary
+                Box(Modifier.fillMaxSize().drawBehind { drawRect(bar, size = size.copy(width = size.width * progress())) })
             }
         }
     }
@@ -500,8 +511,9 @@ internal fun PlayerPage(
     }
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides cs.onSurface) {
     Box(
-        // Material's calm tonal surface: a little lighter at the top, nothing moving behind the music.
-        Modifier.fillMaxSize().nestedScroll(upToQueue).background(Brush.verticalGradient(0f to cs.surfaceContainerHigh, 0.55f to cs.surface, 1f to cs.surface)),
+        // Material's calm tonal surface, a little lighter at the top; with "Colours from the cover" on,
+        // that top takes a soft tint of the cover (as Pixel's own player does), easing between songs.
+        Modifier.fillMaxSize().nestedScroll(upToQueue).background(Brush.verticalGradient(0f to rememberCoverTint(state.artworkUri, cs.surfaceContainerHigh), 0.55f to cs.surface, 1f to cs.surface)),
     ) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
@@ -512,7 +524,7 @@ internal fun PlayerPage(
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
                 // Equal sides keep "Playing from" centred whether the lyrics options show or not.
                 Box(Modifier.width(headerSide)) {
-                    IconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { Symbol(Glyph.COLLAPSE, size = 28.dp) }
+                    KickIconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { k -> Symbol(Glyph.COLLAPSE, size = 28.dp, kick = k) }
                 }
                 // Where the music comes from; a tap opens that album.
                 Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = if (from == null) "Open album" else "Open playing source", onClick = onOpenAlbum) else Modifier)
@@ -529,10 +541,10 @@ internal fun PlayerPage(
                     androidx.compose.animation.AnimatedVisibility(hasLyricsTools,
                         enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.6f),
                         exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.6f)) {
-                        IconButton(onClick = { onLyricsTools?.invoke() }, modifier = Modifier.semantics { contentDescription = "Lyrics options" }) { Symbol(Glyph.TUNE) }
+                        KickIconButton(onClick = { onLyricsTools?.invoke() }, modifier = Modifier.semantics { contentDescription = "Lyrics options" }) { k -> Symbol(Glyph.TUNE, kick = k) }
                     }
                     // Song actions top right, where Google's players keep them.
-                    IconButton(enabled = onMore != null, onClick = { onMore?.invoke() }, modifier = Modifier.semantics { contentDescription = "Song actions" }) { Symbol(Glyph.MORE) }
+                    KickIconButton(enabled = onMore != null, onClick = { onMore?.invoke() }, modifier = Modifier.semantics { contentDescription = "Song actions" }) { k -> Symbol(Glyph.MORE, kick = k) }
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -738,9 +750,10 @@ private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp =
     val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.82f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "skip")
-    IconButton(onClick = onClick, enabled = enabled, interactionSource = source,
+    var kick by remember { mutableIntStateOf(0) }
+    IconButton(onClick = { kick++; onClick() }, enabled = enabled, interactionSource = source,
         modifier = Modifier.size(size).graphicsLayer { scaleX = scale; scaleY = scale }.semantics { contentDescription = label }) {
-        Symbol(glyph, size = minOf(40.dp, size - 12.dp), filled = true)
+        Symbol(glyph, size = minOf(40.dp, size - 12.dp), filled = true, kick = kick)
     }
 }
 
@@ -754,12 +767,14 @@ private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolea
     val haptics = rememberHaptics()
     val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
     val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
+    var kick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(on, glyph) { if (kick >= 0) kick++ }
     Box(Modifier.size(size).clip(CircleShape)
         // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
         .then(if (switch) Modifier.toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { haptics.toggle(it); onClick() }
             else Modifier.clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { haptics.toggle(!on); onClick() })
         .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on)
+        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick - 1)
         Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp).size(5.dp).graphicsLayer { scaleX = dot; scaleY = dot; alpha = dot }
             .clip(CircleShape).background(cs.primary))
     }
@@ -771,13 +786,14 @@ private fun ToggleAction(glyph: Glyph, label: String, on: Boolean, enabled: Bool
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     // Round in every state: the pill they sit in is round, so a square highlight looked pasted on.
-    if (state == null) IconButton(onClick = { haptics.tick(); onClick() }, enabled = enabled, shapes = IconButtonDefaults.shapes(CircleShape, CircleShape),
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label }) { Symbol(glyph, color = cs.onSurfaceVariant) }
+    var kick by remember { mutableIntStateOf(0) }
+    if (state == null) IconButton(onClick = { kick++; haptics.tick(); onClick() }, enabled = enabled, shapes = IconButtonDefaults.shapes(CircleShape, CircleShape),
+        modifier = Modifier.size(48.dp).semantics { contentDescription = label }) { Symbol(glyph, color = cs.onSurfaceVariant, kick = kick) }
     else androidx.compose.material3.IconToggleButton(
-        checked = on, onCheckedChange = { haptics.toggle(it); onClick() }, enabled = enabled, shapes = IconButtonDefaults.toggleableShapes(CircleShape, CircleShape, CircleShape),
+        checked = on, onCheckedChange = { kick++; haptics.toggle(it); onClick() }, enabled = enabled, shapes = IconButtonDefaults.toggleableShapes(CircleShape, CircleShape, CircleShape),
         colors = IconButtonDefaults.iconToggleButtonColors(contentColor = cs.onSurfaceVariant, checkedContainerColor = cs.secondaryContainer, checkedContentColor = cs.onSecondaryContainer),
         modifier = Modifier.size(48.dp).semantics { contentDescription = label; stateDescription = state },
-    ) { Symbol(glyph, filled = on) }
+    ) { Symbol(glyph, filled = on, kick = kick) }
 }
 
 /** The file's format and bitrate, quiet under the seek bar; a tap opens the full audio path. */
@@ -991,4 +1007,38 @@ private fun SleepCountdown(deadline: Long, onClick: () -> Unit) {
         Symbol(Glyph.SLEEP, size = 16.dp, color = cs.tertiary, filled = true)
         Text(text, style = MaterialTheme.typography.labelLarge, color = cs.tertiary)
     }
+}
+
+/** The owner's choice: the player's top tinted by the song's cover (on by default). */
+internal object CoverColours {
+    const val PREFS = "look"; const val KEY = "cover_colours"
+    fun on(context: android.content.Context) = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).getBoolean(KEY, true)
+}
+
+/**
+ * The player's top colour: the surface blended toward the cover's average colour (light enough for
+ * light theme, deep enough for dark), worked out off the main thread from a tiny copy of the cover
+ * and eased between songs. The plain surface when the setting is off or the cover can't be read.
+ */
+@Composable
+private fun rememberCoverTint(artwork: String?, surface: androidx.compose.ui.graphics.Color): androidx.compose.ui.graphics.Color {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val dark = androidx.compose.foundation.isSystemInDarkTheme()
+    val target by androidx.compose.runtime.produceState(surface, artwork, surface, dark) {
+        value = if (artwork == null || !CoverColours.on(context)) surface else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val request = coil3.request.ImageRequest.Builder(context).data(artwork).size(24).build()
+                val image = (coil3.SingletonImageLoader.get(context).execute(request) as? coil3.request.SuccessResult)?.image ?: return@runCatching surface
+                val bitmap = image.toBitmap(24, 24)
+                var r = 0L; var g = 0L; var b = 0L; var n = 0
+                for (x in 0 until bitmap.width) for (y in 0 until bitmap.height) {
+                    val c = bitmap.getPixel(x, y); r += (c shr 16) and 255; g += (c shr 8) and 255; b += c and 255; n++
+                }
+                val cover = androidx.compose.ui.graphics.Color((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
+                // Keep it a surface: mostly the theme's own tone, a third of the cover's colour.
+                androidx.compose.ui.graphics.lerp(surface, cover, if (dark) 0.28f else 0.22f)
+            }.getOrDefault(surface)
+        }
+    }
+    return androidx.compose.animation.animateColorAsState(target, MaterialTheme.motionScheme.slowEffectsSpec(), label = "cover-tint").value
 }
