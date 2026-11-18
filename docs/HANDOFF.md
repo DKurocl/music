@@ -9,6 +9,10 @@ Queue taps, shuffles, search and first mix pages supersede older app selections.
 preparation and system browse/search page construction run off the UI dispatcher. Local radio
 uses recording-key statistics for ranking and recent-track exclusion. The player intent waits for a connected session with a track.
 
+Sleep timer follow-up: the monotonic deadline survives an interrupted fade. Changing or cancelling
+the timer stops only its ramp, and the end-of-track indicator also clears at terminal playback.
+Added virtual-clock regressions for early ramp completion and cancellation. CI is pending.
+
 Local diff check passed. Local APK compilation is unavailable: no Android SDK or Gradle, and the
 skill's version probe could not reach the artifact endpoints from the shell sandbox. Branch CI and
 physical Pixel/XM5, notification entry and motion playback acceptance are pending.
