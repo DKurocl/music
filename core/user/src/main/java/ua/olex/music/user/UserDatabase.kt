@@ -236,6 +236,10 @@ interface UserDao {
     fun playlists(): Flow<List<PlaylistRelations>>
     @Transaction @Query("SELECT play_history.id AS eventId, play_history.playedAt, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId ORDER BY play_history.playedAt DESC, play_history.id DESC LIMIT :limit")
     fun history(limit: Int): Flow<List<HistoryRow>>
+
+    @Transaction
+    @Query("SELECT play_history.id AS eventId, play_history.playedAt, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId WHERE playedAt >= :start ORDER BY playedAt DESC, play_history.id DESC")
+    fun historySince(start: Long): Flow<List<HistoryRow>>
     @Query("SELECT offsetMs FROM lyric_offsets WHERE songId = :songId") fun lyricOffset(songId: String): Flow<Long?>
 
     @Upsert suspend fun saveSongs(songs: List<UserSongEntity>)

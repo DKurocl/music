@@ -625,6 +625,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         playingFrom = null
         player.play(list, list.indices.random(), shuffle = true)
     }
+    fun setPlaybackParameters(speed: Float, pitch: Float) = player.setPlaybackParameters(speed, pitch)
     fun toggle() = player.toggle()
     fun next() = player.next()
     fun previous() = player.previous()

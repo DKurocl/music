@@ -72,6 +72,9 @@ data class PlayerState(
     /** Properties of the selected input track, before decoding or output processing. */
     val inputFormat: AudioFormat? = null,
     val seekable: Boolean = durationMs > 0,
+    val speed: Float = 1f,
+    val pitch: Float = 1f,
+    val canSetPlaybackParameters: Boolean = false,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -210,6 +213,12 @@ class PlayerConnection(context: Context) {
                 if (startPlayback) { player.prepare(); player.play() }
             }
         }
+    }
+
+    fun setPlaybackParameters(speed: Float, pitch: Float) {
+        val player = controller ?: return
+        if (!player.isCommandAvailable(Player.COMMAND_SET_SPEED_AND_PITCH)) return
+        player.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
     }
 
     fun toggle() { controller?.togglePlayback() }
@@ -403,6 +412,9 @@ class PlayerConnection(context: Context) {
             playbackContext = meta.extras?.getString(CONTEXT_KEY),
             artworkUri = (item?.mediaMetadata?.artworkUri ?: meta.artworkUri)?.toString(),
             isPlaying = player.isPlaying,
+            speed = player.playbackParameters.speed,
+            pitch = player.playbackParameters.pitch,
+            canSetPlaybackParameters = player.isCommandAvailable(Player.COMMAND_SET_SPEED_AND_PITCH),
             playWhenReady = player.playWhenReady && player.playbackState != Player.STATE_ENDED,
             buffering = player.playbackState == Player.STATE_BUFFERING,
             durationMs = player.duration.takeIf { it > 0 } ?: item?.mediaMetadata?.durationMs?.takeIf { it > 0 } ?: 0,

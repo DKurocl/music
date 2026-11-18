@@ -262,13 +262,15 @@ internal fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit) {
+internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, modifier: Modifier, onPlay: (List<Track>, Int) -> Unit,
+    history: ((Long) -> kotlinx.coroutines.flow.Flow<List<ua.olex.music.model.HistoryEntry>>)? = null) {
     val s = rememberOffMain(library, stats, initial = null) { LibraryStats.of(library) { stats[it.statsKey] } } ?: LibraryStats.of(LibraryIndex.EMPTY) { null }
     val cs = MaterialTheme.colorScheme
     fun hours(ms: Long) = if (ms >= 3_600_000) "${ms / 3_600_000} h ${ms / 60_000 % 60} min" else "${ms / 60_000} min"
     val byName = rememberOffMain(library, initial = emptyMap()) { library.artists.associateBy { it.name } }
     LazyColumn(modifier, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp + LocalPlayerInset.current),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (history != null) item(key = "periods") { ListeningPeriods(history) }
         item {
             Surface(shape = RoundedCornerShape(36.dp), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, modifier = Modifier.fillMaxWidth().height(190.dp)) {
                 Box {
