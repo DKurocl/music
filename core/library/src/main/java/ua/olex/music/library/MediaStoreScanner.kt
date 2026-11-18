@@ -41,13 +41,17 @@ internal object MediaStoreScanner {
         }
     }
 
-    suspend fun scan(context: Context, scanId: Long, afterGeneration: Long? = null): List<TrackEntity> {
+    suspend fun scan(context: Context, scanId: Long, volumes: Map<String, Long> = emptyMap()): List<TrackEntity> {
         val collection = MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         val out = ArrayList<TrackEntity>()
         // A failed provider query is not an empty library: only a complete scan may replace it.
+        val generations = volumes.entries.toList()
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0" +
-            if (afterGeneration != null) " AND ${MediaStore.MediaColumns.GENERATION_MODIFIED} > ?" else ""
-        val cursor = context.contentResolver.query(collection, COLUMNS, selection, afterGeneration?.let { arrayOf(it.toString()) }, null)
+            if (generations.isEmpty()) "" else generations.joinToString(" OR ", " AND (", ")") {
+                "(${MediaStore.MediaColumns.VOLUME_NAME} = ? AND ${MediaStore.MediaColumns.GENERATION_MODIFIED} > ?)"
+            }
+        val args = generations.flatMap { (volume, generation) -> listOf(volume, generation.toString()) }.toTypedArray()
+        val cursor = context.contentResolver.query(collection, COLUMNS, selection, args.takeIf { it.isNotEmpty() }, null)
             ?: throw IOException("MediaStore did not return a cursor")
         cursor.use { c ->
             val col = COLUMNS.associateWith { c.getColumnIndexOrThrow(it) }

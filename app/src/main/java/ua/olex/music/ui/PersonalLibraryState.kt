@@ -68,4 +68,5 @@ data class PersonalLibraryActions(
     val move: (Long, String, Int, Int) -> Unit,
     val removeFavourite: (String) -> Unit,
     val importPlaylist: (String, List<SavedSong>) -> Unit = { _, _ -> },
+    val removeWithUndo: (suspend (Long, String, Int) -> (suspend () -> Boolean)?)? = null,
 )

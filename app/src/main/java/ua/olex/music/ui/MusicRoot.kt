@@ -104,8 +104,16 @@ import ua.olex.music.playback.PlayerState
  * player page. It proves the path from a file to the earbuds; the designed app (navigation, the
  * expressive player, lyrics) is built over it (docs/ROADMAP.md).
  */
+@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 fun MusicRoot(model: LibraryViewModel) {
+    androidx.compose.animation.SharedTransitionLayout {
+        CompositionLocalProvider(LocalPlayerCoverTransition provides this) { MusicRootContent(model) }
+    }
+}
+
+@Composable
+private fun MusicRootContent(model: LibraryViewModel) {
     val library by model.catalogue.collectAsStateWithLifecycle()
     val tracks = library?.songs
     val query by model.query.collectAsStateWithLifecycle()
@@ -456,6 +464,7 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     AnimatedVisibility(expanded && playing.hasTrack, enter = slideInVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { it },
         exit = slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it }) {
+        val coverVisibility = this
         Box(Modifier.fillMaxSize().onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
             .graphicsLayer {
                 translationY = dismiss.value + backProgress * 120.dp.toPx()
@@ -476,6 +485,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 else -> null
             }
         }
+        CompositionLocalProvider(LocalPlayerCoverVisibility provides coverVisibility) {
         NowPlaying(
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
                 listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") }
@@ -510,6 +520,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } },
             fileRateHz = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.sampleRateHz },
         )
+        }
         }
     }
     model.downloadRequest?.let { requested ->
