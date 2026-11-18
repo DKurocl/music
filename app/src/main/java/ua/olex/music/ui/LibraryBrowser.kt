@@ -307,12 +307,12 @@ internal fun LibraryBrowser(
             trailingIcon = {
                 if (query.isNotEmpty()) KickIconButton(onClick = { onQueryChange("") },
                     modifier = Modifier.semantics { contentDescription = "Clear" }) { taps -> Symbol(Glyph.CLOSE, kick = taps) }
-                else if (mode == BrowserMode.SEARCH) KickIconButton(onClick = {
+                else if (mode == BrowserMode.SEARCH) androidx.compose.material3.IconButton(onClick = {
                     runCatching { voice.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                         .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say a song, artist or album")) }
                         .onFailure { voiceScope.launch { snackbar?.showSnackbar("Voice search is unavailable. Type your search instead.") } }
-                }, modifier = Modifier.semantics { contentDescription = "Search by voice" }) { taps -> Symbol(Glyph.MIC, kick = taps) }
+                }, modifier = Modifier.semantics { contentDescription = "Search by voice" }) { Symbol(Glyph.MIC, size = 22.dp) }
             },
             shape = androidx.compose.foundation.shape.CircleShape,
             colors = androidx.compose.material3.TextFieldDefaults.colors(

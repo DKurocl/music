@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import ua.olex.music.model.ArtworkPlan
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -104,6 +105,8 @@ internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope
         private set
     var thumbnail by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
     var sleeve by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
+    val coverInFlight: Boolean
+        get() = fraction > 0f && fraction < 1f && thumbnail.width > 0f && sleeve.width > 0f
     var page: androidx.compose.ui.layout.LayoutCoordinates? = null
     var host: androidx.compose.ui.layout.LayoutCoordinates? = null
     private var settling: kotlinx.coroutines.Job? = null
@@ -137,15 +140,16 @@ internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, co
             val p = travel.fraction
             val small = travel.thumbnail
             val large = travel.sleeve
-            if (p > 0f && p < 1f && small.width > 0f && large.width > 0f) {
+            if (travel.coverInFlight) {
                 val density = LocalDensity.current
                 val x = small.left + (large.left - small.left) * p
                 val y = small.top + (large.top - small.top) * p
                 val width = small.width + (large.width - small.width) * p
                 val height = small.height + (large.height - small.height) * p
-                PlayerArtwork(artwork, Modifier.offset { IntOffset(x.toInt(), y.toInt()) }
+                val image = rememberCoverImage(artwork, ArtworkPlan.LARGE, large.width.toInt())
+                PlayerCoverFace(image, Modifier.offset { IntOffset(x.toInt(), y.toInt()) }
                     .size(with(density) { width.toDp() }, with(density) { height.toDp() }),
-                    14.dp + 18.dp * p, ua.olex.music.model.ArtworkPlan.LARGE)
+                    corner = 14.dp + 18.dp * p)
             }
         }
     }
@@ -154,7 +158,7 @@ internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, co
 @Composable
 internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
     val travel = LocalPlayerTravel.current ?: return this
-    return graphicsLayer { if (!mini && travel.fraction < 1f) alpha = 0f }.onGloballyPositioned { coordinates ->
+    return graphicsLayer { if (travel.coverInFlight || (!mini && travel.fraction < 1f)) alpha = 0f }.onGloballyPositioned { coordinates ->
         val parent = (if (mini) travel.host else travel.page) ?: return@onGloballyPositioned
         if (!parent.isAttached) return@onGloballyPositioned
         val bounds = parent.localBoundingBoxOf(coordinates, clipBounds = false)

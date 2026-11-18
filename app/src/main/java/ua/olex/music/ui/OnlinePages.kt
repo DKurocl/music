@@ -147,9 +147,9 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     var retry by remember { mutableIntStateOf(0) }
     val network = LocalNetwork.current
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
-    val state = rememberLoad(Triple(target, accountScope, network), retry, target.id?.let(graph.youTube::peekArtist)) {
+    val state = rememberLoad(Triple(target, accountScope, network), retry, target.id?.takeUnless { target.full }?.let(graph.youTube::peekArtist)) {
         val id = target.id ?: graph.youTube.artistId(target.name, offline = !network) ?: return@rememberLoad null
-        graph.youTube.artist(id, offline = !network)
+        graph.youTube.artist(id, offline = !network, full = target.full)
     }
     val mine = key(target.name) { rememberOffMain(library, initial = null as MusicCollection?) {
         val name = TextFold.fold(target.name)
@@ -203,7 +203,12 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 }
                 artist.about?.let { about -> item(key = "about") { AboutCard(about) } }
                 if (songs.isNotEmpty()) {
-                    item(key = "songs-h") { OnlineHeading("Top songs") }
+                    item(key = "songs-h") {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.weight(1f)) { OnlineHeading("Top songs") }
+                            if (!target.full) TextButton(onClick = { nav.open(target.copy(id = artist.id, full = true)) }) { Text("See all") }
+                        }
+                    }
                     itemsIndexed(songs, key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
                         TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, PlaybackOrigin("artist", artist.id, artist.name).encode()) }
                     }

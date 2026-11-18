@@ -66,37 +66,46 @@ internal fun SettingsPage(
 
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
     val soulseekJobs by soulseek.jobs.collectAsStateWithLifecycle()
-    var section by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("All") }
-    key(section) { LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        item(key = "settings-sections") {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf("All", "Player", "Library", "Services").forEach { label ->
-                    FilterChip(selected = section == label, onClick = { section = label }, label = { Text(label) })
-                }
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    val terms = query.trim().lowercase().split(' ').filter { it.isNotBlank() }
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    LaunchedEffect(query) { list.scrollToItem(0) }
+    LazyColumn(modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        item(key = "settings-search") {
+            androidx.compose.material3.OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(),
+                singleLine = true, placeholder = { Text("Search settings") },
+                leadingIcon = { Symbol(Glyph.SEARCH) },
+                trailingIcon = { if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { query = "" },
+                    modifier = Modifier.semantics { contentDescription = "Clear settings search" }) { Symbol(Glyph.CLOSE) } })
+        }
+        var matches = 0
+        fun setting(title: String, content: @Composable () -> Unit) {
+            if (terms.all { it in title.lowercase() }) {
+                matches++
+                item(key = title) { content() }
             }
         }
-        if (section == "All" || section == "Player") {
-        item(key = "group-Playback") { Group("Playback") }
-        item(key = "playback-fades") {
-            PlaybackFadeSetting(fades) { enabled ->
+        if (terms.isEmpty()) item(key = "group-Playback") { Group("Playback") }
+        setting("Smooth pause and play audio fade") {
+            Toggle(Glyph.PLAY, "Smooth pause and play", "Fade audio when playback starts or pauses", fades, first = true, last = true) { enabled ->
                 fades = enabled
                 prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, enabled).apply()
             }
         }
         headphones.forEachIndexed { i, name ->
-            item(key = "hp-$name") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {
+            setting("Play when $name connects headphones Bluetooth") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {
                 HeadsetRules.setResume(context, name, false); headphones = HeadsetRules.resumeDevices(context).sorted() } }
         }
 
-        item(key = "group-Sound") { Group("Sound") }
-        item { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
-        item { Toggle(Glyph.BATTERY, "Battery saver", "The phone's audio chip decodes with the screen off, only while nothing processes the sound", offload) {
+        if (terms.isEmpty()) item(key = "group-Sound") { Group("Sound") }
+        setting("Equalizer and ReplayGain") { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
+        setting("Battery saver audio offload") { Toggle(Glyph.BATTERY, "Battery saver", "The phone's audio chip decodes with the screen off, only while nothing processes the sound", offload) {
             offload = it; prefs(UsbBitPerfect.PREFS).edit().putBoolean(PlaybackService.OFFLOAD_KEY, it).apply() } }
-        item { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
+        setting("Bit-perfect USB output DAC") { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
 
         // The phone taps with the kick drum and the bass, timed to what is heard (MusicHaptics).
-        item(key = "group-Music haptics") { Group("Music haptics") }
-        item {
+        if (terms.isEmpty()) item(key = "group-Music haptics") { Group("Music haptics") }
+        setting("Feel the music haptics vibration") {
             var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
             var strength by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.strength(context)) }
             val haptics = rememberHaptics()
@@ -123,22 +132,22 @@ internal fun SettingsPage(
             }
         }
 
-        item(key = "group-Appearance and artwork") { Group("Appearance and artwork") }
-        item {
+        if (terms.isEmpty()) item(key = "group-Appearance and artwork") { Group("Appearance and artwork") }
+        setting("Colours from the cover artwork") {
             var tint by remember { mutableStateOf(CoverColours.on(context)) }
             Toggle(Glyph.PHOTO, "Colours from the cover", "The player takes a soft tint of the song's cover", tint, first = true) {
                 tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
         }
-        item { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
+        setting("Artist photos Deezer") { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
         // Moving covers from Apple Music, with the owner's own MusicKit key.
 
-        item {
+        setting("Moving covers from Apple Music artwork") {
             val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
             var on by remember { mutableStateOf(apple.enabled) }
             Toggle(Glyph.MOTION, "Moving covers from Apple Music", "Each album is fetched once (about 4 MB) and kept as one file. Unofficial: may stop working",
                 on) { on = it; apple.enabled = it }
         }
-        item {
+        setting("Own MusicKit key Apple Music") {
             val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
             var key by remember { mutableStateOf(apple.key) }
             var editing by remember { mutableStateOf(false) }
@@ -146,37 +155,31 @@ internal fun SettingsPage(
                 ?: "Optional. With an Apple Developer key the official API is used instead") { editing = true }
             if (editing) AppleKeyDialog(key, onDismiss = { editing = false }) { new -> apple.key = new; key = new; editing = false }
         }
-        item {
+        setting("Only on Wi-Fi moving covers") {
             val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
             var wifi by remember { mutableStateOf(apple.wifiOnly) }
             Toggle(Glyph.SPEAKER, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
         }
 
-        }
-        if (section == "All" || section == "Library") {
-        item(key = "group-Library") { Group("Library") }
-        item { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
-        item { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
+        if (terms.isEmpty()) item(key = "group-Library") { Group("Library") }
+        setting("Rescan music") { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
+        setting("Music folders") { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
             else folders.joinToString(" · "), onClick = onAddFolder) }
-        if (folders.isNotEmpty()) item { Row(Glyph.CLOSE, "Forget folder access", "Lyrics and covers beside the files stop loading", onClick = onClearFolders) }
-        if (duplicateCount > 0) item { Row(Glyph.DUPLICATES, "Duplicate recordings", "$duplicateCount with multiple files", onClick = onDuplicates) }
-        item { Row(Glyph.HIDDEN, "Hidden folders", if (hidden == 0) "None. Hide recordings or ringtones from Library, Folders" else "$hidden hidden. Show them again in Library, Folders") }
+        if (folders.isNotEmpty()) setting("Forget folder access") { Row(Glyph.CLOSE, "Forget folder access", "Lyrics and covers beside the files stop loading", onClick = onClearFolders) }
+        if (duplicateCount > 0) setting("Duplicate recordings") { Row(Glyph.DUPLICATES, "Duplicate recordings", "$duplicateCount with multiple files", onClick = onDuplicates) }
+        setting("Hidden folders") { Row(Glyph.HIDDEN, "Hidden folders", if (hidden == 0) "None. Hide recordings or ringtones from Library, Folders" else "$hidden hidden. Show them again in Library, Folders") }
 
-        item { Toggle(Glyph.STAR, "Save ratings in the files", "Stars go into the tags (FLAC RATING, MP3 POPM), so other players see them", ratingsToFiles, onChange = onRatingsToFiles) }
-        item { Row(Glyph.EDIT, "Change files without asking", if (manage) "Allowed: tag edits and ratings are written straight away" else "Android asks before each change; allow once here", last = true) {
+        setting("Save ratings in the files tags") { Toggle(Glyph.STAR, "Save ratings in the files", "Stars go into the tags (FLAC RATING, MP3 POPM), so other players see them", ratingsToFiles, onChange = onRatingsToFiles) }
+        setting("Change files without asking") { Row(Glyph.EDIT, "Change files without asking", if (manage) "Allowed: tag edits and ratings are written straight away" else "Android asks before each change; allow once here", last = true) {
             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:" + context.packageName))) } } }
 
-        }
-        if (section == "All" || section == "Player") {
-        item(key = "group-Lyrics") { Group("Lyrics") }
-        item { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
+        if (terms.isEmpty()) item(key = "group-Lyrics") { Group("Lyrics") }
+        setting("Line on the lock screen lyrics") { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
             lockLyrics = it; LockScreenLyrics.set(context, it) } }
 
-        }
-        if (section == "All" || section == "Services") {
         // YouTube Music as a second source, the owner's files always first.
-        item(key = "group-YouTube Music") { Group("YouTube Music") }
-        item {
+        if (terms.isEmpty()) item(key = "group-YouTube Music") { Group("YouTube Music") }
+        setting("Search and play YouTube Music account sign in") {
             val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
             val on by graph.youTubeOn.collectAsStateWithLifecycle()
             Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have show under yours. Yours always play from the file",
@@ -196,7 +199,7 @@ internal fun SettingsPage(
             } }
         }
 
-        item(key = "sync-youtube-likes") {
+        setting("Sync YouTube Music likes") {
             val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
             val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
             val enabled by graph.youTubeOn.collectAsStateWithLifecycle()
@@ -207,8 +210,8 @@ internal fun SettingsPage(
                 onClick = { syncScope.launch { graph.youtubeFavourites.refresh(force = true) } })
         }
         // Soulseek: lossless copies of songs and albums found online, saved into the library.
-        item(key = "group-Downloads") { Group("Downloads") }
-        item(key = "soulseek-account") {
+        if (terms.isEmpty()) item(key = "group-Downloads") { Group("Downloads") }
+        setting("Soulseek account") {
             val downloads = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
             var account by remember { mutableStateOf(downloads.account) }
             var editing by remember { mutableStateOf(false) }
@@ -220,7 +223,7 @@ internal fun SettingsPage(
             } ?: "Sign in to download songs and albums, lossless first. A new name is created on first sign-in", first = true, last = false) { editing = true }
             if (editing) SoulseekDialog(account, onDismiss = { editing = false }) { new -> downloads.account = new; account = new; editing = false }
         }
-        item(key = "all-downloads") {
+        setting("Downloads transfers") {
             val active = soulseekJobs.count { it.running }
             val failed = soulseekJobs.count { it.failed }
             Row(Glyph.DOWNLOAD, "Downloads", when {
@@ -231,11 +234,9 @@ internal fun SettingsPage(
             }, last = true, onClick = onDownloads)
         }
 
-        }
-        if (section == "All" || section == "Library") {
         // What the app keeps on the phone, and a way to free it. Lyrics you found or retimed stay.
-        item(key = "group-Storage") { Group("Storage") }
-        item {
+        if (terms.isEmpty()) item(key = "group-Storage") { Group("Storage") }
+        setting("Cache limit clear cache storage") {
             // One budget for what the app keeps only to be quick; the owner's music, lyrics,
             // downloads and own moving covers are never part of it.
             val motion = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.motionCovers }
@@ -251,8 +252,10 @@ internal fun SettingsPage(
                 }
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
-            CacheUsageCard(sizes)
-            Spacer(Modifier.height(8.dp))
+            if (terms.isEmpty()) {
+                CacheUsageCard(sizes)
+                Spacer(Modifier.height(8.dp))
+            }
             Row(Glyph.HISTORY, "Cache limit", ua.olex.music.playback.CacheBudget.label(limit), first = true) { editing = true }
             Spacer(Modifier.height(4.dp))
             Row(Glyph.DELETE, "Clear cache", "Streamed songs, covers, photos and fetched moving covers. Your music, lyrics and own moving covers stay", last = true) {
@@ -267,9 +270,9 @@ internal fun SettingsPage(
             }
         }
 
-        }
-        item { Text("Music $version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp, start = 16.dp)) }
-    } }
+        if (terms.isNotEmpty() && matches == 0) item { Text("No settings found", Modifier.padding(16.dp)) }
+        if (terms.isEmpty()) item { Text("Music $version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp, start = 16.dp)) }
+    }
 }
 
 @Composable

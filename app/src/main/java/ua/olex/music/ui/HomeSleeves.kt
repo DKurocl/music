@@ -160,21 +160,23 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
     var taps by remember { mutableIntStateOf(0) }
     val still = LocalPowerSave.current
     val motion = remember { androidx.compose.animation.core.Animatable(0f) }
+    val first = remember { androidx.compose.ui.graphics.Path() }
+    val second = remember { androidx.compose.ui.graphics.Path() }
     LaunchedEffect(taps, still) {
         if (taps > 0 && !still) {
-            motion.snapTo(0f)
-            motion.animateTo(1f, androidx.compose.animation.core.tween(420))
+            motion.animateTo(1f, androidx.compose.animation.core.tween(125))
+            motion.animateTo(0f, androidx.compose.animation.core.tween(250))
         } else motion.snapTo(0f)
     }
     val outer = 28.dp
     val join = 10.dp
     val tileShape = if (glyph == Glyph.SHUFFLE) RoundedCornerShape(outer, outer, join, join) else RoundedCornerShape(join, join, outer, outer)
-    Surface(onClick = { taps++; onClick() }, enabled = enabled, shape = tileShape, color = container, contentColor = content, modifier = modifier.fillMaxWidth().squish()) {
+    Surface(onClick = { taps++; onClick() }, enabled = enabled, shape = tileShape, color = container, contentColor = content, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.fillMaxWidth().height(39.dp)) {
                 Box(Modifier.size(39.dp), contentAlignment = Alignment.Center) {
-                    val wave = kotlin.math.sin(motion.value * kotlin.math.PI).toFloat()
                     Box(Modifier.matchParentSize().graphicsLayer {
+                        val wave = motion.value
                         rotationZ = if (glyph == Glyph.SHUFFLE) wave * 25f else wave * 12f
                         scaleX = 1f + wave * 0.08f
                         scaleY = scaleX
@@ -182,13 +184,15 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
                     if (glyph == Glyph.SHUFFLE) {
                         androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
                             val unit = size.width / 24f
-                            val bend = wave * 3f
+                            val bend = motion.value * 5f
                             val pen = 2.1f * unit
-                            val first = androidx.compose.ui.graphics.Path().apply {
+                            first.apply {
+                                rewind()
                                 moveTo(3f * unit, 6f * unit)
                                 cubicTo(9f * unit, (6f - bend) * unit, 13f * unit, (18f + bend) * unit, 20f * unit, 18f * unit)
                             }
-                            val second = androidx.compose.ui.graphics.Path().apply {
+                            second.apply {
+                                rewind()
                                 moveTo(3f * unit, 18f * unit)
                                 cubicTo(9f * unit, (18f + bend) * unit, 13f * unit, (6f - bend) * unit, 20f * unit, 6f * unit)
                             }
@@ -201,7 +205,10 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
                             drawLine(onAccent, androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 21f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
                         }
                     } else {
-                        Symbol(glyph, color = onAccent, filled = true, kick = taps)
+                        Symbol(glyph, color = onAccent, filled = true, modifier = Modifier.graphicsLayer {
+                            scaleX = 1f + motion.value * 0.20f
+                            scaleY = scaleX
+                        })
                     }
                 }
                 if (previews.isNotEmpty()) Box(Modifier.align(Alignment.CenterEnd).width(46.dp).height(36.dp)) {
