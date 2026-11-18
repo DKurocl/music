@@ -117,13 +117,22 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun DemoHome(modifier: Modifier) {
+    private fun DemoHome(modifier: Modifier, onOpenPlaylist: (Long) -> Unit = {}) {
         val local = androidx.compose.runtime.remember { demoSongs.filterNot { YouTubeMusic.isOnline(it) } }
         val index = androidx.compose.runtime.remember { LibraryIndex.build(local) }
         val remote = androidx.compose.runtime.remember {
-            listOf(YouTubeMusic.Shelf("Quick picks", demoSongs.filter { YouTubeMusic.isOnline(it) }, emptyList()))
+            listOf(YouTubeMusic.Shelf("Quick picks", demoSongs.filter { YouTubeMusic.isOnline(it) }, listOf(
+                YouTubeMusic.Card("radio", "Night Drive Mix", "Personal radio", demoSongs[4].artworkUri, YouTubeMusic.Card.Kind.MIX),
+                YouTubeMusic.Card("VLlate", "After Hours", "Downtempo", demoSongs[3].artworkUri, YouTubeMusic.Card.Kind.PLAYLIST))))
         }
-        HomePage(index, local, emptyMap(), now.mediaId, modifier, { _, _, _ -> }, {}, youTubeHome = remote)
+        val own = androidx.compose.runtime.remember {
+            listOf(PlaylistUi(7, "On the train", demoSongs.map { SavedSongRow(ua.olex.music.model.SavedSong.from(it), it) }))
+        }
+        val account = androidx.compose.runtime.remember {
+            listOf(YouTubeMusic.Card("VLsaved", "Weekend rotation", "12 songs", demoSongs[5].artworkUri, YouTubeMusic.Card.Kind.PLAYLIST))
+        }
+        HomePage(index, local, emptyMap(), now.mediaId, modifier, { _, _, _ -> }, {}, youTubeHome = remote,
+            playlists = own, accountPlaylists = account, onOpenPlaylist = onOpenPlaylist)
     }
 
     /** Coil draws in previews through this handler: the generated files are decoded at once. */
@@ -748,10 +757,24 @@ class DesignGalleryTest {
     }
 
     @Test fun home() {
-        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
+        var opened: Long? = null
+        var mix: String? = null
+        var online: OnlineTarget? = null
+        compose.setContent { Shell("Home", Place.HOME) {
+            CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { target -> online = target }, playMix = { id, _ -> mix = id })) {
+                DemoHome(Modifier.fillMaxSize().padding(it)) { id -> opened = id }
+            }
+        } }
         shot("01-home")
-        compose.onNodeWithTag("home-sleeves").performScrollToIndex(2)
+        compose.onNodeWithText("Night Drive Mix").performClick()
+        org.junit.Assert.assertEquals("radio", mix)
+        compose.onNodeWithText("On the train").performScrollTo().performClick()
+        org.junit.Assert.assertEquals(7L, opened)
+        compose.onNodeWithText("Weekend rotation").performScrollTo().performClick()
+        org.junit.Assert.assertEquals("VLsaved", (online as OnlineTarget.Album).id)
         shot("01b-home-lower")
+        compose.onNodeWithText("Energize").performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("No songs for this mood").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test fun libraryAlbums() {
