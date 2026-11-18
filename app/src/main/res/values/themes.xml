@@ -6,7 +6,7 @@
         <item name="android:windowSplashScreenBackground">@android:color/system_neutral1_900</item>
         <!-- The mark alone on the page colour, no disc behind it, animated for a moment (docs/design/icon.py). -->
         <item name="android:windowSplashScreenAnimatedIcon">@drawable/splash_icon</item>
-        <item name="android:windowSplashScreenAnimationDuration">460</item>
+        <item name="android:windowSplashScreenAnimationDuration">340</item>
         <item name="android:windowSplashScreenBehavior">icon_preferred</item>
         <item name="android:colorAccent">@android:color/system_accent1_200</item>
     </style>
