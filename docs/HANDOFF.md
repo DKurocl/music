@@ -1,3 +1,22 @@
+# Download and player reliability batch (Codex, 2026-11-18)
+
+[код] Points 7/71: Soulseek runs in a data-sync foreground service while requests are queued.
+Durable job IDs restore interrupted requests; per-file checkpoints retain published album tracks
+and interrupted pending MediaStore rows are cleaned before retry. Cancel and Retry are available
+from private notification actions and the app. A notification opens its own download in a sheet.
+A transfer restarts its unfinished file from byte zero. A foreground-service timeout pauses the
+queue until the app can resume it, without keeping an idle service.
+
+[код] Point 72: the mini player displays preparation and playback errors. Error messages
+distinguish missing files, access, network/HTTP and unsupported codecs. Media3 item decoding is
+reused across position and state updates. System buffer presentation remains subject to Media3.
+Point 15: routes handled by MusicRoot follow Predictive Back progress; nested library handlers
+and device acceptance remain open.
+
+CI and phone checks are pending. See PHONE_CHECK.md for notification actions, process stop,
+foreground timeout and resume checks. The branch includes the offline catalogue package and does
+not change lock-screen lyrics.
+
 # Offline online catalogue and search (Codex, 2026-11-18)
 
 [код] Album, artist and account playlist metadata snapshots use atomic bounded disk storage.

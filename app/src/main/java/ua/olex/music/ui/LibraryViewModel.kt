@@ -485,6 +485,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun requestPlayer() { playerRequest++ }
     fun consumePlayerRequest() { playerRequest = 0 }
 
+    var downloadRequest by mutableStateOf<Int?>(null); private set
+    fun requestDownloads(id: Int) { downloadRequest = id }
+    fun dismissDownloads() { downloadRequest = null }
+
     /** Bumped when Play had to leave songs out (or play nothing) because the phone is offline. */
     var offlineNotice by mutableStateOf(0); private set
 

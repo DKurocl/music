@@ -10,7 +10,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.LocalActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -194,7 +194,6 @@ fun MusicRoot(model: LibraryViewModel) {
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) { onlineStack = emptyList(); returnTo = null; baseStates.removeState("place-${to.name}"); if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
-    BackHandler(page != null) { page = null }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
     fun openOf(track: Track, artist: Boolean) {
         val index = library ?: return
@@ -206,7 +205,6 @@ fun MusicRoot(model: LibraryViewModel) {
         if (place == Place.SEARCH) model.setQuery("") else returnTo = place
         openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.SEARCH
     }
-    BackHandler(page == null && place != Place.HOME && !expanded) { go(Place.HOME) }
     var trashing by remember { mutableStateOf<List<Track>?>(null) }
     val trashRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) { haptics.confirm(); model.refresh() }
@@ -229,7 +227,23 @@ fun MusicRoot(model: LibraryViewModel) {
     // In an open collection the bar shows a back arrow, and the name once the header has scrolled away.
     val inCollection = page == null && place != Place.HOME && collectionTitle != null
     // YouTube Music pages (an artist, an album) open over the current place, one on another; Back closes the top one.
-    BackHandler(onlineStack.isNotEmpty() && !expanded) { onlineStack = onlineStack.dropLast(1) }
+    var destinationBackProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    var destinationBackDirection by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+    PredictiveBackHandler(!expanded && (page != null || onlineStack.isNotEmpty() || place != Place.HOME)) { events ->
+        try {
+            events.collect { event ->
+                destinationBackDirection = if (event.swipeEdge == androidx.activity.BackEventCompat.EDGE_LEFT) 1f else -1f
+                destinationBackProgress = event.progress
+            }
+            when {
+                onlineStack.isNotEmpty() -> onlineStack = onlineStack.dropLast(1)
+                page != null -> page = null
+                else -> go(Place.HOME)
+            }
+        } finally {
+            destinationBackProgress = 0f
+        }
+    }
     val onlineNav = remember(model) {
         OnlineNav(
             open = { target ->
@@ -324,7 +338,16 @@ fun MusicRoot(model: LibraryViewModel) {
         // The mini player floats over the page: the page runs under it to the navigation bar, with a
         // soft fade (not a solid band) so it reads as floating, as Google's own players do.
         val playerInset = if (playing.hasTrack) 84.dp else 0.dp
-        Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            val back = destinationBackProgress
+            translationX = destinationBackDirection * 24.dp.toPx() * back
+            scaleX = 1f - 0.04f * back
+            scaleY = scaleX
+            if (back > 0f) {
+                shape = RoundedCornerShape(24.dp * back)
+                clip = true
+            } else clip = false
+        }) {
         CompositionLocalProvider(LocalPlayerInset provides playerInset) {
         val askForFiles: () -> Unit = {
             if (permissionRequested && activity?.shouldShowRequestPermissionRationale(Manifest.permission.READ_MEDIA_AUDIO) == false) {
@@ -472,6 +495,9 @@ fun MusicRoot(model: LibraryViewModel) {
             fileRateHz = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.sampleRateHz },
         )
         }
+    }
+    model.downloadRequest?.let { requested ->
+        DownloadsSheet(context.graph.soulseek, requested, onDismiss = model::dismissDownloads)
     }
     if (equalizerOpen) EqualizerSheet(playing.equalizer, playing.connected, playing.equalizerError,
         onApply = model::setEqualizer, onDismiss = { equalizerOpen = false },
