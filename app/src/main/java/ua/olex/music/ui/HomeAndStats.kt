@@ -87,6 +87,14 @@ internal fun HomePage(
             if (mood == null) { cache.online = online; cache.last = picks }
         }.value
     }
+    val cacheRevision = ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value
+    val shuffleTracks = rememberOffMain(library, history, favourites, youTubeHome, cacheRevision, initial = library.songs) {
+        val candidates = history + favourites + youTubeHome.flatMap { shelf ->
+            shelf.songs + shelf.cards.filter { it.kind == YouTubeMusic.Card.Kind.SONG }.map { it.song() }
+        }
+        (library.songs + candidates.filter { YouTubeMusic.isOnline(it) && ua.olex.music.playback.CacheBudget.isStreamCached(it.uri) })
+            .distinctBy { it.recordingId ?: it.id.value }
+    }
     val stateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val songs = queue.orEmpty()
     val mixes = remember(youTubeHome, accountPlaylists, mood, moodView?.page, online) {
@@ -102,10 +110,10 @@ internal fun HomePage(
         if (mood != null) emptyList() else youTubeHome.flatMap { it.cards }.filter { it.kind == YouTubeMusic.Card.Kind.ALBUM }.distinctBy { it.id }
     }
     val feature = key(cache) {
-        rememberOffMain<ua.olex.music.model.MusicCollection?>(library, history, initial = null) {
+        rememberOffMain<ua.olex.music.model.MusicCollection?>(library, initial = cache.feature) {
             val recent = history.mapIndexed { i, track -> track.id to i }.toMap()
             val named = library.albums.filter { album -> album.tracks.any { !it.album.isNullOrBlank() } }
-            named.minByOrNull { album -> album.tracks.minOfOrNull { recent[it.id] ?: Int.MAX_VALUE } ?: Int.MAX_VALUE }
+            (named.firstOrNull { it.id == cache.feature?.id } ?: named.minByOrNull { album -> album.tracks.minOfOrNull { recent[it.id] ?: Int.MAX_VALUE } ?: Int.MAX_VALUE }).also { cache.feature = it }
         }
     }
     val nextFeed = HomeFeed(mood, mood?.let { moods.indexOf(it) + 1 } ?: 0, songs, queue == null || moodView?.loading == true, mixes, albums)
@@ -139,11 +147,11 @@ internal fun HomePage(
                 }
             stateHolder.SaveableStateProvider(frame.key) {
                 // Keep Home's scroll-to targets inside the touchable viewport above the floating player.
-                LazyColumn(Modifier.fillMaxSize().padding(bottom = LocalPlayerInset.current).then(actionable).background(MaterialTheme.colorScheme.surface),
-                    contentPadding = PaddingValues(bottom = 12.dp)) {
+                LazyColumn(Modifier.fillMaxSize().then(actionable).background(MaterialTheme.colorScheme.surface),
+                    contentPadding = PaddingValues(bottom = 12.dp + LocalPlayerInset.current)) {
                     val contextName = shownMood?.label ?: "Quick picks"
                     if (shownMood == null && (feature != null || shownSongs.isNotEmpty())) item(key = "starts") {
-                        val shuffleSongs = library.songs.ifEmpty { shownSongs }
+                        val shuffleSongs = shuffleTracks
                         fun startFeature() {
                             if (feature != null) onPlay(feature.tracks, 0, feature.name)
                             else if (shownSongs.isNotEmpty()) onPlay(shownSongs, 0, contextName)
@@ -196,6 +204,7 @@ internal fun HomePage(
 internal class HomeCache {
     var online = false
     var last: List<Track>? = null
+    var feature: ua.olex.music.model.MusicCollection? = null
 }
 
 /**

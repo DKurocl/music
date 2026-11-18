@@ -98,7 +98,7 @@ internal class YouTubeMusic(
         exact?.also {
             keep(memoryKey, it)
             pageStore?.write(scope, key, org.json.JSONObject().put("id", it))
-        } ?: found.firstOrNull()?.first
+        }
     }
 
     suspend fun artist(id: String, offline: Boolean = false): OnlineArtist? = withContext(ioDispatcher) {
@@ -108,7 +108,9 @@ internal class YouTubeMusic(
             val saved = pageStore?.read(scope, key)?.let { runCatching { OnlinePageJson.artist(it) }.getOrNull() }
             if (offline) return@cached saved
             val fresh = networkFallback(saved) {
-                post("browse", """"browseId":${quote(id)}"""")?.let { parseArtist(id, it) }
+                val json = post("browse", """"browseId":${quote(id)}"""") ?: return@networkFallback null
+                val initial = parseArtist(id, json) ?: return@networkFallback null
+                expandArtist(initial, json, scope)
             }
             if (pageScope() != scope) return@cached null
             if (fresh != null && fresh !== saved) {
@@ -155,6 +157,30 @@ internal class YouTubeMusic(
                 .put("songs", OnlinePageJson.tracks(value.second)))
         }
         rememberAlbumLinks(scope, value.second)
+    }
+
+    /** Follow artist shelf links and continuation pages, retaining the initial shelf on failure. */
+    private suspend fun expandArtist(initial: OnlineArtist, json: String, scope: String): OnlineArtist {
+        var result = initial
+        for (section in artistSections(json)) {
+            if (pageScope() != scope) return initial
+            val args = "\"browseId\":${quote(section.id)}" + (section.params?.let { ",\"params\":${quote(it)}" } ?: "")
+            var page = post("browse", args) ?: continue
+            val visited = HashSet<String>()
+            while (true) {
+                val tracks = parseSearch(page, fallbackArtist = initial.name, keepOrder = true)
+                val releases = artistReleaseCards(page)
+                result = when (section.kind) {
+                    "songs" -> result.copy(songs = (result.songs + tracks).distinctBy { it.id })
+                    "albums" -> result.copy(albums = (result.albums + releases).distinctBy { it.id })
+                    else -> result.copy(singles = (result.singles + releases).distinctBy { it.id })
+                }
+                val next = continuationOf(page) ?: break
+                if (!visited.add(next) || pageScope() != scope) break
+                page = post("browse", "\"continuation\":${quote(next)}") ?: break
+            }
+        }
+        return result
     }
 
     private fun rememberAlbumLinks(scope: String, tracks: List<Track>) {
@@ -677,6 +703,37 @@ internal class YouTubeMusic(
                 val name = (row["flexColumns"] as? List<*>)?.firstOrNull()?.let { text(((it as? Map<*, *>)?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>)?.get("text")) }.orEmpty()
                 id to name
             }.distinctBy { it.first }
+        }
+
+        internal data class ArtistSection(val kind: String, val id: String, val params: String?)
+
+        internal fun artistSections(json: String): List<ArtistSection> {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
+            val shelves = collect(root, "musicCarouselShelfRenderer") + collect(root, "musicShelfRenderer")
+            return shelves.mapNotNull { shelf ->
+                val header = shelf["header"] ?: shelf["title"] ?: return@mapNotNull null
+                val heading = text((header as? Map<*, *>)?.get("musicCarouselShelfBasicHeaderRenderer")?.let { (it as? Map<*, *>)?.get("title") } ?: header).lowercase()
+                val kind = when {
+                    heading.contains("song") -> "songs"
+                    heading.contains("single") || heading.contains("ep") -> "singles"
+                    heading.contains("album") -> "albums"
+                    else -> return@mapNotNull null
+                }
+                val endpoints = collect(header, "browseEndpoint")
+                val endpoint = endpoints.firstOrNull { (it["browseId"] as? String)?.isNotBlank() == true } ?: return@mapNotNull null
+                ArtistSection(kind, endpoint["browseId"] as String, endpoint["params"] as? String)
+            }.distinctBy { Triple(it.kind, it.id, it.params) }
+        }
+
+        internal fun artistReleaseCards(json: String): List<OnlineAlbum> {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
+            return collect(root, "musicTwoRowItemRenderer").mapNotNull { card ->
+                val nav = dump(card["navigationEndpoint"])
+                if (!nav.contains("MUSIC_PAGE_TYPE_ALBUM")) return@mapNotNull null
+                val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return@mapNotNull null
+                val title = text(card["title"]).takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                OnlineAlbum(id, title, text(card["subtitle"]).ifEmpty { null }, biggestImage(card["thumbnailRenderer"]))
+            }.distinctBy { it.id }
         }
 
         /** An artist page: header, description, every song row and every album and video card. */

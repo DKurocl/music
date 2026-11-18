@@ -476,6 +476,7 @@ internal fun LibraryBrowser(
                             onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     item(key = "artist-bio") { ArtistBio(selected.name) }
+                    item(key = "artist-online") { MoreOnYouTubeMusic(selected.name, library, currentId) }
                     if (albums.isNotEmpty()) {
                         item(key = "artist-albums-title") { PageHeading(if (albums.size == 1) "Album" else "Albums") }
                         item(key = "artist-albums") {
@@ -503,8 +504,6 @@ internal fun LibraryBrowser(
                                     albumArtist = selected.name) { onPlay(shown, index) }
                             }
                         }
-                        // What else the artist has on YouTube Music, beyond the owner's files.
-                        item(key = "artist-online") { MoreOnYouTubeMusic(selected.name, library, currentId) }
                     }
                 }
                 selected != null -> {
