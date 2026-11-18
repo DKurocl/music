@@ -5,9 +5,8 @@ package ua.olex.music.ui
 import android.content.Context
 import android.graphics.Matrix
 import android.view.TextureView
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.BoundsTransform
-import androidx.compose.animation.SharedTransitionScope
+import kotlinx.coroutines.launch
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -95,35 +94,76 @@ internal class PlayerCoverMemory {
 }
 
 internal val LocalPlayerCovers = staticCompositionLocalOf<PlayerCoverMemory?> { null }
-internal val LocalCoverTransition = staticCompositionLocalOf<SharedTransitionScope?> { null }
-internal val LocalPlayerVisibility = staticCompositionLocalOf<AnimatedVisibilityScope?> { null }
-private val coverTravel = BoundsTransform { _, _ -> tween(340, easing = FastOutSlowInEasing) }
+/** Endpoints are measured in the unscaled page and its host, even during an interrupted drag. */
+internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope) {
+    var fraction by androidx.compose.runtime.mutableFloatStateOf(0f)
+        private set
+    var thumbnail by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
+    var sleeve by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
+    var page: androidx.compose.ui.layout.LayoutCoordinates? = null
+    var host: androidx.compose.ui.layout.LayoutCoordinates? = null
+    private var settling: kotlinx.coroutines.Job? = null
 
-/** Both endpoints can draw the same decoded pixels on the first frame of the bounds animation. */
-@Composable
-internal fun PlayerCoverLayout(content: @Composable () -> Unit) {
-    androidx.compose.animation.SharedTransitionLayout(Modifier.fillMaxSize()) {
-        androidx.compose.runtime.CompositionLocalProvider(
-            LocalCoverTransition provides this, LocalPlayerCovers provides remember { PlayerCoverMemory() },
-            content = content,
-        )
+    fun drag(delta: Float) {
+        settling?.cancel()
+        fraction = (fraction + delta).coerceIn(0f, 1f)
+    }
+
+    fun settle(open: Boolean, instant: Boolean) {
+        settling?.cancel()
+        val end = if (open) 1f else 0f
+        if (instant || fraction == end) { fraction = end; return }
+        settling = scope.launch {
+            androidx.compose.animation.core.animate(fraction, end,
+                animationSpec = tween((150 + 190 * kotlin.math.abs(end - fraction)).toInt(), easing = FastOutSlowInEasing)
+            ) { value, _ -> fraction = value }
+        }
     }
 }
 
-/** Only the current still participates. The queue can contain several occurrences of the same URI. */
+internal val LocalPlayerTravel = staticCompositionLocalOf<PlayerTravel?> { null }
+
 @Composable
-internal fun Modifier.sharedPlayerCover(visible: Boolean): Modifier {
-    val scope = LocalCoverTransition.current ?: return this
-    if (LocalPowerSave.current) return this
-    val page = LocalPlayerVisibility.current
-    return with(scope) {
-        val cover = rememberSharedContentState("current player cover")
-        if (page != null) sharedElement(cover, page, boundsTransform = coverTravel)
-        else sharedElementWithCallerManagedVisibility(cover, visible, boundsTransform = coverTravel)
+internal fun PlayerCoverLayout(travel: PlayerTravel, content: @Composable () -> Unit) {
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalPlayerTravel provides travel, LocalPlayerCovers provides remember { PlayerCoverMemory() },
+    ) {
+        Box(Modifier.fillMaxSize().onGloballyPositioned { travel.host = it }) { content() }
     }
 }
 
-internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean)
+@Composable
+internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
+    val travel = LocalPlayerTravel.current ?: return this
+    return onGloballyPositioned { coordinates ->
+        val parent = (if (mini) travel.host else travel.page) ?: return@onGloballyPositioned
+        if (!parent.isAttached) return@onGloballyPositioned
+        val bounds = parent.localBoundingBoxOf(coordinates, clipBounds = false)
+        if (mini) travel.thumbnail = bounds else travel.sleeve = bounds
+    }
+}
+
+/** The page, its artwork and its controls all use this same matrix in both directions. */
+internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier = graphicsLayer {
+    val p = travel.fraction
+    val small = travel.thumbnail
+    val large = travel.sleeve
+    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+    if (small.width > 0f && large.width > 0f && large.top >= 0f) {
+        val scale = p + (1f - p) * (small.width / large.width)
+        scaleX = scale
+        scaleY = scale
+        translationX = (1f - p) * (small.left - large.left * small.width / large.width)
+        translationY = (1f - p) * (small.top - large.top * small.width / large.width)
+    } else {
+        scaleX = 1f; scaleY = 1f
+        translationX = 0f; translationY = (1f - p) * size.height
+    }
+    shape = RoundedCornerShape((28f * (1f - p)).dp)
+    clip = p < 1f
+}.onGloballyPositioned { travel.page = it }
+
+internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean, val preview: CoverFrame? = null)
 
 @OptIn(ExperimentalCoilApi::class)
 @Composable
@@ -137,6 +177,7 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
     // A full player can stay visible while queue edits cycle many neighbours through the cache.
     var retained by remember(uri, memory) { mutableStateOf<CoverFrame?>(null) }
     val frame = memory[uri] ?: retained
+    val previewFrame = remember(uri, frame) { retained?.takeIf { frame != null && it.pixels < frame.pixels } }
     androidx.compose.runtime.SideEffect { retained = frame }
     // Keep the request independent of draw visibility and of the shared element's animated size.
     LaunchedEffect(uri, size, loader, preview, memory) {
@@ -147,15 +188,15 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
         if (painter != null) memory.put(uri, CoverFrame(painter, size))
         else failed = true
     }
-    return CoverImage(frame, frame == null && uri != null && !failed)
+    return CoverImage(frame, frame == null && uri != null && !failed, previewFrame)
 }
 
 @Composable
-internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int, sharedVisible: Boolean? = null) {
+internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int, miniEndpoint: Boolean = false) {
     var measured by remember { mutableStateOf(0) }
     val image = rememberCoverImage(uri, pixels, measured)
     PlayerCoverFace(image, modifier.onSizeChanged { measured = maxOf(it.width, it.height) }
-        .then(if (sharedVisible == null) Modifier else Modifier.sharedPlayerCover(sharedVisible)), corner)
+        .then(if (miniEndpoint) Modifier.playerCoverEndpoint(true) else Modifier), corner)
 }
 
 /** Keep the outline continuous as the shared element grows from a thumbnail to the album sleeve. */
@@ -174,9 +215,17 @@ internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, 
     val frame = image.frame ?: previous.takeIf { image.loading && retainWhileLoading }
     androidx.compose.runtime.SideEffect { previous = frame }
     val saving = LocalPowerSave.current
-    ArtworkFrame(modifier, if (LocalCoverTransition.current != null) playerCoverShape else RoundedCornerShape(corner)) {
-        if (frame != null) Image(frame.painter, contentDescription = null,
-            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    ArtworkFrame(modifier, if (LocalPlayerTravel.current != null) playerCoverShape else RoundedCornerShape(corner)) {
+        if (frame != null) {
+            val preview = image.preview
+            if (preview == null || saving) Image(frame.painter, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else key(frame) {
+                val reveal = remember { androidx.compose.animation.core.Animatable(0f) }
+                LaunchedEffect(frame) { reveal.animateTo(1f, tween(100)) }
+                if (reveal.value < 1f) Image(preview.painter, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Image(frame.painter, null, Modifier.fillMaxSize().graphicsLayer { alpha = reveal.value }, contentScale = ContentScale.Crop)
+            }
+        }
         else Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
         if (motion != null && !saving && !LocalInspectionMode.current) {
             val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()

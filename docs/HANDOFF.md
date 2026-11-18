@@ -1,3 +1,11 @@
+# Player motion and Settings (2026-11-18)
+
+[код] The floating cover and page crossfade have been replaced by a single opaque page
+transform using measured thumbnail and sleeve positions. Mini drag, page drag and system back
+share its progress. A thumbnail can blend into the decoded full-resolution still. Settings
+groups appearance options together and uses one switch action per row. Physical motion and
+frame timing on the Pixel require device acceptance.
+
 # Music 2.0 (Codex, 2026-11-18)
 
 [код] Release candidate on `agent/player-shared-art`. Each tab retains its catalogue history,

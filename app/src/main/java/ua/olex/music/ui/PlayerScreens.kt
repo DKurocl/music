@@ -330,6 +330,9 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
     var settleX by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val next by rememberUpdatedState(onNext)
     val previous by rememberUpdatedState(onPrevious)
+    val travel = LocalPlayerTravel.current
+    val still = LocalPowerSave.current
+    val open by rememberUpdatedState(onOpen)
     var dragUp by remember { mutableFloatStateOf(0f) }
     var cardWidth by remember { mutableIntStateOf(1) }
     val spring = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
@@ -346,7 +349,8 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
             .graphicsLayer {
                 translationX = rubber(dragX, 48.dp.toPx())
                 // Up opens the player; down has nowhere to go, so it stretches a little and springs back.
-                translationY = if (dragUp >= 0f) -dragUp * 0.3f else -rubber(dragUp, 16.dp.toPx())
+                alpha = 1f - ((travel?.fraction ?: 0f) * 4f).coerceIn(0f, 1f)
+                translationY = if (dragUp < 0f) -rubber(dragUp, 16.dp.toPx()) else 0f
             }
             .pointerInput(state.hasNext) {
                 detectHorizontalDragGestures(
@@ -361,12 +365,20 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                     onDragCancel = ::releaseDrag,
                 ) { change, amount -> change.consume(); dragX += amount }
             }
-            .pointerInput(Unit) {
+            .pointerInput(travel, still) {
                 detectVerticalDragGestures(
-                    onDragEnd = { if (dragUp > 60.dp.toPx()) { haptics.threshold(); onOpen() }; val from = dragUp
-                        scope.launch { androidx.compose.animation.core.animate(from, 0f, animationSpec = androidx.compose.animation.core.spring(0.5f, 400f)) { v, _ -> dragUp = v } } },
-                    onDragCancel = { dragUp = 0f },
-                ) { change, amount -> change.consume(); dragUp -= amount }
+                    onDragEnd = {
+                        if (dragUp > 60.dp.toPx()) { haptics.threshold(); open() }
+                        else travel?.settle(false, still)
+                        dragUp = 0f
+                    },
+                    onDragCancel = { dragUp = 0f; travel?.settle(false, still) },
+                ) { change, amount ->
+                    change.consume()
+                    dragUp -= amount
+                    val height = travel?.host?.size?.height ?: 0
+                    if (!still && height > 0) travel?.drag((dragUp / height).coerceIn(0f, 1f) - travel.fraction)
+                }
             }
             .clip(RoundedCornerShape(24.dp)).clickable(onClickLabel = "Open player", onClick = onOpen),
     ) {
@@ -375,7 +387,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL, sharedVisible = !covered)
+                PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL, miniEndpoint = true)
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = when {
@@ -626,7 +638,7 @@ internal fun PlayerPage(
                             val scale = 1f - 0.06f * (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
                             scaleX = scale
                             scaleY = scale
-                        }.sharedPlayerCover(visible = true),
+                        }.playerCoverEndpoint(false),
                     corner = 32.dp, motion = motionCover,
                     moving = state.isPlaying, showMotion = direction == 0 && !skipping,
                     retainWhileLoading = swipedTo == null || swipedTo != occurrence,

@@ -345,7 +345,10 @@ fun MusicRoot(model: LibraryViewModel) {
             if (account != null) pending()
         }
     }
-    PlayerCoverLayout {
+    val travel = remember(scope) { PlayerTravel(scope) }
+    val openPlayer = expanded && playing.hasTrack
+    LaunchedEffect(openPlayer, powerSave) { travel.settle(openPlayer, powerSave || !playing.hasTrack) }
+    PlayerCoverLayout(travel) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
             .then(if (expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
@@ -494,57 +497,50 @@ fun MusicRoot(model: LibraryViewModel) {
 
     // The player follows the finger down from the top of its page and closes past a quarter of the
     // screen or on a quick flick; predictive back shrinks it toward the mini player.
-    var dismiss by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-    var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var pageHeight by remember { androidx.compose.runtime.mutableIntStateOf(1) }
-    val settle = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
-    LaunchedEffect(expanded) { if (expanded) { dismiss = 0f; backProgress = 0f } }
-    androidx.activity.compose.PredictiveBackHandler(expanded) { events ->
-        try { events.collect { backProgress = it.progress }; haptics.threshold(); expanded = false }
-        catch (e: kotlin.coroutines.cancellation.CancellationException) { backProgress = 0f; throw e }
+    val latestPowerSave by androidx.compose.runtime.rememberUpdatedState(powerSave)
+    androidx.activity.compose.PredictiveBackHandler(openPlayer) { events ->
+        val start = travel.fraction
+        try {
+            events.collect { travel.drag(start * (1f - it.progress) - travel.fraction) }
+            haptics.threshold()
+            expanded = false
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            travel.settle(true, latestPowerSave)
+            throw e
+        }
     }
-    val dragToClose = remember {
+    val dragToClose = remember(travel) {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
-            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (available.y < 0 && dismiss > 0f && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
-                    val used = maxOf(available.y, -dismiss)
-                    dismiss += used
-                    return androidx.compose.ui.geometry.Offset(0f, used)
-                }
-                return androidx.compose.ui.geometry.Offset.Zero
+            var dragging = false
+            private fun move(y: Float): androidx.compose.ui.geometry.Offset {
+                val before = travel.fraction
+                travel.drag(-y / pageHeight)
+                dragging = true
+                return androidx.compose.ui.geometry.Offset(0f, (before - travel.fraction) * pageHeight)
             }
-            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (available.y > 0 && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
-                    val used = minOf(available.y, (pageHeight - dismiss).coerceAtLeast(0f))
-                    dismiss += used
-                    return available.copy(x = 0f, y = used)
-                }
-                return androidx.compose.ui.geometry.Offset.Zero
-            }
+            override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource) =
+                if (dragging && available.y < 0 && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) move(available.y)
+                else androidx.compose.ui.geometry.Offset.Zero
+            override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource) =
+                if (expanded && available.y > 0 && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) move(available.y)
+                else androidx.compose.ui.geometry.Offset.Zero
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
-                if (dismiss <= 0f) return androidx.compose.ui.unit.Velocity.Zero
-                if (dismiss > pageHeight * 0.25f || available.y > 2_500f) { haptics.threshold(); expanded = false }
-                else androidx.compose.animation.core.animate(dismiss, 0f, animationSpec = settle) { value, _ -> dismiss = value }
-                return available
+                if (!dragging) return androidx.compose.ui.unit.Velocity.Zero
+                dragging = false
+                if (travel.fraction < 0.75f || available.y > 2500f) { haptics.threshold(); expanded = false }
+                else travel.settle(true, latestPowerSave)
+                return androidx.compose.ui.unit.Velocity(0f, available.y)
             }
         }
     }
-    AnimatedVisibility(expanded && playing.hasTrack, enter = EnterTransition.None, exit = ExitTransition.None) {
-        CompositionLocalProvider(LocalPlayerVisibility provides this) {
-        val hidden by transition.animateFloat(
-            transitionSpec = { tween(if (powerSave) 0 else 340, easing = FastOutSlowInEasing) },
-            label = "Player travel",
-        ) { if (it == androidx.compose.animation.EnterExitState.Visible) 0f else 1f }
-        val settled = transition.currentState == androidx.compose.animation.EnterExitState.Visible &&
-            transition.targetState == androidx.compose.animation.EnterExitState.Visible && !transition.isRunning
-        Box(Modifier.fillMaxSize().then(if (!expanded) Modifier.clearAndSetSemantics {} else Modifier).onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
-            .graphicsLayer {
-                val offset = (dismiss + backProgress * 120.dp.toPx()).coerceIn(0f, size.height)
-                alpha = 1f - hidden
-                translationY = offset + 32.dp.toPx() * hidden
-                val s = 1f - backProgress * 0.08f; scaleX = s; scaleY = s
-                shape = RoundedCornerShape((backProgress * 40 + (dismiss / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
-            }) {
+    val travelling by remember { androidx.compose.runtime.derivedStateOf { travel.fraction > 0f } }
+    if (playing.hasTrack && (expanded || travelling)) {
+        val settled by remember { androidx.compose.runtime.derivedStateOf { travel.fraction == 1f } }
+        var videoReady by remember { mutableStateOf(false) }
+        LaunchedEffect(settled) { if (settled) videoReady = true }
+        Box(Modifier.fillMaxSize().then(if (!expanded) Modifier.clearAndSetSemantics {} else Modifier)
+            .onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.playerTransform(travel).nestedScroll(dragToClose)) {
         val motionCover by model.motionCover.collectAsStateWithLifecycle()
         val onlineAlbumId = rememberOnlineAlbumId(playing.mediaId, onlinePageScope)
         val rawOrigin = playing.playbackContext ?: model.playingFrom
@@ -576,7 +572,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onOpenOrigin = openOrigin,
             originIsMix = model.mixLabel != null || origin?.kind == "mix",
             position = { model.positionMs }, onClose = { expanded = false },
-            motionCover = motionCover?.takeIf { settled && it.owner == currentTrack?.let(::motionCoverOwner) }?.video,
+            motionCover = motionCover?.takeIf { videoReady && it.owner == currentTrack?.let(::motionCoverOwner) }?.video,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer, onExtendSleep = model::extendSleepTimer,
             onClearNext = model::clearUpNext,
@@ -610,7 +606,7 @@ fun MusicRoot(model: LibraryViewModel) {
             fileRateHz = file?.sampleRateHz ?: input?.sampleRateHz,
         )
         }
-        } // Player visibility scope
+
     }
     } // PlayerCoverLayout
     } // App composition locals
