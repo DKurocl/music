@@ -38,17 +38,9 @@ internal fun HomePage(
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember(library) { HomeCache() },
 ) {
-    var choosing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var label by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    var recentMood by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    fun selectMood(next: String?) {
-        label = next
-        if (next != null) recentMood = next
-        choosing = false
-    }
-    val dockMoods = remember(moods, recentMood) { moods.sortedByDescending { it.label == recentMood } }
     val mood = moods.firstOrNull { it.label == label }
-    androidx.activity.compose.BackHandler(mood != null && !choosing) { label = null }
+    androidx.activity.compose.BackHandler(mood != null) { label = null }
     val network = LocalNetwork.current
     val online = onlineEnabled && network
     val revision = if (!online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
@@ -87,14 +79,18 @@ internal fun HomePage(
     }
     val hasPersonal = mood == null && (playlists.isNotEmpty() || accountPlaylists.isNotEmpty())
     val hasCollections = hasPersonal || mixes.isNotEmpty()
-    Box(modifier.fillMaxSize()) {
+    val albums = remember(youTubeHome, mood) {
+        if (mood != null) emptyList() else youTubeHome.flatMap { it.cards }.filter { it.kind == YouTubeMusic.Card.Kind.ALBUM }.distinctBy { it.id }
+    }
+    Column(modifier.fillMaxSize()) {
+        if (moods.isNotEmpty()) MoodBar(moods, mood?.label, onSelect = { label = it })
         Arrival(mode, Place.HOME, deeper = mood != null) {
             stateHolder.SaveableStateProvider(mode) {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 72.dp + LocalPlayerInset.current)) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
                     val contextName = mood?.label ?: "Quick picks"
                     if (songs.isNotEmpty()) {
                         item(key = "title") { SectionTitle(contextName) }
-                        if (hasCollections) item(key = "picks") {
+                        if (hasCollections && songs.size > 3) item(key = "picks") {
                             SleeveRail(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions, start = 0)
                         } else item(key = "spread") {
                             CoverSpread(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions)
@@ -115,6 +111,10 @@ internal fun HomePage(
                         item(key = "my-title") { SectionTitle("Your playlists", onAllPlaylists) }
                         item(key = "my-playlists") { PersonalPlaylistRail(playlists, accountPlaylists, onOpenPlaylist) }
                     }
+                    if (albums.isNotEmpty()) {
+                        item(key = "album-title") { SectionTitle("Albums for you") }
+                        item(key = "albums") { YouTubeCards(albums, size = 132.dp) }
+                    }
                     if (!hasCollections && songs.size > 3) {
                         item(key = "more-title") { SectionTitle("More picks") }
                         item(key = "sleeves") { SleeveRail(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions) }
@@ -126,21 +126,7 @@ internal fun HomePage(
                 }
             }
         }
-        if (moods.isNotEmpty() && !choosing) MoodBar(dockMoods, mood?.label, ::selectMood, { choosing = true },
-            Modifier.align(Alignment.BottomCenter).padding(start = 10.dp, end = 10.dp, bottom = LocalPlayerInset.current + 4.dp))
-        if (choosing) Box(Modifier.align(Alignment.BottomCenter)) {
-            AppSheet(onDismiss = { choosing = false }) {
-                SectionTitle("Moods")
-                LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
-                    items(moods.chunked(2), key = { it.first().label }) { pair ->
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pair.forEach { choice -> MoodTile(choice.label, Modifier.weight(1f)) { selectMood(choice.label) } }
-                            if (pair.size == 1) Spacer(Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-        }
+
     }
 }
 

@@ -2,7 +2,14 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -14,30 +21,55 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** Direct mood filters stay just above the mini player, within reach while the feed scrolls. */
+/** A stable strip: the filter stays under the finger when a different Home feed arrives. */
 @Composable
-internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect: (String?) -> Unit,
-    onBrowse: () -> Unit, modifier: Modifier = Modifier) {
+internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect: (String?) -> Unit) {
+    LazyRow(Modifier.fillMaxWidth().selectableGroup().testTag("home-moods"), contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        item(key = "all") { MoodChip("For you", Glyph.MIX, selected == null) { onSelect(null) } }
+        items(moods, key = { "mood-" + it.label }) { mood ->
+            MoodChip(mood.label, moodGlyph(mood.label), selected == mood.label) {
+                onSelect(mood.label.takeUnless { it == selected })
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoodChip(label: String, glyph: Glyph, active: Boolean, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val still = LocalPowerSave.current
     val haptics = rememberHaptics()
-    Surface(modifier, color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(30.dp), tonalElevation = 2.dp) {
-        Row(Modifier.padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            FilledTonalButton(onClick = { haptics.tick(); onBrowse() }, contentPadding = PaddingValues(horizontal = 12.dp)) {
-                Symbol(Glyph.MIX, size = 18.dp)
-                Spacer(Modifier.width(5.dp))
-                Text("Moods")
-            }
-            LazyRow(contentPadding = PaddingValues(horizontal = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                if (selected != null) item(key = "reset") {
-                    InputChip(selected = true, onClick = { haptics.tick(); onSelect(null) }, label = { Text(selected) },
-                        trailingIcon = { Symbol(Glyph.CLOSE, size = 16.dp) }, shape = CircleShape)
+    val motion = MaterialTheme.motionScheme
+    val paper by animateColorAsState(if (active) cs.primary else cs.surfaceContainerHigh,
+        if (still) snap() else motion.fastEffectsSpec(), label = "Mood surface")
+    val ink by animateColorAsState(if (active) cs.onPrimary else cs.onSurfaceVariant,
+        if (still) snap() else motion.fastEffectsSpec(), label = "Mood icon")
+    val pulse = remember { Animatable(0f) }
+    var taps by remember { mutableIntStateOf(0) }
+    val settle = motion.fastSpatialSpec<Float>()
+    LaunchedEffect(taps, still) {
+        if (!still && taps > 0) {
+            pulse.animateTo(1f, tween(90))
+            pulse.animateTo(0f, settle)
+        } else pulse.snapTo(0f)
+    }
+    Surface(selected = active, onClick = { taps++; haptics.tick(); onClick() }, shape = CircleShape,
+        color = paper, contentColor = ink, modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 3.dp).squish(0.025f)) {
+        Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Symbol(glyph, size = 19.dp, color = ink, filled = active, bold = active, modifier = Modifier.graphicsLayer {
+                val t = pulse.value
+                when (glyph) {
+                    Glyph.RELAX, Glyph.SLEEP -> { rotationZ = -15f * t; translationY = -1.5.dp.toPx() * t }
+                    Glyph.ENERGY, Glyph.WORKOUT -> { translationY = -3.dp.toPx() * t; rotationZ = 8f * t }
+                    Glyph.COMMUTE -> translationX = 3.dp.toPx() * t
+                    Glyph.RAIN -> translationY = 3.dp.toPx() * t
+                    Glyph.HAPPY, Glyph.PARTY, Glyph.MIX -> rotationZ = 17f * t
+                    else -> { scaleX = 1f + 0.18f * t; scaleY = scaleX }
                 }
-                items(moods.filterNot { it.label == selected }, key = { it.label }) { mood ->
-                    FilterChip(selected = false, onClick = { haptics.tick(); onSelect(mood.label) },
-                        label = { Text(mood.label) }, shape = CircleShape)
-                }
-            }
+            })
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }
 }
@@ -46,21 +78,24 @@ internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect
 internal fun MixRail(cards: List<YouTubeMusic.Card>) {
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
-    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(cards, key = { it.id }) { card ->
-            val radio = card.kind == YouTubeMusic.Card.Kind.MIX
-            Surface(onClick = {
-                if (radio) nav.playMix(card.id, card.title)
-                else nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
-            }, color = if (radio) cs.primaryContainer else cs.tertiaryContainer, shape = RoundedCornerShape(24.dp),
-                modifier = Modifier.width(264.dp).squish(0.025f)) {
-                Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Artwork(card.cover, Modifier.size(86.dp), 17.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
-                    Column(Modifier.weight(1f).padding(start = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Symbol(if (radio) Glyph.RADIO else Glyph.PLAYLIST, size = 20.dp)
-                        Text(card.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        card.subtitle?.takeIf { it.isNotBlank() }?.let {
-                            Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cardWidth = if (cards.size == 1) (maxWidth - 32.dp).coerceAtLeast(1.dp) else 264.dp
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(cards, key = { it.id }) { card ->
+                val radio = card.kind == YouTubeMusic.Card.Kind.MIX
+                Surface(onClick = {
+                    if (radio) nav.playMix(card.id, card.title)
+                    else nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
+                }, color = if (radio) cs.primaryContainer else cs.tertiaryContainer, shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier.width(cardWidth).squish(0.025f)) {
+                    Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Artwork(card.cover, Modifier.size(86.dp), 17.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
+                        Column(Modifier.weight(1f).padding(start = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Symbol(if (radio) Glyph.RADIO else Glyph.PLAYLIST, size = 20.dp)
+                            Text(card.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            card.subtitle?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
@@ -76,37 +111,42 @@ private data class HomePlaylist(val local: PlaylistUi? = null, val remote: YouTu
 /** Local and account playlists alternate, preserving each source's order and original destination. */
 @Composable
 internal fun PersonalPlaylistRail(local: List<PlaylistUi>, remote: List<YouTubeMusic.Card>, onOpen: (Long) -> Unit) {
-    val columns = remember(local, remote) {
+    val pages = remember(local, remote) {
         buildList {
             for (i in 0 until maxOf(local.size, remote.size)) {
                 local.getOrNull(i)?.let { add(HomePlaylist(local = it)) }
                 remote.getOrNull(i)?.let { add(HomePlaylist(remote = it)) }
             }
-        }.chunked(2)
+        }.chunked(4)
     }
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
-    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(columns, key = { it.first().key }) { column ->
-            Column(Modifier.width(234.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                column.forEachIndexed { i, entry ->
-                    val playlist = entry.local
-                    val card = entry.remote
-                    val title = playlist?.name ?: requireNotNull(card).title
-                    val top = if (i == 0) 22.dp else 6.dp
-                    val bottom = if (i == column.lastIndex) 22.dp else 6.dp
-                    Surface(onClick = {
-                        if (playlist != null) onOpen(playlist.id) else if (card != null)
-                            nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
-                    }, color = cs.surfaceContainerHigh, shape = RoundedCornerShape(top, top, bottom, bottom),
-                        modifier = Modifier.fillMaxWidth().squish(0.02f)) {
-                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            if (playlist != null) PlaylistCover(playlist.playable, 46.dp, 12.dp) else Artwork(card?.cover, Modifier.size(46.dp), 12.dp)
-                            Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
-                                Text(title, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                val detail = playlist?.let { songCount(it.songs.size) } ?: card?.subtitle
-                                if (!detail.isNullOrBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-                                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val width = (maxWidth - 32.dp).coerceAtLeast(1.dp)
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(pages, key = { it.first().key }) { page ->
+                Column(Modifier.width(width), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    page.chunked(2).forEach { pair ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            pair.forEach { entry ->
+                                val playlist = entry.local
+                                val card = entry.remote
+                                val title = playlist?.name ?: requireNotNull(card).title
+                                Surface(onClick = {
+                                    if (playlist != null) onOpen(playlist.id) else if (card != null)
+                                        nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
+                                }, color = cs.surfaceContainerHigh, shape = RoundedCornerShape(18.dp),
+                                    modifier = Modifier.weight(1f).squish(0.02f)) {
+                                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        if (playlist != null) PlaylistCover(playlist.playable, 46.dp, 12.dp) else Artwork(card?.cover, Modifier.size(46.dp), 12.dp)
+                                        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                                            Text(title, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                            val detail = playlist?.let { songCount(it.songs.size) } ?: card?.subtitle
+                                            if (!detail.isNullOrBlank()) Text(detail, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
