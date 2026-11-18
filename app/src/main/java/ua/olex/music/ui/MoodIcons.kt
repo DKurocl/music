@@ -24,7 +24,7 @@ import kotlin.math.sin
 internal fun moodDuration(glyph: Glyph): Int = when (glyph) {
     Glyph.SLEEP, Glyph.RELAX -> 500
     Glyph.PARTY, Glyph.FAVOURITE -> 460
-    Glyph.HAPPY, Glyph.RAIN -> 560
+    Glyph.HAPPY, Glyph.RAIN -> 500
     Glyph.ENERGY, Glyph.FOCUS -> 320
     else -> 380
 }
