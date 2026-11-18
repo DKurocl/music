@@ -494,7 +494,7 @@ internal fun DownloadStatus(key: String) {
 internal fun moodGlyph(label: String): Glyph = when (TextFold.fold(label)) {
     "energize" -> Glyph.ENERGY; "feel good" -> Glyph.HAPPY; "relax", "chill" -> Glyph.RELAX; "party" -> Glyph.PARTY
     "workout" -> Glyph.WORKOUT; "commute" -> Glyph.COMMUTE; "romance" -> Glyph.FAVOURITE; "sad" -> Glyph.RAIN
-    "focus" -> Glyph.FOCUS; "sleep" -> Glyph.SLEEP; else -> Glyph.MIX
+    "focus", "study", "concentration" -> Glyph.FOCUS; "sleep", "bedtime" -> Glyph.SLEEP; else -> Glyph.NOTE
 }
 
 /** A local mood queue can play while its account-scoped recommendations arrive. */

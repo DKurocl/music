@@ -767,6 +767,47 @@ class DesignGalleryTest {
         File("build/reports/ui-previews/gallery").apply { mkdirs() }.resolve("$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    /** Capture the production vector marks on the same elapsed timeline, including their quiet resting frame. */
+    @Test fun moodGestures() {
+        val time = androidx.compose.runtime.mutableIntStateOf(0)
+        val options = listOf("For you") + YouTubeMusic.DEFAULT_MOODS.map { it.label }
+        compose.setContent { AppTheme {
+            val cs = MaterialTheme.colorScheme
+            Column(Modifier.fillMaxWidth().testTag("mood-motion").background(cs.surface).padding(12.dp)) {
+                options.chunked(2).forEach { pair ->
+                    androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(6.dp)) {
+                        pair.forEach { label ->
+                            val glyph = if (label == "For you") Glyph.MIX else moodGlyph(label)
+                            androidx.compose.material3.Surface(modifier = Modifier.weight(1f),
+                                shape = androidx.compose.foundation.shape.CircleShape, color = cs.primaryContainer) {
+                                androidx.compose.foundation.layout.Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    MoodMark(glyph, cs.onPrimaryContainer, Modifier.size(29.dp)) { (time.intValue.toFloat() / moodDuration(glyph)).coerceAtMost(1f) }
+                                    Text(label, Modifier.padding(start = 9.dp), style = MaterialTheme.typography.labelLarge)
+                                }
+                            }
+                        }
+                        if (pair.size == 1) androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        } }
+        val output = File("build/reports/ui-previews/gallery").apply { mkdirs() }
+        var first: Bitmap? = null
+        for (frame in 0..16) {
+            compose.runOnIdle { time.intValue = frame * 32 }
+            compose.waitForIdle()
+            val image = compose.onNodeWithTag("mood-motion").captureToImage().asAndroidBitmap()
+            when (frame) {
+                0 -> first = image.copy(Bitmap.Config.ARGB_8888, false)
+                5 -> org.junit.Assert.assertFalse(first!!.sameAs(image))
+                16 -> org.junit.Assert.assertTrue(first!!.sameAs(image))
+            }
+            output.resolve("01f-mood-${frame.toString().padStart(2, '0')}.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+    }
+
     /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
     @Test fun homeMood() {
         compose.setContent { Shell("Home", Place.HOME, demoNow) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
