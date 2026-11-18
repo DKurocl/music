@@ -36,6 +36,10 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Download and player reliability (Codex, 2026-11-18): 7/71, 72 and 15 root routes.
+      Confirm Android CI and phone behavior before marking complete.
+
+
 - [~] Offline online catalogue, source links and search (Codex, 2026-11-18): 49/64/50 and
       account-scoped outgoing likes (55). Verify the batch before marking it complete.
 

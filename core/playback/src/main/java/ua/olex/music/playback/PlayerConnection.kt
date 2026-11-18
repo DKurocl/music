@@ -356,6 +356,9 @@ class PlayerConnection(context: Context) {
         }, app.mainExecutor)
     }
 
+    private var lastPublishedItem: MediaItem? = null
+    private var lastPublishedTrack: Track? = null
+
     private fun publish(player: Player, updateQueue: Boolean = false) {
         if (updateQueue) queueSnapshot = (0 until player.mediaItemCount).map { index ->
             val queued = player.getMediaItemAt(index)
@@ -364,11 +367,15 @@ class PlayerConnection(context: Context) {
                 metadata.title?.toString().orEmpty(), metadata.artist?.toString().orEmpty(), metadata.artworkUri?.toString(), queued)
         }
         val item = player.currentMediaItem
+        if (lastPublishedItem !== item) {
+            lastPublishedItem = item
+            lastPublishedTrack = item?.let(::track)
+        }
         val meta = player.mediaMetadata
         _state.value = PlayerState(
             connected = true,
             mediaId = item?.mediaId,
-            track = item?.let(::track),
+            track = lastPublishedTrack,
             title = meta.title?.toString().orEmpty(),
             artist = meta.artist?.toString().orEmpty(),
             album = meta.albumTitle?.toString(),
@@ -382,7 +389,7 @@ class PlayerConnection(context: Context) {
             hasPrevious = player.hasPreviousMediaItem(),
             queueSize = player.mediaItemCount,
             positionMs = player.currentPosition.coerceAtLeast(0),
-            error = PlaybackSourceItems.error(item) ?: player.playerError?.let { "Couldn't play this file. Retry or choose another song." },
+            error = PlaybackSourceItems.error(item) ?: player.playerError?.let(::playbackErrorMessage),
             sleepDeadlineMs = (player as? MediaController)?.sessionExtras?.getLong(SleepTimerCommand.DEADLINE)?.takeIf { it > 0 },
             sleepTimerError = _state.value.sleepTimerError,
             queue = queueSnapshot,
@@ -466,6 +473,18 @@ class PlayerConnection(context: Context) {
 internal fun Player.indexOfQueueKey(key: String): Int = (0 until mediaItemCount).firstOrNull {
     getMediaItemAt(it).mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) == key
 } ?: -1
+
+private fun playbackErrorMessage(error: androidx.media3.common.PlaybackException): String {
+    return when (error.errorCode) {
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "The audio file is missing. Choose another source or rescan."
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NO_PERMISSION -> "Music can't read this file. Check audio and folder access."
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "The stream lost its connection. Check the network and retry."
+        androidx.media3.common.PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The stream couldn't be opened. Retry or choose another source."
+        androidx.media3.common.PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED -> "This audio format can't be decoded."
+        else -> "Couldn't play this track. Retry or choose another song."
+    }
+}
 
 /** Pause also cancels buffering; Play retries a failed item and restarts an ended queue. */
 internal fun Player.togglePlayback() {

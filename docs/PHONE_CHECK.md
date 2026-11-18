@@ -152,3 +152,14 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
 4. Run End of this song on the last item and on a queue with a following item. Verify the timer clears,
    the next item does not start, and the expected queue position is retained. Repeat with shuffle and XM5.
 5. Repeat timed playback over Cast. End-of-track currently relies on the local ExoPlayer end event.
+
+## Downloads and player feedback
+
+1. Start an album download, lock the Pixel, and verify the service notification stays while work is
+   queued. Tap a download notification and check its row is shown first. Cancel a waiting job and
+   an active transfer; Retry must start only the selected job.
+2. Stop the process during the second file of an album and reopen Music. Confirm the first file is
+   retained once, the pending row is cleaned, and the incomplete transfer restarts. Check behaviour
+   with notifications denied and after forcing a data-sync foreground timeout.
+3. Pull a predictive back gesture on an online artist or Settings, cancel it, then commit it. Check
+   the previous scroll position and the mini player. Test missing file and network failure feedback.

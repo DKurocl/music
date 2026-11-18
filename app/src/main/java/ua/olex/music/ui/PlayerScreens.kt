@@ -401,7 +401,13 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Artwork(state.artworkUri, Modifier.size(48.dp), 14.dp)
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(state.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    val subtitle = when {
+                        state.error != null -> state.error
+                        state.playWhenReady && state.buffering -> "Getting ready…"
+                        else -> state.artist
+                    }
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall,
+                        color = if (state.error != null) cs.error else cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 // Asked to play but still getting ready (a stream opening, a slow file): a ring around the
                 // button says so, instead of a pause button that seems to do nothing.
