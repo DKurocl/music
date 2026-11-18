@@ -175,3 +175,21 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
    app process and reopen playback. Verify the cursor resumes without changing the queue order.
 4. Verify the system media heart with the app closed, the transport at large display size,
    Home at maximum font size, and gapless offload with and without ReplayGain/EQ.
+
+
+## Now Playing cover and paused progress
+
+1. Pause partway through a local song. Press Home and reopen Music. The thumb, elapsed time and
+   mini-player line must show the paused position before Play. Repeat after the process is killed,
+   and seek back to zero while paused to verify an actual zero still appears immediately.
+2. Switch rapidly using Next, Previous and cover swipes. Try a row with no cover and an online
+   cover that loads slowly. Check for placeholder flashes, a second slide, or late artwork.
+3. Turn lyrics on and off during a long Playing from title, including at large font/display scale.
+   The overflow and lyric-settings button stay in their horizontal slots. Try TalkBack while the
+   lyrics options fade out.
+4. Switch between albums with square and non-square videos, songs of the same album, a missing
+   file, and a known corrupt video. Check the first frame, cropping, looping and still fallback.
+   Pause, leave the app, open lyrics and switch on Battery Saver. The video must not run offscreen.
+5. Tap Play and then Next rapidly. The transport buttons retain their positions across play,
+   pause and buffering. Review touch response and cover transitions at 120 Hz and with system
+   animations disabled.
