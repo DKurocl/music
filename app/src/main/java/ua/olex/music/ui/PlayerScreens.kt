@@ -9,7 +9,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.flow.map
@@ -25,7 +24,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -368,7 +366,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL)
+                PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL, sharedVisible = !covered)
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = when {
@@ -383,13 +381,13 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 // button says so, instead of a pause button that seems to do nothing.
                 val preparing = state.playWhenReady && state.buffering
                 KickIconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() },
-                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (preparing) stateDescription = "Getting ready" }) { kick ->
+                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (preparing) stateDescription = "Getting ready" }) { _ ->
                     if (preparing) CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 2.dp, color = cs.primary)
-                    PlayPauseSymbol(state.playWhenReady, 28.dp, kick)
+                    PlayPauseSymbol(state.playWhenReady, 28.dp)
                 }
                 KickIconButton(enabled = state.hasNext, onClick = { haptics.skip(true); onNext() },
                     modifier = Modifier.semantics { contentDescription = "Next" }) { kick ->
-                    Symbol(Glyph.NEXT, filled = true, kick = kick)
+                    SkipSymbol(true, 24.dp, kick)
                 }
             }
             // Progress along the bottom edge, inside the card's rounded corners.
@@ -509,7 +507,6 @@ internal fun PlayerPage(
             var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
             val visibleOffset = { if (gestureItem == latestOccurrence) dragOffset ?: swipe.value else 0f }
             val direction by remember { derivedStateOf { visibleOffset().compareTo(0f) } }
-            val context = LocalContext.current
             val powerSave = LocalPowerSave.current
             LaunchedEffect(occurrence, lyricsShown) {
                 settleJob?.cancel()
@@ -518,32 +515,35 @@ internal fun PlayerPage(
                 swipe.snapTo(0f)
                 gestureItem = occurrence
             }
-            DisposableEffect(context, nextArt, previousArt, coverWidth, lyricsShown) {
-                val preloads = if (coverWidth <= 1 || lyricsShown) emptyList() else listOfNotNull(nextArt, previousArt).distinct().map { uri ->
-                    coil3.SingletonImageLoader.get(context).enqueue(playerCoverRequest(context, uri, ArtworkPlan.LARGE, coverWidth))
-                }
-                onDispose { preloads.forEach { it.dispose() } }
-            }
             if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f))
             else Box(contentAlignment = Alignment.Center) {
+                // Keep the exact three requested images alive across index changes. The neighbour
+                // under the finger and the new centre read the same frame in the same composition.
+                val currentArt = state.artworkUri
+                val covers = listOfNotNull(currentArt, nextArt, previousArt).distinct().associateWith { uri ->
+                    androidx.compose.runtime.key(uri) {
+                        rememberCoverImage(uri, ArtworkPlan.LARGE, coverWidth.takeIf { it > 1 } ?: 0)
+                    }
+                }
+                val emptyCover = CoverImage(null, false)
                 val side = if (direction < 0) 1 else -1
                 if (direction != 0 && (if (side > 0) state.hasNext else canGoPrevious)) {
-                    Artwork(if (side > 0) nextArt else previousArt,
+                    PlayerCoverFace(covers[if (side > 0) nextArt else previousArt] ?: emptyCover,
                         Modifier.matchParentSize().graphicsLayer {
                             val x = visibleOffset()
                             val progress = (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
                             translationX = x + side * step
                             scaleX = 0.94f + 0.06f * progress
                             scaleY = scaleX
-                        }, 32.dp, pixels = ArtworkPlan.LARGE)
+                        }, 32.dp)
                 }
                 val tapFavourite by rememberUpdatedState(onFavourite)
                 val tapMore by rememberUpdatedState(onMore)
                 val isFavourite by rememberUpdatedState(favourite)
                 val next by rememberUpdatedState(onNext)
                 val previous by rememberUpdatedState(onPrevious)
-                PlayerArtwork(
-                    state.artworkUri,
+                PlayerCoverFace(
+                    covers[currentArt] ?: emptyCover,
                     Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
                         .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
                         .pointerInput(Unit) {
@@ -603,8 +603,8 @@ internal fun PlayerPage(
                             val scale = 1f - 0.06f * (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
                             scaleX = scale
                             scaleY = scale
-                        },
-                    corner = 32.dp, pixels = ArtworkPlan.LARGE, motion = motionCover,
+                        }.sharedPlayerCover(visible = true),
+                    corner = 32.dp, motion = motionCover,
                     moving = state.isPlaying && direction == 0 && !skipping,
                 )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
@@ -684,9 +684,8 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
                 Box(Modifier.width(slotWidth), contentAlignment = Alignment.Center) {
                     val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
                     val pressed by playInteraction.collectIsPressedAsState()
-                    var playKick by remember { mutableIntStateOf(0) }
                     androidx.compose.material3.FilledIconToggleButton(
-                        checked = playing, onCheckedChange = { playKick++; if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
+                        checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
                         interactionSource = playInteraction,
                         shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
                         colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
@@ -699,7 +698,7 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
                         if (state.playWhenReady && state.buffering) {
                             CircularProgressIndicator(Modifier.size(minOf(64.dp, width - 8.dp)), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
                         }
-                        PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, playKick, pressed)
+                        PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, pressed)
                     }
                 }
                 SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
@@ -713,31 +712,11 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
     }
 }
 
-/** Swap the two transport glyphs inside one fixed footprint and let the container shape respond separately. */
-@Composable
-private fun PlayPauseSymbol(playing: Boolean, size: Dp, kick: Int, pressed: Boolean = LocalIconPressed.current) {
-    val motion = MaterialTheme.motionScheme
-    if (LocalPowerSave.current) {
-        Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true)
-        return
-    }
-    androidx.compose.animation.AnimatedContent(
-        targetState = playing, modifier = Modifier.size(size), contentAlignment = Alignment.Center,
-        transitionSpec = {
-            (androidx.compose.animation.fadeIn(motion.fastEffectsSpec()) +
-                androidx.compose.animation.scaleIn(motion.fastEffectsSpec(), initialScale = 0.86f))
-                .togetherWith(androidx.compose.animation.fadeOut(motion.fastEffectsSpec()))
-        }, label = "play pause",
-    ) { active ->
-        Symbol(if (active) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true, kick = kick, pressed = pressed)
-    }
-}
-
 /** Previous and next: big bare icons (no tile behind), that give a little under the finger. */
 @Composable
 private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp = 64.dp, onClick: () -> Unit) {
     KickIconButton(onClick, enabled = enabled, modifier = Modifier.size(size).semantics { contentDescription = label }) { kick ->
-        Symbol(glyph, size = minOf(40.dp, size - 12.dp), filled = true, kick = kick)
+        SkipSymbol(glyph == Glyph.NEXT, minOf(40.dp, size - 12.dp), kick)
     }
 }
 

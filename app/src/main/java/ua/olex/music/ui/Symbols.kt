@@ -17,6 +17,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
@@ -88,7 +90,8 @@ fun Symbol(
     LaunchedEffect(kick, still) {
         if (still || kick == 0) tap.snapTo(0f)
         else {
-            tap.animateTo(1f, tween(65))
+            tap.snapTo(0f)
+            tap.animateTo(1f, tween(105))
             tap.animateTo(0f, motion.fastSpatialSpec())
         }
     }
@@ -96,7 +99,7 @@ fun Symbol(
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = SymbolFont.get(ctx); textAlign = Paint.Align.CENTER } }
     Canvas(modifier.size(size).graphicsLayer {
         val pulse = tap.value
-        val scale = pressScale * (1f - pulse * if (gesture == GlyphMotion.POP) 0.08f else 0.03f)
+        val scale = pressScale * (1f + pulse * if (gesture == GlyphMotion.POP) 0.21f else 0.08f)
         scaleX = scale
         scaleY = scale
         when (gesture) {
@@ -105,7 +108,7 @@ fun Symbol(
             GlyphMotion.NUDGE_LEFT -> translationX = pulse * -3.dp.toPx()
             GlyphMotion.DROP -> translationY = pulse * 3.dp.toPx()
             GlyphMotion.RISE -> translationY = pulse * -3.dp.toPx()
-            GlyphMotion.POP -> Unit
+            GlyphMotion.POP -> translationY = -pulse * 1.5.dp.toPx()
         }
     }) {
         // 960 units per em with the icon standing on the baseline: an em-sized glyph drawn with
@@ -115,6 +118,77 @@ fun Symbol(
         paint.color = color.toArgb()
         paint.fontVariationSettings = String.format(Locale.ROOT, "'FILL' %.3f, 'wght' %.1f", fill, weight)
         drawContext.canvas.nativeCanvas.drawText(glyph.text, this.size.width / 2, (this.size.height + em) / 2, paint)
+    }
+}
+
+/** The triangle unfolds into two stems. Playback changes from any controller retarget the same paths. */
+@Composable
+internal fun PlayPauseSymbol(playing: Boolean, size: Dp, pressed: Boolean = LocalIconPressed.current) {
+    val still = LocalPowerSave.current
+    val target = if (playing) 1f else 0f
+    val progress by animateFloatAsState(target, if (still) androidx.compose.animation.core.snap() else tween(240),
+        label = "play pause shape")
+    val scale by animateFloatAsState(if (pressed && !still) 0.86f else 1f,
+        MaterialTheme.motionScheme.fastSpatialSpec(), label = "transport press")
+    val color = LocalContentColor.current
+    val path = remember { Path() }
+    Canvas(Modifier.size(size).graphicsLayer { scaleX = scale; scaleY = scale }) {
+        val px = this.size.minDimension / 24f
+        val t = progress
+        fun between(a: Float, b: Float) = a + (b - a) * t
+        withTransform({ scale(px, px, androidx.compose.ui.geometry.Offset.Zero) }) {
+            fun stem(left: Float, right: Float, outerTop: Float, innerTop: Float) {
+                // A rounded stroke around the fill rounds the corners and seals the centre seam.
+                path.reset()
+                path.moveTo(left, outerTop)
+                path.lineTo(right, innerTop)
+                path.lineTo(right, 24f - innerTop)
+                path.lineTo(left, 24f - outerTop)
+                path.close()
+                drawPath(path, color)
+                drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(1.4f,
+                    join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            }
+            stem(between(6.5f, 5.5f), between(11.5f, 9.4f), between(4f, 4.5f), between(7f, 4.5f))
+            stem(between(11.5f, 14.6f), between(19.7f, 18.5f), between(7f, 4.5f), between(11.95f, 4.5f))
+        }
+    }
+}
+
+/** The arrow travels towards its stop, compresses, then rebounds. Previous mirrors the whole gesture. */
+@Composable
+internal fun SkipSymbol(forward: Boolean, size: Dp, kick: Int) {
+    val pulse = remember { Animatable(0f) }
+    val still = LocalPowerSave.current
+    val spring = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    LaunchedEffect(kick, still) {
+        if (kick == 0 || still) pulse.snapTo(0f) else {
+            pulse.snapTo(0f)
+            pulse.animateTo(1f, tween(120))
+            pulse.animateTo(0f, spring)
+        }
+    }
+    val color = LocalContentColor.current
+    val pressed = LocalIconPressed.current
+    val scale by animateFloatAsState(if (pressed && !still) 0.86f else 1f,
+        MaterialTheme.motionScheme.fastSpatialSpec(), label = "skip press")
+    val path = remember { Path() }
+    Canvas(Modifier.size(size).graphicsLayer { scaleX = if (forward) scale else -scale; scaleY = scale }) {
+        val unit = this.size.minDimension / 24f
+        val t = pulse.value
+        withTransform({ scale(unit, unit, androidx.compose.ui.geometry.Offset.Zero) }) {
+            val left = 4f + 5.5f * t
+            path.reset()
+            path.moveTo(left, 5f + t)
+            path.lineTo(14.4f + 3.4f * t, 12f)
+            path.lineTo(left, 19f - t)
+            path.close()
+            drawPath(path, color)
+            drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(1.3f,
+                join = androidx.compose.ui.graphics.StrokeJoin.Round))
+            drawRoundRect(color, androidx.compose.ui.geometry.Offset(16.5f + t * 2f, 4.5f),
+                androidx.compose.ui.geometry.Size(3.5f, 15f), androidx.compose.ui.geometry.CornerRadius(1.6f))
+        }
     }
 }
 
