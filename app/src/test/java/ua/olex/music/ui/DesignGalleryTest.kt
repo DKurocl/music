@@ -1,5 +1,7 @@
 package ua.olex.music.ui
 
+import androidx.compose.ui.graphics.graphicsLayer
+
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.LinearGradient
@@ -491,15 +493,16 @@ class DesignGalleryTest {
         compose.setContent { AppTheme {
             CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
                 coil3.compose.LocalAsyncImagePreviewHandler provides image) {
-                PlayerCoverLayout {
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                val travel = androidx.compose.runtime.remember { PlayerTravel(scope) }
+                androidx.compose.runtime.LaunchedEffect(expanded.value) { travel.settle(expanded.value, false) }
+                PlayerCoverLayout(travel) {
                     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-                        PlayerArtwork("file:///cover", Modifier.align(androidx.compose.ui.Alignment.BottomStart).size(48.dp),
-                            14.dp, 192, sharedVisible = !expanded.value)
-                        androidx.compose.animation.AnimatedVisibility(expanded.value,
-                            enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
-                            CompositionLocalProvider(LocalPlayerVisibility provides this) {
-                                PlayerArtwork("file:///cover", Modifier.size(260.dp), 32.dp, 1280, sharedVisible = true)
-                            }
+                        PlayerArtwork("file:///cover", Modifier.align(androidx.compose.ui.Alignment.BottomStart)
+                            .size(48.dp).graphicsLayer { alpha = if (travel.fraction > 0f) 0f else 1f },
+                            14.dp, 192, miniEndpoint = true)
+                        if (expanded.value || travel.fraction > 0f) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().playerTransform(travel)) {
+                            PlayerArtwork("file:///cover", Modifier.size(260.dp).playerCoverEndpoint(false), 32.dp, 1280)
                         }
                     }
                 }

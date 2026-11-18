@@ -104,11 +104,10 @@ fun Symbol(
     val still = LocalPowerSave.current
     val fill by animateFloatAsState(if (filled) 1f else 0f, if (still) androidx.compose.animation.core.snap() else motion.defaultEffectsSpec(), label = "fill")
     val weight by animateFloatAsState(if (bold) 600f else 400f, if (still) androidx.compose.animation.core.snap() else motion.fastSpatialSpec(), label = "weight")
-    val pressScale by animateFloatAsState(if (pressed && !still) 0.91f else 1f, motion.fastSpatialSpec(), label = "press")
+    val pressScale by animateFloatAsState(if (pressed && !still) 0.94f else 1f, if (pressed) tween(75) else motion.fastSpatialSpec(), label = "press")
     val tap = if (kick > 0 && !still) remember { Animatable(0f) }.also { pulse ->
         LaunchedEffect(kick) {
-            pulse.snapTo(0f)
-            pulse.animateTo(1f, tween(105))
+            pulse.animateTo(1f, tween(90))
             pulse.animateTo(0f, motion.fastSpatialSpec())
         }
     } else null
@@ -116,7 +115,7 @@ fun Symbol(
     val paint = remember(ctx) { SymbolPaint(ctx) }
     Canvas(modifier.size(size).graphicsLayer {
         val pulse = tap?.value ?: 0f
-        val scale = pressScale * (1f + pulse * if (gesture == GlyphMotion.POP) 0.21f else 0.08f)
+        val scale = pressScale * (1f + pulse * if (gesture == GlyphMotion.POP) 0.13f else 0.05f)
         scaleX = scale
         scaleY = scale
         when (gesture) {
