@@ -89,6 +89,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
         val miss = File(dir, key(name) + ".none")
         if (miss.isFile && System.currentTimeMillis() - miss.lastModified() < 30L * 24 * 3600 * 1000) return null
         return gate.withPermit {
+            ua.olex.music.playback.AudioLoadPriority.awaitAudioReady()
             withContext(Dispatchers.IO) {
                 cachedFile(name) ?: fetch(name)?.let { bytes ->
                     val file = File(dir, key(name) + ".jpg"); val tmp = File(dir, file.name + ".tmp")
@@ -112,6 +113,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
         val miss = File(dir, key(name) + ".nobio")
         if (miss.isFile && System.currentTimeMillis() - miss.lastModified() < 30L * 24 * 3600 * 1000) return null
         return gate.withPermit {
+            ua.olex.music.playback.AudioLoadPriority.awaitAudioReady()
             withContext(Dispatchers.IO) {
                 fetchBio(name)?.also { text ->
                     val file = File(dir, key(name) + ".bio"); val tmp = File(dir, file.name + ".tmp")

@@ -37,8 +37,20 @@ internal fun PlaylistBrowser(
     playlists: List<PlaylistUi>, actions: PersonalLibraryActions, modifier: Modifier = Modifier,
     currentId: String?, onPlay: (List<Track>, Int) -> Unit, onTrackActions: (Track) -> Unit,
     library: LibraryIndex = LibraryIndex.EMPTY,
+    openPlaylist: Long? = null, onOpenedPlaylist: () -> Unit = {},
+    onPlayFrom: ((List<Track>, Int, String) -> Unit)? = null,
 ) {
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
+    androidx.compose.runtime.LaunchedEffect(openPlaylist, playlists) {
+        if (openPlaylist != null && playlists.any { it.id == openPlaylist }) {
+            selectedId = openPlaylist
+            onOpenedPlaylist()
+        }
+    }
+    fun playPlaylist(playlist: PlaylistUi, index: Int) {
+        val origin = PlaybackOrigin("playlist", playlist.id.toString(), playlist.name).encode()
+        if (onPlayFrom != null) onPlayFrom(playlist.playable, index, origin) else onPlay(playlist.playable, index)
+    }
     var namingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var create by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -97,6 +109,11 @@ internal fun PlaylistBrowser(
             }
         }
         loaded
+    }
+
+    var editingRemote by remember(accountScope) { mutableStateOf<YouTubeMusic.Card?>(null) }
+    editingRemote?.let { card ->
+        RemotePlaylistSheet(card, graph.youTube, accountScope, onDismiss = { editingRemote = null })
     }
 
     if (create || namingId != null) {
@@ -158,10 +175,15 @@ internal fun PlaylistBrowser(
                     modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable { selectedId = playlist.id },
                 )
             }
-            // The owner's playlists on YouTube Music, under his own: the same list, a cloud on each.
-            if (youTubePlaylists.isNotEmpty()) {
-                item(key = "yt-h") { Text("On YouTube Music", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp)) }
-                items(youTubePlaylists, key = { "yt-" + it.id }) { card -> OnlineResultRow(card) }
+            // One list. Remote rows retain their source and editing capabilities.
+            items(youTubePlaylists, key = { "yt-" + it.id }) { card ->
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) { OnlineResultRow(card) }
+                    if (card.id.removePrefix("VL").startsWith("PL")) {
+                        IconButton(onClick = { editingRemote = card }, enabled = network,
+                            modifier = Modifier.semantics { contentDescription = "Edit ${card.title} on YouTube Music" }) { Symbol(Glyph.MORE) }
+                    }
+                }
             }
         } else {
             item {
@@ -175,7 +197,7 @@ internal fun PlaylistBrowser(
                     val missing = selected.songs.size - selected.playable.size
                     Text(listOfNotNull(if (selected.songs.size == 1) "1 song" else "${selected.songs.size} songs", if (missing > 0) "$missing unavailable" else null).joinToString(" · "),
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(enabled = selected.playable.isNotEmpty(), onClick = { onPlay(selected.playable, 0) }, modifier = Modifier.height(52.dp)) {
+                    Button(enabled = selected.playable.isNotEmpty(), onClick = { playPlaylist(selected, 0) }, modifier = Modifier.height(52.dp)) {
                         Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.width(8.dp)); Text("Play all")
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -193,7 +215,7 @@ internal fun PlaylistBrowser(
             // Keyed by position: the same song can be in a playlist twice.
             itemsIndexed(selected.songs, key = { position, row -> "$position:${row.song.id}" }) { position, row ->
                 SavedSongItem(row, currentId, onPlay = {
-                    if (row.track != null) onPlay(selected.playable, selected.songs.take(position).count { it.track != null })
+                    if (row.track != null) playPlaylist(selected, selected.songs.take(position).count { it.track != null })
                 }, onMore = { editingSong = position })
             }
         }

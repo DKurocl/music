@@ -290,18 +290,18 @@ class PlayerConnection(context: Context) {
     }
 
     /** Appends or inserts after the current item; queued additions keep their request order. */
-    fun enqueue(tracks: List<Track>, next: Boolean) {
+    fun enqueue(tracks: List<Track>, next: Boolean, origin: String? = null) {
         if (tracks.isEmpty()) return
         dismissQueueError()
         if (tracks.size > ua.olex.music.model.TrackSelection.MAX_ITEMS) {
             _state.value = _state.value.copy(queueError = "Add up to ${ua.olex.music.model.TrackSelection.MAX_ITEMS} songs per batch.")
             return
         }
-        val player = controller ?: return play(tracks, 0)
+        val player = controller ?: return play(tracks, 0, origin)
         val snapshot = tracks.toList()
         scope.launch {
             queueMutex.withLock {
-                val context = player.mediaMetadata.extras?.getString(CONTEXT_KEY)
+                val context = origin ?: player.mediaMetadata.extras?.getString(CONTEXT_KEY)
                 val items = withContext(Dispatchers.Default) {
                     snapshot.map { currentCoroutineContext().ensureActive(); mediaItem(it, playbackContext = context) }
                 }

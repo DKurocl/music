@@ -15,7 +15,8 @@ import androidx.media3.exoplayer.ExoPlayer
 @OptIn(UnstableApi::class)
 internal object PlayerFactory {
     fun create(context: Context, equalizer: () -> ua.olex.music.dsp.EqualizerSettings = { ua.olex.music.dsp.EqualizerSettings() },
-        replayGain: () -> ua.olex.music.dsp.ReplayGainSettings = { ua.olex.music.dsp.ReplayGainSettings() }): ExoPlayer {
+        replayGain: () -> ua.olex.music.dsp.ReplayGainSettings = { ua.olex.music.dsp.ReplayGainSettings() },
+        allowOffload: () -> Boolean = { false }): ExoPlayer {
         val renderers = object : DefaultRenderersFactory(context) {
             override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioOutputPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
                 ReplayGainAudioSink(androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
@@ -23,7 +24,7 @@ internal object PlayerFactory {
                     .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
                     .setAudioOutputProvider(EqualizerAudioOutputProvider(
                         androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider.Builder(context).build(), equalizer, context,
-                     )).build(), replayGain)
+                     )).build(), replayGain, allowOffload)
         }
             // Without this ExoPlayer cuts 24-bit and float PCM down to 16 bits before the mixer.
             // With it, high-resolution PCM retains its precision as 32-bit float; 16-bit audio is

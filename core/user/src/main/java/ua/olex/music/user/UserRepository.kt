@@ -1,6 +1,7 @@
 package ua.olex.music.user
 
 import androidx.room.withTransaction
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -63,6 +64,9 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         return known?.toSong() ?: register(listOf(SavedSong.from(track)), at).single()
     }
 
+    suspend fun isFavourite(track: Track): Boolean =
+        reference(track).first()?.let { dao.isFavourite(it.id) } ?: false
+
     suspend fun toggleFavourite(track: Track, existingId: String? = null) = database.withTransaction {
         val at = now()
         val song = personalReference(track, at)
@@ -72,6 +76,45 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     }
 
     suspend fun removeFavourite(id: String) = database.withTransaction { dao.removeFavourite(dao.canonicalId(id) ?: id) }
+
+    /** YouTube may remove only the exact favourite that this session previously imported. */
+    data class ImportedFavourite(val recordingId: String, val addedAt: Long)
+
+    suspend fun mergeImportedFavourites(
+        tracks: List<Track>,
+        previous: Map<String, ImportedFavourite>,
+        remoteVideoIds: Set<String>,
+        pendingVideoIds: Set<String>,
+    ): Map<String, ImportedFavourite> = database.withTransaction {
+        val origins = previous.toMutableMap()
+        val retainedRecordings = previous.filterKeys { it in remoteVideoIds || it in pendingVideoIds }
+            .values.mapNotNull { dao.canonicalId(it.recordingId) }.toSet()
+        for ((video, origin) in previous) {
+            if (video in remoteVideoIds || video in pendingVideoIds) continue
+            val id = dao.canonicalId(origin.recordingId)
+            if (id != null && id !in retainedRecordings && dao.latestFavourite(listOf(id)) == origin.addedAt) {
+                dao.removeFavourite(id)
+            }
+            origins.remove(video)
+        }
+        val fresh = tracks.distinctBy { it.id }.filter { track ->
+            val video = track.id.value.removePrefix("yt:")
+            video !in pendingVideoIds
+        }
+        val at = now()
+        val saved = register(fresh.map(SavedSong::from), at)
+        for ((track, song) in fresh.zip(saved)) {
+            val video = track.id.value.removePrefix("yt:")
+            if (!dao.isFavourite(song.id)) {
+                dao.addFavourite(FavouriteEntity(song.id, at))
+                origins[video] = ImportedFavourite(song.id, at)
+            } else if (origins[video] == null) {
+                val existing = origins.values.firstOrNull { dao.canonicalId(it.recordingId) == song.id }
+                if (existing != null && dao.latestFavourite(listOf(song.id)) == existing.addedAt) origins[video] = existing
+            }
+        }
+        origins
+    }
 
     /** Recording IDs own statistics. A unique old SongKey alias keeps unsaved/local callers readable. */
     val stats = kotlinx.coroutines.flow.combine(dao.recordingStats(), dao.recordingAliases()) { rows, aliases ->

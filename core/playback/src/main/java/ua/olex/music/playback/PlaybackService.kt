@@ -80,6 +80,7 @@ class PlaybackService : MediaLibraryService() {
         val player = session?.player ?: return
         val wanted = getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).getBoolean(OFFLOAD_KEY, false) &&
             !equalizer.active.active && replayGain.mode == ua.olex.music.dsp.ReplayGainMode.OFF && !usb.enabled
+        allowOffload = wanted
         val mode = if (wanted) androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED
             else androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_DISABLED
         if (player.trackSelectionParameters.audioOffloadPreferences.audioOffloadMode == mode) return
@@ -87,6 +88,7 @@ class PlaybackService : MediaLibraryService() {
             androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences.Builder()
                 .setAudioOffloadMode(mode).setIsGaplessSupportRequired(true).build()).build()
     }
+    @Volatile private var allowOffload = false
     @Volatile private var replayGain = ua.olex.music.dsp.ReplayGainSettings()
     /** The device callback reports every present device once at registration: not a "connect". */
     private var devicesSeen = false
@@ -112,7 +114,7 @@ class PlaybackService : MediaLibraryService() {
         replayGain = getSharedPreferences("replaygain-v1", MODE_PRIVATE).getString("settings", null)?.let {
             runCatching { ReplayGainCodec.decode(it) }.getOrNull()
         } ?: ua.olex.music.dsp.ReplayGainSettings()
-        val player = PlayerFactory.create(this, { equalizer.active }, { replayGain })
+        val player = PlayerFactory.create(this, { equalizer.active }, { replayGain }, { allowOffload })
         exo = player
         // Cast: the session's player hands playback to a Chromecast chosen in the output switcher.
         val playbackPrefs = getSharedPreferences(FadingPlayer.PREFS, MODE_PRIVATE)
@@ -132,6 +134,9 @@ class PlaybackService : MediaLibraryService() {
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
         session = builder.build()
+        (application as? PlaybackFavouriteOwner)?.let { owner ->
+            scope.launch { owner.favouriteChanges.collect { updateFavouriteButton() } }
+        }
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(routeCallback, null)
         scope.launch { devicesSeen = true }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(outputPrefs)
@@ -176,12 +181,15 @@ class PlaybackService : MediaLibraryService() {
         })
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
+                AudioLoadPriority.update(player.playWhenReady &&
+                    (player.playbackState == Player.STATE_BUFFERING))
                 if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) refillQueue()
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) = recoverSource()
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 lockLyrics?.update()
+                updateFavouriteButton()
                 val key = mediaItem?.mediaMetadata?.extras?.getString(PlayerConnection.QUEUE_KEY) ?: mediaItem?.mediaId
                 historyGate.transition(key, reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
                 recordCurrentPlayback()
@@ -203,6 +211,35 @@ class PlaybackService : MediaLibraryService() {
         })
     }
 
+    private val favouriteCommand = SessionCommand("ua.olex.music.favourite", Bundle.EMPTY)
+    private var favouriteButtonJob: Job? = null
+
+    private fun updateFavouriteButton() {
+        val current = session ?: return
+        val owner = application as? PlaybackFavouriteOwner ?: return
+        favouriteButtonJob?.cancel()
+        val item = current.player.currentMediaItem
+        if (item == null) {
+            current.setMediaButtonPreferences(emptyList())
+            return
+        }
+        favouriteButtonJob = scope.launch {
+            try {
+                val liked = withContext(Dispatchers.Default) { owner.isPlaybackFavourite(PlayerConnection.track(item)) }
+                if (current.player.currentMediaItem?.let(::occurrence) != occurrence(item)) return@launch
+                val icon = if (liked) androidx.media3.session.CommandButton.ICON_HEART_FILLED
+                    else androidx.media3.session.CommandButton.ICON_HEART_UNFILLED
+                val button = androidx.media3.session.CommandButton.Builder(icon)
+                    .setSessionCommand(favouriteCommand)
+                    .setDisplayName(if (liked) "Remove from favourites" else "Add to favourites")
+                    .setSlots(androidx.media3.session.CommandButton.SLOT_OVERFLOW)
+                    .build()
+                current.setMediaButtonPreferences(listOf(button))
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { current.setMediaButtonPreferences(emptyList()) }
+        }
+    }
+
     private fun refillQueue() {
         val owner = application as? PlaybackQueueOwner ?: return
         val player = exoOrNull() ?: return
@@ -213,8 +250,8 @@ class PlaybackService : MediaLibraryService() {
         refill = scope.launch {
             try {
                 val tracks = withContext(Dispatchers.Default) { items.map(PlayerConnection::track) }
-                val extension = owner.extendPlaybackQueue(tracks, current - from) ?: return@launch
-                val context = player.mediaMetadata.extras?.getString(PlayerConnection.CONTEXT_KEY)
+                val context = items.getOrNull(current - from)?.mediaMetadata?.extras?.getString(PlayerConnection.CONTEXT_KEY)
+                val extension = owner.extendPlaybackQueue(tracks, current - from, context) ?: return@launch
                 val selected = selectSources(extension.tracks.map { PlayerConnection.mediaItem(it, playbackContext = context) }, allowDirect = true)
                 if (player.currentMediaItemIndex != current ||
                     (from until player.mediaItemCount).map { occurrence(player.getMediaItemAt(it)) } != items.map(::occurrence)) return@launch
@@ -334,6 +371,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        AudioLoadPriority.update(false)
         lockLyrics?.release()
         runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
@@ -538,7 +576,13 @@ class PlaybackService : MediaLibraryService() {
             if (controller.uid == Process.myUid()) {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
-                        .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command).build(),
+                        .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command)
+                        .add(favouriteCommand).build(),
+                )
+            }
+            if (controller.uid != Process.myUid() && session.isMediaNotificationController(controller)) {
+                result.setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(favouriteCommand).build(),
                 )
             }
             return Futures.immediateFuture(result.build())
@@ -547,6 +591,22 @@ class PlaybackService : MediaLibraryService() {
         override fun onCustomCommand(
             session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == favouriteCommand.customAction) {
+                if (controller.uid != Process.myUid() && !session.isMediaNotificationController(controller)) {
+                    return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                }
+                val item = session.player.currentMediaItem
+                    ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                val owner = application as? PlaybackFavouriteOwner
+                    ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
+                return future {
+                    try {
+                        withContext(Dispatchers.Default) { owner.togglePlaybackFavourite(PlayerConnection.track(item)) }
+                        SessionResult(SessionResult.RESULT_SUCCESS)
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { SessionResult(SessionError.ERROR_BAD_VALUE) }
+                }
+            }
             if (customCommand.customAction == ReplayGainCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 val accepted = runCatching {

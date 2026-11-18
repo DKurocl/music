@@ -163,3 +163,15 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
    with notifications denied and after forcing a data-sync foreground timeout.
 3. Pull a predictive back gesture on an online artist or Settings, cancel it, then commit it. Check
    the previous scroll position and the mini player. Test missing file and network failure feedback.
+
+## Account edits, radio and adaptive controls
+
+1. Like a song on both devices, then unlike an imported song remotely. Refresh in Music and
+   verify only that favourite is removed. Disconnect while toggling likes, then reconnect.
+2. Edit a remote playlist containing two occurrences of one song. Move the second, remove the
+   first, and verify the remaining occurrence. Change the playlist on the web while its editor is
+   open and verify stale order is rejected rather than overwritten.
+3. Open a playlist from Playing from, then start a radio. Let a mix occurrence play, kill the
+   app process and reopen playback. Verify the cursor resumes without changing the queue order.
+4. Verify the system media heart with the app closed, the transport at large display size,
+   Home at maximum font size, and gapless offload with and without ReplayGain/EQ.

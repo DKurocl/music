@@ -49,6 +49,7 @@ internal fun HomePage(
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
+    val textScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
     // Everything Home shows is worked out from the whole library and the play counts, always off the
     // main thread. Until the first result the last one this process made is shown (or an empty Home
     // with the library's first album), so opening Home never waits on a pass over every song.
@@ -93,7 +94,7 @@ internal fun HomePage(
 
         // Bento: the album to jump back into, large; two bright one-tap starts beside it.
         item(key = "bento") {
-            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).height(264.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).height(264.dp + 144.dp * (textScale - 1f)), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (hero != null) Surface(onClick = { onOpenAlbum(hero) }, shape = RoundedCornerShape(32.dp), color = cs.primaryContainer,
                     modifier = Modifier.weight(1.45f).fillMaxHeight().squish(0.03f)) {
                     Box {
@@ -185,7 +186,7 @@ internal fun HomePage(
         // Listening as one big number, with a shape for character; Duplicates beside it only when needed.
         item(key = "cards") {
             Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(onClick = onStats, shape = RoundedCornerShape(32.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer, modifier = Modifier.weight(1f).height(150.dp).squish(0.03f)) {
+                Surface(onClick = onStats, shape = RoundedCornerShape(32.dp), color = cs.tertiaryContainer, contentColor = cs.onTertiaryContainer, modifier = Modifier.weight(1f).height(150.dp + 100.dp * (textScale - 1f)).squish(0.03f)) {
                     Box {
                         Box(Modifier.align(Alignment.TopEnd).offset(x = 24.dp, y = (-24).dp).size(120.dp)
                             .clip(androidx.compose.material3.MaterialShapes.Cookie12Sided.toShape()).background(cs.onTertiaryContainer.copy(alpha = 0.08f)))
@@ -201,7 +202,7 @@ internal fun HomePage(
                         }
                     }
                 }
-                if (duplicates > 0) Surface(onClick = onDuplicates, shape = RoundedCornerShape(32.dp), color = cs.surfaceContainerHigh, modifier = Modifier.weight(0.75f).height(150.dp)) {
+                if (duplicates > 0) Surface(onClick = onDuplicates, shape = RoundedCornerShape(32.dp), color = cs.surfaceContainerHigh, modifier = Modifier.weight(0.75f).height(150.dp + 100.dp * (textScale - 1f))) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.SpaceBetween) {
                         Box(Modifier.size(40.dp).clip(androidx.compose.material3.MaterialShapes.Pill.toShape()).background(cs.errorContainer), contentAlignment = Alignment.Center) {
                             Symbol(Glyph.DUPLICATES, color = cs.onErrorContainer, size = 20.dp)
@@ -500,7 +501,7 @@ internal fun StatsPage(library: LibraryIndex, stats: Map<String, SongStats>, mod
 @Composable
 private fun Fact(value: String, label: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
     container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, modifier: Modifier) {
-    Surface(shape = RoundedCornerShape(28.dp), color = container, contentColor = content, modifier = modifier.height(128.dp)) {
+    Surface(shape = RoundedCornerShape(28.dp), color = container, contentColor = content, modifier = modifier.then(Modifier.heightIn(min = 128.dp))) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.size(36.dp).clip(shape).background(content.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) { Symbol(glyph, size = 20.dp, filled = true) }
             Column {

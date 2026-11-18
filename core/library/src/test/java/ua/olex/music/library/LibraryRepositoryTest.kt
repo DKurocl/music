@@ -132,6 +132,27 @@ class LibraryRepositoryTest {
         assertEquals(2, scans)
     }
 
+    @Test fun advancingOneVolumeReadsChangedMetadataAndFindsDeletions() = runTest {
+        val dao = MemoryTracks()
+        var generation = "external_primary:one:10"
+        var full = 0
+        val repo = LibraryRepository(dao, { id ->
+            full++
+            listOf(entity("local:kept", id), entity("local:deleted", id))
+        }, StandardTestDispatcher(testScheduler), version = { generation },
+            changedSince = { id, since ->
+                assertEquals(10L, since)
+                listOf(entity("local:new", id))
+            },
+            currentIds = { setOf("local:kept", "local:new") },
+        )
+        assertEquals(2, repo.refresh())
+        generation = "external_primary:one:11"
+        assertEquals(2, repo.refresh())
+        assertEquals(1, full)
+        assertEquals(setOf("local:kept", "local:new"), dao.rows.value.map { it.id }.toSet())
+    }
+
     private class MemoryTracks : TrackDao {
         val rows = MutableStateFlow(listOf(entity("local:old", 1)))
         var replacements = 0
