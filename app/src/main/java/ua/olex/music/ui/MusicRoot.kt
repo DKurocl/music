@@ -665,7 +665,7 @@ fun MusicRoot(model: LibraryViewModel) {
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
             if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
             if (online || '#' in track.id.value) null else TrackAction(Glyph.DELETE, "Move to trash") { moveToTrash(listOf(track)) },
-            if (youTubeOn && network) TrackAction(Glyph.MOTION, "Find music video") { actionTrack = null; videoTrack = track },
+            if (youTubeOn && network) TrackAction(Glyph.MOTION, "Find music video") { actionTrack = null; videoTrack = track } else null,
             TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
         ))
     }
