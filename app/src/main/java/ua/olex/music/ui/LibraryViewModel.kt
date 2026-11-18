@@ -157,14 +157,20 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             state.copy(lyrics = ua.olex.music.lyrics.LyricsCleanup.clean(state.lyrics, track?.title, track?.artist))
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
-    /** A moving cover for the playing song, when its folder has one. */
-    val motionCover = combine(lyricTrack, graph.musicFiles.revision, graph.motionCovers.revision) { track, _, _ -> track }
+    internal data class PlaybackMotionCover(val trackId: String, val sourceUri: String, val videoUri: String)
+
+    /** A moving cover for the selected source, when there is one. */
+    internal val motionCover = combine(lyricTrack, graph.musicFiles.revision, graph.motionCovers.revision) { track, _, _ -> track }
         .mapLatest { track ->
+            if (track == null) return@mapLatest null
             // The album's own file first, then a cover.mp4 beside the songs; with neither, Apple
             // Music is asked once for the album (with the owner's key, on Wi-Fi unless allowed).
-            track?.let { graph.motionCovers.file(it) }?.let { android.net.Uri.fromFile(it).toString() }
-                ?: runCatching { graph.musicFiles.motionCover(track?.path) }.getOrNull()
-                ?: run { if (track != null) fetchAppleMotion(track); null }
+            val video = graph.motionCovers.file(track)?.let { android.net.Uri.fromFile(it).toString() }
+                ?: runCatching { graph.musicFiles.motionCover(track.path) }.getOrNull()
+            if (video == null) {
+                fetchAppleMotion(track)
+                null
+            } else PlaybackMotionCover(track.id.value, track.uri, video)
         }
         .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
