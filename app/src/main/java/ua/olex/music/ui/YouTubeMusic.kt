@@ -103,16 +103,23 @@ internal class YouTubeMusic(
         exact?.first ?: found.firstOrNull()?.first
     }
 
-    suspend fun artist(id: String, offline: Boolean = false, full: Boolean = false): OnlineArtist? = withContext(ioDispatcher) {
+    suspend fun artist(
+        id: String, offline: Boolean = false, full: Boolean = false,
+        onPage: (OnlineArtist) -> Unit = {},
+    ): OnlineArtist? = withContext(ioDispatcher) {
         val scope = pageScope()
         val key = if (full) "artist-full:$id" else "artist:$id"
         cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
             val saved = pageStore?.read(scope, key)?.let { runCatching { OnlinePageJson.artist(it) }.getOrNull() }
             if (offline) return@cached saved
+            saved?.let(onPage)
             val fresh = networkFallback(saved) {
                 val json = post("browse", """"browseId":${quote(id)}"""") ?: return@networkFallback null
                 val initial = parseArtist(id, json) ?: return@networkFallback null
-                if (full) expandArtist(initial, json, scope) else initial
+                if (full) {
+                    if (saved == null) onPage(initial)
+                    expandArtist(initial, json, scope, onPage)
+                } else initial
             }
             if (pageScope() != scope) return@cached null
             if (fresh != null && fresh !== saved) {
@@ -124,7 +131,7 @@ internal class YouTubeMusic(
     }
 
     /** Cached album metadata can open offline; online opens refresh the disk copy. */
-    suspend fun album(id: String, offline: Boolean = false): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) {
+    suspend fun album(id: String, offline: Boolean = false, summary: OnlineAlbum? = null): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) {
         val scope = pageScope()
         val key = "album:$id"
         cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
@@ -133,9 +140,15 @@ internal class YouTubeMusic(
             }
             if (offline) return@cached saved
             val fresh = networkFallback(saved) {
-                post("browse", """"browseId":${quote(id)}"""")?.let { json ->
-                    parseAlbum(id, json)?.also { if (pageScope() == scope) rememberContinuation("$scope/$id", continuationOf(json)) }
+                suspend fun browse(headers: Map<String, String>?): Pair<OnlineAlbum, List<Track>>? {
+                    val browseId = if (id.startsWith("PL") || id == "LM" || id == "SE") "VL$id" else id
+                    val json = post("browse", """"browseId":${quote(browseId)}"""", headers = headers) ?: return null
+                    return parseAlbum(id, json, summary)?.also {
+                        if (pageScope() == scope) rememberContinuation("$scope/$id", continuationOf(json))
+                    }
                 }
+                val headers = account()
+                browse(headers) ?: if (headers != null && id.removePrefix("VL") !in setOf("LM", "SE")) browse(null) else null
             }
             if (pageScope() != scope) return@cached null
             if (fresh != null && fresh !== saved) saveAlbum(scope, id, fresh)
@@ -162,26 +175,27 @@ internal class YouTubeMusic(
     }
 
     /** Follow artist shelf links and continuation pages, retaining the initial shelf on failure. */
-    private suspend fun expandArtist(initial: OnlineArtist, json: String, scope: String): OnlineArtist {
+    private suspend fun expandArtist(
+        initial: OnlineArtist, json: String, scope: String, onPage: (OnlineArtist) -> Unit,
+    ): OnlineArtist {
         var result = initial
-        kotlinx.coroutines.withTimeoutOrNull(10_000) {
-            for (section in artistSections(json)) {
-                if (pageScope() != scope) return@withTimeoutOrNull
-                val args = "\"browseId\":${quote(section.id)}" + (section.params?.let { ",\"params\":${quote(it)}" } ?: "")
-                var page = post("browse", args) ?: continue
-                val visited = HashSet<String>()
-                while (true) {
-                    val tracks = parseSearch(page, fallbackArtist = initial.name, keepOrder = true)
-                    val releases = artistReleaseCards(page)
-                    result = when (section.kind) {
-                        "songs" -> result.copy(songs = (result.songs + tracks).distinctBy { it.id })
-                        "albums" -> result.copy(albums = (result.albums + releases).distinctBy { it.id })
-                        else -> result.copy(singles = (result.singles + releases).distinctBy { it.id })
-                    }
-                    val next = continuationOf(page) ?: break
-                    if (!visited.add(next) || pageScope() != scope) break
-                    page = post("browse", "\"continuation\":${quote(next)}") ?: break
+        for (section in artistSections(json)) {
+            if (pageScope() != scope) return initial
+            val args = "\"browseId\":${quote(section.id)}" + (section.params?.let { ",\"params\":${quote(it)}" } ?: "")
+            var page = post("browse", args) ?: continue
+            val visited = HashSet<String>()
+            while (pageScope() == scope) {
+                result = when (section.kind) {
+                    "songs" -> result.copy(songs = (result.songs + parseSearch(page, initial.name, keepOrder = true)).distinctBy { it.id })
+                    "albums" -> result.copy(albums = (result.albums + artistReleaseCards(page)).distinctBy { it.id })
+                    else -> result.copy(singles = (result.singles + artistReleaseCards(page)).distinctBy { it.id })
                 }
+                onPage(result)
+                val token = continuationOf(page) ?: break
+                if (!visited.add(token)) break
+                page = post("browse", "\"continuation\":${quote(token)}")
+                    ?: post("browse", "", "&ctoken=${Uri.encode(token)}&continuation=${Uri.encode(token)}&type=next")
+                    ?: break
             }
         }
         return result
@@ -770,14 +784,22 @@ internal class YouTubeMusic(
         }
 
         /** An album page: its title, artist and cover, then its songs in order. */
-        fun parseAlbum(id: String, json: String): Pair<OnlineAlbum, List<Track>>? {
+        fun parseAlbum(id: String, json: String, summary: OnlineAlbum? = null): Pair<OnlineAlbum, List<Track>>? {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
-            val header = collect(root, "musicResponsiveHeaderRenderer").firstOrNull() ?: collect(root, "musicDetailHeaderRenderer").firstOrNull()
-            val title = text(header?.get("title")).ifEmpty { return null }
-            val artist = text(header?.get("straplineTextOne")).ifEmpty { text(header?.get("subtitle")).split("•").getOrNull(1)?.trim().orEmpty() }
-            val cover = biggestImage(header?.get("thumbnail"))
-            val album = OnlineAlbum(id, title, text(header?.get("subtitle")).ifEmpty { null }, cover)
-            val songs = parseSearch(json, fallbackArtist = artist.ifEmpty { null }, keepOrder = true).map { it.copy(album = it.album ?: title, artworkUri = it.artworkUri ?: cover) }
+            val header = listOf("musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer", "musicVisualHeaderRenderer", "musicEditablePlaylistDetailHeaderRenderer")
+                .asSequence().flatMap { collect(root, it).asSequence() }.firstOrNull { text(it["title"]).isNotBlank() }
+            val rows = collect(root, "musicResponsiveListItemRenderer")
+            val hasPlaylist = rows.isNotEmpty() || collect(root, "musicPlaylistShelfRenderer").isNotEmpty()
+            val title = text(header?.get("title")).ifEmpty { summary?.title?.takeIf { hasPlaylist } ?: return null }
+            val subtitle = text(header?.get("subtitle")).ifEmpty { summary?.subtitle.orEmpty() }
+            val playlist = id.startsWith("VL") || id.startsWith("PL") || id == "LM" || id == "SE"
+            val artist = if (playlist) null else text(header?.get("straplineTextOne"))
+                .ifEmpty { subtitle.split("•").getOrNull(1)?.trim().orEmpty() }.ifEmpty { null }
+            val cover = biggestImage(header?.get("thumbnail")) ?: summary?.cover
+            val album = OnlineAlbum(id, title, subtitle.ifEmpty { null }, cover)
+            val songs = songRows(rows, fallbackArtist = artist, keepOrder = true).map {
+                it.copy(album = it.album ?: title.takeUnless { playlist }, artworkUri = it.artworkUri ?: cover)
+            }
             if (id.startsWith("MPRE")) songs.forEach { track ->
                 val video = track.id.value.removePrefix("yt:")
                 albumIds.putIfAbsent(video, id)

@@ -38,16 +38,6 @@ internal sealed interface OnlineTarget {
     data class Album(val id: String, val title: String, val playlist: Boolean = false, val cover: String? = null, val subtitle: String? = null) : OnlineTarget
 }
 
-/**
- * The library's own page for an online target, when there is one: an artist the owner has opens his
- * artist page (which carries the YouTube Music sections too), so an artist is one page wherever it
- * is opened from. Albums stay online pages: they list every song, the owner's files marked in place.
- */
-internal fun libraryTwin(target: OnlineTarget, library: LibraryIndex): Pair<String, String>? = when (target) {
-    is OnlineTarget.Artist -> if (target.full) null else TextFold.fold(target.name).let { name -> library.artists.firstOrNull { TextFold.fold(it.name) == name } }?.let { "ARTISTS" to it.id }
-    else -> null
-}
-
 /** What online pages can do in the app: open another page, play, show a song's actions, open the owner's own artist. */
 internal class OnlineNav(
     val open: (OnlineTarget) -> Unit = {},
@@ -147,9 +137,30 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     var retry by remember { mutableIntStateOf(0) }
     val network = LocalNetwork.current
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
-    val state = rememberLoad(Triple(target, accountScope, network), retry, target.id?.takeUnless { target.full }?.let(graph.youTube::peekArtist)) {
-        val id = target.id ?: graph.youTube.artistId(target.name, offline = !network) ?: return@rememberLoad null
-        graph.youTube.artist(id, offline = !network, full = target.full)
+    val state = key(target, accountScope, network) {
+        produceState<Load<YouTubeMusic.OnlineArtist>>(Load.Wait, retry) {
+            val id = try {
+                target.id ?: graph.youTube.artistId(target.name, offline = !network)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: java.io.IOException) {
+                null
+            }
+            if (id == null) {
+                value = Load.Failed
+                return@produceState
+            }
+            val artist = try {
+                graph.youTube.artist(id, offline = !network, full = network) { value = Load.Done(it) }
+                    ?: graph.youTube.artist(id, offline = !network)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: java.io.IOException) {
+                null
+            }
+            if (artist != null) value = Load.Done(artist)
+            else if (value !is Load.Done) value = Load.Failed
+        }.value
     }
     val mine = key(target.name) { rememberOffMain(library, initial = null as MusicCollection?) {
         val name = TextFold.fold(target.name)
@@ -171,8 +182,11 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 }
                 placeholders(cover = true)
             }
-            Load.Failed -> item {
-                OnlineFailed(target.name, Glyph.SEARCH) { retry++ }
+            Load.Failed -> {
+                item { OnlineFailed(target.name, Glyph.SEARCH) { retry++ } }
+                mine?.let { local -> item {
+                    TextButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("From your library") }
+                } }
             }
             is Load.Done -> {
                 val artist = state.value
@@ -206,7 +220,6 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                     item(key = "songs-h") {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f)) { OnlineHeading("Top songs") }
-                            if (!target.full) TextButton(onClick = { nav.open(target.copy(id = artist.id, full = true)) }) { Text("See all") }
                         }
                     }
                     itemsIndexed(songs, key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
@@ -254,7 +267,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val network = LocalNetwork.current
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val state = rememberLoad(Triple(target, accountScope, network), retry, graph.youTube.peekAlbum(target.id)) {
-        graph.youTube.album(target.id, offline = !network)
+        graph.youTube.album(target.id, offline = !network, summary = YouTubeMusic.OnlineAlbum(target.id, target.title, target.subtitle, target.cover))
     }
     // A long playlist arrives in parts: the rest is fetched in the background and added under what is
     // on screen, so nothing moves while the owner reads or plays.
