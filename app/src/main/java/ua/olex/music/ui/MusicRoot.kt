@@ -186,14 +186,22 @@ fun MusicRoot(model: LibraryViewModel) {
     androidx.compose.runtime.LaunchedEffect(onlineTop) { onlineTitleShown = false }
     // YouTube Music's moods for Home; the usual set when it is off or unreachable (they still play
     // from the library by genre).
-    val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) { if (youTubeOn) value = context.graph.youTube.moods() }
+    // Both start from what was last seen (read off the main thread), so Home is whole at once and
+    // only refreshes; the network answer replaces them quietly.
+    val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) {
+        if (!youTubeOn) return@produceState
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedMoods() }?.let { value = it }
+        value = context.graph.youTube.moods()
+    }
     // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
     val onlinePageScope by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
     // A different account (or none) never sees the last one's playlists, home or moods.
     androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
     val youTubeHome by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), youTubeOn, youTubeSignedIn) {
-        value = if (youTubeOn) runCatching { context.graph.youTube.home() }.getOrDefault(emptyList()) else emptyList()
+        if (!youTubeOn) { value = emptyList(); return@produceState }
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
+        runCatching { context.graph.youTube.home() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
     }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -678,6 +686,14 @@ private fun NowPlaying(
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
+    // A song without lyrics: with the player open, they are looked up online once, by themselves
+    // (word-timed first), instead of waiting for the owner to find the button.
+    val asked = remember { mutableSetOf<String>() }
+    val online = LocalNetwork.current
+    LaunchedEffect(state.mediaId, lyricsState.mediaId, lyricsState.lyrics.lines.isEmpty(), online) {
+        val id = state.mediaId ?: return@LaunchedEffect
+        if (online && lyricsState.mediaId == id && lyricsState.lyrics.lines.isEmpty() && asked.add(id)) onFindLyricsOnline()
+    }
     if (lyricsOpen) LyricsSheet(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY,
         state, lyricOffset, position, onSeek, onLyricOffset, onDismiss = { lyricsOpen = false },
         source = if (lyricsState.mediaId == state.mediaId) lyricsState.source else "Loading local lyrics...",

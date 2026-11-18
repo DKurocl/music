@@ -10,6 +10,8 @@ import ua.olex.music.playback.PlaybackHistoryOwner
 import ua.olex.music.model.Track
 import ua.olex.music.ui.resolveLyrics
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -71,13 +73,31 @@ class AppGraph(context: Context) {
         flow
     }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
+
+    // One library index for the whole app, built once per change of the files and shared by every
+    // screen, the catalogue, Search and the player (each used to read the database and build its own).
+    private val shared = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+    /** The library (hidden folders left out), or null until first read. Started with the process. */
+    val index: kotlinx.coroutines.flow.StateFlow<ua.olex.music.model.LibraryIndex?> by lazy {
+        library.index.stateIn(shared, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+    }
+    /** Every file, hidden folders included: playback can still use them as sources. */
+    val allFiles: kotlinx.coroutines.flow.StateFlow<ua.olex.music.model.LibraryIndex?> by lazy {
+        library.tracks.map { ua.olex.music.model.LibraryIndex.build(it) }.flowOn(Dispatchers.Default)
+            .stateIn(shared, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+    }
+    suspend fun indexNow(): ua.olex.music.model.LibraryIndex = index.first { it != null }!!
+    /** The merged catalogue (files and saved YouTube Music songs), kept warm like [index]. */
+    val catalogueState: kotlinx.coroutines.flow.StateFlow<ua.olex.music.model.LibraryIndex?> by lazy {
+        catalogue.stateIn(shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(60_000), null)
+    }
     val artwork by lazy { ua.olex.music.library.LocalArtworkCache(app, musicFiles, ua.olex.music.playback.CacheBudget.localImageBytes(app)) }
     val player by lazy { PlayerConnection(app) }
     val output by lazy { OutputRouteMonitor(app) }
     val userLibrary by lazy { UserRepository(UserDatabase.open(app)) }
     /** Reconciliation is idempotent and never adds unrelated scanned files to the saved library. */
     val catalogue by lazy {
-        combine(library.index, userLibrary.catalogue, userLibrary.recordings) { local, saved, evidence ->
+        combine(index.filterNotNull(), userLibrary.catalogue, userLibrary.recordings) { local, saved, evidence ->
             userLibrary.reconcile(local, evidence)
             ua.olex.music.model.SavedCatalog.merge(local, saved, evidence)
         }.flowOn(Dispatchers.Default)
@@ -87,6 +107,11 @@ class AppGraph(context: Context) {
 @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams, ua.olex.music.playback.PlaybackLyricsOwner, ua.olex.music.playback.PlaybackQueueOwner,
     coil3.SingletonImageLoader.Factory, ua.olex.music.playback.PlaybackFavouriteOwner {
+    override fun onCreate() {
+        super.onCreate()
+        // The library starts loading with the process, while the splash shows, not when Home asks.
+        if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) graph.index
+    }
     /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
     override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
         .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("image_cache").absolutePath.toPath() })
@@ -128,22 +153,23 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         // Playback reads the current snapshot immediately. The service source observer refreshes
         // it independently; a long scan or its failure must not hold up an online/local Play.
         // Hidden library folders still remain legitimate playlist/playback sources.
-        val local = if (permitted) ua.olex.music.model.LibraryIndex.build(graph.library.tracks.first()) else ua.olex.music.model.LibraryIndex.EMPTY
+        val local = if (permitted) graph.allFiles.first { it != null }!! else ua.olex.music.model.LibraryIndex.EMPTY
         val policy = graph.userLibrary.sourcePolicy(local)
         val credits = ua.olex.music.ui.YouTubeMusic.indexOf(local)
         val availability: (String) -> Boolean = ::available
         tracks.map { track ->
             val original = policy.requested(track)
-            val proposed = if (ua.olex.music.ui.YouTubeMusic.isOnline(original)) credits.copyOf(original)?.takeIf {
-                original.durationMs > 0 && it.durationMs > 0
-            } else null
+            // The owner's file for an online song, proposed whenever the index finds one: lengths within
+            // three seconds when both are known, else the same version words (no live take for a studio
+            // song). A YouTube song often arrives without its length, which used to send it online.
+            val proposed = if (ua.olex.music.ui.YouTubeMusic.isOnline(original)) credits.copyOf(original) else null
             policy.select(original, rejected, allowDirect, availability, proposedLocal = proposed)
         }
     }
     override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?, remaining: Int) =
         graph.mix.extend(queue, current, context, remaining)
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
-        val file = graph.library.index.first().byId[track.id]?.takeIf { it.uri == track.uri }
+        val file = graph.indexNow().byId[track.id]?.takeIf { it.uri == track.uri }
         val known = file?.let { track.copy(metadata = it.metadata, path = it.path) } ?: track
         val lyrics = graph.resolveLyrics(known).lyrics
         val offset = graph.userLibrary.lyricOffset(ua.olex.music.model.SavedSong.from(known)).first()
@@ -181,7 +207,7 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     }
     private suspend fun buildTree(): ua.olex.music.model.BrowseTree = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val user = graph.userLibrary
-        val index = graph.catalogue.first()
+        val index = graph.catalogueState.first { it != null }!!
         val stats = runCatching { user.stats.first() }.getOrDefault(emptyMap())
         val favourites = runCatching { user.favourites.first() }.getOrDefault(emptyList()).mapNotNull { it.resolve(index)?.id }.toSet()
         val own = runCatching { user.smartPlaylists.first() }.getOrDefault(emptyList())

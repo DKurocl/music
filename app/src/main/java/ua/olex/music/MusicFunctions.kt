@@ -30,7 +30,7 @@ abstract class MusicFunctions : AppFunctionService() {
     suspend fun playMusic(query: String, shuffle: Boolean): String {
         if (query.isBlank()) throw AppFunctionInvalidArgumentException("query must not be empty")
         val graph = (application as MusicApp).graph
-        val songs = withContext(Dispatchers.Default) { BrowseTree(graph.library.index.first()).search(query, limit = 500) }
+        val songs = withContext(Dispatchers.Default) { BrowseTree(graph.indexNow()).search(query, limit = 500) }
         if (songs.isEmpty()) return "Nothing in your library matches \"$query\"."
         val queue = if (shuffle) songs.shuffled() else songs
         ua.olex.music.playback.QuickControl.play(this, queue)
