@@ -106,7 +106,7 @@ import ua.olex.music.playback.RepeatMode
 /** A cover from the shared cache, with a tonal fallback when it has no image. */
 @Composable
 internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ArtworkPlan.SMALL) {
-    ArtworkFrame(modifier, corner) {
+    ArtworkFrame(modifier, RoundedCornerShape(corner)) {
         Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
         if (uri != null) AsyncImage(
             model = ua.olex.music.library.ArtworkUris.variant(uri, LocalContext.current.packageName, pixels),
