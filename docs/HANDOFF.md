@@ -1,7 +1,10 @@
 # Playlists and one-tap moods on Home (2026-11-18)
 
 The horizontal mood strip stays below the Home toolbar. Each chip filters in one tap and
-animates its own glyph. Repeating a selection or pressing Back restores the default feed. Home starts with the recent album and the original Shuffle all and Liked tiles. A tap on the
+animates its own glyph. A dedicated 24-unit vector set covers the ten default moods and For you.
+Petals open, rain drops stagger, the focus brackets converge, and the heart beats twice. Marks
+rest between taps and snap to rest in Battery Saver. The gallery exports the same draw paths
+over a shared elapsed timeline and checks the rest and intermediate frames. Repeating a selection or pressing Back restores the default feed. Home starts with the recent album and the original Shuffle all and Liked tiles. A tap on the
 album opens it, its transport button pauses or resumes the existing queue when the album is already playing,
 and otherwise starts the album. Liked shows actual favourite sleeves. Quick picks pages have
 both swipe and button navigation and play from the exact combined queue position. Made for you opens the suggested playlist or starts the exact radio mix.
