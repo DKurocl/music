@@ -117,7 +117,7 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun DemoHome(modifier: Modifier, small: Boolean = false, onOpenPlaylist: (Long) -> Unit = {}) {
+    private fun DemoHome(modifier: Modifier, small: Boolean = false, onToggle: () -> Unit = {}, onOpenPlaylist: (Long) -> Unit = {}) {
         val local = androidx.compose.runtime.remember(small) { demoSongs.filterNot { YouTubeMusic.isOnline(it) }.take(if (small) 2 else 3) }
         val index = androidx.compose.runtime.remember(local) { LibraryIndex.build(local) }
         fun card(id: String, name: String, subtitle: String, cover: Int, kind: YouTubeMusic.Card.Kind) =
@@ -142,8 +142,17 @@ class DesignGalleryTest {
             if (small) emptyList() else listOf(card("VLsaved", "Weekend rotation", "12 songs", 5, YouTubeMusic.Card.Kind.PLAYLIST),
                 card("VLcity", "City lights", "23 songs", 4, YouTubeMusic.Card.Kind.PLAYLIST))
         }
-        HomePage(index, local, emptyMap(), now.mediaId, modifier, { _, _, _ -> }, {}, youTubeHome = remote,
-            playlists = own, accountPlaylists = account, favourites = local.take(2), onOpenPlaylist = onOpenPlaylist)
+        val playing = demoSongs.first().takeUnless { small }
+        CompositionLocalProvider(LocalPlayingTrack provides playing) {
+            HomePage(index, local, emptyMap(), playing?.id?.value, modifier, { _, _, _ -> }, {}, youTubeHome = remote,
+                playlists = own, accountPlaylists = account, favourites = local.take(2), onOpenPlaylist = onOpenPlaylist,
+                transportPlaying = playing != null, onToggle = onToggle)
+        }
+    }
+
+    private val demoNow by lazy {
+        val t = demoSongs.first()
+        now.copy(mediaId = t.id.value, track = t, title = t.title, artist = t.artist, album = t.album, artworkUri = t.artworkUri)
     }
 
     /** Coil draws in previews through this handler: the generated files are decoded at once. */
@@ -166,7 +175,7 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun Shell(title: String, place: Place?, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
+    private fun Shell(title: String, place: Place?, current: PlayerState = now, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
         CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
                 topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) },
@@ -179,7 +188,7 @@ class DesignGalleryTest {
                     androidx.compose.foundation.layout.Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(bottom = pad.calculateBottomPadding()).fillMaxWidth()
                         .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent,
                             0.55f to MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), 1f to MaterialTheme.colorScheme.surface))) {
-                        androidx.compose.foundation.layout.Box(Modifier.padding(top = 20.dp)) { MiniPlayer(now, { 90_000 }, {}, {}, {}) }
+                        androidx.compose.foundation.layout.Box(Modifier.padding(top = 20.dp)) { MiniPlayer(current, { 90_000 }, {}, {}, {}) }
                     }
                 }
             }
@@ -760,7 +769,7 @@ class DesignGalleryTest {
 
     /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
     @Test fun homeMood() {
-        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
+        compose.setContent { Shell("Home", Place.HOME, demoNow) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
         compose.onNodeWithTag("home-moods").performScrollToNode(hasText("Relax"))
         compose.onNodeWithText("Relax").performClick()
         shot("01c-home-mood")
@@ -774,14 +783,19 @@ class DesignGalleryTest {
 
     @Test fun home() {
         var opened: Long? = null
+        var toggles = 0
         var mix: String? = null
         var online: OnlineTarget? = null
-        compose.setContent { Shell("Home", Place.HOME) {
+        compose.setContent { Shell("Home", Place.HOME, demoNow) {
             CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { target -> online = target }, playMix = { id, _ -> mix = id })) {
-                DemoHome(Modifier.fillMaxSize().padding(it)) { id -> opened = id }
+                DemoHome(Modifier.fillMaxSize().padding(it), onToggle = { toggles++ }) { id -> opened = id }
             }
         } }
         shot("01-home")
+        compose.onNodeWithContentDescription("Pause In Transit").performClick()
+        org.junit.Assert.assertEquals(1, toggles)
+        compose.onNodeWithContentDescription("Next picks").performClick()
+        compose.onNodeWithContentDescription("First picks").performClick()
         compose.onNodeWithTag("home-feed").performScrollToNode(hasText("Night Drive Mix"))
         compose.onNodeWithText("Night Drive Mix").performClick()
         org.junit.Assert.assertEquals("radio", mix)
@@ -877,7 +891,7 @@ class DesignGalleryTest {
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun homeDark() {
-        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
+        compose.setContent { Shell("Home", Place.HOME, demoNow) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
         shot("13-home-dark")
     }
 }
