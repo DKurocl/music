@@ -99,6 +99,17 @@ internal val LocalCoverTransition = staticCompositionLocalOf<SharedTransitionSco
 internal val LocalPlayerVisibility = staticCompositionLocalOf<AnimatedVisibilityScope?> { null }
 private val coverTravel = BoundsTransform { _, _ -> tween(340, easing = FastOutSlowInEasing) }
 
+/** Both endpoints can draw the same decoded pixels on the first frame of the bounds animation. */
+@Composable
+internal fun PlayerCoverLayout(content: @Composable () -> Unit) {
+    androidx.compose.animation.SharedTransitionLayout(Modifier.fillMaxSize()) {
+        androidx.compose.runtime.CompositionLocalProvider(
+            LocalCoverTransition provides this, LocalPlayerCovers provides remember { PlayerCoverMemory() },
+            content = content,
+        )
+    }
+}
+
 /** Only the current still participates. The queue can contain several occurrences of the same URI. */
 @Composable
 internal fun Modifier.sharedPlayerCover(visible: Boolean): Modifier {
