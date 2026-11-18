@@ -355,7 +355,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val travel = remember(scope) { PlayerTravel(scope) }
     val openPlayer = expanded && playing.hasTrack
     LaunchedEffect(openPlayer, powerSave) { travel.settle(openPlayer, powerSave || !playing.hasTrack) }
-    PlayerCoverLayout(travel) {
+    PlayerCoverLayout(travel, playing.artworkUri) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
             .then(if (expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
@@ -489,12 +489,8 @@ fun MusicRoot(model: LibraryViewModel) {
         }
         }
         }
-        if (playing.hasTrack) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = insets.calculateBottomPadding()).fillMaxWidth()
-            .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to androidx.compose.ui.graphics.Color.Transparent,
-                0.55f to MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), 1f to MaterialTheme.colorScheme.surface))) {
-            Box(Modifier.padding(top = 20.dp)) {
-                MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, covered = expanded)
-            }
+        if (playing.hasTrack) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = insets.calculateBottomPadding()).fillMaxWidth()) {
+            MiniPlayer(playing, position = { model.positionMs }, onOpen = { expanded = true }, onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, covered = expanded)
         }
         }
     }
@@ -968,7 +964,16 @@ internal fun Arrival(key: Any, place: Place, deeper: Boolean, content: @Composab
     val sign = if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) -1 else 1
     Box(Modifier.fillMaxSize().graphicsLayer {
         val remaining = if (still) 0f else 1f - progress.value
-        alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
-        translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()
+        if (key == "page:STATS") {
+            val amount = remaining.coerceIn(0f, 1f)
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (sign > 0) 0.9f else 0.1f, 0f)
+            scaleX = 1f - 0.035f * amount
+            scaleY = scaleX
+            alpha = 1f - 0.32f * amount
+            translationY = -12.dp.toPx() * amount
+        } else {
+            alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
+            translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()
+        }
     }) { content() }
 }

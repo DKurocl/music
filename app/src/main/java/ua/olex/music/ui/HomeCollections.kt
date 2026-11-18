@@ -7,6 +7,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,7 +24,7 @@ import androidx.compose.ui.unit.dp
 /** A stable strip: the filter stays under the finger when a different Home feed arrives. */
 @Composable
 internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect: (String?) -> Unit) {
-    LazyRow(Modifier.fillMaxWidth().selectableGroup().testTag("home-moods"), contentPadding = PaddingValues(horizontal = 16.dp),
+    LazyRow(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).selectableGroup().testTag("home-moods"), contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         item(key = "all") { MoodChip("For you", Glyph.MIX, selected == null) { onSelect(null) } }
         items(moods, key = { "mood-" + it.label }) { mood ->
@@ -67,7 +68,8 @@ internal fun MixRail(cards: List<YouTubeMusic.Card>) {
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val cardWidth = if (cards.size == 1) (maxWidth - 32.dp).coerceAtLeast(1.dp) else 264.dp
+        val cardWidth = (maxWidth - 32.dp).coerceIn(1.dp, 264.dp)
+        val cardHeight = 116.dp
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(cards, key = { it.id }) { card ->
                 val radio = card.kind == YouTubeMusic.Card.Kind.MIX
@@ -75,8 +77,8 @@ internal fun MixRail(cards: List<YouTubeMusic.Card>) {
                     if (radio) nav.playMix(card.id, card.title)
                     else nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
                 }, color = if (radio) cs.primaryContainer else cs.tertiaryContainer, shape = RoundedCornerShape(24.dp),
-                    modifier = Modifier.width(cardWidth).squish(0.025f)) {
-                    Row(Modifier.padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    modifier = Modifier.width(cardWidth).height(cardHeight).squish(0.025f)) {
+                    Row(Modifier.fillMaxSize().padding(9.dp), verticalAlignment = Alignment.CenterVertically) {
                         Artwork(card.cover, Modifier.size(86.dp), 17.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
                         Column(Modifier.weight(1f).padding(start = 12.dp, end = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Symbol(if (radio) Glyph.RADIO else Glyph.PLAYLIST, size = 20.dp)
@@ -124,8 +126,8 @@ internal fun PersonalPlaylistRail(local: List<PlaylistUi>, remote: List<YouTubeM
                                     if (playlist != null) onOpen(playlist.id) else if (card != null)
                                         nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
                                 }, color = cs.surfaceContainerHigh, shape = RoundedCornerShape(18.dp),
-                                    modifier = Modifier.weight(1f).squish(0.02f)) {
-                                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    modifier = Modifier.width((width - 6.dp) / 2).height(76.dp).squish(0.02f)) {
+                                    Row(Modifier.fillMaxSize().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         if (playlist != null) PlaylistCover(playlist.playable, 46.dp, 12.dp) else Artwork(card?.cover, Modifier.size(46.dp), 12.dp)
                                         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                                             Text(title, style = MaterialTheme.typography.titleSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)

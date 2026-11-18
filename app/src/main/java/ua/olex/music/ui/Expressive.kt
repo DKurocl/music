@@ -66,28 +66,16 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
-/**
- * The playing song's mark, over its cover: a soft scrim and three rounded bars that dance while the
- * music plays and rest, still, when it is paused.
- */
+/** A compact playback badge keeps the cover visible and distinguishes pause from playback. */
 @Composable
 internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
-    // A small loop in a list: 30 frames a second is plenty and keeps the panel from holding 120 Hz.
-    Box(modifier.preferredFrameRate(30f).background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.45f)), contentAlignment = Alignment.Center) {
-        androidx.compose.foundation.layout.Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(3.dp),
-            verticalAlignment = Alignment.Bottom, modifier = Modifier.size(width = 18.dp, height = 16.dp)) {
-            // Each bar keeps its own range and never drops to a square, so even a still frame reads as
-            // uneven bars (playing), never as three dots (a menu).
-            val rest = listOf(0.45f, 0.85f, 0.6f)
-            val from = listOf(0.35f, 1f, 0.5f); val to = listOf(0.95f, 0.4f, 1f)
-            rest.forEachIndexed { i, still ->
-                val level = if (playing) androidx.compose.animation.core.rememberInfiniteTransition(label = "bar$i").animateFloat(from[i], to[i],
-                    androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(380 + i * 130, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-                        androidx.compose.animation.core.RepeatMode.Reverse, androidx.compose.animation.core.StartOffset(i * 120)), label = "level$i").value else still
-                Box(Modifier.width(4.dp).fillMaxHeight(level).clip(androidx.compose.foundation.shape.RoundedCornerShape(2.dp)).background(androidx.compose.ui.graphics.Color.White))
-            }
+    Box(modifier) {
+        Box(Modifier.align(Alignment.BottomEnd).padding(2.dp).size(22.dp)
+            .clip(androidx.compose.foundation.shape.CircleShape).background(cs.primary),
+            contentAlignment = Alignment.Center) {
+            Symbol(if (playing) Glyph.PLAY else Glyph.PAUSE, size = 14.dp, color = cs.onPrimary, filled = true)
         }
     }
 }
