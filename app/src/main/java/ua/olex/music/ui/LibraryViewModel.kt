@@ -30,6 +30,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.Dispatchers
 import ua.olex.music.user.UserRepository
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import ua.olex.music.graph
@@ -424,10 +427,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         playingFrom = from
         // The last choice wins: a slower earlier one (an online list still being matched) is dropped,
         // so it can never replace what the owner picked after it.
-        playJob?.cancel()
+        cancelPendingPlay()
         // All online: swap in the owner's files off the main thread (the index may still be building
         // right after a start); a list of files plays at once.
-        if (list.none(YouTubeMusic::isOnline)) { playJob = null; player.play(list, index, from); return }
+        if (list.none(YouTubeMusic::isOnline)) { player.play(list, index, from); return }
         playJob = viewModelScope.launch {
             val songs = kotlinx.coroutines.withContext(Dispatchers.Default) { localFirst(list) }
             kotlinx.coroutines.yield()
@@ -435,6 +438,21 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
     }
     private var playJob: Job? = null
+
+    private fun cancelPendingPlay() {
+        playJob?.cancel()
+        playJob = null
+        mixLoading = false
+    }
+
+    private fun prepareMix(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) {
+        cancelPendingPlay()
+        mixLoading = true
+        playJob = viewModelScope.launch {
+            try { block() }
+            finally { if (kotlinx.coroutines.currentCoroutineContext().isActive) mixLoading = false }
+        }
+    }
 
     private fun playChecked(songs: List<Track>, index: Int) {
         if (graph.network.value || songs.none(YouTubeMusic::isOnline)) { player.play(songs, index, playingFrom); return }
@@ -449,6 +467,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Bumped when the player should open (a tap on the media notification). */
     var playerRequest by mutableStateOf(0); private set
     fun requestPlayer() { playerRequest++ }
+    fun consumePlayerRequest() { playerRequest = 0 }
 
     /** Bumped when Play had to leave songs out (or play nothing) because the phone is offline. */
     var offlineNotice by mutableStateOf(0); private set
@@ -503,58 +522,52 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      * Starts a mix from [seed]: YouTube Music's radio for it when online, else the library. A song
      * already playing keeps playing and the mix replaces what comes after it.
      */
-    fun startMix(seed: Track) {
-        viewModelScope.launch {
-            mixLoading = true
-            try {
-                val recent = recentKeys()
-                val yt = graph.youTube
-                val page = if (!graph.youTubeOn.value) null else runCatching {
-                    val id = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else yt.find(seed)?.id?.value?.removePrefix("yt:")
-                    id?.let { yt.radio(it) }
-                }.getOrNull()
-                // Cleaning, matching against the library and the local fallback run off the main
-                // thread: with a large library they are the part that made the screen stall.
-                val seen = (recent + Mix.songKey(seed)).toMutableSet()
-                val stats = stats.value
-                val (online, upcoming) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                    val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
-                    val songs = library.value?.songs.orEmpty()
-                    online to localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats, recent))
-                }
-                if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return@launch }
-                seen += upcoming.map(Mix::songKey)
-                val state = playing.value
-                val current = state.mediaId
-                val seedHere = localFirst(listOf(seed)).first()
-                if (current != null && (current == seedHere.id.value || current == seed.id.value)) {
-                    // Keep the song playing; replace what follows it.
-                    player.clearUpcoming()
-                    player.enqueue(upcoming, false)
-                } else player.play(listOf(seedHere) + upcoming, 0)
-                mixRun = if (online.size >= 5) PlaybackMix.Run(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seedHere.id.value + seed.id.value).toMutableSet()) else null
-                mixLabel = "Mix from ${seed.title}"
-            } finally { mixLoading = false }
+    fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
+
+    private suspend fun playMix(seed: Track, label: String) {
+        val recent = withContext(Dispatchers.Default) { recentKeys() }
+        val yt = graph.youTube
+        val page = if (!graph.youTubeOn.value) null else runCatching {
+            val id = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else yt.find(seed)?.id?.value?.removePrefix("yt:")
+            id?.let { yt.radio(it) }
+        }.getOrNull()
+        // Cleaning, matching against the library and the local fallback run off the main
+        // thread: with a large library they are the part that made the screen stall.
+        val seen = (recent + Mix.songKey(seed)).toMutableSet()
+        val stats = stats.value
+        val (online, upcoming, seedHere) = withContext(Dispatchers.Default) {
+            val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
+            val songs = library.value?.songs.orEmpty()
+            Triple(online, localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats, recent)), localFirst(listOf(seed)).first())
         }
+        if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return }
+        seen += upcoming.map(Mix::songKey)
+        val state = playing.value
+        val current = state.mediaId
+        if (current != null && (current == seedHere.id.value || current == seed.id.value)) {
+            // Keep the song playing; replace what follows it.
+            player.clearUpcoming()
+            player.enqueue(upcoming, false)
+        } else player.play(listOf(seedHere) + upcoming, 0)
+        mixRun = if (online.size >= 5) PlaybackMix.Run(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seedHere.id.value + seed.id.value).toMutableSet()) else null
+        mixLabel = label
     }
 
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, cleaned and endless like any mix. */
-    fun startPlaylistRadio(playlistId: String, label: String) {
-        viewModelScope.launch {
-            mixLoading = true
-            try {
-                val page = runCatching { graph.youTube.playlistRadio(playlistId) }.getOrNull()
-                val tracks = page?.tracks.orEmpty()
-                if (tracks.isEmpty()) { userError = "YouTube Music didn't answer. Check the connection."; return@launch }
-                val first = tracks.first()
-                val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
-                val queue = localFirst(listOf(first) + Mix.clean(tracks.drop(1), first, seen))
-                seen += queue.map(Mix::songKey)
-                player.play(queue, 0)
-                mixRun = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
-                mixLabel = label
-            } finally { mixLoading = false }
+    fun startPlaylistRadio(playlistId: String, label: String) = prepareMix {
+        val page = runCatching { graph.youTube.playlistRadio(playlistId) }.getOrNull()
+        coroutineContext.ensureActive()
+        val tracks = page?.tracks.orEmpty()
+        if (tracks.isEmpty()) { userError = "YouTube Music didn't answer. Check the connection."; return@prepareMix }
+        val first = tracks.first()
+        val (queue, seen) = withContext(Dispatchers.Default) {
+            val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
+            localFirst(listOf(first) + Mix.clean(tracks.drop(1), first, seen)) to seen
         }
+        seen += queue.map(Mix::songKey)
+        player.play(queue, 0)
+        mixRun = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
+        mixLabel = label
     }
 
     // The title/artist index of each new library is built here, off the main thread, so online pages
@@ -588,36 +601,34 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      * Plays a mood: its first YouTube Music playlist, cleaned like a mix, flowing into the radio of
      * its first song when it ends; without one, a mix grown from a library song of that mood.
      */
-    internal fun startMood(mood: YouTubeMusic.Mood, page: YouTubeMusic.MoodPage?) {
-        viewModelScope.launch {
-            mixLoading = true
-            try {
-                val yt = graph.youTube
-                val listed = page?.playlists?.firstOrNull()?.let { runCatching { yt.album(it.id)?.second }.getOrNull() }.orEmpty().ifEmpty { page?.songs.orEmpty() }
-                if (listed.size >= 5) {
-                    val first = listed.first()
-                    val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
-                    val queue = localFirst(listOf(first) + Mix.clean(listed.drop(1), first, seen))
-                    seen += queue.map(Mix::songKey)
-                    player.play(queue, 0)
-                    mixRun = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
-                    mixLabel = mood.label
-                    return@launch
-                }
-                val songs = library.value?.songs.orEmpty()
-                val matches = Mix.moodSongs(mood.label, songs)
-                if (matches.isEmpty()) { userError = "Nothing for \"${mood.label}\" yet: YouTube Music isn't reachable and no song in the library has a genre that fits."; return@launch }
-                startMix(matches.random())
-                mixLabel = mood.label
-            } finally { mixLoading = false }
+    internal fun startMood(mood: YouTubeMusic.Mood, page: YouTubeMusic.MoodPage?) = prepareMix {
+        val yt = graph.youTube
+        val listed = page?.playlists?.firstOrNull()?.let { runCatching { yt.album(it.id)?.second }.getOrNull() }.orEmpty().ifEmpty { page?.songs.orEmpty() }
+        coroutineContext.ensureActive()
+        if (listed.size >= 5) {
+            val first = listed.first()
+            val (queue, seen) = withContext(Dispatchers.Default) {
+                val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
+                localFirst(listOf(first) + Mix.clean(listed.drop(1), first, seen)) to seen
+            }
+            seen += queue.map(Mix::songKey)
+            player.play(queue, 0)
+            mixRun = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
+            mixLabel = mood.label
+            return@prepareMix
         }
+        val songs = library.value?.songs.orEmpty()
+        val matches = withContext(Dispatchers.Default) { Mix.moodSongs(mood.label, songs) }
+        if (matches.isEmpty()) { userError = "Nothing for \"${mood.label}\" yet: YouTube Music isn't reachable and no song in the library has a genre that fits."; return@prepareMix }
+        playMix(matches.random(), mood.label)
     }
 
     /** Plays what a spoken or typed search finds; an empty query plays the library shuffled. */
     fun playSearch(query: String) {
-        viewModelScope.launch {
+        cancelPendingPlay()
+        playJob = viewModelScope.launch {
             val tree = (getApplication<Application>() as ua.olex.music.MusicApp).browseTree()
-            val found = if (query.isBlank()) emptyList() else tree.search(query)
+            val found = withContext(Dispatchers.Default) { if (query.isBlank()) emptyList() else tree.search(query) }
             if (found.isNotEmpty()) play(found, 0) else library.value?.songs?.takeIf { it.isNotEmpty() }?.let(::playShuffled)
         }
     }
@@ -625,6 +636,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Plays [list] with shuffle on, from a random song; the queue keeps its order for "shuffle off". */
     fun playShuffled(list: List<Track>) {
         if (list.isEmpty()) return
+        cancelPendingPlay()
         graph.mix.stop()
         playingFrom = null
         if (!playing.value.shuffle) player.toggleShuffle()
@@ -637,7 +649,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun setSleepTimer(minutes: Int) = player.setSleepTimer(minutes)
     fun toggleShuffle() = player.toggleShuffle()
     fun cycleRepeat() = player.cycleRepeat()
-    fun playQueueItem(key: String) = player.playQueueItem(key)
+    fun playQueueItem(key: String) {
+        cancelPendingPlay()
+        player.playQueueItem(key)
+    }
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
     fun enqueue(tracks: List<Track>, next: Boolean) {
