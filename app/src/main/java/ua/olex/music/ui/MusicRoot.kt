@@ -252,7 +252,12 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     val powerSave = rememberPowerSave()
     val network by context.graph.network.collectAsStateWithLifecycle()
-    androidx.compose.runtime.LaunchedEffect(model.playerRequest) { if (model.playerRequest > 0 && playing.hasTrack) expanded = true }
+    androidx.compose.runtime.LaunchedEffect(model.playerRequest, playing.hasTrack) {
+        if (model.playerRequest > 0 && playing.hasTrack) {
+            expanded = true
+            model.consumePlayerRequest()
+        }
+    }
     // Play left songs out (or found nothing to play) because the phone is offline: say so once.
     androidx.compose.runtime.LaunchedEffect(model.offlineNotice) {
         if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")

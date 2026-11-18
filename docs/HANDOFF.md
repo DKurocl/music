@@ -1,3 +1,19 @@
+# Playback and artwork reliability (Codex, 2026-11-18)
+
+Based on main `45be07f`, whose GitHub Actions run 44175207911 passed. The recording/source
+migration is already present in main. This branch addresses the remaining app selection races,
+cold-start notification entry, widget ordering, motion cover replacement and local cover locks.
+The widget reads one preferences snapshot and serializes both submissions with its render generation.
+Cover writes use fixed lock stripes so simultaneous requests for the same digest keep the same lock.
+Queue taps, shuffles, search and first mix pages supersede older app selections. Mix and search
+preparation run off the UI dispatcher. The player intent waits for a connected session with a track.
+
+Local diff check passed. Local APK compilation is unavailable: no Android SDK or Gradle, and the
+skill's version probe could not reach the artifact endpoints from the shell sandbox. Branch CI and
+physical Pixel/XM5, notification entry and motion playback acceptance are pending.
+Central source selection, durable artist/album pages and account-scoped bidirectional sync remain open.
+See AUDIT_CONTINUATION.md for the previous backlog.
+
 # Active recording/source continuation (Codex, 2026-11-17)
 
 Branch `agent/recording-sources`, based on main `d2ef360` after music-v1109. Owner asked to keep
