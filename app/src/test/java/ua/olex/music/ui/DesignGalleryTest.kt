@@ -101,6 +101,31 @@ class DesignGalleryTest {
             queueIndex = 0)
     }
 
+    // Original demo sleeves exercise the same Home and queue used on the phone, with both sources.
+    private val demoSongs by lazy {
+        val titles = listOf("Midnight Transit", "Afterimage", "Glass Pavilion", "Silver Fold", "Night Drive", "Acid Print")
+        val artists = listOf("Still Lines", "Noon Echo", "Blue Hour", "Figure Eight", "City Static", "Soft Circuit")
+        titles.mapIndexed { i, title ->
+            val cover = File(app.cacheDir, "sleeve-$i.jpg")
+            requireNotNull(javaClass.getResourceAsStream("/home-art/$i.jpg")).use { input ->
+                cover.outputStream().use { output -> input.copyTo(output) }
+            }
+            val stream = i % 2 == 1
+            Track(TrackId(if (stream) "yt:demo$i" else "local:demo$i"), if (stream) "ytm://demo$i" else "content://fixture/$i",
+                title, artists[i], genre = "Downtempo", artworkUri = cover.toURI().toString(), durationMs = 180_000)
+        }
+    }
+
+    @Composable
+    private fun DemoHome(modifier: Modifier) {
+        val local = androidx.compose.runtime.remember { demoSongs.filterNot { YouTubeMusic.isOnline(it) } }
+        val index = androidx.compose.runtime.remember { LibraryIndex.build(local) }
+        val remote = androidx.compose.runtime.remember {
+            listOf(YouTubeMusic.Shelf("Quick picks", demoSongs.filter { YouTubeMusic.isOnline(it) }, emptyList()))
+        }
+        HomePage(index, local, emptyMap(), now.mediaId, modifier, { _, _, _ -> }, {}, youTubeHome = remote)
+    }
+
     /** Coil draws in previews through this handler: the generated files are decoded at once. */
     @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     private val images = coil3.compose.AsyncImagePreviewHandler { request ->
@@ -124,7 +149,8 @@ class DesignGalleryTest {
     private fun Shell(title: String, place: Place?, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
         CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
-                topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) }) },
+                topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) },
+                    actions = { if (place == Place.HOME) HomeActions({}, {}) }) },
                 bottomBar = { PlacesBar(place) {} },
             ) { pad ->
                 // Same frame as the app: the page runs under the floating mini player, with a fade behind it.
@@ -714,8 +740,7 @@ class DesignGalleryTest {
 
     /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
     @Test fun homeMood() {
-        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}, moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
         compose.onNodeWithText("Moods").performClick()
         shot("01d-home-moods")
         compose.onNodeWithText("Relax").performClick()
@@ -723,10 +748,9 @@ class DesignGalleryTest {
     }
 
     @Test fun home() {
-        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}, favourites = library.songs.take(5), moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
         shot("01-home")
-        compose.onAllNodes(hasScrollToIndexAction())[0].performScrollToIndex(5)
+        compose.onNodeWithTag("home-sleeves").performScrollToIndex(2)
         shot("01b-home-lower")
     }
 
@@ -812,8 +836,7 @@ class DesignGalleryTest {
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun homeDark() {
-        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}, moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
         shot("13-home-dark")
     }
 }

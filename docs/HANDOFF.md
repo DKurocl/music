@@ -1,3 +1,12 @@
+# Home cover composition (Codex, 2026-11-18)
+
+The opening three tracks form a connected cover spread. The remaining positions use a snapping
+horizontal shelf. Each sleeve plays its original queue index and offers actions on long press.
+The mood chooser uses tonal illustrated tiles. The same Home composable and toolbar are rendered
+with original sample artwork in DesignGalleryTest. The artwork is a test resource only.
+References: [PixelPlayer Home](https://github.com/PixelPlayerHQ/PixelPlayer) (album art collage)
+and [Rhythm Home](https://github.com/cromaguy/Rhythm) (featured carousel).
+
 # Quick picks and Moods (Codex, 2026-11-18)
 
 Home opens to one queue. Recent plays, favourites, play counts and account-scoped YouTube
