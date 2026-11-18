@@ -74,11 +74,13 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         val phrases = queries(artist, title)
         val results = ArrayList<SoulseekClient.Result>()
         var best: SoulseekClient.Result? = null
+        val partial = prefs.getString("peer-file:$id", null)
         for ((i, q) in phrases.withIndex()) {
             update(if (phrases.size > 1) "Searching Soulseek\u2026 ${i + 1} of ${phrases.size}" else "Searching Soulseek\u2026", null)
             results += client.search(q, seconds = 7)
-            best = chooseSong(results, title, durationMs / 1000)
-            if (best != null) break
+            val same = partial?.let { key -> results.firstOrNull { peerFileKey(it) == key } }
+            best = same ?: chooseSong(results, title, durationMs / 1000)
+            if (same != null || (partial == null && best != null)) break
         }
         save(id, best ?: error("Not on Soulseek in lossless or 320 kbps"), artist, album ?: "Singles", update, 1, 1)
     }
@@ -88,9 +90,16 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         listOf("a", artist, album).joinToString(SEP)) { id, update ->
         update("Searching Soulseek…", null)
         var files: List<SoulseekClient.Result>? = null
+        val partial = prefs.getString("peer-file:$id", null)
         for (q in queries(artist, album)) {
-            files = chooseAlbum(client.search(q, seconds = 10))
-            if (files != null) break
+            val results = client.search(q, seconds = 10)
+            val same = partial?.let { key -> results.firstOrNull { peerFileKey(it) == key } }
+            val original = same?.let { candidate ->
+                chooseAlbum(results.filter { it.username == candidate.username && it.folder == candidate.folder })
+            }
+            if (original != null) { files = original; break }
+            if (files == null) files = chooseAlbum(results)
+            if (partial == null && files != null) break
         }
         if (files == null) error("This album isn't on Soulseek in lossless or 320 kbps")
         files.forEachIndexed { i, f -> save(id, f, artist, album, update, i + 1, files.size) }
@@ -132,7 +141,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             finished.forEach { job ->
                 edit.remove(record(job.id))
                 edit.remove("completed:${job.id}")
-                if (prefs.contains("file:${job.id}")) scope.launch { runCatching { cleanInterruptedFile(job.id) } }
+                if (prefs.contains("file:${job.id}")) scope.launch { runCatching { cleanInterruptedFile(job.id, discard = true) } }
                 context.getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_BASE + job.id)
             }
             edit.apply()
@@ -281,23 +290,27 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         }
     }
 
-    private fun cleanInterruptedFile(id: Int) {
+    private fun cleanInterruptedFile(id: Int, discard: Boolean = false) {
         val raw = prefs.getString("file:$id", null) ?: return
         val uri = android.net.Uri.parse(raw)
         val resolver = context.contentResolver
         val pending = resolver.query(uri, arrayOf(MediaStore.Audio.Media.IS_PENDING), null, null)?.use {
             it.moveToFirst() && it.getInt(0) == 1
         } ?: false
+        if (pending && !discard) return
         if (pending) resolver.delete(uri, null, null)
         val finished = prefs.getString("file-key:$id", null)
         val exists = !pending && resolver.query(uri, arrayOf(MediaStore.Audio.Media._ID), null, null)?.use { it.moveToFirst() } == true
-        val edit = prefs.edit().remove("file:$id").remove("file-key:$id")
+        val edit = prefs.edit().remove("file:$id").remove("file-key:$id").remove("peer-file:$id")
         if (exists && finished != null) {
             val completed = prefs.getStringSet("completed:$id", emptySet()).orEmpty()
             edit.putStringSet("completed:$id", completed + finished)
         }
         edit.apply()
     }
+
+    private fun peerFileKey(file: SoulseekClient.Result): String =
+        org.json.JSONArray(listOf(file.username, file.path, file.size)).toString()
 
     @Volatile private var lastKind: String? = null
 
@@ -315,26 +328,37 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             put(MediaStore.Audio.Media.RELATIVE_PATH, "Music/Soulseek/${safe(artist)}/${safe(album)}/")
             put(MediaStore.Audio.Media.IS_PENDING, 1)
         }
-        val uri = resolver.insert(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values) ?: error("Couldn't create the file")
-        prefs.edit().putString("file:$id", uri.toString()).putString("file-key:$id", fileKey).apply()
+        // A partial can be appended only for the same advertised file on the same peer.
+        val peerKey = peerFileKey(file)
+        val previous = prefs.getString("file:$id", null)?.let(android.net.Uri::parse)
+        val previousSize = if (previous != null && prefs.getString("peer-file:$id", null) == peerKey) {
+            resolver.openFileDescriptor(previous, "r")?.use { it.statSize } ?: -1L
+        } else -1L
+        val resume = previous != null && previousSize in 0..file.size
+        if (!resume && previous != null) cleanInterruptedFile(id, discard = true)
+        val offset = if (resume) previousSize else 0L
+        val uri = if (resume) requireNotNull(previous) else
+            resolver.insert(MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values) ?: error("Couldn't create the file")
+        prefs.edit().putString("file:$id", uri.toString()).putString("file-key:$id", fileKey)
+            .putString("peer-file:$id", peerKey).apply()
         val prefix = if (of > 1) "$n of $of · " else ""
-        try {
-            update("${prefix}Waiting for ${file.username}…", null)
+        if (offset < file.size) {
+            val waiting = if (offset > 0) "Resuming with" else "Waiting for"
+            update("$prefix$waiting ${file.username}…", null)
             var shown = -1
-            resolver.openOutputStream(uri)!!.use { out ->
+            val output = resolver.openOutputStream(uri, if (offset == 0L) "wt" else "wa") ?: error("Couldn't open the download")
+            output.use { out ->
                 client.download(file, out, { got, size ->
                     val percent = (got * 100 / size.coerceAtLeast(1)).toInt()
-                    if (percent != shown) { shown = percent; update("${prefix}$percent% of ${megabytes(size)}", got.toFloat() / size) }
-                })
+                    if (percent != shown) { shown = percent; update("$prefix$percent% of ${megabytes(size)}", got.toFloat() / size) }
+                }, offset = offset)
             }
-            currentCoroutineContext().ensureActive()
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null)
-            prefs.edit().putStringSet(checkpoint, completed + fileKey).remove("file:$id").remove("file-key:$id").apply()
-        } catch (failure: Exception) {
-            runCatching { resolver.delete(uri, null, null) }
-            prefs.edit().remove("file:$id").remove("file-key:$id").apply()
-            throw failure
         }
+        currentCoroutineContext().ensureActive()
+        val written = resolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+        check(written == file.size) { "The downloaded file size doesn't match the transfer" }
+        check(resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null) == 1) { "Couldn't publish the download" }
+        prefs.edit().putStringSet(checkpoint, completed + fileKey).remove("file:$id").remove("file-key:$id").remove("peer-file:$id").apply()
     }
 
     private val lastShown = java.util.concurrent.ConcurrentHashMap<Int, Long>()

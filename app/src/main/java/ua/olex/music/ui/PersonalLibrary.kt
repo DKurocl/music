@@ -56,6 +56,26 @@ internal fun PlaylistBrowser(
     var editingSong by rememberSaveable { mutableStateOf<Int?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val snackbar = LocalSnackbar.current
+    fun removeOccurrence(id: Long, song: String, index: Int) {
+        val remove = actions.removeWithUndo
+        if (remove == null || snackbar == null) {
+            actions.remove(id, song, index)
+            return
+        }
+        scope.launch {
+            try {
+                val undo = remove(id, song, index)
+                if (undo == null) {
+                    snackbar.showSnackbar("The playlist changed. Try again.")
+                } else if (snackbar.showSnackbar("Song removed", actionLabel = "Undo", withDismissAction = true,
+                        duration = SnackbarDuration.Long) == SnackbarResult.ActionPerformed && !undo()) {
+                    snackbar.showSnackbar("The playlist changed. The song couldn't be restored.")
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { snackbar.showSnackbar("Couldn't update the playlist.") }
+        }
+    }
     var loadingDocument by remember { mutableStateOf(false) }
     var loaded by remember { mutableStateOf<PlaylistDocuments.Loaded?>(null) }
     var documentMessage by remember { mutableStateOf<String?>(null) }
@@ -138,7 +158,7 @@ internal fun PlaylistBrowser(
                 if (editRow.track != null) TextButton(onClick = { onTrackActions(editRow.track); editingSong = null }) { Text("Song actions") }
                 TextButton(enabled = index > 0, onClick = { actions.move(selected.id, editRow.song.id, -1, index); editingSong = null }) { Text("Move up") }
                 TextButton(enabled = index < selected.songs.lastIndex, onClick = { actions.move(selected.id, editRow.song.id, 1, index); editingSong = null }) { Text("Move down") }
-                TextButton(onClick = { actions.remove(selected.id, editRow.song.id, index); editingSong = null }) { Text("Remove from playlist") }
+                TextButton(onClick = { removeOccurrence(selected.id, editRow.song.id, index); editingSong = null }) { Text("Remove from playlist") }
             }
         }, confirmButton = { TextButton(onClick = { editingSong = null }) { Text("Close") } })
     }

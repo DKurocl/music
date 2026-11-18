@@ -1,3 +1,20 @@
+# Final audit software pass (Codex, 2026-11-18)
+
+[код] Player cover uses one media identity for its mini and expanded shared elements.
+Local playlist entries can be restored by Undo to their original position if the remaining
+playlist still matches. Remote edits rebase onto the freshly fetched playlist when unrelated
+entries changed, reject conflicting moves, and treat an already removed occurrence as complete.
+The provider does not expose an atomic compare-and-set write.
+
+[код] Partials remain hidden in MediaStore until the expected byte count is present. A retry can
+resume from the current byte offset for the same peer, path and advertised size. If the original
+copy is unavailable, a different copy starts at zero. Multi-volume refresh adds generation filters
+for each changed mounted volume. Mount changes or inconsistent results trigger full reconciliation.
+
+Full Android CI and physical Pixel 10 Pro XL/XM5 measurement are separate. Baseline-profile
+recording, 120 Hz traces, TalkBack, live account edits and approved screen goldens remain pending
+physical or visual acceptance. Lock-screen lyrics remain deferred by the owner.
+
 # Library, system playback and layout continuation (Codex, 2026-11-18)
 
 This branch includes the download package and fixes its nullable player-subtitle compile error.

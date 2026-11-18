@@ -35,6 +35,7 @@ class LibraryRepository internal constructor(
     private val version: suspend () -> String? = { null },
     private val changedSince: (suspend (Long, Long) -> List<TrackEntity>)? = null,
     private val currentIds: (suspend () -> Set<String>)? = null,
+    private val changedVolumes: (suspend (Long, Map<String, Long>) -> List<TrackEntity>)? = null,
 ) {
     constructor(context: Context, database: LibraryDatabase, files: LocalMusicFiles? = null) : this(
         database.tracks(), { scanId -> MediaStoreScanner.scan(context.applicationContext, scanId) },
@@ -42,7 +43,7 @@ class LibraryRepository internal constructor(
         enrich = { rows -> FileTagScanner.enrich(rows, database.tracks().observeAll().first(), cue = { path -> files?.sidecarCueBlocking(path) }, read = AndroidTagSource(context.applicationContext)::read) },
         excluded = LibraryFolders.excluded(context.applicationContext),
         artworkPackage = context.applicationContext.packageName, artworkRevision = files?.revision ?: flowOf(0L),
-        changedSince = { scanId, previous -> MediaStoreScanner.scan(context.applicationContext, scanId, previous) },
+        changedVolumes = { scanId, volumes -> MediaStoreScanner.scan(context.applicationContext, scanId, volumes) },
         currentIds = { MediaStoreScanner.musicIds(context.applicationContext) },
         version = metadata@{
             val revisions = ArrayList<String>()
@@ -98,17 +99,44 @@ class LibraryRepository internal constructor(
         }
     }
 
-    /** A version change or multiple volumes need a full scan; generations belong to one volume. */
+    private data class VolumeStamp(val version: String, val generation: Long)
+
+    private fun volumeStamps(value: String): Map<String, VolumeStamp>? {
+        val stamps = LinkedHashMap<String, VolumeStamp>()
+        for (entry in value.split('|')) {
+            val volume = entry.substringBefore(':')
+            val last = entry.lastIndexOf(':')
+            if (last <= volume.length + 1) return null
+            val generation = entry.substring(last + 1).toLongOrNull() ?: return null
+            if (volume.isBlank() || generation < 0 || stamps.put(volume, VolumeStamp(
+                    entry.substring(volume.length + 1, last), generation,
+                )) != null) return null
+        }
+        return stamps
+    }
+
+    /** Mount changes, provider resets and inconsistent ID reads trigger full reconciliation. */
     private suspend fun incremental(current: String?, scanId: Long): List<TrackEntity>? {
-        val previous = lastVersion ?: return null
-        if (current == null || '|' in previous || '|' in current) return null
-        if (previous.substringBeforeLast(':') != current.substringBeforeLast(':')) return null
-        val since = previous.substringAfterLast(':').toLongOrNull() ?: return null
-        if ((current.substringAfterLast(':').toLongOrNull() ?: return null) <= since) return null
-        val scanDelta = changedSince ?: return null
+        val old = lastVersion?.let(::volumeStamps) ?: return null
+        val new = current?.let(::volumeStamps) ?: return null
+        if (old.keys != new.keys) return null
+        val changed = LinkedHashMap<String, Long>()
+        for ((volume, before) in old) {
+            val after = new.getValue(volume)
+            if (before.version != after.version || before.generation > after.generation) return null
+            if (before.generation < after.generation) changed[volume] = before.generation
+        }
+        if (changed.isEmpty()) return null
         val ids = currentIds ?: return null
         return try {
-            val updated = enrich(scanDelta(scanId, since)).associateBy { it.id }
+            val volumeScanner = changedVolumes
+            val legacyScanner = changedSince
+            val delta = when {
+                volumeScanner != null -> volumeScanner(scanId, changed)
+                legacyScanner != null && old.size == 1 -> legacyScanner(scanId, changed.values.single())
+                else -> return null
+            }
+            val updated = enrich(delta).associateBy { it.id }
             val existing = dao.snapshot(Origin.LOCAL.prefix).associateBy { it.id }
             val live = ids()
             if (live.any { it !in updated && it !in existing }) return null

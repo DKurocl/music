@@ -316,6 +316,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         rename = { id, name -> editUserData { renamePlaylist(id, name) } },
         delete = { id -> editUserData { deletePlaylist(id) } },
         add = { id, tracks, duplicates -> editUserData { addToPlaylist(id, tracks, duplicates) } },
+        removeWithUndo = { id, song, position ->
+            val repository = graph.userLibrary
+            val removed = repository.removeFromPlaylist(id, song, position)
+            if (removed == null) null else suspend { repository.restorePlaylistOccurrence(removed) }
+        },
         remove = { id, song, position -> editUserData { removeFromPlaylist(id, song, position) } },
         move = { id, song, delta, position -> editUserData { moveInPlaylist(id, song, delta, position) } },
         removeFavourite = { id -> editUserData {
