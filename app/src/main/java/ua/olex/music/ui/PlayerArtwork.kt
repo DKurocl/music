@@ -105,9 +105,10 @@ internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels:
         }
         if (uri != null) key(uri) {
             val request = remember(context, uri, pixels) { playerCoverRequest(context, uri, pixels) }
+            // Keep Coil's draw/size resolver attached even while the incoming image is transparent.
             AsyncImage(
                 model = request, contentDescription = null, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value },
+                modifier = Modifier.fillMaxSize(), alpha = alpha.value,
                 onSuccess = {
                     if (requestToken === latestToken) {
                         resolved.value = it.painter

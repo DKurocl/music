@@ -410,8 +410,8 @@ class DesignGalleryTest {
         try {
             compose.runOnIdle { cover.value = loading }
             compose.mainClock.advanceTimeBy(112)
+            compose.waitUntil(timeoutMillis = 2_000) { requests.any { "waiting-cover.png" in it } }
             org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
-            org.junit.Assert.assertTrue(requests.any { "waiting-cover.png" in it })
         } finally {
             compose.mainClock.autoAdvance = true
         }
