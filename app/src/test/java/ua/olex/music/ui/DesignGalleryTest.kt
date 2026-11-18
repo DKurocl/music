@@ -23,6 +23,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -361,12 +362,13 @@ class DesignGalleryTest {
         compose.mainClock.autoAdvance = false
         try {
             compose.runOnIdle { showLyrics.value = false }
-            compose.mainClock.advanceTimeBy(32)
+            compose.mainClock.advanceTimeBy(64)
             org.junit.Assert.assertEquals(initialActions, actions.fetchSemanticsNode().boundsInRoot)
-            lyrics.assertDoesNotExist()
         } finally {
             compose.mainClock.autoAdvance = true
         }
+        compose.waitForIdle()
+        lyrics.assertDoesNotExist()
         compose.runOnIdle { showLyrics.value = true }
         org.junit.Assert.assertEquals(initialLyrics, lyrics.fetchSemanticsNode().boundsInRoot)
         org.junit.Assert.assertEquals(initialActions, actions.fetchSemanticsNode().boundsInRoot)
@@ -375,17 +377,23 @@ class DesignGalleryTest {
     @Test
     @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     fun playerKeepsTheDecodedCoverWhileTheNextImageLoads() {
-        val first = "file:///first-cover.png"
-        val second = "file:///second-cover.png"
-        val cover = androidx.compose.runtime.mutableStateOf(first)
-        val nextRequested = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val nextReady = kotlinx.coroutines.CompletableDeferred<Unit>()
-        val handler = coil3.compose.AsyncImagePreviewHandler { request ->
-            val next = request.data.toString().endsWith("second-cover.png")
-            if (next) { nextRequested.complete(Unit); nextReady.await() }
-            Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply {
-                eraseColor(if (next) android.graphics.Color.BLUE else android.graphics.Color.RED)
-            }.asImage()
+        val cover = androidx.compose.runtime.mutableStateOf("file:///first-cover.png")
+        val loading = "file:///waiting-cover.png"
+        val loaded = "file:///second-cover.png"
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val handler = coil3.compose.AsyncImagePreviewHandler { _, request ->
+            val model = request.data.toString()
+            requests.add(model)
+            if (model.contains("waiting-cover.png")) coil3.compose.AsyncImagePainter.State.Loading(null)
+            else {
+                val picture = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply {
+                    eraseColor(if (model.contains("second-cover.png")) android.graphics.Color.BLUE else android.graphics.Color.RED)
+                }
+                coil3.compose.AsyncImagePainter.State.Success(
+                    androidx.compose.ui.graphics.painter.BitmapPainter(picture.asImageBitmap()),
+                    coil3.request.SuccessResult(picture.asImage(), request),
+                )
+            }
         }
         compose.setContent { AppTheme {
             CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
@@ -398,10 +406,16 @@ class DesignGalleryTest {
             return image.getPixel(image.width / 2, image.height / 2)
         }
         org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
-        compose.runOnIdle { cover.value = second }
-        compose.waitUntil { nextRequested.isCompleted }
-        org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
-        nextReady.complete(Unit)
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnIdle { cover.value = loading }
+            compose.mainClock.advanceTimeBy(112)
+            org.junit.Assert.assertEquals(android.graphics.Color.RED, centre())
+            org.junit.Assert.assertTrue(requests.any { "waiting-cover.png" in it })
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.runOnIdle { cover.value = loaded }
         compose.waitForIdle()
         org.junit.Assert.assertEquals(android.graphics.Color.BLUE, centre())
     }

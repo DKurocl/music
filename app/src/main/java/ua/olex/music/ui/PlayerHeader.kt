@@ -23,7 +23,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,11 +64,13 @@ internal fun PlayerHeader(
                 enter = if (saving) androidx.compose.animation.EnterTransition.None else fadeIn(motion.fastEffectsSpec()) + scaleIn(motion.fastSpatialSpec(), initialScale = 0.88f),
                 exit = if (saving) androidx.compose.animation.ExitTransition.None else fadeOut(motion.fastEffectsSpec()) + scaleOut(motion.fastEffectsSpec(), targetScale = 0.88f),
             ) {
-                KickIconButton(
-                    onClick = onLyricsTools, enabled = lyricsVisible,
-                    modifier = if (lyricsVisible) Modifier.semantics { contentDescription = "Lyrics options" }
-                        else Modifier.semantics { hideFromAccessibility() },
-                ) { kick -> Symbol(Glyph.TUNE, kick = kick) }
+                if (lyricsVisible) {
+                    KickIconButton(onLyricsTools, Modifier.semantics { contentDescription = "Lyrics options" }) { kick ->
+                        Symbol(Glyph.TUNE, kick = kick)
+                    }
+                } else {
+                    Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { Symbol(Glyph.TUNE) }
+                }
             }
         }
         KickIconButton(onClick = { onMore?.invoke() }, enabled = onMore != null, modifier = Modifier.semantics { contentDescription = "Song actions" }) { kick ->

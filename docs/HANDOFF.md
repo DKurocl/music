@@ -15,9 +15,20 @@ Remote cover work is delayed until selection settles. An automatic fetch cannot 
 attachment. Play/pause transitions within a stable button shape; press feedback uses short bounded
 motion and keeps touch targets stable. Navigation no longer stacks two independent glyph effects.
 
-First CI 44247703675 found the implicit RowScope AnimatedVisibility overload inside a Box.
-The call is now qualified. Added Robolectric checks that capture the still during a delayed next
-cover and measure the two header controls through the lyrics exit. Updated CI evidence pending.
+[код] Paused progress uses the published session position while the MediaController reconnects.
+Controller detachment captures the last position; live clock polling starts only when connected
+and playing. Known media duration remains available before the restored source prepares. The
+transport reserves the Play button's largest width so a shape change leaves adjacent taps in place.
+A superseded Apple Motion request now cancels its network call before resolving the next album.
+
+The first two branch CI runs stopped on the Box AnimatedVisibility overload (44247703675) and a
+test size import (44248049594). Both were corrected in `faf35f1`. CI 44248543564 passed the paused-position regression and found
+two issues in the new Compose fixtures for intermediate frames. The fading lyrics icon now has a
+decorative-only exit, and the delayed cover fixture returns a deterministic Loading state.
+Robolectric scenarios cover a
+delayed incoming cover, fixed lyrics action positions and 2:23 displayed before reconnecting
+playback. CI evidence: https://github.com/DKurocl/music/actions/workflows/build.yml
+See PHONE_CHECK.md for physical acceptance.
 Physical 120 Hz, real video decode, large font and TalkBack acceptance still need the Pixel.
 
 # Now Playing format and motion (Codex, 2026-11-18)
