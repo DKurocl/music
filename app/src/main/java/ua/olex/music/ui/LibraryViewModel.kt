@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -90,6 +91,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     internal val online: StateFlow<OnlineSearch?> = query
         .debounce { if (it.isBlank()) 0 else 450 }
         .combine(graph.youTubeOn) { text, on -> text to on }
+        .combine(graph.network) { (text, on), connected -> text to (on && connected) }
         .combine(searchRetry) { request, _ -> request }
         .mapLatest { (text, on) ->
             if (!on || text.trim().length < 2) return@mapLatest null
@@ -99,14 +101,20 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { OnlineSearch(text, emptyList(), failed = true) }
-        }.combine(catalogue) { found, catalogue ->
+        }.combine(search) { found, local -> found to local }.combine(catalogue) { (found, local), catalogue ->
             if (found == null) return@combine null
+            val visible = local?.takeIf { it.query == found.query }?.tracks.orEmpty()
+            val visibleIds = visible.mapTo(HashSet()) { it.id }
+            val linkedVideos = visible.flatMap { it.sources }.mapNotNullTo(HashSet()) { it.uri }
             val index = catalogue ?: LibraryIndex.EMPTY
             val owned = YouTubeMusic.indexOf(index)
             val mineArtists = index.artists.mapTo(HashSet()) { ua.olex.music.model.TextFold.fold(it.name) }
             val mineAlbums = index.albums.groupBy({ ua.olex.music.model.TextFold.fold(it.name) }, { ua.olex.music.model.TextFold.fold(it.subtitle.orEmpty()) })
             found.copy(
-                tracks = found.tracks.filter { it.id !in index.byId && owned.copyOf(it) == null },
+                tracks = found.tracks.filter { track ->
+                    val file = owned.copyOf(track)?.takeIf { it.recordingId == null }
+                    track.id !in visibleIds && track.uri !in linkedVideos && (file == null || file.id !in visibleIds)
+                },
                 artists = found.artists.filterNot { ua.olex.music.model.TextFold.fold(it.title) in mineArtists },
                 albums = found.albums.filterNot { card ->
                     val by = ua.olex.music.model.TextFold.fold(card.subtitle.orEmpty())
@@ -308,42 +316,56 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         add = { id, tracks, duplicates -> editUserData { addToPlaylist(id, tracks, duplicates) } },
         remove = { id, song, position -> editUserData { removeFromPlaylist(id, song, position) } },
         move = { id, song, delta, position -> editUserData { moveInPlaylist(id, song, delta, position) } },
-        removeFavourite = { id -> editUserData {
-            val sources = reference(id).first()?.references.orEmpty()
-            removeFavourite(id)
-            queueLikes(sources, false)
-            sendLikes()
-        } },
+        removeFavourite = { id ->
+            val scope = graph.youTubeAccount.cacheScope.value
+            editUserData {
+                val sources = reference(id).first()?.references.orEmpty()
+                removeFavourite(id)
+                queueLikes(sources, false, scope)
+                sendLikes()
+            }
+        },
     )
 
     fun toggleFavourite(track: Track) {
         val saved = personal.value.favouriteByTrackId[track.recordingId ?: track.id.value]
+        val scope = graph.youTubeAccount.cacheScope.value
         editUserData {
             val liked = toggleFavourite(track, saved?.id)
             val sources = reference(track).first()?.references.orEmpty()
-            queueLikes(sources, liked)
+            queueLikes(sources, liked, scope)
             sendLikes()
         }
     }
 
     private val pendingLikes = getApplication<Application>().getSharedPreferences("pending_likes", android.content.Context.MODE_PRIVATE)
-    private fun queueLikes(sources: List<ua.olex.music.model.RecordingSource>, liked: Boolean) {
+    private fun queueLikes(sources: List<ua.olex.music.model.RecordingSource>, liked: Boolean, scope: String) {
+        if (scope == "public") return
         val pending = pendingLikes.edit()
         sources.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE }.forEach { source ->
-            pending.putBoolean(source.uri!!.removePrefix(ua.olex.music.model.SavedSong.ONLINE_PREFIX), liked)
+            val id = source.uri!!.removePrefix(ua.olex.music.model.SavedSong.ONLINE_PREFIX)
+            pending.putBoolean("$scope/$id", liked)
         }
         pending.apply()
     }
     private val likeSync = kotlinx.coroutines.sync.Mutex()
     private suspend fun sendLikes() = likeSync.withLock {
-        if (!graph.youTubeAccount.signedIn.value || !graph.network.value) return@withLock
-        for ((id, liked) in pendingLikes.all) {
-            if (liked !is Boolean) continue
-            if (graph.youTube.like(id, liked) && pendingLikes.all[id] == liked) pendingLikes.edit().remove(id).apply()
+        val scope = graph.youTubeAccount.cacheScope.value
+        if (scope == "public" || !graph.network.value) return@withLock
+        val prefix = "$scope/"
+        for ((key, liked) in pendingLikes.all) {
+            if (graph.youTubeAccount.cacheScope.value != scope) return@withLock
+            if (!key.startsWith(prefix) || liked !is Boolean) continue
+            if (graph.youTube.like(key.removePrefix(prefix), liked, scope) && pendingLikes.all[key] == liked) {
+                pendingLikes.edit().remove(key).apply()
+            }
         }
     }
     init {
-        viewModelScope.launch { graph.network.collect { online -> if (online) sendLikes() } }
+        viewModelScope.launch {
+            combine(graph.network, graph.youTubeAccount.cacheScope) { online, scope -> scope.takeIf { online && it != "public" } }
+                .collectLatest { if (it != null) sendLikes() }
+        }
     }
     fun dismissUserError() { userError = null }
     private fun editUserData(action: suspend UserRepository.() -> Unit) {

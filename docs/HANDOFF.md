@@ -1,3 +1,18 @@
+# Offline online catalogue and search (Codex, 2026-11-18)
+
+[код] Album, artist and account playlist metadata snapshots use atomic bounded disk storage.
+Offline openings retain track order and duplicates. Online openings can refresh when the connection
+returns. Album links are restored by video ID; confirmed artist name lookups keep their page ID.
+No stream address, cookie, continuation token or raw provider reply is written by this cache.
+A signed-in session has a separate cache namespace and likes outbox. Legacy unscoped likes are not
+sent because their originating account cannot be determined. Inbound likes and playlist conflict
+resolution are still open. The catalogue work does not touch lock-screen lyrics.
+
+Search retries when the network returns and filters results against the current query's visible
+tracks and confirmed source links. Only a matching file that appears in the results suppresses a
+remote song. The disk snapshots are bounded and can be removed by Clear cache. This is not an
+offline audio download feature. Live signed-in and Pixel checks are pending.
+
 # Playback and artwork reliability (Codex, 2026-11-18)
 
 Integration branch `agent/integrate-service-policy` combines the verified service policy at
