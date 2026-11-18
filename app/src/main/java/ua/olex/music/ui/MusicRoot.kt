@@ -177,11 +177,26 @@ fun MusicRoot(model: LibraryViewModel) {
     val haptics = rememberHaptics()
     var focusSearch by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
-    var returnTo by remember { mutableStateOf<Place?>(null) }
-    var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
+    var returnTo by rememberSaveable { mutableStateOf<Place?>(null) }
+    val onlinePageScope by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val tabHistory = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
+        rememberSaveable(saver = OnlineTabHistory.saver) { OnlineTabHistory() }
+    }
+    val onlineStack = tabHistory[place]
     // The screen under an online page keeps its state (scroll, open artist) while the page is over
     // it, so Back lands exactly where the owner was.
     val baseStates = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    val onlineStates = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
+        androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+    }
+    fun clearOnline(destination: Place) {
+        for (depth in 1..tabHistory[destination].size) onlineStates.removeState("${destination.name}/$depth")
+        tabHistory.clear(destination)
+    }
+    fun popOnline() {
+        onlineStates.removeState("${place.name}/${tabHistory[place].size}")
+        tabHistory.back(place)
+    }
     // An online page's title moves into the top bar once its header has scrolled away.
     var onlineTitleShown by remember { mutableStateOf(false) }
     val onlineTop = onlineStack.lastOrNull()
@@ -196,19 +211,26 @@ fun MusicRoot(model: LibraryViewModel) {
         value = context.graph.youTube.moods()
     }
     // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
-    val onlinePageScope by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
     // A different account (or none) never sees the last one's playlists, home or moods.
     androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
-    val youTubeHome by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), youTubeOn, youTubeSignedIn) {
+    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>()) {
         if (!youTubeOn) { value = emptyList(); return@produceState }
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
         runCatching { context.graph.youTube.home() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
+    }.value }
+    val homeCache = remember(library, onlinePageScope) { HomeCache() }
+    val excluded = model.excluded
+    val visibleShelves = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
+        rememberOffMain(youTubeHome, excluded, initial = emptyList()) {
+            youTubeHome.map { shelf -> shelf.copy(songs = shelf.songs.filterNot { it.id.value in excluded || Mix.songKey(it) in excluded },
+                cards = shelf.cards.filterNot { it.kind == YouTubeMusic.Card.Kind.SONG && "yt:${it.id}" in excluded }) }
+        }
     }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) {
-        onlineStack = emptyList()
+        if (to == place) clearOnline(to)
         returnTo = null
         if (to == Place.SEARCH && place == Place.SEARCH && page == null) {
             focusSearch++
@@ -216,7 +238,6 @@ fun MusicRoot(model: LibraryViewModel) {
         }
         if (to != place) haptics.tick()
         collectionTitle = null
-        if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery("")
         page = null
         place = to
     }
@@ -231,7 +252,9 @@ fun MusicRoot(model: LibraryViewModel) {
             else index.albums.firstOrNull { a -> a.tracks.any { it.id == track.id } }
         } ?: return@launch
         haptics.tick(); expanded = false; actionTrack = null; page = null
-        if (place == Place.SEARCH) model.setQuery("") else returnTo = place
+        if (place != Place.SEARCH) returnTo = place
+        model.setQuery("")
+        clearOnline(Place.SEARCH)
         openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.SEARCH
     }
     var trashing by remember { mutableStateOf<List<Track>?>(null) }
@@ -265,7 +288,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 destinationBackProgress = event.progress
             }
             when {
-                onlineStack.isNotEmpty() -> onlineStack = onlineStack.dropLast(1)
+                onlineStack.isNotEmpty() -> popOnline()
                 page != null -> page = null
                 else -> go(Place.HOME)
             }
@@ -273,22 +296,23 @@ fun MusicRoot(model: LibraryViewModel) {
             destinationBackProgress = 0f
         }
     }
-    val onlineNav = remember(model) {
+    val onlineNav = remember(model, tabHistory) {
         OnlineNav(
             open = { target ->
                 expanded = false; actionTrack = null; page = null
                 val twin = model.library.value?.let { libraryTwin(target, it) }
-                if (twin == null) onlineStack = onlineStack + target
+                if (twin == null) tabHistory.open(place, target)
                 else {
                     // One artist, one page: the owner's own, with YouTube Music's sections on it.
-                    onlineStack = emptyList()
-                    if (place == Place.SEARCH) model.setQuery("") else returnTo = place
+                    clearOnline(Place.SEARCH)
+                    if (place != Place.SEARCH) returnTo = place
+                    model.setQuery("")
                     openInLibrary = twin; place = Place.SEARCH
                 }
             },
-            play = model::playFrom,
+            openDownload = model::requestDownloads, play = model::playFrom,
             actions = { actionTrack = it },
-            openLocalArtist = { artist -> onlineStack = emptyList(); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
+            openLocalArtist = { artist -> model.setQuery(""); clearOnline(Place.SEARCH); returnTo = null; openInLibrary = "ARTISTS" to artist.id; place = Place.SEARCH },
             download = { start -> if (context.graph.soulseek.account == null) afterSignIn = start else start() },
             playMood = { mood, moodPage -> model.startMood(mood, moodPage) },
             playMix = { id, title -> model.startPlaylistRadio(id, title) },
@@ -297,7 +321,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val powerSave = rememberPowerSave()
     val network by context.graph.network.collectAsStateWithLifecycle()
     // The Search shortcut: Search with the field focused.
-    androidx.compose.runtime.LaunchedEffect(model.searchRequest) { if (model.searchRequest > 0) { expanded = false; onlineStack = emptyList(); page = null; place = Place.SEARCH; focusSearch++; model.consumeSearchRequest() } }
+    androidx.compose.runtime.LaunchedEffect(model.searchRequest) { if (model.searchRequest > 0) { expanded = false; clearOnline(Place.SEARCH); page = null; place = Place.SEARCH; focusSearch++; model.consumeSearchRequest() } }
     androidx.compose.runtime.LaunchedEffect(model.playerRequest, playing.hasTrack) {
         if (model.playerRequest > 0 && playing.hasTrack) {
             expanded = true
@@ -341,7 +365,7 @@ fun MusicRoot(model: LibraryViewModel) {
                     else Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
                 }, scrollBehavior = scroll,
                 navigationIcon = {
-                    if (onlineTop != null) KickIconButton(onClick = { onlineStack = onlineStack.dropLast(1) }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
+                    if (onlineTop != null) KickIconButton(onClick = { popOnline() }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     else if (page != null) KickIconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     else if (inCollection) KickIconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { k -> Symbol(Glyph.BACK, kick = k) }
                 },
@@ -398,7 +422,7 @@ fun MusicRoot(model: LibraryViewModel) {
         // Without access to the files, YouTube Music still works: the permission opens the owner's own
         // files, it doesn't lock the app. With YouTube Music off there is nothing to show but the ask.
         val withoutFiles = !model.allowed && youTubeOn
-        val library = library ?: if (withoutFiles) ua.olex.music.model.LibraryIndex.EMPTY else null
+        val library = library ?: if (withoutFiles || (youTubeOn && model.scanError != null)) ua.olex.music.model.LibraryIndex.EMPTY else null
         // Where the owner is: a new place fades through, a page opened from it slides in from the side.
         val route = when {
             onlineStack.isNotEmpty() -> "online:${onlineStack.size}:${onlineStack.last()}"
@@ -407,35 +431,34 @@ fun MusicRoot(model: LibraryViewModel) {
         }
         Arrival(route, place, deeper = onlineStack.isNotEmpty() || page != null) {
         when {
-            !model.allowed && !youTubeOn -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
-            model.scanError != null && list.isNullOrEmpty() && !withoutFiles -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
+            !model.allowed && !youTubeOn && page != Page.SETTINGS -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
+            model.scanError != null && list.isNullOrEmpty() && !youTubeOn && page != Page.SETTINGS -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             // Home's own shape while the library loads: the first real frame then lands in place.
-            list == null && !withoutFiles -> HomeSkeleton(Modifier.padding(insets))
+            library == null && page != Page.SETTINGS -> HomeSkeleton(Modifier.padding(insets))
             onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
                 // Each page in the stack keeps its own scroll, so Back to a previous online page lands where it was.
-                is OnlineTarget.Artist -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
-                is OnlineTarget.Album -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Artist -> onlineStates.SaveableStateProvider("${place.name}/${onlineStack.size}") { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Album -> onlineStates.SaveableStateProvider("${place.name}/${onlineStack.size}") { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
-                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders)
+                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) })
             page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
             place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library), personal.history.mapNotNull { it.track }, songStats, smart, playing.mediaId,
                 Modifier.padding(insets), onPlay = model::play, onShuffle = model::playShuffled,
-                onOpenAlbum = { returnTo = Place.HOME; openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
-                onOpenArtist = { returnTo = Place.HOME; openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
+                onOpenAlbum = { clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME; openInLibrary = "ALBUMS" to it.id; place = Place.SEARCH },
+                onOpenArtist = { clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME; openInLibrary = "ARTISTS" to it.id; place = Place.SEARCH },
                 onTrackActions = { actionTrack = it }, duplicates = duplicates.size,
                 onStats = { page = Page.STATS }, onDuplicates = { page = Page.DUPLICATES },
                 favourites = personal.favourites.mapNotNull { it.track },
-                moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles },
-                youTubeHome = youTubeHome.map { shelf -> shelf.copy(songs = shelf.songs.filterNot { it.id.value in model.excluded || Mix.songKey(it) in model.excluded },
-                    cards = shelf.cards.filterNot { it.kind == YouTubeMusic.Card.Kind.SONG && "yt:${it.id}" in model.excluded }) },
+                moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
+                youTubeHome = visibleShelves, cache = homeCache,
                 onSeeAll = { tab ->
                     // Smart playlists live in Playlists; albums, artists and history are Search tiles.
-                    if (tab == "SMART") { returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
+                    if (tab == "SMART") { clearOnline(Place.LIBRARY); returnTo = Place.HOME; openInLibrary = tab to ""; place = Place.LIBRARY } else { clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME; openTile = tab; place = Place.SEARCH }
                 }) }
             else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
@@ -529,7 +552,7 @@ fun MusicRoot(model: LibraryViewModel) {
         val openOrigin: (() -> Unit)? = origin?.let { source ->
             when (source.kind) {
                 "playlist" -> source.id.toLongOrNull()?.takeIf { id -> personal.playlists.any { it.id == id } }?.let { id ->
-                    { go(Place.LIBRARY); openPlaylist = id; expanded = false }
+                    { clearOnline(Place.LIBRARY); go(Place.LIBRARY); openPlaylist = id; expanded = false }
                 }
                 "remote-playlist", "album" -> ({ onlineNav.open(OnlineTarget.Album(source.id, source.title, playlist = source.kind == "remote-playlist")) })
                 "artist" -> ({ onlineNav.open(OnlineTarget.Artist(source.title, id = source.id)) })
@@ -621,13 +644,15 @@ fun MusicRoot(model: LibraryViewModel) {
             // A song from YouTube Music, kept for good: Soulseek finds a lossless copy and the library plays it from then on.
             if (online) {
                 val artist = track.artist.substringBefore(",").trim()
-                val job = context.graph.soulseek.job(ua.olex.music.soulseek.SoulseekDownloads.songKey(artist, track.title))
+                val jobs by context.graph.soulseek.jobs.collectAsStateWithLifecycle()
+                val downloadKey = ua.olex.music.soulseek.SoulseekDownloads.songKey(artist, track.title)
+                val job = jobs.lastOrNull { it.key == downloadKey }
                 when {
-                    job?.running == true -> TrackAction(Glyph.DOWNLOAD, job.status) { }
-                    job?.failed == true -> TrackAction(Glyph.REFRESH, "Try the download again") {
+                    job?.running == true || job?.done == true -> TrackAction(Glyph.DOWNLOAD, "View download") { job?.let { model.requestDownloads(it.id) } }
+                    job != null && (job.failed || job.cancelled) -> TrackAction(Glyph.REFRESH, "Try the download again") {
                         context.graph.soulseek.retry(job); scope.launch { snackbar.showSnackbar("Looking on Soulseek again") }
                     }
-                    else -> TrackAction(Glyph.DOWNLOAD, "Download") {
+                    else -> TrackAction(Glyph.DOWNLOAD, "Find a lossless copy") {
                         onlineNav.download {
                             context.graph.soulseek.song(artist, track.title, track.album, track.durationMs)
                             scope.launch { snackbar.showSnackbar("Looking for a lossless copy on Soulseek") }

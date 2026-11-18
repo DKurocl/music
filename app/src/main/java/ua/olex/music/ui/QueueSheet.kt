@@ -8,10 +8,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import ua.olex.music.model.TextFold
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -44,6 +47,37 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    val filtering = searchOpen && query.isNotBlank()
+    val searchList = rememberLazyListState()
+    val matches: List<Int>? = if (filtering) {
+        val request = remember(state.queue, query) { Any() }
+        key(request) {
+            rememberOffMain<List<Int>?>(initial = null) {
+                val words = TextFold.fold(query).split(' ').filter(String::isNotEmpty)
+                state.queue.indices.filter { index ->
+                    val item = state.queue[index]
+                    val text = TextFold.fold(item.title + " " + item.artist)
+                    words.all(text::contains)
+                }
+            }
+        }
+    } else null
+    LaunchedEffect(query) { if (filtering) searchList.requestScrollToItem(0) }
+    var jumpToCurrent by remember { mutableStateOf(false) }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    fun closeSearch() {
+        keyboard?.hide()
+        searchOpen = false
+        query = ""
+    }
+    LaunchedEffect(jumpToCurrent) {
+        if (jumpToCurrent) {
+            if (state.queueIndex in state.queue.indices) list.scrollToItem(state.queueIndex)
+            jumpToCurrent = false
+        }
+    }
     var draggingKey by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var dragDirection by remember { mutableIntStateOf(0) }
@@ -118,24 +152,57 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     }
 
     AppSheet(onDismiss, cs.surfaceContainerLow, gestures = draggingKey == null) { CompositionLocalProvider(LocalIsPlaying provides state.isPlaying) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)
-                Text(
-                    listOfNotNull(mixFrom, "${state.queue.size} songs", if (state.shuffle) "shuffled" else null).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (searchOpen) {
+                val focus = remember { FocusRequester() }
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it }, singleLine = true,
+                    label = { Text("Find in queue") }, modifier = Modifier.weight(1f).focusRequester(focus),
+                    leadingIcon = {
+                        KickIconButton(onClick = ::closeSearch, modifier = Modifier.semantics { contentDescription = "Close queue search" }) {
+                            Symbol(Glyph.BACK, kick = it)
+                        }
+                    },
                 )
+                LaunchedEffect(Unit) { focus.requestFocus() }
+            } else {
+                Column(Modifier.weight(1f).padding(start = 4.dp)) {
+                    Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)
+                    Text(listOfNotNull(mixFrom, songCount(state.queue.size), if (state.shuffle) "shuffled" else null).joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                }
+                if (state.queue.size > 1) KickIconButton(onClick = { searchOpen = true }, enabled = draggingKey == null,
+                    modifier = Modifier.semantics { contentDescription = "Find in queue" }) { Symbol(Glyph.SEARCH, kick = it) }
             }
-            // Two quiet actions where the queue's header is, as in YouTube Music: keep it, or clear what's next.
-            if (onSave != null && state.queue.isNotEmpty()) KickIconButton(onClick = onSave, modifier = Modifier.semantics { contentDescription = "Save queue as a playlist" }) { k ->
-                Symbol(Glyph.PLAYLIST_ADD, color = cs.onSurfaceVariant, kick = k)
+            if (currentKey != null && state.queue.size > 1) KickIconButton(onClick = {
+                closeSearch()
+                jumpToCurrent = true
+            }, enabled = draggingKey == null, modifier = Modifier.semantics { contentDescription = "Show current song" }) {
+                Symbol(Glyph.WAVE, kick = it)
             }
-            if (onClearNext != null && state.queueIndex < state.queue.lastIndex) KickIconButton(onClick = onClearNext, modifier = Modifier.semantics { contentDescription = "Clear songs after this one" }) { k ->
-                Symbol(Glyph.REMOVE, color = cs.onSurfaceVariant, kick = k)
+            if (!searchOpen && (onSave != null || onClearNext != null) && state.queue.isNotEmpty()) Box {
+                var menu by remember { mutableStateOf(false) }
+                KickIconButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Queue actions" }) {
+                    Symbol(Glyph.MORE, kick = it)
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (onSave != null) DropdownMenuItem(text = { Text("Save queue as a playlist") },
+                        leadingIcon = { Symbol(Glyph.PLAYLIST_ADD) }, onClick = { menu = false; onSave() })
+                    if (onClearNext != null) DropdownMenuItem(text = { Text("Clear songs after this one") },
+                        enabled = state.queueIndex in 0 until state.queue.lastIndex, leadingIcon = { Symbol(Glyph.REMOVE) },
+                        onClick = { menu = false; onClearNext() })
+                }
             }
         }
-        LazyColumn(state = list, modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-            itemsIndexed(order, key = { _, item -> item.key }) { position, item ->
+        LazyColumn(state = if (filtering) searchList else list, modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+            if (filtering && matches.isNullOrEmpty()) item {
+                Text(if (matches == null) "Searching..." else "No songs match your search.",
+                    modifier = Modifier.padding(24.dp), style = MaterialTheme.typography.bodyMedium)
+            }
+            items(count = if (filtering) matches?.size ?: 0 else order.size,
+                key = { index -> order[matches?.get(index) ?: index].key }) { index ->
+                val position = matches?.get(index) ?: index
+                val item = order[position]
                 val current = item.key == currentKey
                 val dragging = draggingKey == item.key
                 ListItem(
@@ -145,7 +212,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     },
                     supportingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(item.sourceError ?: item.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                            Text((if (filtering) "${position + 1} · " else "") + (item.sourceError ?: item.artist), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                             // The same source mark as every song list: a cloud for a song that streams.
                             if (item.mediaId.startsWith("yt:")) Symbol(Glyph.CLOUD, size = 16.dp, color = cs.onSurfaceVariant,
                                 modifier = Modifier.semantics { contentDescription = "Streams" })
@@ -159,10 +226,10 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     },
                     trailingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!current) IconButton(onClick = { onRemove(item.key) }, modifier = Modifier.semantics { contentDescription = "Remove ${item.title} from queue" }) {
-                                Symbol(Glyph.CLOSE, size = 20.dp, color = cs.onSurfaceVariant)
+                            if (!current) KickIconButton(onClick = { onRemove(item.key) }, modifier = Modifier.semantics { contentDescription = "Remove ${item.title} from queue" }) { taps ->
+                                Symbol(Glyph.CLOSE, size = 20.dp, color = cs.onSurfaceVariant, kick = taps)
                             }
-                            Box(
+                            if (!filtering) Box(
                                 Modifier.size(48.dp).pointerInput(item.key) {
                                     detectVerticalDragGestures(
                                         onDragStart = {
@@ -208,8 +275,8 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                             contentDescription = "${item.title}, ${item.artist}, queue item ${position + 1}" + item.sourceError?.let { ", $it" }.orEmpty()
                             selected = current
                             customActions = listOfNotNull(
-                                if (position > 0) CustomAccessibilityAction("Move up") { onMove(item.key, -1); true } else null,
-                                if (position < order.lastIndex) CustomAccessibilityAction("Move down") { onMove(item.key, 1); true } else null,
+                                if (!filtering && position > 0) CustomAccessibilityAction("Move up") { onMove(item.key, -1); true } else null,
+                                if (!filtering && position < order.lastIndex) CustomAccessibilityAction("Move down") { onMove(item.key, 1); true } else null,
                                 if (!current) CustomAccessibilityAction("Remove from queue") { onRemove(item.key); true } else null,
                             )
                         },

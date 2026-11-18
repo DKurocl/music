@@ -35,8 +35,10 @@ class YouTubePaginationTest {
         source.album("PL")
         try { source.albumMore("PL"); fail("Expected network failure") } catch (_: IOException) { }
         assertEquals(1, source.peekAlbum("PL")!!.second.size)
+        org.junit.Assert.assertTrue(source.hasAlbumContinuation("PL"))
         try { source.albumMore("PL"); fail("Expected cancellation") } catch (_: kotlinx.coroutines.CancellationException) { }
         assertEquals(listOf("yt:one", "yt:one", "yt:two"), source.albumMore("PL")!!.second.map { it.id.value })
+        org.junit.Assert.assertFalse(source.hasAlbumContinuation("PL"))
     }
 
     @Test fun concurrentRequestsAppendAPageOnlyOnce() = runBlocking {

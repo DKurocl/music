@@ -54,6 +54,7 @@ internal class OnlineNav(
     /** Plays a list; the last argument names it for the player's "Playing from". */
     val play: (List<Track>, Int, String?) -> Unit = { _, _, _ -> },
     val actions: (Track) -> Unit = {},
+    val openDownload: (Int) -> Unit = {},
     val openLocalArtist: (MusicCollection) -> Unit = {},
     /** Starts a Soulseek download, asking for the account first when there is none. */
     val download: (() -> Unit) -> Unit = { it() },
@@ -91,6 +92,7 @@ private fun <T> rememberLoad(key: Any, retry: Int, cached: T? = null, load: susp
     androidx.compose.runtime.key(key) {
         produceState<Load<T>>(cached?.let { Load.Done(it) } ?: Load.Wait, retry) {
             if (cached != null && retry == 0) return@produceState
+            if (value !is Load.Done) value = Load.Wait
             val loaded = try { load() }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { null }
@@ -149,7 +151,10 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
         val id = target.id ?: graph.youTube.artistId(target.name, offline = !network) ?: return@rememberLoad null
         graph.youTube.artist(id, offline = !network)
     }
-    val mine = remember(library, target.name) { library.artists.firstOrNull { TextFold.fold(it.name) == TextFold.fold(target.name) } }
+    val mine = key(target.name) { rememberOffMain(library, initial = null as MusicCollection?) {
+        val name = TextFold.fold(target.name)
+        library.artists.firstOrNull { TextFold.fold(it.name) == name }
+    } }
     val cs = MaterialTheme.colorScheme
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
@@ -249,14 +254,22 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     // A long playlist arrives in parts: the rest is fetched in the background and added under what is
     // on screen, so nothing moves while the owner reads or plays.
     var grown by remember(target, accountScope) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
-    LaunchedEffect(target, accountScope, network, state is Load.Done) {
+    var pageRetry by remember(target, accountScope) { mutableIntStateOf(0) }
+    var moreFailed by remember(target, accountScope) { mutableStateOf(false) }
+    var loadingMore by remember(target, accountScope) { mutableStateOf(false) }
+    LaunchedEffect(target, accountScope, network, state is Load.Done, pageRetry) {
+        loadingMore = false
+        moreFailed = false
         if (!network || state !is Load.Done) return@LaunchedEffect
-        while (true) {
+        while (graph.youTube.hasAlbumContinuation(target.id)) {
+            loadingMore = true
             val next = try { graph.youTube.albumMore(target.id) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { null }
-            grown = next ?: break
+            if (next == null) { moreFailed = graph.youTube.hasAlbumContinuation(target.id); break }
+            grown = next
         }
+        loadingMore = false
     }
     val loaded = grown ?: (state as? Load.Done)?.value
     val songs = loaded?.second.orEmpty()
@@ -268,7 +281,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val origin = PlaybackOrigin(if (target.playlist) "remote-playlist" else "album", target.id, title).encode()
     val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
     // A playlist mixes albums: its rows show covers. An album's rows show track numbers.
-    val mixed = target.playlist || songs.mapTo(HashSet()) { it.album }.size > 1
+    val mixed = target.playlist || remember(songs) { songs.any { it.album != songs.firstOrNull()?.album } }
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -281,10 +294,10 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, origin) }, modifier = Modifier.height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play all")
+                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(if (loadingMore || moreFailed) "Play loaded songs" else "Play all")
                     }
-                    FilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, origin) },
-                        modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
+                    KickFilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, origin) },
+                        modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { taps -> Symbol(Glyph.SHUFFLE, kick = taps) }
                     // The whole album in lossless from Soulseek, into the library. Nothing to fetch
                     // once every song plays from a file.
                     if (!target.playlist && songs.isNotEmpty()) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title),
@@ -297,14 +310,22 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 Spacer(Modifier.height(16.dp))
             }
         }
-        when (state) {
-            Load.Wait -> placeholders(cover = mixed)
-            Load.Failed -> item {
-                OnlineFailed(target.title, Glyph.ALBUM) { retry++ }
+        when {
+            loaded != null -> {
+                if (!network && songs.isNotEmpty()) item(key = "offline") {
+                    Text("Offline · ${songCount(songs.size)} in the saved list", style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
+                }
+                itemsIndexed(songs, key = { i, track -> "a-$i-" + track.id.value }, contentType = { _, _ -> "song" }) { i, track ->
+                    TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { nav.actions(track) },
+                        number = if (mixed) null else i + 1, albumArtist = if (mixed) null else track.artist) { nav.play(songs, i, origin) }
+                }
+                if (moreFailed) item(key = "retry-page") { ErrorNotice("Couldn't load the rest of this list.") { pageRetry++ } }
+                else if (loadingMore) item(key = "next-page") { PlaceholderRow(cover = mixed) }
+                else if (songs.isEmpty()) item { EmptyState(Glyph.NOTE, "No songs available", "There are no playable songs in this list.") }
             }
-            is Load.Done -> itemsIndexed(songs, key = { i, t -> "a-$i-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
-                TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, origin) }
-            }
+            state is Load.Wait -> placeholders(cover = mixed)
+            else -> item { OnlineFailed(target.title, Glyph.ALBUM) { retry++ } }
         }
     }
 }
@@ -320,12 +341,19 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
     val on by graph.youTubeOn.collectAsStateWithLifecycle()
     if (!on) return
     val nav = LocalOnlineNav.current
-    val state = rememberLoad(name, 0) { graph.youTube.artistId(name)?.let { graph.youTube.artist(it) } }
+    val network = LocalNetwork.current
+    val account by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val state = rememberLoad(Triple(name, network, account), 0) {
+        graph.youTube.artistId(name, offline = !network)?.let { graph.youTube.artist(it, offline = !network) }
+    }
     val artist = (state as? Load.Done)?.value
     val popular = artist?.songs.orEmpty().take(5)
     if (artist == null) return
     // Albums the owner already has open from his library above; only the others are offered here.
-    val owned = remember(library) { library.albums.mapTo(HashSet()) { TextFold.fold(it.name) } }
+    val owned = key(name) { rememberOffMain(library, initial = emptySet()) {
+        val artistName = TextFold.fold(name)
+        library.albums.asSequence().filter { TextFold.fold(it.subtitle.orEmpty()) == artistName }.map { TextFold.fold(it.name) }.toSet()
+    } }
     fun cards(list: List<YouTubeMusic.OnlineAlbum>) = list.filterNot { TextFold.fold(it.title) in owned }
         .map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.ALBUM) }
     val albums = cards(artist.albums)
@@ -399,20 +427,22 @@ internal fun DownloadButton(key: String, owned: Boolean, what: String, onStart: 
     val jobs by graph.soulseek.jobs.collectAsStateWithLifecycle()
     val job = jobs.lastOrNull { it.key == key }
     val snackbar = LocalSnackbar.current
+    val nav = LocalOnlineNav.current
     val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
     val done = owned || job?.done == true
-    val failed = job?.failed == true
+    val failed = job?.failed == true || job?.cancelled == true
     val description = when {
+        job?.done == true -> "View completed download"
         done -> "Already in your library"
         failed -> "Download failed: ${job?.status}. Try again"
-        job?.running == true -> job.status
+        job?.running == true -> "View download: ${job.status}"
         else -> "Download $what"
     }
     FilledTonalIconButton(onClick = {
         when {
+            job != null && (job.running || job.done) -> nav.openDownload(job.id)
             done -> scope.launch { snackbar?.showSnackbar("Already in your library") }
-            job?.running == true -> scope.launch { snackbar?.showSnackbar(job.status) }
             failed -> { graph.soulseek.retry(job!!); scope.launch { snackbar?.showSnackbar("${job.status}. Trying again") } }
             else -> onStart()
         }

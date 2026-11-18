@@ -1,3 +1,24 @@
+# Music 2.0 (Codex, 2026-11-18)
+
+[код] Release candidate on `agent/player-shared-art`. Each tab retains its catalogue history,
+scroll and library filters. Saved navigation arguments are account scoped. Local search results
+remain above arriving YouTube results and each source reports errors independently. Leaving
+Search preserves the query. Returning from a local search album restores the matching results.
+Home keeps the current library snapshot, filters remote shelves off the UI thread, and keeps
+online pages and Settings reachable when a local scan fails.
+
+[код] The queue supports accent-insensitive title and artist search with original occurrence
+numbers. A matching repeated song still plays or removes that exact occurrence. Show current
+song clears the search and jumps to playback. Drag ordering belongs to the full queue.
+Remote albums keep partial lists with a retry at the failed continuation. Local playlist export
+validates and prepares a mixed M3U8 before opening the document picker. Downloads from Settings,
+a running song or album, and notifications use one transfer screen with progress, cancel and retry.
+
+[код] App versionName is 2.0.0 with the existing package, signing key and monotonically increasing
+Obtainium versionCode. Player, navigation and Search focus passed CI 44261654025 before the
+combined release candidate. CI runs the complete suite for the batch. Physical device scenarios
+are in PHONE_CHECK.md. No Pixel frame time or actual Bluetooth measurements are available here.
+
 # Player cover continuity follow-up (Codex, 2026-11-18)
 
 The owner still saw artwork blinking on v1154. Its regression exercised a URI swap in one
