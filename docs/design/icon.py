@@ -13,10 +13,10 @@ DURATION = 460
 # The dark rim sits just below the face. The spindle hole is cut from every layer.
 GROOVES = ("M35,49 A20,20 0 0 1 45,37 M63,71 A20,20 0 0 0 73,59 "
            "M39,52 A15,15 0 0 1 47,41 M61,67 A15,15 0 0 0 69,56")
-FACE_STOPS = ((0.0, "#D27A6A"), (0.52, "#AD4E47"), (1.0, "#843438"))
-LABEL_STOPS = ((0.0, "#F3AB95"), (1.0, "#DD7C6A"))
-EDGE = "#783238"
-SHEEN = "#FBB9A6"
+FACE_STOPS = ((0.0, "#FFAC29"), (0.52, "#F67921"), (1.0, "#D7472F"))
+LABEL_STOPS = ((0.0, "#FFEC91"), (1.0, "#FFC553"))
+EDGE = "#AA3328"
+SHEEN = "#FFF0B9"
 SCALE = 0.90
 
 
