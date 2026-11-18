@@ -36,6 +36,9 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Player artwork handoff, lyrics header and expressive controls (Codex, 2026-11-18,
+      `agent/player-cover-polish`). Owner's reported track-switch flash and lyrics button movement.
+
 - [~] Now Playing follow-up (Codex, 2026-11-18): active input format, cohesive player
       motion, and related gesture and audio path corrections.
 

@@ -536,7 +536,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onOpenOrigin = openOrigin,
             originIsMix = model.mixLabel != null || origin?.kind == "mix",
             position = { model.positionMs }, onClose = { expanded = false },
-            motionCover = motionCover?.takeIf { settled && it.trackId == playing.mediaId && it.sourceUri == currentTrack?.uri }?.videoUri,
+            motionCover = motionCover?.takeIf { settled && it.owner == currentTrack?.let(::motionCoverOwner) }?.video,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer, onExtendSleep = model::extendSleepTimer,
             onClearNext = model::clearUpNext,
@@ -678,7 +678,7 @@ private fun NowPlaying(
     onSaveLyricTiming: ((ua.olex.music.lyrics.Lyrics) -> Unit)? = null, onResetLyricTiming: () -> Unit = {},
     favourite: Boolean, onFavourite: (() -> Unit)?,
     onOpenOrigin: (() -> Unit)? = null, originIsMix: Boolean = false,
-    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null, motionCover: String? = null,
+    onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null, motionCover: MotionArtwork? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -888,20 +888,8 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
             var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
             androidx.compose.material3.ShortNavigationBarItem(
                 selected = selected, onClick = { taps++; onGo(p) },
-                icon = {
-                    val motion = remember { androidx.compose.animation.core.Animatable(1f) }
-                    LaunchedEffect(taps) { if (taps > 0) { motion.snapTo(0f); motion.animateTo(1f, androidx.compose.animation.core.spring(0.45f, 450f)) } }
-                    Symbol(p.glyph, filled = selected, bold = selected, modifier = Modifier.graphicsLayer {
-                        val v = motion.value
-                        val k = 0.82f + 0.18f * v
-                        scaleX = k; scaleY = k
-                        when (p) {
-                            Place.HOME -> translationY = (1f - v) * -4.dp.toPx()          // the house settles down
-                            Place.LIBRARY -> translationX = (1f - v) * -4.dp.toPx()       // the list slides in
-                            Place.SEARCH -> rotationZ = (1f - v) * -28f                   // the lens swings and settles
-                        }
-                    })
-                }, label = { Text(p.title) },
+                icon = { Symbol(p.glyph, filled = selected, bold = selected, kick = taps) },
+                label = { Text(p.title) },
             )
         }
     }

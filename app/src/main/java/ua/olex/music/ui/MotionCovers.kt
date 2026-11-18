@@ -97,3 +97,17 @@ class MotionCovers(private val context: Context) {
 /** "Travis Scott, Drake", "A & B", "A feat. B", "A x B" give "Travis Scott", "A". */
 internal fun firstArtist(artist: String): String =
     artist.split(Regex(""",|&|;|\s+(feat\.?|ft\.?|featuring|x|with)\s+""", RegexOption.IGNORE_CASE)).first().trim().ifEmpty { artist }
+
+/** The album and folder own the cover together. A different album or folder starts on its still. */
+internal data class MotionCoverOwner(val album: String?, val artist: String?, val folder: String?, val fallback: String?)
+
+internal fun motionCoverOwner(track: Track): MotionCoverOwner {
+    val album = track.album?.let(TextFold::fold)?.takeIf { it.isNotBlank() }
+    val folder = track.path?.substringBeforeLast('/', "")?.takeIf { it.isNotBlank() }
+    return MotionCoverOwner(
+        album,
+        album?.let { TextFold.fold(track.albumArtist?.takeIf(String::isNotBlank) ?: firstArtist(track.artist)) },
+        folder,
+        track.uri.takeIf { album == null && folder == null },
+    )
+}
