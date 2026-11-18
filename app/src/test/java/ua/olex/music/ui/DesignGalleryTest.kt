@@ -289,7 +289,7 @@ class DesignGalleryTest {
     }
 
     @Test fun homeFresh() {
-        compose.setContent { Shell(greeting(9), Place.HOME) { HomePage(library, emptyList(), emptyMap(), emptyList(), null, Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}) } }
+        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, emptyList(), emptyMap(), null, Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}) } }
         shot("35-home-fresh")
     }
 
@@ -316,7 +316,7 @@ class DesignGalleryTest {
     }
 
     @Test fun loading() {
-        compose.setContent { Shell("Good evening", Place.HOME) { pad -> HomeSkeleton(Modifier.padding(pad)) } }
+        compose.setContent { Shell("Home", Place.HOME) { pad -> HomeSkeleton(Modifier.padding(pad)) } }
         shot("29-loading")
     }
 
@@ -714,15 +714,17 @@ class DesignGalleryTest {
 
     /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
     @Test fun homeMood() {
-        compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, now.mediaId,
+            Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}, moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.onNodeWithText("Moods").performClick()
+        shot("01d-home-moods")
         compose.onNodeWithText("Relax").performClick()
         shot("01c-home-mood")
     }
 
     @Test fun home() {
-        compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 3, favourites = library.songs.take(5), moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, now.mediaId,
+            Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}, favourites = library.songs.take(5), moods = YouTubeMusic.DEFAULT_MOODS) } }
         shot("01-home")
         compose.onAllNodes(hasScrollToIndexAction())[0].performScrollToIndex(5)
         shot("01b-home-lower")
@@ -810,8 +812,8 @@ class DesignGalleryTest {
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun homeDark() {
-        compose.setContent { Shell(greeting(21), Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, emptyList(), now.mediaId,
-            Modifier.fillMaxSize().padding(it), { _, _ -> }, {}, {}, {}, duplicates = 0, moods = YouTubeMusic.DEFAULT_MOODS) } }
+        compose.setContent { Shell("Home", Place.HOME) { HomePage(library, library.albums.drop(2).flatMap { it.tracks }.take(20), stats, now.mediaId,
+            Modifier.fillMaxSize().padding(it), { _, _, _ -> }, {}, moods = YouTubeMusic.DEFAULT_MOODS) } }
         shot("13-home-dark")
     }
 }
