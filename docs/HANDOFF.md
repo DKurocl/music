@@ -5,7 +5,8 @@ summary, timeline, top artists/albums/tracks and concentration. Catalogue totals
 labelled. Playback records monotonic elapsed time only while Media3 reports playing, with an
 early checkpoint and then a periodic write. The Room migration preserves all historical starts
 and leaves their measured time unknown. An event's time is attributed to the date it started.
-Existing history flows retain their start-only representation outside the dashboard.
+Existing history flows retain their start-only representation outside the dashboard. Room
+compiler generated schema 5 during CI; migration tests exercise v4 data against it.
 
 # YouTube Music browse recovery
 

@@ -66,7 +66,7 @@ internal fun StatsPage(library: LibraryIndex, modifier: Modifier, onPlay: (List<
         LazyRow(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(7.dp)) {
             items(ListeningRange.entries, key = { it.name }) { option ->
-                FilterChip(selected = option == range, onClick = { range = option }, label = { Text(option.label) },
+                FilterChip(selected = option == range, onClick = { range = option }, label = { Text(option.label.removePrefix("This ").replaceFirstChar { it.uppercaseChar() }) },
                     shape = CircleShape, modifier = Modifier.squish(0.03f))
             }
         }
@@ -235,15 +235,17 @@ private fun ListeningConcentration(s: ListeningSummary) {
     val time = s.total.millis > 0
     val share = s.concentration(time).coerceIn(0f, 1f)
     val cs = MaterialTheme.colorScheme
-    val animated by animateFloatAsState(share, if (LocalPowerSave.current) snap() else MaterialTheme.motionScheme.defaultSpatialSpec(),
-        label = "Repeat share")
+    val still = LocalPowerSave.current
+    val animated = remember { Animatable(if (still) share else 0f) }
+    val motion = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    LaunchedEffect(share, still) { if (still) animated.snapTo(share) else animated.animateTo(share, motion) }
     Surface(shape = RoundedCornerShape(26.dp), color = cs.surfaceContainerHigh) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Box(Modifier.size(88.dp), contentAlignment = Alignment.Center) {
                 Canvas(Modifier.fillMaxSize().padding(5.dp)) {
                     val stroke = Stroke(7.dp.toPx(), cap = StrokeCap.Round)
                     drawCircle(cs.outlineVariant, style = stroke)
-                    drawArc(cs.primary, -90f, animated.coerceIn(0f, 1f) * 360f, useCenter = false, style = stroke)
+                    drawArc(cs.primary, -90f, animated.value.coerceIn(0f, 1f) * 360f, useCenter = false, style = stroke)
                 }
                 Text("${(share * 100).roundToInt()}%", style = MaterialTheme.typography.titleLargeEmphasized)
             }
