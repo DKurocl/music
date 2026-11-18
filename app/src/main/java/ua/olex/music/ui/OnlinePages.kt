@@ -178,6 +178,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
             }
             is Load.Done -> {
                 val artist = state.value
+                val origin = artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name
                 item(key = "head") {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -190,10 +191,10 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                         Spacer(Modifier.height(16.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             val playable = songs.ifEmpty { artist.videos }
-                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name) }, modifier = Modifier.height(52.dp)) {
+                            Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, origin) }, modifier = Modifier.height(52.dp)) {
                                 Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
                             }
-                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name) },
+                            FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, origin) },
                                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
                             // The owner's own songs by this artist, one tap away.
                             mine?.let { local -> FilledTonalButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.height(52.dp)) {
@@ -212,7 +213,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                         }
                     }
                     itemsIndexed(songs, key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
-                        TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, artist.id.takeIf { it.isNotEmpty() }?.let { PlaybackOrigin("artist", it, artist.name).encode() } ?: artist.name) }
+                        TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, origin) }
                     }
                 }
                 if (artist.albums.isNotEmpty()) {

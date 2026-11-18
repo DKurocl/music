@@ -27,7 +27,7 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         val songs = row.songs.associateBy { it.id }
         UserPlaylist(row.playlist.id, row.playlist.name, row.entries.sortedBy { it.position }.mapNotNull { songs[it.songId]?.toSong() }, row.playlist.createdAt)
     } }
-    val history = dao.history(200).map { rows -> rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt) } }
+    val history = dao.history(200).map { rows -> rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt) } }.distinctUntilChanged()
     fun historySince(start: Long) = dao.historySince(start).map { rows ->
         rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt, it.listenedMs) }
     }

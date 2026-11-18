@@ -198,13 +198,13 @@ internal class YouTubeMusic(
         if (id != null) artist(id, offline, full = !offline, knownName = name, onPage = onPage)?.let { return@withContext it }
         if (offline) return@withContext null
         val folded = TextFold.fold(name)
-        fun matches(track: Track): Boolean {
-            val credit = artistOfTrack(track)
-            if (id != null && credit != null) return credit.first == id
-            return artistCredits(track).any { TextFold.fold(it) == folded }
+        fun matchesName(track: Track) = TextFold.fold(track.artist) == folded ||
+            artistCredits(track).any { TextFold.fold(it) == folded }
+        val anchor = seed?.takeIf { isOnline(it) && matchesName(it) }
+        val found = catalogueSearch(name).filter { track ->
+            if (id != null) artistIdsByVideo[track.id.value.removePrefix("yt:")].orEmpty().any { it.first == id }
+            else matchesName(track)
         }
-        val anchor = seed?.takeIf { isOnline(it) && matches(it) }
-        val found = catalogueSearch(name).filter(::matches)
         if (pageScope() != scope) return@withContext null
         val songs = (found + listOfNotNull(anchor)).distinctBy { it.id }
         if (songs.isEmpty()) return@withContext null
@@ -714,16 +714,17 @@ internal class YouTubeMusic(
 
         internal fun rememberAlbum(video: String, album: String) { albumIds[video] = album }
 
-        private val artistIdsByVideo = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, Pair<String, String>>(256, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<String, String>>?) = size > 5_000
+        private val artistIdsByVideo = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, List<Pair<String, String>>>(256, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<Pair<String, String>>>?) = size > 5_000
         })
 
-        fun artistOfTrack(track: Track): Pair<String, String>? = if (isOnline(track)) artistIdsByVideo[track.id.value.removePrefix("yt:")] else null
+        fun artistOfTrack(track: Track): Pair<String, String>? = if (isOnline(track)) artistIdsByVideo[track.id.value.removePrefix("yt:")]?.firstOrNull() else null
 
         fun artistCredits(track: Track): List<String> =
             if (track.artists.size > 1) track.artists else track.artist.split(",").map(String::trim)
 
         private fun recordCatalogueLinks(video: String, runs: List<Map<*, *>>) {
+            val credits = ArrayList<Pair<String, String>>()
             for (run in runs) {
                 val endpoint = (run["navigationEndpoint"] as? Map<*, *>)?.get("browseEndpoint") as? Map<*, *> ?: continue
                 val id = endpoint["browseId"] as? String ?: continue
@@ -731,9 +732,10 @@ internal class YouTubeMusic(
                 if (id.startsWith("MPRE") && type.contains("MUSIC_PAGE_TYPE_ALBUM")) rememberAlbum(video, id)
                 if (id.startsWith("UC") && (type.contains("MUSIC_PAGE_TYPE_ARTIST") || type.contains("MUSIC_PAGE_TYPE_USER_CHANNEL"))) {
                     val name = text(run["text"])
-                    if (name.isNotBlank()) artistIdsByVideo.putIfAbsent(video, id to name)
+                    if (name.isNotBlank()) credits += id to name
                 }
             }
+            if (credits.isNotEmpty()) artistIdsByVideo[video] = credits.distinctBy { it.first }
         }
 
         /** Playlist cards anywhere in an answer (a library grid, a shelf), in order, without the "New playlist" tile. */
@@ -974,7 +976,7 @@ internal class YouTubeMusic(
                 val year = if (video) null else parts.lastOrNull()?.takeIf { it.matches(Regex("""\d{4}""")) }?.toInt()
                 val length = text(row["lengthText"]).split(':').mapNotNull { it.trim().toLongOrNull() }.fold(0L) { acc, p -> acc * 60 + p }
                 val cover = biggestImage(row["thumbnail"])
-                Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", song, artist, album = album, durationMs = length * 1000, year = year, artworkUri = cover, artists = artists.ifEmpty { listOf(artist) })
+                Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", song, artist, album = album, durationMs = length * 1000, year = year, artworkUri = cover, artists = if (video) listOf(artist) else artists.ifEmpty { listOf(artist) })
             }.distinctBy { it.id }
             val token = Regex(""""nextRadioContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
                 ?: Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
