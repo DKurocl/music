@@ -537,8 +537,12 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         val stats = stats.value
         val (online, upcoming, seedHere) = withContext(Dispatchers.Default) {
             val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
-            val songs = library.value?.songs.orEmpty()
-            Triple(online, localFirst(if (online.size >= 5) online else Mix.local(seed, songs, stats, recent)), localFirst(listOf(seed)).first())
+            val upcoming = if (online.size >= 5) localFirst(online) else {
+                // Use the catalogue's bound file copies so their stats keys match the user database.
+                val files = (catalogue.value ?: library.value)?.songs.orEmpty().filterNot(YouTubeMusic::isOnline)
+                Mix.local(seed, files, stats, recent)
+            }
+            Triple(online, upcoming, localFirst(listOf(seed)).first())
         }
         if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return }
         seen += upcoming.map(Mix::songKey)
