@@ -36,6 +36,7 @@ internal fun HomePage(
     youTubeHome: List<YouTubeMusic.Shelf> = emptyList(), excluded: Set<String> = emptySet(), onlineEnabled: Boolean = true,
     playlists: List<PlaylistUi> = emptyList(), accountPlaylists: List<YouTubeMusic.Card> = emptyList(),
     onOpenPlaylist: (Long) -> Unit = {}, onAllPlaylists: () -> Unit = {},
+    transportPlaying: Boolean = false, onToggle: () -> Unit = {},
     onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onShuffle: (List<Track>) -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember(library) { HomeCache() },
@@ -103,18 +104,18 @@ internal fun HomePage(
                             if (feature != null) onPlay(feature.tracks, 0, feature.name)
                             else if (songs.isNotEmpty()) onPlay(songs, 0, contextName)
                         }
-                        HomeStarts(feature, songs.firstOrNull(), shuffleSongs, favourites,
+                        HomeStarts(feature, songs.firstOrNull(), shuffleSongs, favourites, currentId, transportPlaying, onToggle,
                             onAlbum = { if (feature != null) onOpenAlbum(feature) else startFeature() },
                             onPlayAlbum = ::startFeature, onShuffle = { onShuffle(shuffleSongs) }, onLiked = { onPlay(favourites, 0, "Liked") })
                     }
                     if (songs.isNotEmpty()) {
-                        item(key = "title") { SectionTitle(contextName) }
+                        if (mood != null) item(key = "title") { SectionTitle(contextName) }
                         if (mood != null) item(key = "spread") {
                             CoverSpread(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions)
                         }
                         val start = if (mood == null) 0 else minOf(3, songs.size)
                         if (start < songs.size) item(key = "picks") {
-                            QuickPicks(songs.drop(start), currentId, { _, i -> onPlay(songs, i + start, contextName) }, onTrackActions)
+                            QuickPicks(if (mood == null) contextName else "More picks", songs.drop(start), currentId, { _, i -> onPlay(songs, i + start, contextName) }, onTrackActions)
                         }
                     } else if (queue == null || moodView?.loading == true) {
                         item(key = "loading") { PlaceholderRow() }

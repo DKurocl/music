@@ -458,6 +458,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier.padding(insets),
                 onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
                 playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
+                transportPlaying = playing.playWhenReady, onToggle = model::toggle,
                 onOpenAlbum = { album ->
                     clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME
                     openInLibrary = "ALBUMS" to album.id; place = Place.SEARCH

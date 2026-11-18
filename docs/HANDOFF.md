@@ -2,8 +2,9 @@
 
 The horizontal mood strip stays below the Home toolbar. Each chip filters in one tap and
 animates its own glyph. Repeating a selection or pressing Back restores the default feed. Home starts with the recent album and the original Shuffle all and Liked tiles. A tap on the
-album opens it, its play button starts the album, and compact track rows play from the exact
-position in the combined queue. Made for you opens the suggested playlist or starts the exact radio mix.
+album opens it, its transport button pauses or resumes the existing queue when the album is already playing,
+and otherwise starts the album. Liked shows actual favourite sleeves. Quick picks pages have
+both swipe and button navigation and play from the exact combined queue position. Made for you opens the suggested playlist or starts the exact radio mix.
 Your playlists fills the available width and interleaves local and signed-in account entries,
 including stored account lists offline. Albums supplied by Home have their own shelf. Each opens its existing detail screen. The gallery exercises both opens and the direct
 mood filter. CI now uploads the Home renders immediately after tests, before lint and assembly.
