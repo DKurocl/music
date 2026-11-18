@@ -45,7 +45,11 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     source: String = "Embedded lyrics", note: String? = null, folders: List<String> = emptyList(),
     onChooseFolder: (() -> Unit)? = null, onClearFolders: (() -> Unit)? = null, onReload: (() -> Unit)? = null,
     onFindOnline: (() -> Unit)? = null, onlineStatus: String? = null,
-    onSaveTiming: ((Lyrics) -> Unit)? = null, onResetTiming: (() -> Unit)? = null) {
+    onSaveTiming: ((Lyrics) -> Unit)? = null, onResetTiming: (() -> Unit)? = null,
+    textScale: Float = 1f, onTextScale: (Float) -> Unit = {}, synced: Boolean = true, onSynced: (Boolean) -> Unit = {},
+    romanized: Boolean = false, onRomanized: (Boolean) -> Unit = {},
+    translated: Boolean = false, onTranslated: (Boolean) -> Unit = {}) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     // Timing editor: tap a line while it is sung to move it there; Save keeps it for this song.
     var editing by rememberSaveable(state.mediaId) { mutableStateOf(false) }
     var draft by remember(state.mediaId, lyrics) { mutableStateOf(lyrics) }
@@ -100,12 +104,36 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                     }
                 } else {
                     // One group of plain rows, as in Settings: no colours, each row says what it does.
+                    if (lyrics.lines.isNotEmpty()) item(key = "appearance") {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(selected = synced, onClick = { onSynced(true) }, enabled = timed, label = { Text("Synced") })
+                                FilterChip(selected = !synced || !timed, onClick = { onSynced(false) }, label = { Text("Static") })
+                            }
+                            Text("Text size · ${(textScale * 100).toInt()}%", style = MaterialTheme.typography.titleMedium)
+                            Slider(textScale, onTextScale, valueRange = 0.8f..1.4f, steps = 5)
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                FilterChip(selected = romanized, onClick = { onRomanized(!romanized) }, label = { Text("Romanize") })
+                                if (lyrics.lines.any { !it.translation.isNullOrBlank() }) {
+                                    FilterChip(selected = translated, onClick = { onTranslated(!translated) }, label = { Text("Show translation") })
+                                }
+                            }
+                        }
+                    }
                     val rows = buildList<@Composable (Boolean, Boolean) -> Unit> {
                         if (timed) add { first, last ->
                             ToolRow(Glyph.TIMER, "Timing", if (offsetMs == 0L) "In sync with the song" else "Moved ${kotlin.math.abs(offsetMs) / 100 / 10.0} s ${if (offsetMs > 0) "earlier" else "later"}", first, last, onClick = { onOffset(0) }) {
                                 TextButton(onClick = { onOffset((offsetMs - 200).coerceAtLeast(-60_000)) }) { Text("Later") }
                                 TextButton(onClick = { onOffset((offsetMs + 200).coerceAtMost(60_000)) }) { Text("Earlier") }
                             }
+                        }
+                        if (lyrics.lines.isNotEmpty()) add { first, last ->
+                            ToolRow(Glyph.NOTE, "Share lyrics", null, first, last, onClick = {
+                                val text = lyrics.lines.joinToString("\n") { it.text }
+                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                                    .putExtra(android.content.Intent.EXTRA_TEXT, text)
+                                context.startActivity(android.content.Intent.createChooser(intent, null))
+                            })
                         }
                         if (timed && onSaveTiming != null) add { first, last -> ToolRow(Glyph.EDIT, "Fix timing", "Tap each line as it is sung", first, last, onClick = { editing = true; follow = false; draft = lyrics }) }
                         if (onResetTiming != null) add { first, last -> ToolRow(Glyph.REFRESH, "Restore original", "Undo your timing", first, last, onClick = onResetTiming) }
@@ -155,7 +183,7 @@ private fun ToolRow(glyph: Glyph, title: String, subtitle: String?, first: Boole
  * a second singer ("v2", "F") sits on the other side, as Apple Music shows duets.
  */
 @Composable
-internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int, now: () -> Long, timed: Boolean, onSeek: () -> Unit) {
+internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int, now: () -> Long, timed: Boolean, textScale: Float = 1f, onSeek: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val active = index == current
     val distance = if (current < 0) 0 else kotlin.math.abs(index - current)
@@ -168,7 +196,7 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
     // Distant lines go soft, as in Apple Music; in Battery Saver they only dim (blur is GPU work per line).
     val blur by androidx.compose.animation.core.animateDpAsState(if (timed && distance >= 2 && !LocalPowerSave.current) 1.5.dp else 0.dp, motion.defaultEffectsSpec(), label = "lyric-blur")
     val base = if (line.background) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium
-    val style = base.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = (-0.2).sp)
+    val style = base.copy(fontSize = base.fontSize * textScale, lineHeight = base.lineHeight * textScale, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = (-0.2).sp)
     val dim = cs.onSurface.copy(alpha = 0.32f)
     val text = if (active && line.words.isNotEmpty()) line.words.joinToString("") { it.text } else line.text
     var layout by remember(line, active) { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
@@ -228,7 +256,7 @@ private val KeepScroll = object : androidx.compose.ui.input.nestedscroll.NestedS
  */
 @Composable
 internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, position: () -> Long, onSeek: (Long) -> Unit,
-    onTools: () -> Unit, onFindOnline: (() -> Unit)?, onlineStatus: String?, modifier: Modifier = Modifier) {
+    onTools: () -> Unit, onFindOnline: (() -> Unit)?, onlineStatus: String?, modifier: Modifier = Modifier, textScale: Float = 1f, synced: Boolean = true, romanized: Boolean = false, translated: Boolean = false) {
     val cs = MaterialTheme.colorScheme
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val list = rememberLazyListState()
@@ -236,9 +264,18 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
     var follow by remember(state.mediaId) { mutableStateOf(true) }
     var current by remember(state.mediaId, lyrics) { mutableIntStateOf(-1) }
     var now by remember(state.mediaId, lyrics) { mutableLongStateOf(0L) }
-    val timed = lyrics.sync != Sync.NONE
+    val timed = synced && lyrics.sync != Sync.NONE
+    val romanizedLines = rememberOffMain(lyrics, romanized, initial = null as List<ua.olex.music.lyrics.Line>?) {
+        if (!romanized || lyrics.lines.isEmpty()) return@rememberOffMain null
+        val transliterator = android.icu.text.Transliterator.getInstance("Any-Latin")
+        lyrics.lines.map { line ->
+            line.copy(text = transliterator.transliterate(line.text),
+                words = line.words.map { word -> word.copy(text = transliterator.transliterate(word.text)) })
+        }
+    }
+    val lines = if (romanized) romanizedLines ?: lyrics.lines else lyrics.lines
     LaunchedEffect(dragging) { if (dragging) follow = false }
-    LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, lifecycle) {
+    LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, lifecycle, timed) {
         if (!timed) { current = -1; return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             do {
@@ -270,8 +307,16 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
             }
         } else LazyColumn(Modifier.fillMaxSize().nestedScroll(KeepScroll), state = list, contentPadding = PaddingValues(top = 48.dp, bottom = 200.dp),
             verticalArrangement = Arrangement.spacedBy(22.dp)) {
-            itemsIndexed(lyrics.lines) { index, line ->
-                LyricLine(line, index, current, { now }, timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
+            itemsIndexed(lines) { index, line ->
+                Column {
+                    LyricLine(line, index, current, { now }, timed, textScale) {
+                        if (timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
+                    }
+                    if (translated) line.translation?.let { translation ->
+                        Text(translation, style = MaterialTheme.typography.titleMedium,
+                            color = cs.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp))
+                    }
+                }
             }
         }
         if (!follow && timed) androidx.compose.material3.FilledTonalButton(onClick = { follow = true }, modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp)) {

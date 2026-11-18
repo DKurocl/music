@@ -26,7 +26,7 @@ import ua.olex.music.playback.OutputRoute
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDiagnostics, onDismiss: () -> Unit, onOutput: () -> Unit,
-    onEqualizer: (() -> Unit)? = null, fileRateHz: Int? = null, processing: List<String> = emptyList(), sourceLabel: String = "File input") {
+    onEqualizer: (() -> Unit)? = null, fileRateHz: Int? = null, processing: List<String> = emptyList(), sourceLabel: String = "File input", controls: @Composable () -> Unit = {}) {
     val cs = MaterialTheme.colorScheme
     val context = androidx.compose.ui.platform.LocalContext.current
     val outputRateHz = audio.sampleRateHz
@@ -49,6 +49,7 @@ internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDi
                     }
                 }
             }
+            controls()
             Column {
                 Step(Glyph.NOTE, sourceLabel, listOf(format ?: "Format not reported"), MaterialShapes.Cookie6Sided, cs.primaryContainer, cs.onPrimaryContainer)
                 Step(Glyph.WAVE, "Decoder", listOf(audio.decoder?.let(::decoderName) ?: "Not active"), MaterialShapes.Circle, cs.secondaryContainer, cs.onSecondaryContainer)

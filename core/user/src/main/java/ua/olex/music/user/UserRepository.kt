@@ -28,6 +28,10 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         UserPlaylist(row.playlist.id, row.playlist.name, row.entries.sortedBy { it.position }.mapNotNull { songs[it.songId]?.toSong() }, row.playlist.createdAt)
     } }
     val history = dao.history(200).map { rows -> rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt) } }
+    fun historySince(start: Long) = dao.historySince(start).map { rows ->
+        rows.map { HistoryEntry(it.eventId, it.toSong(), it.playedAt) }
+    }
+
 
     private suspend fun register(songs: List<SavedSong>, at: Long): List<SavedSong> {
         if (songs.isEmpty()) return emptyList()

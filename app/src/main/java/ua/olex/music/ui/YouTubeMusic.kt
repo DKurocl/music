@@ -53,6 +53,16 @@ internal class YouTubeMusic(
         post("search", """"query":${quote(query)}""")?.let(::parseSearch) ?: emptyList()
     }
 
+    /** The provider marks official music clips separately from audio and user uploads. */
+    suspend fun musicVideos(artist: String, title: String): List<Track> = withContext(ioDispatcher) {
+        val answer = post("search", """"query":${quote("$artist $title official video")}""")
+            ?: throw java.io.IOException("Video search failed")
+        val root = ua.olex.music.lyrics.Json.parse(answer) ?: return@withContext emptyList()
+        val rows = collect(root, "musicResponsiveListItemRenderer")
+            .filter { dump(it["overlay"]).contains("MUSIC_VIDEO_TYPE_OMV") }
+        songRows(rows, fallbackArtist = artist, keepOrder = true).distinctBy { it.id }
+    }
+
     /** An artist on YouTube Music: photo, a few lines about them, top songs, albums and videos. */
     data class OnlineArtist(val id: String, val name: String, val photo: String?, val about: String?, val songs: List<Track>, val albums: List<OnlineAlbum>, val videos: List<Track>,
         val singles: List<OnlineAlbum> = emptyList(), val related: List<Card> = emptyList(), val listeners: String? = null)
