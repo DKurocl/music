@@ -7,5 +7,5 @@ data class QueueExtension(val tracks: List<Track>, val commit: () -> Boolean)
 
 /** Radio and autoplay belong to the playback service lifecycle, independently of any UI controller. */
 interface PlaybackQueueOwner {
-    suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?): QueueExtension?
+    suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?, remaining: Int): QueueExtension?
 }

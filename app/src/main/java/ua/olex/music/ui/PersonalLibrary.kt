@@ -2,7 +2,6 @@
 
 package ua.olex.music.ui
 
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -94,7 +93,7 @@ internal fun PlaylistBrowser(
     documentMessage?.let { message -> AppDialog(onDismissRequest = { documentMessage = null }, title = { Text("Playlist file") },
         text = { Text(message) }, confirmButton = { TextButton(onClick = { documentMessage = null }) { Text("Close") } }) }
     val selected = playlists.firstOrNull { it.id == selectedId }
-    BackHandler(selected != null) { selectedId = null }
+    val back = rememberLibraryBack(selected != null) { selectedId = null }
     // Signed in to YouTube Music: his playlists there too (Liked music first), loaded once a session.
     val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
     val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
@@ -144,7 +143,7 @@ internal fun PlaylistBrowser(
         }, confirmButton = { TextButton(onClick = { editingSong = null }) { Text("Close") } })
     }
 
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
+    LazyColumn(modifier.libraryBackMotion(back), contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
             // Two starts as cards: make one, or bring one from another player (M3U8).
