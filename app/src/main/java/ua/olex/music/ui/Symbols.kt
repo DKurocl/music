@@ -26,7 +26,6 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import java.util.Locale
 import ua.olex.music.R
 
 /**
@@ -69,6 +68,26 @@ private object SymbolFont {
         typeface ?: ctx.resources.getFont(R.font.material_symbols).also { typeface = it }
 }
 
+/** Reuse the native font settings when a scroll or ripple redraws an unchanged symbol. */
+private class SymbolPaint(context: android.content.Context) : Paint(Paint.ANTI_ALIAS_FLAG) {
+    private var lastFill = -1
+    private var lastWeight = -1
+
+    init {
+        typeface = SymbolFont.get(context)
+        textAlign = Paint.Align.CENTER
+    }
+
+    fun setAxes(fill: Float, weight: Float) {
+        val f = (fill.coerceIn(0f, 1f) * 32f).toInt()
+        val w = weight.toInt()
+        if (f == lastFill && w == lastWeight) return
+        fontVariationSettings = "'FILL' ${f / 32f}, 'wght' $w"
+        lastFill = f
+        lastWeight = w
+    }
+}
+
 /**
  * A Material Symbol with independent fill, weight and short press feedback. The animation stays
  * inside the control so the visual motion cannot move its layout or touch target.
@@ -82,23 +101,21 @@ fun Symbol(
 ) {
     val ctx = LocalContext.current
     val motion = MaterialTheme.motionScheme
-    val fill by animateFloatAsState(if (filled) 1f else 0f, motion.defaultEffectsSpec(), label = "fill")
-    val weight by animateFloatAsState(if (bold) 600f else 400f, motion.fastSpatialSpec(), label = "weight")
-    val tap = remember { Animatable(0f) }
     val still = LocalPowerSave.current
+    val fill by animateFloatAsState(if (filled) 1f else 0f, if (still) androidx.compose.animation.core.snap() else motion.defaultEffectsSpec(), label = "fill")
+    val weight by animateFloatAsState(if (bold) 600f else 400f, if (still) androidx.compose.animation.core.snap() else motion.fastSpatialSpec(), label = "weight")
     val pressScale by animateFloatAsState(if (pressed && !still) 0.91f else 1f, motion.fastSpatialSpec(), label = "press")
-    LaunchedEffect(kick, still) {
-        if (still || kick == 0) tap.snapTo(0f)
-        else {
-            tap.snapTo(0f)
-            tap.animateTo(1f, tween(105))
-            tap.animateTo(0f, motion.fastSpatialSpec())
+    val tap = if (kick > 0 && !still) remember { Animatable(0f) }.also { pulse ->
+        LaunchedEffect(kick) {
+            pulse.snapTo(0f)
+            pulse.animateTo(1f, tween(105))
+            pulse.animateTo(0f, motion.fastSpatialSpec())
         }
-    }
+    } else null
     val gesture = glyph.motion
-    val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = SymbolFont.get(ctx); textAlign = Paint.Align.CENTER } }
+    val paint = remember(ctx) { SymbolPaint(ctx) }
     Canvas(modifier.size(size).graphicsLayer {
-        val pulse = tap.value
+        val pulse = tap?.value ?: 0f
         val scale = pressScale * (1f + pulse * if (gesture == GlyphMotion.POP) 0.21f else 0.08f)
         scaleX = scale
         scaleY = scale
@@ -116,7 +133,7 @@ fun Symbol(
         val em = this.size.minDimension
         paint.textSize = em
         paint.color = color.toArgb()
-        paint.fontVariationSettings = String.format(Locale.ROOT, "'FILL' %.3f, 'wght' %.1f", fill, weight)
+        paint.setAxes(fill, weight)
         drawContext.canvas.nativeCanvas.drawText(glyph.text, this.size.width / 2, (this.size.height + em) / 2, paint)
     }
 }

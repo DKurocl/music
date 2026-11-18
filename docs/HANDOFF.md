@@ -17,6 +17,9 @@ fade the card or start a coroutine for each movement.
 towards their stop. The glyphs stay inside stable touch targets. Battery Saver disables these
 gestures. Tests exercise a slow session acknowledgement, shared bounds in both directions and
 the drawn icon geometry during motion. CI stores intermediate frames under player-motion.
+The library behind Now Playing clears its accessibility actions while covered. Tab screens
+arrive from their relative direction and retain visible content during the first frame. Static
+Material Symbols reuse their native font settings when scrolling redraws them.
 CI 44259189250 passed the initial swipe, bounds and glyph frame tests, both lints and signed
 build. The follow-up adds an unresolved incoming image to the swipe fixture. Bottom destinations
 have independent drawn gestures, share touch with the Material indicator and preserve saved tab

@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
@@ -32,11 +33,14 @@ internal fun DestinationIcon(place: Place, selected: Boolean, taps: Int, pressed
     val scheme = MaterialTheme.motionScheme
     val settle = scheme.fastSpatialSpec<Float>()
     val action = remember { Animatable(0f) }
+    var handled by remember { androidx.compose.runtime.mutableIntStateOf(taps) }
     LaunchedEffect(taps, selected, still) {
+        val tapped = handled != taps
+        handled = taps
         when {
             still -> action.snapTo(0f)
             !selected -> action.animateTo(0f, settle)
-            taps > 0 -> {
+            tapped -> {
                 action.animateTo(1f, tween(125))
                 action.animateTo(0f, settle)
             }
