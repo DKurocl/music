@@ -645,6 +645,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Bumped when Search should open with the keyboard (the Search shortcut). */
     var searchRequest by mutableStateOf(0); private set
     fun requestSearch() { searchRequest++ }
+    fun consumeSearchRequest() { searchRequest = 0 }
     fun resumeFromShortcut() = viewModelScope.launch {
         val state = kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
         if (!state.playWhenReady && state.hasTrack) player.toggle()

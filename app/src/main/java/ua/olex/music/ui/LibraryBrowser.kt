@@ -71,6 +71,12 @@ import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.MusicCollection
 import ua.olex.music.model.Track
 
+private val trackFilterSaver = androidx.compose.runtime.saveable.listSaver<ua.olex.music.model.TrackFilter, Any>(
+    save = { listOf(it.lossless, it.hiRes, it.unplayed, it.minRating, it.decade ?: -1, it.genre.orEmpty()) },
+    restore = { ua.olex.music.model.TrackFilter(it[0] as Boolean, it[1] as Boolean, it[2] as Boolean,
+        it[3] as Int, (it[4] as Int).takeIf { year -> year >= 0 }, (it[5] as String).ifEmpty { null }) },
+)
+
 private enum class LibraryTab(val title: String) {
     ALBUMS("Albums"), ARTISTS("Artists"), SONGS("Songs"), PLAYLISTS("Playlists"), SMART("Smart"), FAVOURITES("Favourites"), GENRES("Genres"), FOLDERS("Folders"), YEARS("Years"), COMPOSERS("Composers"), HISTORY("History")
 }
@@ -113,13 +119,13 @@ internal fun LibraryBrowser(
     open: Pair<String, String>? = null, onOpened: () -> Unit = {},
     recentSearches: List<String> = emptyList(), onSearchUsed: (String) -> Unit = {}, onClearRecent: () -> Unit = {},
     /** The open collection's name once its header has scrolled away (null when none is open), for the top bar. */
-    onCollection: (String?) -> Unit = {}, closeCollection: Int = 0,
+    onCollection: (String?) -> Unit = {}, closeCollection: Int = 0, onCollectionClosed: () -> Unit = {},
     /** Set when something here was opened from another place: Back from it goes there. */
     onLeave: (() -> Unit)? = null,
     /** YouTube Music's songs for the query, shown under the library's (null while it looks). */
     online: OnlineSearch? = null, onlineOn: Boolean = false,
     /** Bumped when the Search tab is tapped again: back to the tiles and the field focused (as Google Play does). */
-    focusSearch: Int = 0,
+    focusSearch: Int = 0, onSearchFocused: () -> Unit = {},
     /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
     openTile: String? = null,
     openPlaylist: Long? = null, onOpenedPlaylist: () -> Unit = {},
@@ -176,7 +182,7 @@ internal fun LibraryBrowser(
         tab == LibraryTab.SONGS -> library.songs
         else -> null
     }
-    var filter by remember { mutableStateOf(ua.olex.music.model.TrackFilter()) }
+    var filter by rememberSaveable(stateSaver = trackFilterSaver) { mutableStateOf(ua.olex.music.model.TrackFilter()) }
     var browsing by rememberSaveable { mutableStateOf<String?>(null) }
     val filterStats = if (filter.unplayed || filter.minRating > 0) stats else null
     val visibleIds = library.byId.takeIf { searching }
@@ -232,7 +238,7 @@ internal fun LibraryBrowser(
         if (openedFromOutside == "collection" && onLeave != null) { openedFromOutside = null; selectedId = null; browsing = null; onLeave(); return }
         selectedId = null
     }
-    LaunchedEffect(closeCollection) { if (closeCollection > 0) closeSelected() }
+    LaunchedEffect(closeCollection) { if (closeCollection > 0) { closeSelected(); onCollectionClosed() } }
     LaunchedEffect(openTile) { openTile?.let { t -> runCatching { BrowseTile.valueOf(t) }.getOrNull()?.let { tile -> browsing = tile.name; tabName = tile.tab.name; filter = tile.filter; openedFromOutside = "tile"; onOpened() } } }
     fun closeTile() {
         browsing = null
@@ -265,25 +271,38 @@ internal fun LibraryBrowser(
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
         // The lens swings each time the field is entered, as in Google's own search fields.
         var lens by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-        LaunchedEffect(focusSearch) { if (focusSearch > 0) { browsing = null; selectedId = null; filter = ua.olex.music.model.TrackFilter(); runCatching { focus.requestFocus() } } }
+        LaunchedEffect(focusSearch) {
+            if (focusSearch > 0) { browsing = null; selectedId = null; filter = ua.olex.music.model.TrackFilter() }
+        }
+        val snackbar = LocalSnackbar.current
+        val voiceScope = androidx.compose.runtime.rememberCoroutineScope()
         val voice = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
             r.data?.getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS)?.firstOrNull()?.let(onQueryChange)
         }
         // Inside a tile or an album the page has its own header (as Google Play's category pages do);
         // the field comes back with Back or a second tap on Search.
         val fieldShown = mode == BrowserMode.ALL || (mode == BrowserMode.SEARCH && (searching || (browsing == null && selected == null)))
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        LaunchedEffect(focusSearch, fieldShown) {
+            if (focusSearch > 0 && fieldShown) {
+                focus.requestFocus()
+                keyboard?.show()
+                onSearchFocused()
+            }
+        }
         if (fieldShown) androidx.compose.material3.TextField(
             value = query, onValueChange = onQueryChange, singleLine = true,
             placeholder = { Text("Search your music") },
             leadingIcon = { Symbol(Glyph.SEARCH, color = MaterialTheme.colorScheme.onSurfaceVariant, kick = lens) },
             trailingIcon = {
-                if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { onQueryChange("") },
-                    modifier = Modifier.semantics { contentDescription = "Clear" }) { Symbol(Glyph.CLOSE) }
-                else if (mode == BrowserMode.SEARCH) androidx.compose.material3.IconButton(onClick = {
+                if (query.isNotEmpty()) KickIconButton(onClick = { onQueryChange("") },
+                    modifier = Modifier.semantics { contentDescription = "Clear" }) { taps -> Symbol(Glyph.CLOSE, kick = taps) }
+                else if (mode == BrowserMode.SEARCH) KickIconButton(onClick = {
                     runCatching { voice.launch(android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                         .putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                         .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say a song, artist or album")) }
-                }, modifier = Modifier.semantics { contentDescription = "Search by voice" }) { Symbol(Glyph.MIC) }
+                        .onFailure { voiceScope.launch { snackbar?.showSnackbar("Voice search is unavailable. Type your search instead.") } }
+                }, modifier = Modifier.semantics { contentDescription = "Search by voice" }) { taps -> Symbol(Glyph.MIC, kick = taps) }
             },
             shape = androidx.compose.foundation.shape.CircleShape,
             colors = androidx.compose.material3.TextFieldDefaults.colors(
@@ -314,8 +333,8 @@ internal fun LibraryBrowser(
         // Inside a tile: its name with a way back to the tiles.
         if (mode == BrowserMode.SEARCH && !searching && selected == null) browsing?.let { name ->
             Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.material3.IconButton(onClick = { closeTile() },
-                    modifier = Modifier.semantics { contentDescription = "Back to browse" }) { Symbol(Glyph.BACK) }
+                KickIconButton(onClick = { closeTile() },
+                    modifier = Modifier.semantics { contentDescription = "Back to browse" }) { taps -> Symbol(Glyph.BACK, kick = taps) }
                 Text(BrowseTile.valueOf(name).title, style = MaterialTheme.typography.titleLarge)
             }
         }
@@ -329,8 +348,8 @@ internal fun LibraryBrowser(
                 HubCard("Smart", "${smart.count { it.tracks.isNotEmpty() }} lists", Glyph.SMART, androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(),
                     MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, Modifier.weight(1f)) { tabName = LibraryTab.SMART.name }
             } else Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                androidx.compose.material3.IconButton(onClick = { tabName = LibraryTab.PLAYLISTS.name },
-                    modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { Symbol(Glyph.BACK) }
+                KickIconButton(onClick = { tabName = LibraryTab.PLAYLISTS.name },
+                    modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { taps -> Symbol(Glyph.BACK, kick = taps) }
                 Text(tab.title, style = MaterialTheme.typography.titleLarge)
             }
         }
@@ -685,10 +704,10 @@ private fun CollectionHeader(collection: MusicCollection, artist: Boolean = fals
             Button(enabled = enabled, onClick = onPlay, modifier = Modifier.height(52.dp)) {
                 Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play all")
             }
-            androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onShuffle,
-                modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
-            androidx.compose.material3.FilledTonalIconButton(enabled = enabled, onClick = onAdd,
-                modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { Symbol(Glyph.PLAYLIST_ADD) }
+            KickFilledTonalIconButton(enabled = enabled, onClick = onShuffle,
+                modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { taps -> Symbol(Glyph.SHUFFLE, kick = taps) }
+            KickFilledTonalIconButton(enabled = enabled, onClick = onAdd,
+                modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { taps -> Symbol(Glyph.PLAYLIST_ADD, kick = taps) }
             if (!artist) collection.tracks.firstOrNull()?.let { MotionCoverButton(it) }
         }
     }
@@ -924,8 +943,8 @@ private fun SelectionActions(enabled: Boolean, onPlay: () -> Unit, onNext: () ->
         listOf(Triple(Glyph.PLAY, "Play selected", onPlay), Triple(Glyph.NEXT, "Play next", onNext), Triple(Glyph.QUEUE, "Add to queue", onQueue),
             Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags),
             Triple(Glyph.DELETE, "Move to trash", onTrash)).forEachIndexed { i, (glyph, label, action) ->
-            androidx.compose.material3.IconButton(enabled = enabled, onClick = { haptics.confirm(); action() },
-                modifier = Modifier.semantics { contentDescription = label }) { Symbol(glyph, filled = glyph == Glyph.PLAY) }
+            KickIconButton(enabled = enabled, onClick = { haptics.confirm(); action() },
+                modifier = Modifier.semantics { contentDescription = label }) { taps -> Symbol(glyph, filled = glyph == Glyph.PLAY, kick = taps) }
         }
     }
 }

@@ -35,7 +35,9 @@ A change that makes a number worse needs a reason in the commit. Features are tr
 Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
-- [~] Shared player cover, continuous swipe pages and transport icon motion (Codex, 2026-11-18).
+
+- [x] Shared player cover, continuous swipe pages and transport icon motion (Codex, 2026-11-18,
+      `a4ae9a9`, `a63be0f` and bottom navigation follow-up).
 
 - [x] Player artwork handoff, lyrics header and expressive controls (Codex, 2026-11-18,
       `faf35f1` plus regression follow-up). Cover changes, lyrics action slots, press feedback, motion
