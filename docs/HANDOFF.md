@@ -1,6 +1,10 @@
 # Library, system playback and layout continuation (Codex, 2026-11-18)
 
 This branch includes the download package and fixes its nullable player-subtitle compile error.
+GitHub Actions 44223169107 executed 485 tests with zero failures, errors or skips. The subsequent
+lint step stopped because the app manifest did not declare the media playback foreground permission
+alongside data sync. Both permissions are now explicit. Lint, release and signer checks must be
+confirmed for the corrected commit.
 [код] Added two-way likes, a session-specific operation queue and a visible sync action. An inbound
 unlike can remove only the exact favourite imported by that session, identified by its original
 write time. Empty or incomplete remote snapshots cannot remove favourites.
