@@ -57,6 +57,29 @@ class YouTubeMusicTest {
         assertTrue(artist.videos.all { it.artist == "Tame Impala" && it.uri.startsWith("ytm://") })
     }
 
+    @Test fun artistLookupUsesExactCreditWhenFilteredSearchReturnsADifferentArtist() = kotlinx.coroutines.runBlocking {
+        val filtered = """{"musicCardShelfRenderer":{"title":{"runs":[{"text":"Someone else"}]},"onTap":{"browseEndpoint":{"browseId":"UCwrong","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}"""
+        val credit = """{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"melancholicjoana","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_USER_CHANNEL"}}}]}}}"""
+        var calls = 0
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            assertEquals("search", endpoint)
+            calls++
+            if ("params" in fields) filtered else credit
+        })
+        assertEquals("UCcorrect", source.artistId("melancholicjoana"))
+        assertEquals("UCcorrect", source.artistId("melancholicjoana"))
+        assertEquals(2, calls)
+    }
+
+    @Test fun publicArtistProfileAcceptsAlternateHeadersButRejectsErrorPages() {
+        val shelf = """{"musicShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"song"},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song title"}]}}}]}}]}}"""
+        val modern = """{"pageHeaderRenderer":{"content":{"pageHeaderViewModel":{"title":{"dynamicTextViewModel":{"text":{"content":"Artist"}}}}}},"shelf":$shelf}"""
+        assertEquals("Artist", YouTubeMusic.parseArtist("UCexample", modern)?.name)
+        assertEquals("Known artist", YouTubeMusic.parseArtist("UCexample", shelf, "Known artist")?.name)
+        assertEquals("Song title", YouTubeMusic.parseArtist("UCexample", shelf, "Known artist")?.songs?.single()?.title)
+        assertNull(YouTubeMusic.parseArtist("UCexample", """{"error":{"code":403}}""", "Known artist"))
+    }
+
     @Test fun theOwnersFileIsFoundForAnOnlineSong() {
         val file = Track(TrackId("local:1"), "content://1", "Eventually", "Tame Impala", album = "Currents", durationMs = 318_500)
         val library = LibraryIndex.EMPTY.copy(songs = listOf(file))
