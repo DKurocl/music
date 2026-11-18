@@ -512,6 +512,7 @@ internal fun PlayerPage(
             val acceptsSkip by rememberUpdatedState(state.connected && state.error == null)
             var gestureItem by remember { mutableStateOf(occurrence) }
             var skipping by remember { mutableStateOf(false) }
+            var swipedTo by remember { mutableStateOf<String?>(null) }
             var dragOffset by remember { mutableStateOf<Float?>(null) }
             var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
             val visibleOffset = { if (gestureItem == latestOccurrence) dragOffset ?: swipe.value else 0f }
@@ -544,7 +545,7 @@ internal fun PlayerPage(
                             translationX = x + side * step
                             scaleX = 0.94f + 0.06f * progress
                             scaleY = scaleX
-                        }, 32.dp)
+                        }, 32.dp, retainWhileLoading = false)
                 }
                 val tapFavourite by rememberUpdatedState(onFavourite)
                 val tapMore by rememberUpdatedState(onMore)
@@ -584,15 +585,17 @@ internal fun PlayerPage(
                                         try {
                                             if (!powerSave) swipe.animateTo(if (goNext) -step else step, motion.fastEffectsSpec())
                                             if (occurrence != latestOccurrence) return@launch
+                                            val target = if (goNext) state.nextIndex else state.previousIndex
+                                            swipedTo = state.queue.getOrNull(target)?.key
                                             if (goNext) next() else previous()
                                             // Hold the incoming cover until the session acknowledges the command.
                                             // An unresponsive controller must eventually give the gesture back.
-                                            val target = if (goNext) state.nextIndex else state.previousIndex
                                             if (target != state.queueIndex) kotlinx.coroutines.withTimeoutOrNull(3_000) {
                                                 androidx.compose.runtime.snapshotFlow { latestOccurrence != occurrence || !acceptsSkip }
                                                     .first { it }
                                             }
                                         } finally {
+                                            if (latestOccurrence == occurrence) swipedTo = null
                                             skipping = false
                                         }
                                     } else if (commit && x > coverWidth * 0.2f) {
@@ -625,6 +628,7 @@ internal fun PlayerPage(
                         }.sharedPlayerCover(visible = true),
                     corner = 32.dp, motion = motionCover,
                     moving = state.isPlaying, showMotion = direction == 0 && !skipping,
+                    retainWhileLoading = swipedTo == null || swipedTo != occurrence,
                 )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
                 modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })
