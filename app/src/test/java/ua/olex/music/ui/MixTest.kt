@@ -60,6 +60,14 @@ class MixTest {
         assertEquals(1, Mix.clean(batch, seed, emptySet()).size)
     }
 
+    @Test fun localMixUsesRecordingStatsAfterSourceChanges() {
+        val seed = t("Seed", "Artist")
+        val copy = t("Other song", "Other artist").copy(recordingId = "recording-1")
+        val stats = mapOf(copy.statsKey to SongStats(plays = 100, rating = 5))
+        val mix = Mix.local(seed, listOf(copy), stats, emptySet(), random = kotlin.random.Random(1))
+        assertEquals(listOf(copy), mix)
+    }
+
     @Test fun localMixStaysNearTheSeedAndSpreadsArtists() {
         val seed = t("Teardrop", "Massive Attack", genre = "Trip Hop", year = 1998)
         val songs = (1..8).map { t("MA $it", "Massive Attack", genre = "Trip Hop", year = 1998) } +
