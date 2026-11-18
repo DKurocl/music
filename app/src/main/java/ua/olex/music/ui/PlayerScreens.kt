@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -258,12 +259,12 @@ private fun TrackRowContent(
         supportingContent = {
             // One line's height whatever the mark (a quality tag, a cloud, a ring): every row is the same height.
             val line = with(androidx.compose.ui.platform.LocalDensity.current) { MaterialTheme.typography.bodyMedium.lineHeight.toDp() }
-            Row(Modifier.height(line), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.heightIn(min = line), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // The tag shares the text's baseline: ListItem reads two different baselines as a
                 // second line and grows the row, which is what made rows with a tag taller.
                 if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                 else Text(clock(track.durationMs), maxLines = 1, modifier = Modifier.alignByBaseline())
-                if (showQuality) SourceMark(owned ?: track, Modifier.alignByBaseline(), kept = kept, unavailable = unavailable)
+                if (showQuality) SourceMark(owned ?: track, kept = kept && owned == null, unavailable = unavailable)
             }
         },
         leadingContent = {
@@ -307,18 +308,23 @@ internal fun SourceMark(track: Track, modifier: Modifier = Modifier, kept: Boole
     val cs = MaterialTheme.colorScheme
     val key = remember(track.artist, track.title) { ua.olex.music.soulseek.SoulseekDownloads.songKey(track.artist.substringBefore(",").trim(), track.title) }
     // Only this song's download: other downloads' progress doesn't redraw this row.
-    val job by remember(key) { graph.soulseek.jobs.map { all -> all.lastOrNull { it.key == key }?.takeIf { it.running } } }.collectAsState(null)
-    Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+    val job by remember(key) { graph.soulseek.jobs.map { all -> all.lastOrNull { it.key == key }?.takeIf { it.running } } }.collectAsStateWithLifecycle(null)
+    val mark = when {
+        job != null -> "Downloading a local copy"
+        unavailable -> "Requires internet"
+        kept -> "Cached audio available offline"
+        else -> "Streams from YouTube Music"
+    }
+    Box(modifier.size(18.dp).semantics { contentDescription = mark }, contentAlignment = Alignment.Center) {
         when {
             job != null -> {
                 val p = job?.progress
                 if (p == null) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = cs.primary, trackColor = cs.primary.copy(alpha = 0.2f))
                 else CircularProgressIndicator(progress = { p }, modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = cs.primary, trackColor = cs.primary.copy(alpha = 0.2f))
-                Box(Modifier.semantics { contentDescription = "Downloading" })
             }
-            unavailable -> Symbol(Glyph.CLOUD_OFF, size = 16.dp, color = cs.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = "Needs internet" })
-            kept -> Symbol(Glyph.CLOUD_DONE, size = 16.dp, color = cs.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = "Streams, kept offline" })
-            else -> Symbol(Glyph.CLOUD, size = 16.dp, color = cs.onSurfaceVariant, modifier = Modifier.semantics { contentDescription = "Streams from YouTube Music" })
+            unavailable -> Symbol(Glyph.CLOUD_OFF, size = 16.dp, color = cs.onSurfaceVariant)
+            kept -> Symbol(Glyph.CLOUD_DONE, size = 16.dp, color = cs.onSurfaceVariant)
+            else -> Symbol(Glyph.CLOUD, size = 16.dp, color = cs.onSurfaceVariant)
         }
     }
 }

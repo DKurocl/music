@@ -59,7 +59,7 @@ internal class PlaybackMix(
         }.getOrNull()
     }
 
-    suspend fun extend(queue: List<Track>, current: Int, context: String? = null): QueueExtension? {
+    suspend fun extend(queue: List<Track>, current: Int, context: String? = null, remaining: Int = queue.size - current - 1): QueueExtension? {
         val seed = queue.getOrNull(current) ?: return null
         if (!graph.youTubeOn.value || !graph.network.value) return null
         val origin = PlaybackOrigin.decode(context)
@@ -67,8 +67,7 @@ internal class PlaybackMix(
         var active = run
         if (active != null && seed.id.value !in active.ids && seed.requestedId !in active.ids) { run = null; label = null; active = null }
         val expected = active
-        val left = queue.size - current - 1
-        if (left > if (active == null) 0 else 3) return null
+        if (remaining > if (active == null) 0 else 3) return null
         val source = graph.youTube
         val page = if (active != null) {
             val token = active.token

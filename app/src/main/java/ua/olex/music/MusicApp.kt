@@ -140,7 +140,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             policy.select(original, rejected, allowDirect, availability, proposedLocal = proposed)
         }
     }
-    override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?) = graph.mix.extend(queue, current, context)
+    override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?, remaining: Int) =
+        graph.mix.extend(queue, current, context, remaining)
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
         val file = graph.library.index.first().byId[track.id]?.takeIf { it.uri == track.uri }
         val known = file?.let { track.copy(metadata = it.metadata, path = it.path) } ?: track

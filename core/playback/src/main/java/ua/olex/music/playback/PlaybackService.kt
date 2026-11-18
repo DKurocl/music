@@ -243,17 +243,29 @@ class PlaybackService : MediaLibraryService() {
     private fun refillQueue() {
         val owner = application as? PlaybackQueueOwner ?: return
         val player = exoOrNull() ?: return
-        if (!player.isPlaying || refill?.isActive == true || player.mediaItemCount == 0 || player.mediaItemCount - player.currentMediaItemIndex > 4) return
+        if (!player.isPlaying || refill?.isActive == true || player.mediaItemCount == 0 || player.repeatMode == Player.REPEAT_MODE_ONE) return
         val current = player.currentMediaItemIndex
+        val shuffle = player.shuffleModeEnabled
+        val repeat = player.repeatMode
+        val timeline = player.currentTimeline
+        if (current !in 0 until timeline.windowCount) return
+        var remaining = 0
+        var cursor = current
+        while (remaining < 4) {
+            cursor = timeline.getNextWindowIndex(cursor, Player.REPEAT_MODE_OFF, shuffle)
+            if (cursor == androidx.media3.common.C.INDEX_UNSET) break
+            remaining++
+        }
+        if (remaining >= 4) return
         val from = (current - 100).coerceAtLeast(0)
         val items = (from until player.mediaItemCount).map(player::getMediaItemAt)
         refill = scope.launch {
             try {
                 val tracks = withContext(Dispatchers.Default) { items.map(PlayerConnection::track) }
                 val context = items.getOrNull(current - from)?.mediaMetadata?.extras?.getString(PlayerConnection.CONTEXT_KEY)
-                val extension = owner.extendPlaybackQueue(tracks, current - from, context) ?: return@launch
+                val extension = owner.extendPlaybackQueue(tracks, current - from, context, remaining) ?: return@launch
                 val selected = selectSources(extension.tracks.map { PlayerConnection.mediaItem(it, playbackContext = context) }, allowDirect = true)
-                if (player.currentMediaItemIndex != current ||
+                if (player.currentMediaItemIndex != current || player.shuffleModeEnabled != shuffle || player.repeatMode != repeat ||
                     (from until player.mediaItemCount).map { occurrence(player.getMediaItemAt(it)) } != items.map(::occurrence)) return@launch
                 if (extension.commit() && selected.isNotEmpty()) QueueCommand.enqueue(player, selected, false)
 

@@ -208,17 +208,25 @@ internal fun LibraryBrowser(
         selectedId = null
     }
     LaunchedEffect(closeCollection) { if (closeCollection > 0) closeSelected() }
-    BackHandler(searching || selected != null) {
-        if (searching) onQueryChange("") else closeSelected()
-    }
-    BackHandler(picking) { picking = false; picked = TrackSelection() }
     LaunchedEffect(openTile) { openTile?.let { t -> runCatching { BrowseTile.valueOf(t) }.getOrNull()?.let { tile -> browsing = tile.name; tabName = tile.tab.name; filter = tile.filter; openedFromOutside = "tile"; onOpened() } } }
-    BackHandler(mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS && selected == null) { tabName = LibraryTab.PLAYLISTS.name }
     fun closeTile() {
-        browsing = null; filter = ua.olex.music.model.TrackFilter()
+        browsing = null
+        filter = ua.olex.music.model.TrackFilter()
         if (openedFromOutside == "tile" && onLeave != null) { openedFromOutside = null; onLeave() }
     }
-    BackHandler(mode == BrowserMode.SEARCH && browsing != null && selected == null && !searching) { closeTile() }
+    val back = rememberLibraryBack(
+        picking || searching || selected != null ||
+            (mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS) ||
+            (mode == BrowserMode.SEARCH && browsing != null),
+    ) {
+        when {
+            picking -> { picking = false; picked = TrackSelection() }
+            searching -> onQueryChange("")
+            selected != null -> closeSelected()
+            mode == BrowserMode.LIBRARY -> tabName = LibraryTab.PLAYLISTS.name
+            browsing != null -> closeTile()
+        }
+    }
     missingFavourite?.let { id ->
         AppDialog(onDismissRequest = { missingFavourite = null }, title = { Text("Remove unavailable favourite?") },
             text = { Text("The saved entry will be removed. Your music files are not changed.") },
@@ -227,7 +235,7 @@ internal fun LibraryBrowser(
     }
 
     var fieldFocused by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().padding(insets)) {
+    Column(Modifier.fillMaxSize().padding(insets).libraryBackMotion(back)) {
         // A search pill, as in Google's apps, and the library's sections as chips below it.
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
         LaunchedEffect(focusSearch) { if (focusSearch > 0) { browsing = null; selectedId = null; filter = ua.olex.music.model.TrackFilter(); runCatching { focus.requestFocus() } } }
