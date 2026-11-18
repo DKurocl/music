@@ -10,6 +10,9 @@ AAPT = 'xmlns:aapt="http://schemas.android.com/aapt"'
 SIZE = 'android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108"'
 COLORS = ("#CD6654", "#B34A3B")
 DURATION = 460
+MARK_SCALE = 0.68
+MARK_X = 0.8
+MARK_Y = -2.0
 # An offset pair of note heads and their connecting beam, as one outline.
 MARK = ("M43,60 V38 Q43,34 47,33 L73,27 Q78,26 78,31 V64 "
         "C78,71 71,76 64,76 C58,76 54,72 55,67 C56,61 63,57 71,58 "
@@ -28,8 +31,8 @@ def draw(animated=False, themed=False):
     )
     name = 'android:name="mark"' if animated else ""
     return (f'<group {name} android:pivotX="54" android:pivotY="54">'
-            f'<group android:pivotX="54" android:pivotY="54" android:scaleX="0.86" '
-            f'android:scaleY="0.86" android:translateY="-3"><path {paint} android:pathData="{MARK}">'
+            f'<group android:pivotX="54" android:pivotY="54" android:scaleX="{MARK_SCALE}" '
+            f'android:scaleY="{MARK_SCALE}" android:translateX="{MARK_X}" android:translateY="{MARK_Y}"><path {paint} android:pathData="{MARK}">'
             f'{gradient}</path></group></group>')
 
 
@@ -53,7 +56,7 @@ def main():
           f'<target android:name="mark"><aapt:attr name="android:animation"><set>{motion}</set></aapt:attr></target>'
           '</animated-vector>')
 
-    path = f'<path d="{MARK}" transform="translate(54 51) scale(.86) translate(-54 -54)"'
+    path = f'<path d="{MARK}" transform="translate({54 + MARK_X} {54 + MARK_Y}) scale({MARK_SCALE}) translate(-54 -54)"'
     panels = [
         '<circle cx="54" cy="54" r="36" fill="white"/>' + f'{path} fill="url(#g)"/>',
         '<rect x="18" y="18" width="72" height="72" rx="22" fill="white"/>' + f'{path} fill="url(#g)"/>',

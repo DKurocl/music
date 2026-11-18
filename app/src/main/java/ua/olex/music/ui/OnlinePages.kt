@@ -151,8 +151,8 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 return@produceState
             }
             val artist = try {
-                graph.youTube.artist(id, offline = !network, full = network) { value = Load.Done(it) }
-                    ?: graph.youTube.artist(id, offline = !network)
+                graph.youTube.artist(id, offline = !network, full = network, knownName = target.name) { value = Load.Done(it) }
+                    ?: graph.youTube.artist(id, offline = !network, knownName = target.name)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (_: java.io.IOException) {
@@ -363,7 +363,7 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
     val account by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     var retry by remember(name) { mutableIntStateOf(0) }
     val state = rememberLoad(Triple(name, network, account), retry) {
-        graph.youTube.artistId(name, offline = !network)?.let { graph.youTube.artist(it, offline = !network) }
+        graph.youTube.artistId(name, offline = !network)?.let { graph.youTube.artist(it, offline = !network, knownName = name) }
     }
     val artist = (state as? Load.Done)?.value
     if (artist == null) {
