@@ -96,7 +96,9 @@ internal fun HomePage(
         if (moods.isNotEmpty()) MoodBar(moods, mood?.label, onSelect = { label = it })
         Arrival(mode, Place.HOME, deeper = mood != null) {
             stateHolder.SaveableStateProvider(mode) {
-                LazyColumn(Modifier.fillMaxSize().testTag("home-feed"), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
+                // Keep Home's scroll-to targets inside the touchable viewport above the floating player.
+                LazyColumn(Modifier.fillMaxSize().padding(bottom = LocalPlayerInset.current).testTag("home-feed"),
+                    contentPadding = PaddingValues(bottom = 12.dp)) {
                     val contextName = mood?.label ?: "Quick picks"
                     if (mood == null && (feature != null || songs.isNotEmpty())) item(key = "starts") {
                         val shuffleSongs = library.songs.ifEmpty { songs }
