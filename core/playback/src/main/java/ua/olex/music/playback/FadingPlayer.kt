@@ -17,6 +17,7 @@ import kotlinx.coroutines.launch
 @OptIn(UnstableApi::class)
 class FadingPlayer internal constructor(private val real: Player, private val scope: CoroutineScope, private val wanted: () -> Boolean = { true }) : ForwardingPlayer(real) {
     private var fade: Job? = null
+    private var timerFade: Job? = null
     private val enabled get() = wanted()
     /** True during the short fade before a pause: the player already reads as paused to everyone. */
     private var pausing = false
@@ -68,14 +69,23 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
     }
 
     /** The last half minute of a sleep timer: a slow fade to silence instead of a sudden stop. */
-    internal fun sleepFade(durationMs: Long, then: () -> Unit): Job {
+    internal fun sleepFade(durationMs: Long) {
         fade?.cancel()
         val from = real.volume
-        return scope.launch { ramp(from, 0f, durationMs); then(); real.volume = 1f }.also { fade = it }
+        val job = scope.launch { ramp(from, 0f, durationMs) }
+        timerFade = job
+        fade = job
     }
 
-    /** A changed or cancelled sleep timer stops its fade and restores full volume. */
-    internal fun cancelFade() { fade?.cancel(); fade = null; real.volume = 1f }
+    /** Timer changes must not interrupt a manual pause or play fade. */
+    internal fun cancelSleepFade() {
+        val owned = timerFade ?: return
+        timerFade = null
+        if (fade !== owned) return
+        owned.cancel()
+        fade = null
+        real.volume = 1f
+    }
 
     // Runs inside the fade's own job, so cancelling the fade (a new play or pause, a cancelled sleep
     // timer) stops the volume at once; a separate job here used to keep lowering it after a cancel.
@@ -85,7 +95,7 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
             val t = i.toFloat() / steps
             // Equal-power curve: the loudness change sounds even, not front-loaded.
             real.volume = from + (to - from) * (if (to > from) kotlin.math.sin(t * Math.PI / 2).toFloat() else 1 - kotlin.math.cos(t * Math.PI / 2).toFloat())
-            delay(ms / steps)
+            delay(i * ms / steps - (i - 1) * ms / steps)
         }
         real.volume = to
     }

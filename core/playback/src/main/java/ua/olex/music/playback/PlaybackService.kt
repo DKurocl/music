@@ -189,12 +189,16 @@ class PlaybackService : MediaLibraryService() {
             override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback(); publishNowPlaying(); lockLyrics?.update() }
             override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) = publishNowPlaying()
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
-                if (endOfTrack && !playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
-                    endOfTrack = false; exoOrNull()?.pauseAtEndOfMediaItems = false; publishSleepTimer()
-                }
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) finishEndOfTrackTimer()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_ENDED) historyGate.transition()
+                if (playbackState == Player.STATE_ENDED) {
+                    historyGate.transition()
+                    if (endOfTrack) {
+                        player.playWhenReady = false
+                        finishEndOfTrackTimer()
+                    }
+                }
             }
         })
     }
@@ -347,33 +351,38 @@ class PlaybackService : MediaLibraryService() {
 
     private var endOfTrack = false
 
+    private fun finishEndOfTrackTimer() {
+        if (!endOfTrack) return
+        endOfTrack = false
+        exoOrNull()?.pauseAtEndOfMediaItems = false
+        publishSleepTimer()
+    }
+
     private fun setSleepTimer(minutes: Int) {
-        // "End of track": ExoPlayer pauses right at the end of the current song, before the next starts.
-        endOfTrack = minutes == SleepTimerCommand.END_OF_TRACK
-        if (sleepJob?.isActive == true) fading?.cancelFade()
-        exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
-        if (endOfTrack) { sleepTimer.set(0, SystemClock.elapsedRealtime()); sleepJob?.cancel(); publishSleepTimer(); return }
-        sleepTimer.set(minutes, SystemClock.elapsedRealtime())
         sleepJob?.cancel()
         sleepJob = null
+        fading?.cancelSleepFade()
+        endOfTrack = minutes == SleepTimerCommand.END_OF_TRACK
+        exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
+        sleepTimer.set(if (endOfTrack) 0 else minutes, SystemClock.elapsedRealtime())
         publishSleepTimer()
         val deadline = sleepTimer.deadlineMs ?: return
         sleepJob = scope.launch {
-            // The last 30 seconds fade out, so sleep is not interrupted by a sudden stop.
             val fadeMs = minOf(30_000L, minutes * 60_000L / 4)
-            delay((deadline - fadeMs - SystemClock.elapsedRealtime()).coerceAtLeast(0))
-            val player = session?.player
-            val fader = fading
-            if (fader != null && player?.isPlaying == true && exoOrNull()?.let { player.currentMediaItem == it.currentMediaItem } == true) {
-                fader.sleepFade((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)) { exoOrNull()?.playWhenReady = false }.join()
-            } else delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+            awaitSleepDeadline(deadline, fadeMs, SystemClock::elapsedRealtime) { remaining ->
+                val local = exoOrNull()
+                val active = session?.player
+                if (local?.isPlaying == true && active?.currentMediaItem == local.currentMediaItem) {
+                    fading?.sleepFade(remaining)
+                }
+            }
             if (sleepTimer.expire(SystemClock.elapsedRealtime())) {
                 session?.player?.pause()
+                fading?.cancelSleepFade()
                 publishSleepTimer()
             }
         }
     }
-
 
     private fun publishSleepTimer() {
         session?.let { current ->
