@@ -7,6 +7,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.derivedStateOf
@@ -753,13 +754,15 @@ private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolea
     val haptics = rememberHaptics()
     val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
     val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
     var kick by remember { mutableIntStateOf(0) }
     Box(Modifier.size(size).clip(CircleShape)
         // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
-        .then(if (switch) Modifier.toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { kick++; haptics.toggle(it); onClick() }
-            else Modifier.clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { kick++; haptics.toggle(!on); onClick() })
+        .then(if (switch) Modifier.toggleable(on, interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { kick++; haptics.toggle(it); onClick() }
+            else Modifier.clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { kick++; haptics.toggle(!on); onClick() })
         .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick)
+        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick, pressed = pressed)
         Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp).size(5.dp).graphicsLayer { scaleX = dot; scaleY = dot; alpha = dot }
             .clip(CircleShape).background(cs.primary))
     }
@@ -771,14 +774,16 @@ private fun ToggleAction(glyph: Glyph, label: String, on: Boolean, enabled: Bool
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     // Round in every state: the pill they sit in is round, so a square highlight looked pasted on.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
     var kick by remember { mutableIntStateOf(0) }
-    if (state == null) IconButton(onClick = { kick++; haptics.tick(); onClick() }, enabled = enabled, shapes = IconButtonDefaults.shapes(CircleShape, CircleShape),
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label }) { Symbol(glyph, color = cs.onSurfaceVariant, kick = kick) }
+    if (state == null) IconButton(onClick = { kick++; haptics.tick(); onClick() }, enabled = enabled, interactionSource = interaction, shapes = IconButtonDefaults.shapes(CircleShape, CircleShape),
+        modifier = Modifier.size(48.dp).semantics { contentDescription = label }) { Symbol(glyph, color = cs.onSurfaceVariant, kick = kick, pressed = pressed) }
     else androidx.compose.material3.IconToggleButton(
-        checked = on, onCheckedChange = { kick++; haptics.toggle(it); onClick() }, enabled = enabled, shapes = IconButtonDefaults.toggleableShapes(CircleShape, CircleShape, CircleShape),
+        checked = on, onCheckedChange = { kick++; haptics.toggle(it); onClick() }, enabled = enabled, interactionSource = interaction, shapes = IconButtonDefaults.toggleableShapes(CircleShape, CircleShape, CircleShape),
         colors = IconButtonDefaults.iconToggleButtonColors(contentColor = cs.onSurfaceVariant, checkedContainerColor = cs.secondaryContainer, checkedContentColor = cs.onSecondaryContainer),
         modifier = Modifier.size(48.dp).semantics { contentDescription = label; stateDescription = state },
-    ) { Symbol(glyph, filled = on, kick = kick) }
+    ) { Symbol(glyph, filled = on, kick = kick, pressed = pressed) }
 }
 
 /** The file's format and bitrate, quiet under the seek bar; a tap opens the full audio path. */

@@ -20,6 +20,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -173,7 +174,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val duplicates by model.duplicates.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val haptics = rememberHaptics()
-    var focusSearch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var focusSearch by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by remember { mutableStateOf<Place?>(null) }
     var onlineStack by remember { mutableStateOf(listOf<OnlineTarget>()) }
@@ -205,7 +206,19 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
-    fun go(to: Place) { onlineStack = emptyList(); returnTo = null; baseStates.removeState("place-${to.name}"); if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
+    fun go(to: Place) {
+        onlineStack = emptyList()
+        returnTo = null
+        if (to == Place.SEARCH && place == Place.SEARCH && page == null) {
+            focusSearch++
+            return
+        }
+        if (to != place) haptics.tick()
+        collectionTitle = null
+        if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery("")
+        page = null
+        place = to
+    }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
     val openScope = androidx.compose.runtime.rememberCoroutineScope()
     fun openOf(track: Track, artist: Boolean) = openScope.launch {
@@ -283,7 +296,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val powerSave = rememberPowerSave()
     val network by context.graph.network.collectAsStateWithLifecycle()
     // The Search shortcut: Search with the field focused.
-    androidx.compose.runtime.LaunchedEffect(model.searchRequest) { if (model.searchRequest > 0) { expanded = false; onlineStack = emptyList(); page = null; place = Place.SEARCH; focusSearch++ } }
+    androidx.compose.runtime.LaunchedEffect(model.searchRequest) { if (model.searchRequest > 0) { expanded = false; onlineStack = emptyList(); page = null; place = Place.SEARCH; focusSearch++; model.consumeSearchRequest() } }
     androidx.compose.runtime.LaunchedEffect(model.playerRequest, playing.hasTrack) {
         if (model.playerRequest > 0 && playing.hasTrack) {
             expanded = true
@@ -429,7 +442,8 @@ fun MusicRoot(model: LibraryViewModel) {
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
                 online = onlineResults, onlineOn = youTubeOn && place == Place.SEARCH,
-                onCollection = { collectionTitle = it }, closeCollection = closeCollection, focusSearch = focusSearch, openTile = openTile.takeIf { place == Place.SEARCH },
+                onCollection = { collectionTitle = it }, closeCollection = closeCollection, onCollectionClosed = { closeCollection = 0 },
+                focusSearch = if (place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
@@ -876,7 +890,7 @@ private fun SleepDial(fraction: Float, enabled: Boolean, onDrag: (Float) -> Unit
 }
 
 /** The three places of the app, in the navigation bar. */
-internal enum class Place(val title: String, val glyph: Glyph) { HOME("Home", Glyph.HOME), LIBRARY("Playlists", Glyph.PLAYLIST), SEARCH("Search", Glyph.SEARCH) }
+internal enum class Place(val title: String) { HOME("Home"), LIBRARY("Playlists"), SEARCH("Search") }
 
 /** Pages opened over Home. */
 internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates"), SETTINGS("Settings") }
@@ -890,9 +904,11 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
             val selected = current == p
             // Only a tap animates, and only the tapped icon (as Gboard does): each icon has its own small gesture.
             var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+            val pressed by interaction.collectIsPressedAsState()
             androidx.compose.material3.ShortNavigationBarItem(
-                selected = selected, onClick = { taps++; onGo(p) },
-                icon = { Symbol(p.glyph, filled = selected, bold = selected, kick = taps) },
+                interactionSource = interaction, selected = selected, onClick = { taps++; onGo(p) },
+                icon = { DestinationIcon(p, selected, taps, pressed) },
                 label = { Text(p.title) },
             )
         }

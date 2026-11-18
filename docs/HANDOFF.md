@@ -17,6 +17,12 @@ fade the card or start a coroutine for each movement.
 towards their stop. The glyphs stay inside stable touch targets. Battery Saver disables these
 gestures. Tests exercise a slow session acknowledgement, shared bounds in both directions and
 the drawn icon geometry during motion. CI stores intermediate frames under player-motion.
+CI 44259189250 passed the initial swipe, bounds and glyph frame tests, both lints and signed
+build. The follow-up adds an unresolved incoming image to the swipe fixture. Bottom destinations
+have independent drawn gestures, share touch with the Material indicator and preserve saved tab
+state. Search requests keyboard focus after returning from a tile, consumes the request once
+and explains a missing voice recognizer. Shuffle, Repeat, secondary player actions and album and
+selection actions now respond to press. Tests cover rapid tab selection and Search reselection.
 The Pixel at 120 Hz, decoder output and interrupted system back still require phone checks.
 
 # Player cover and interaction polish (Codex, 2026-11-18)

@@ -586,6 +586,49 @@ class DesignGalleryTest {
         } finally { compose.mainClock.autoAdvance = true }
     }
 
+    @Test fun bottomTabsRespondInsideStationaryTargetsAndAllowReselection() {
+        val visits = mutableListOf<Place>()
+        compose.setContent { AppTheme {
+            val selected = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(Place.HOME) }
+            PlacesBar(selected.value) { visits.add(it); selected.value = it }
+        } }
+        val tabs = Place.entries.map { compose.onNodeWithText(it.title) }
+        val bounds = tabs.map { it.fetchSemanticsNode().boundsInRoot }
+        compose.mainClock.autoAdvance = false
+        try {
+            for (index in listOf(1, 2, 0, 0)) {
+                tabs[index].performClick()
+                compose.mainClock.advanceTimeBy(112)
+                tabs[index].assertIsSelected()
+                org.junit.Assert.assertEquals(bounds, tabs.map { it.fetchSemanticsNode().boundsInRoot })
+                val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+                File("build/reports/ui-previews/player-motion").apply { mkdirs() }
+                    .resolve("tab-${Place.entries[index].name}.png").outputStream().use {
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+                    }
+            }
+            org.junit.Assert.assertEquals(listOf(Place.LIBRARY, Place.SEARCH, Place.HOME, Place.HOME), visits)
+        } finally { compose.mainClock.autoAdvance = true }
+    }
+
+    @Test fun searchReselectionFocusesTheFieldAfterLeavingAnAlbumTile() {
+        var consumed = 0
+        compose.setContent { AppTheme { Images {
+            val focus = androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(0) }
+            val initial = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>("ALBUMS") }
+            Column {
+                PlacesBar(Place.SEARCH) { if (it == Place.SEARCH) focus.intValue++ }
+                LibraryBrowser(library, PaddingValues(0.dp), "", null, {}, now.mediaId, { _, _ -> }, null, {},
+                    mode = BrowserMode.SEARCH, openTile = initial.value, onOpened = { initial.value = null },
+                    focusSearch = focus.intValue, onSearchFocused = { consumed++; focus.intValue = 0 })
+            }
+        } } }
+        compose.onNodeWithContentDescription("Back to browse").assertIsDisplayed()
+        compose.onNodeWithText("Search").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        org.junit.Assert.assertEquals(1, consumed)
+    }
+
     @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
     fun playerLargeFont() {
         compose.setContent {
