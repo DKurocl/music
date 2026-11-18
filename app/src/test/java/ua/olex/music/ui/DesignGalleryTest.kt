@@ -942,13 +942,14 @@ class DesignGalleryTest {
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun statsPage() {
         val samples = (0..36).map { i ->
-            val track = demoSongs[if (i % 4 == 0) 0 else i % demoSongs.size]
+            val track = demoSongs[if (i % 4 == 0) 1 else i % demoSongs.size]
             ua.olex.music.model.HistoryEntry(i.toLong(), ua.olex.music.model.SavedSong.from(track),
                 System.currentTimeMillis() - (i % 3) * 86_400_000L - i * 60_000L, 27_000L + i * 3_000)
         }
         val catalog = LibraryIndex.build(demoSongs)
+        var played: Track? = null
         compose.setContent { Shell("Your listening", null, demoNow) {
-            StatsPage(catalog, Modifier.fillMaxSize().padding(it), { _, _ -> }) { start ->
+            StatsPage(catalog, Modifier.fillMaxSize().padding(it), { queue, index -> played = queue[index] }) { start ->
                 kotlinx.coroutines.flow.flowOf(samples.filter { entry -> entry.playedAt >= start })
             }
         } }
@@ -957,6 +958,20 @@ class DesignGalleryTest {
         shot("12b-stats-rankings")
         compose.onNodeWithTag("listening-cards").performScrollToIndex(4)
         shot("12c-stats-tracks")
+        compose.onNodeWithText("Year").performClick()
+        compose.onNodeWithText("Year").assertIsSelected()
+        compose.onNodeWithTag("listening-cards").performScrollToIndex(0)
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText(java.time.LocalDate.now().year.toString()).fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithTag("listening-cards").performScrollToIndex(2)
+        compose.onNodeWithText("Top album").performClick()
+        compose.onNodeWithTag("listening-detail").assertExists()
+        val firstRecording = hasText(demoSongs[1].title) and hasAnyAncestor(hasTestTag("listening-detail"))
+        compose.waitUntil(5_000) { compose.onAllNodes(firstRecording).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNode(firstRecording).performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(demoSongs[1].title, played?.title) }
+        compose.onNodeWithTag("listening-detail").assertDoesNotExist()
     }
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
