@@ -11,6 +11,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -508,6 +509,7 @@ internal fun PlayerPage(
             val occurrence = state.queue.getOrNull(state.queueIndex)?.key ?: state.mediaId
             val canGoPrevious = state.hasPrevious
             val latestOccurrence by rememberUpdatedState(occurrence)
+            val acceptsSkip by rememberUpdatedState(state.connected && state.error == null)
             var gestureItem by remember { mutableStateOf(occurrence) }
             var skipping by remember { mutableStateOf(false) }
             var dragOffset by remember { mutableStateOf<Float?>(null) }
@@ -583,7 +585,13 @@ internal fun PlayerPage(
                                             if (!powerSave) swipe.animateTo(if (goNext) -step else step, motion.fastEffectsSpec())
                                             if (occurrence != latestOccurrence) return@launch
                                             if (goNext) next() else previous()
-                                            delay(450)
+                                            // Hold the incoming cover until the session acknowledges the command.
+                                            // An unresponsive controller must eventually give the gesture back.
+                                            val target = if (goNext) state.nextIndex else state.previousIndex
+                                            if (target != state.queueIndex) kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                                                androidx.compose.runtime.snapshotFlow { latestOccurrence != occurrence || !acceptsSkip }
+                                                    .first { it }
+                                            }
                                         } finally {
                                             skipping = false
                                         }
@@ -616,7 +624,7 @@ internal fun PlayerPage(
                             scaleY = scale
                         }.sharedPlayerCover(visible = true),
                     corner = 32.dp, motion = motionCover,
-                    moving = state.isPlaying && direction == 0 && !skipping,
+                    moving = state.isPlaying, showMotion = direction == 0 && !skipping,
                 )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
                 modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })

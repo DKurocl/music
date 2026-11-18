@@ -1,3 +1,24 @@
+# Player cover continuity follow-up (Codex, 2026-11-18)
+
+The owner still saw artwork blinking on v1154. Its regression exercised a URI swap in one
+composable. A real swipe used two different renderers and the centre faded the old cover back
+over the neighbour after the session changed track. The mini and full player also had independent
+artwork and no shared bounds.
+
+[код] Branch `agent/player-shared-art` keeps the current and adjacent artwork requests keyed by
+URI across queue moves. The swipe waits for the session acknowledgement, and the centre can
+draw the same decoded neighbour on the first commit frame. A bounded pool makes the mini still
+available on expansion and the larger still available on collapse. Compose animates the actual
+cover bounds in the root overlay. The album sleeve and thumbnail use the same size-dependent
+corner shape; video yields to the still during horizontal gestures. Mini-player drags no longer
+fade the card or start a coroutine for each movement.
+
+[код] The play triangle unfolds into the pause stems; Next and Previous compress and release
+towards their stop. The glyphs stay inside stable touch targets. Battery Saver disables these
+gestures. Tests exercise a slow session acknowledgement, shared bounds in both directions and
+the drawn icon geometry during motion. CI stores intermediate frames under player-motion.
+The Pixel at 120 Hz, decoder output and interrupted system back still require phone checks.
+
 # Player cover and interaction polish (Codex, 2026-11-18)
 
 Owner reports a cover flash on track changes and a lyrics settings button sliding into the overflow
