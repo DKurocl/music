@@ -169,9 +169,9 @@ private val playerCoverShape = RoundedCornerShape(object : androidx.compose.foun
 
 /** A ready neighbour paints directly on the commit frame, without a second reveal animation. */
 @Composable
-internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false, showMotion: Boolean = true) {
+internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false, showMotion: Boolean = true, retainWhileLoading: Boolean = true) {
     var previous by remember { mutableStateOf<CoverFrame?>(null) }
-    val frame = image.frame ?: previous.takeIf { image.loading }
+    val frame = image.frame ?: previous.takeIf { image.loading && retainWhileLoading }
     androidx.compose.runtime.SideEffect { previous = frame }
     val saving = LocalPowerSave.current
     ArtworkFrame(modifier, if (LocalCoverTransition.current != null) playerCoverShape else RoundedCornerShape(corner)) {

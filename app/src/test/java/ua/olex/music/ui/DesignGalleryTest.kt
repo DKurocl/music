@@ -421,15 +421,17 @@ class DesignGalleryTest {
     fun swipedNeighbourRemainsOnScreenWhenTheControllerCommitsTheSkip() {
         val red = android.graphics.Color.RED
         val blue = android.graphics.Color.BLUE
+        val thirdReady = kotlinx.coroutines.CompletableDeferred<Unit>()
         val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
         val images = coil3.compose.AsyncImagePreviewHandler { request ->
             val uri = request.data.toString()
             requests.add(uri)
+            if ("green.png" in uri) thirdReady.await()
             Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply {
-                eraseColor(if ("blue.png" in uri) blue else red)
+                eraseColor(when { "blue.png" in uri -> blue; "green.png" in uri -> android.graphics.Color.GREEN; else -> red })
             }.asImage()
         }
-        val queue = listOf("red", "blue").map {
+        val queue = listOf("red", "blue", "green").map {
             ua.olex.music.playback.QueueItem(it, it, it, "Artist", "file:///$it.png")
         }
         val current = androidx.compose.runtime.mutableIntStateOf(0)
@@ -439,8 +441,8 @@ class DesignGalleryTest {
                 coil3.compose.LocalAsyncImagePreviewHandler provides images) {
                 val i = current.intValue
                 val state = PlayerState(connected = true, mediaId = queue[i].mediaId, title = queue[i].title,
-                    artworkUri = queue[i].artworkUri, queue = queue, queueIndex = i, hasNext = i == 0,
-                    hasPrevious = i == 1, nextIndex = if (i == 0) 1 else -1, previousIndex = if (i == 1) 0 else -1)
+                    artworkUri = queue[i].artworkUri, queue = queue, queueIndex = i, hasNext = i < queue.lastIndex,
+                    hasPrevious = i > 0, nextIndex = if (i < queue.lastIndex) i + 1 else -1, previousIndex = i - 1)
                 PlayerPage(state, null, null, false, { 0L }, {}, {}, { skips++ }, {}, {}, {}, {}, null,
                     null, {}, {}, {}, {}, {})
             }
@@ -462,6 +464,19 @@ class DesignGalleryTest {
                 org.junit.Assert.assertEquals("Commit frame $it", blue, pixel())
             }
             org.junit.Assert.assertEquals(1, requests.count { "blue.png" in it })
+            cover.performTouchInput { swipeLeft() }
+            compose.mainClock.advanceTimeUntil(2_000) { skips == 2 }
+            val pending = pixel()
+            org.junit.Assert.assertNotEquals(blue, pending)
+            compose.runOnUiThread { current.intValue = 2 }
+            repeat(3) {
+                compose.mainClock.advanceTimeByFrame()
+                org.junit.Assert.assertEquals("Pending artwork commit frame $it", pending, pixel())
+            }
+            thirdReady.complete(Unit)
+            compose.mainClock.advanceTimeBy(100)
+            compose.waitForIdle()
+            org.junit.Assert.assertEquals(android.graphics.Color.GREEN, pixel())
         } finally { compose.mainClock.autoAdvance = true }
     }
 
