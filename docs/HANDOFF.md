@@ -1,5 +1,9 @@
 # Playlists and one-tap moods on Home (2026-11-18)
 
+Filter changes use the direction of the tapped chip, with overlapping motion below the fixed
+strip. The previous feed stays visible while local candidates are being ranked, and retiring
+content cannot accept touches or accessibility focus. Each filter retains its scroll position.
+
 The horizontal mood strip stays below the Home toolbar. Each chip filters in one tap and
 animates its own glyph. A dedicated 24-unit vector set covers the ten default moods and For you.
 Petals open, rain drops stagger, the focus brackets converge, and the heart beats twice. Marks
