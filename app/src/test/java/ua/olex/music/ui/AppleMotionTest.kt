@@ -5,6 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
@@ -38,7 +39,7 @@ class AppleMotionTest {
         assertNull(AppleMotion.pick(json, "Innerspeaker", "Tame Impala"))
     }
 
-    @Test fun webTokenComesFromThePlayersScriptWithItsExpiry() {
+    @Test fun webTokenComesFromThePlayersScriptWithItsExpiry() = runBlocking {
         val b64 = java.util.Base64.getUrlEncoder().withoutPadding()
         val jwt = b64.encodeToString("""{"alg":"ES256"}""".toByteArray()) + "." + b64.encodeToString("""{"iss":"x","exp":1900000000}""".toByteArray()) + ".c2ln"
         val pages = mapOf("https://music.apple.com/us/new" to """<script type="module" src="/assets/index~abc.js"></script>""",
@@ -46,7 +47,7 @@ class AppleMotionTest {
         assertEquals(jwt to 1_900_000_000L, AppleMotion.webToken { url, _ -> pages[url]?.toByteArray() })
     }
 
-    @Test fun joinsTheLeanestSharpHevcVariantIntoOneFile() {
+    @Test fun joinsTheLeanestSharpHevcVariantIntoOneFile() = runBlocking {
         val files = mapOf(
             "https://v/master.m3u8" to "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=9000,RESOLUTION=2160x2160,CODECS=\"hvc1\"\nbig.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=3800,RESOLUTION=1080x1080,CODECS=\"avc1.64\"\navc.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=5900,RESOLUTION=1080x1080,CODECS=\"hvc1\"\nrich.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=3340,RESOLUTION=1080x1080,CODECS=\"hvc1\"\nmid.m3u8\n",
             "https://v/mid.m3u8" to "#EXTM3U\n#EXT-X-MAP:URI=\"init.mp4\"\n#EXTINF:2,\nseg1.m4s\n#EXTINF:2,\nseg2.m4s\n#EXT-X-ENDLIST\n",
@@ -56,7 +57,7 @@ class AppleMotionTest {
         assertArrayEquals(ByteArray(600) { 1 } + ByteArray(500) { 2 } + ByteArray(400) { 3 }, joined)
     }
 
-    @Test fun skipsEncryptedStreams() {
+    @Test fun skipsEncryptedStreams() = runBlocking {
         val files = mapOf("https://v/a.m3u8" to "#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"skd://x\"\n#EXTINF:2,\nseg.m4s\n")
         assertNull(AppleMotion.joinHls("https://v/a.m3u8") { files[it]?.toByteArray() ?: ByteArray(5_000) })
     }

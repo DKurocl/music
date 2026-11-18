@@ -145,20 +145,22 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
             setMediaItem(MediaItem.fromUri(uri))
         }
     }
+    fun restartLoop() {
+        if (player.isCurrentMediaItemSeekable) player.seekToDefaultPosition()
+        else {
+            ready = false
+            player.setMediaItem(MediaItem.fromUri(uri))
+            player.prepare()
+        }
+    }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() { ready = true }
             override fun onVideoSizeChanged(size: VideoSize) { videoSize = size }
             override fun onPlayerError(error: PlaybackException) { failed = true }
             override fun onPlaybackStateChanged(playbackState: Int) {
-                // A fragmented MP4 may end without automatic repeat. Prepare it again from zero.
-                if (playbackState == Player.STATE_ENDED && player.playWhenReady) {
-                    if (!player.isCurrentMediaItemSeekable) {
-                        ready = false
-                        player.setMediaItem(MediaItem.fromUri(uri))
-                        player.prepare()
-                    } else player.seekToDefaultPosition()
-                }
+                // A fragmented MP4 may end without automatic repeat.
+                if (playbackState == Player.STATE_ENDED && player.playWhenReady) restartLoop()
             }
         }
         player.addListener(listener)
@@ -168,7 +170,10 @@ private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
             player.release()
         }
     }
-    LaunchedEffect(player, moving) { player.playWhenReady = moving }
+    LaunchedEffect(player, moving) {
+        if (moving && player.playbackState == Player.STATE_ENDED) restartLoop()
+        player.playWhenReady = moving
+    }
     val alpha by androidx.compose.animation.core.animateFloatAsState(
         if (ready) 1f else 0f, MaterialTheme.motionScheme.fastEffectsSpec(), label = "motion artwork",
     )
@@ -200,6 +205,7 @@ private class CoverTexture(context: Context) : TextureView(context) {
     private fun crop() {
         if (width == 0 || height == 0 || video.width == 0 || video.height == 0) return
         val ratio = (video.width * video.pixelWidthHeightRatio / video.height) / (width.toFloat() / height)
+        if (!ratio.isFinite() || ratio <= 0f) return
         setTransform(Matrix().apply {
             setScale(maxOf(1f, ratio), maxOf(1f, 1f / ratio), width / 2f, height / 2f)
         })
