@@ -454,6 +454,8 @@ class DesignGalleryTest {
             cover.performTouchInput { swipeLeft() }
             compose.mainClock.advanceTimeUntil(2_000) { skips == 1 }
             org.junit.Assert.assertEquals("Incoming page", blue, pixel())
+            compose.mainClock.advanceTimeBy(900)
+            org.junit.Assert.assertEquals("Waiting for session acknowledgement", blue, pixel())
             compose.runOnUiThread { current.intValue = 1 }
             repeat(5) {
                 compose.mainClock.advanceTimeByFrame()
@@ -496,18 +498,24 @@ class DesignGalleryTest {
             for (y in 0 until b.height) if ((0 until b.width step 4).any { x -> b.getPixel(x, y) == red }) height++
             return height
         }
+        // Shared elements start their bounds animation after a real lookahead/layout pass.
+        // Pump both Compose time and the Android host between samples.
+        fun advanceFrames(count: Int) = repeat(count) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
         val small = coverHeight("mini")
         compose.mainClock.autoAdvance = false
         try {
             compose.runOnUiThread { expanded.value = true }
-            compose.mainClock.advanceTimeBy(144)
+            advanceFrames(10)
             val opening = coverHeight("expanding")
-            compose.mainClock.advanceTimeBy(600)
+            advanceFrames(35)
             val full = coverHeight("full")
             compose.runOnUiThread { expanded.value = false }
-            compose.mainClock.advanceTimeBy(144)
+            advanceFrames(10)
             val closing = coverHeight("collapsing")
-            compose.mainClock.advanceTimeBy(600)
+            advanceFrames(35)
             org.junit.Assert.assertTrue("mini=$small opening=$opening full=$full", small > 0 && opening in (small + 1) until full)
             org.junit.Assert.assertTrue("closing=$closing", closing in (small + 1) until full)
             org.junit.Assert.assertEquals(small, coverHeight("returned"))
@@ -551,7 +559,15 @@ class DesignGalleryTest {
             org.junit.Assert.assertFalse(play.sameAs(unfolding))
             org.junit.Assert.assertFalse(pause.sameAs(unfolding))
             org.junit.Assert.assertFalse(skip.sameAs(advancing))
-            org.junit.Assert.assertTrue(skip.sameAs(image("skip shape", "skip-settled")))
+            // Software rasterisation can round a handful of antialiased edge pixels differently.
+            val settled = image("skip shape", "skip-settled")
+            var changed = 0
+            for (y in 0 until skip.height) for (x in 0 until skip.width) {
+                val first = android.graphics.Color.red(skip.getPixel(x, y))
+                val last = android.graphics.Color.red(settled.getPixel(x, y))
+                if (kotlin.math.abs(first - last) > 8) changed++
+            }
+            org.junit.Assert.assertTrue("Changed pixels after settling: $changed", changed < skip.width * skip.height / 200)
         } finally { compose.mainClock.autoAdvance = true }
     }
 
