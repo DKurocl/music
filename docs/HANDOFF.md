@@ -10,13 +10,14 @@ connected account and provider acceptance. The provider does not expose a compar
 so edits on another device between the read and write can still race.
 [код] Media notifications use the same favourites as the in-app player. Stable queue origins open
 their playlist or online page. Radio continuations are checkpointed against their original queue
-identity. The resume path for a mix that was started over the current song resumes after a new
+identity. Refill counts the real shuffle itinerary and leaves single-track repeat alone. The resume path for a mix that was started over the current song resumes after a new
 mix occurrence enters the journal.
 [код] Regular refresh on a single MediaStore volume requests changed generations and scans IDs only
 to detect deletion. Manual refresh, provider reset and multivolume changes still reconcile fully.
 Optional artist and motion work waits while audible playback is buffering. The sink exposes
 gapless hardware offload only when it is eligible and processing is disabled.
-[код] The transport fits narrow display widths and Home cards allow larger fonts. Android CI, live
+[код] The transport fits narrow display widths, Home cards allow larger fonts and nested library
+pages respond to Predictive Back. Rows keep one footprint and expose spoken source availability. Android CI, live
 account mutations, Pixel/XM5 audio offload, real 120 Hz timing and final visual acceptance are
 separate checks. Lock-screen lyrics were not changed in this batch.
 
