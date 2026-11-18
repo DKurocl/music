@@ -117,19 +117,30 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun DemoHome(modifier: Modifier, onOpenPlaylist: (Long) -> Unit = {}) {
-        val local = androidx.compose.runtime.remember { demoSongs.filterNot { YouTubeMusic.isOnline(it) } }
-        val index = androidx.compose.runtime.remember { LibraryIndex.build(local) }
-        val remote = androidx.compose.runtime.remember {
-            listOf(YouTubeMusic.Shelf("Quick picks", demoSongs.filter { YouTubeMusic.isOnline(it) }, listOf(
-                YouTubeMusic.Card("radio", "Night Drive Mix", "Personal radio", demoSongs[4].artworkUri, YouTubeMusic.Card.Kind.MIX),
-                YouTubeMusic.Card("VLlate", "After Hours", "Downtempo", demoSongs[3].artworkUri, YouTubeMusic.Card.Kind.PLAYLIST))))
+    private fun DemoHome(modifier: Modifier, small: Boolean = false, onOpenPlaylist: (Long) -> Unit = {}) {
+        val local = androidx.compose.runtime.remember(small) { demoSongs.filterNot { YouTubeMusic.isOnline(it) }.take(if (small) 2 else 3) }
+        val index = androidx.compose.runtime.remember(local) { LibraryIndex.build(local) }
+        fun card(id: String, name: String, subtitle: String, cover: Int, kind: YouTubeMusic.Card.Kind) =
+            YouTubeMusic.Card(id, name, subtitle, demoSongs[cover].artworkUri, kind)
+        val remote = androidx.compose.runtime.remember(small) {
+            if (small) emptyList() else listOf(YouTubeMusic.Shelf("Quick picks", demoSongs.filter { YouTubeMusic.isOnline(it) }, listOf(
+                card("radio", "Night Drive Mix", "Personal radio", 4, YouTubeMusic.Card.Kind.MIX),
+                card("VLlate", "After Hours", "Downtempo", 3, YouTubeMusic.Card.Kind.PLAYLIST),
+                card("VLday", "Sunday Slowdown", "Acoustic", 1, YouTubeMusic.Card.Kind.PLAYLIST),
+                card("MPRE1", "Concrete Hours", "Blue Hour", 2, YouTubeMusic.Card.Kind.ALBUM),
+                card("MPRE2", "Fold", "Figure Eight", 3, YouTubeMusic.Card.Kind.ALBUM),
+                card("MPRE3", "In Transit", "Still Lines", 0, YouTubeMusic.Card.Kind.ALBUM))))
         }
-        val own = androidx.compose.runtime.remember {
-            listOf(PlaylistUi(7, "On the train", demoSongs.map { SavedSongRow(ua.olex.music.model.SavedSong.from(it), it) }))
+        val own = androidx.compose.runtime.remember(small) {
+            fun list(id: Long, name: String, songs: List<Track>) =
+                PlaylistUi(id, name, songs.map { SavedSongRow(ua.olex.music.model.SavedSong.from(it), it) })
+            if (small) listOf(list(7, "On the train", local), list(8, "Quiet hours", local.reversed()))
+            else listOf(list(7, "On the train", demoSongs), list(8, "Quiet hours", demoSongs.takeLast(3)),
+                list(9, "Headphones", demoSongs.reversed()))
         }
-        val account = androidx.compose.runtime.remember {
-            listOf(YouTubeMusic.Card("VLsaved", "Weekend rotation", "12 songs", demoSongs[5].artworkUri, YouTubeMusic.Card.Kind.PLAYLIST))
+        val account = androidx.compose.runtime.remember(small) {
+            if (small) emptyList() else listOf(card("VLsaved", "Weekend rotation", "12 songs", 5, YouTubeMusic.Card.Kind.PLAYLIST),
+                card("VLcity", "City lights", "23 songs", 4, YouTubeMusic.Card.Kind.PLAYLIST))
         }
         HomePage(index, local, emptyMap(), now.mediaId, modifier, { _, _, _ -> }, {}, youTubeHome = remote,
             playlists = own, accountPlaylists = account, onOpenPlaylist = onOpenPlaylist)
@@ -750,10 +761,15 @@ class DesignGalleryTest {
     /** A mood chosen on Home: the chip fills in, Home shows that mood (here offline: the owner's songs that fit). */
     @Test fun homeMood() {
         compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it)) } }
-        compose.onNodeWithText("Moods").performClick()
-        shot("01d-home-moods")
+        compose.onNodeWithTag("home-moods").performScrollToNode(hasText("Relax"))
         compose.onNodeWithText("Relax").performClick()
         shot("01c-home-mood")
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
+    fun homeSmallLibrary() {
+        compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it), small = true) } }
+        shot("01e-home-small")
     }
 
     @Test fun home() {

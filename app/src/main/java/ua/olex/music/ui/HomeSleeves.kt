@@ -2,7 +2,6 @@
 
 package ua.olex.music.ui
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -16,10 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
@@ -29,8 +25,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import ua.olex.music.model.ArtworkPlan
 import ua.olex.music.model.Track
-import kotlin.math.PI
-import kotlin.math.sin
 
 /** The first three positions share one cover composition. Every sleeve opens its own queue position. */
 @Composable
@@ -121,46 +115,6 @@ internal fun SleeveRail(songs: List<Track>, currentId: String?, onPlay: (Int) ->
                 Text(track.artist, Modifier.padding(start = 3.dp, bottom = 4.dp), style = MaterialTheme.typography.bodySmall,
                     color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-        }
-    }
-}
-
-/** Printed shapes echo each mood: smooth contours, sharp pulses or concentric records. */
-@Composable
-internal fun MoodTile(label: String, modifier: Modifier, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    val glyph = moodGlyph(label)
-    val calm = glyph in listOf(Glyph.RELAX, Glyph.SLEEP, Glyph.RAIN)
-    val lively = glyph in listOf(Glyph.WORKOUT, Glyph.ENERGY, Glyph.PARTY)
-    val paper = if (calm) cs.secondaryContainer else if (lively) cs.tertiaryContainer else cs.primaryContainer
-    val ink = if (calm) cs.onSecondaryContainer else if (lively) cs.onTertiaryContainer else cs.onPrimaryContainer
-    Surface(onClick = onClick, shape = RoundedCornerShape(24.dp), color = paper, contentColor = ink, modifier = modifier.squish(0.035f)) {
-        Column(Modifier.fillMaxWidth()) {
-            Box(Modifier.fillMaxWidth().height(70.dp).clip(RoundedCornerShape(0.dp))) {
-                Canvas(Modifier.fillMaxSize()) {
-                    val w = size.width
-                    val h = size.height
-                    val tone = ink.copy(alpha = 0.28f)
-                    if (calm || lively) {
-                        repeat(5) { line ->
-                            val path = Path()
-                            for (step in 0..48) {
-                                val x = step / 48f
-                                val phase = x * (if (calm) 1.3 else 2.7) + (label.length % 5) / 5.0
-                                val wave = if (calm) sin(phase * PI * 2).toFloat() else (kotlin.math.abs((phase % 1.0) - 0.5) * 4 - 1).toFloat()
-                                val y = h * (0.12f + line * 0.18f + wave * 0.28f)
-                                if (step == 0) path.moveTo(0f, y) else path.lineTo(x * w, y)
-                            }
-                            drawPath(path, tone, style = Stroke(3.dp.toPx()))
-                        }
-                    } else repeat(6) { i ->
-                        drawCircle(tone, w * (0.08f + i * 0.085f), center = Offset(w * 0.80f, h * 0.5f), style = Stroke(4.dp.toPx()))
-                    }
-                }
-                Box(Modifier.align(Alignment.BottomStart).padding(start = 12.dp).size(42.dp).clip(CircleShape).background(ink),
-                    contentAlignment = Alignment.Center) { Symbol(glyph, size = 23.dp, filled = true, color = paper) }
-            }
-            Text(label, Modifier.padding(start = 14.dp, end = 12.dp, top = 6.dp, bottom = 12.dp), style = MaterialTheme.typography.titleMediumEmphasized)
         }
     }
 }
