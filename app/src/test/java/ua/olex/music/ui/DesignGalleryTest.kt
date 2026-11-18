@@ -112,7 +112,7 @@ class DesignGalleryTest {
             }
             val stream = i % 2 == 1
             Track(TrackId(if (stream) "yt:demo$i" else "local:demo$i"), if (stream) "ytm://demo$i" else "content://fixture/$i",
-                title, artists[i], genre = "Downtempo", artworkUri = cover.toURI().toString(), durationMs = 180_000)
+                title, artists[i], album = listOf("In Transit", "Golden Hour", "Concrete Hours", "Fold", "Night Routes", "Circuit")[i], genre = "Downtempo", artworkUri = cover.toURI().toString(), durationMs = 180_000)
         }
     }
 
@@ -143,7 +143,7 @@ class DesignGalleryTest {
                 card("VLcity", "City lights", "23 songs", 4, YouTubeMusic.Card.Kind.PLAYLIST))
         }
         HomePage(index, local, emptyMap(), now.mediaId, modifier, { _, _, _ -> }, {}, youTubeHome = remote,
-            playlists = own, accountPlaylists = account, onOpenPlaylist = onOpenPlaylist)
+            playlists = own, accountPlaylists = account, favourites = local.take(2), onOpenPlaylist = onOpenPlaylist)
     }
 
     /** Coil draws in previews through this handler: the generated files are decoded at once. */
@@ -782,9 +782,11 @@ class DesignGalleryTest {
             }
         } }
         shot("01-home")
+        compose.onNodeWithTag("home-feed").performScrollToNode(hasText("Night Drive Mix"))
         compose.onNodeWithText("Night Drive Mix").performClick()
         org.junit.Assert.assertEquals("radio", mix)
-        compose.onNodeWithText("On the train").performScrollTo().performClick()
+        compose.onNodeWithTag("home-feed").performScrollToNode(hasText("On the train"))
+        compose.onNodeWithText("On the train").performClick()
         org.junit.Assert.assertEquals(7L, opened)
         compose.onNodeWithText("Weekend rotation").performScrollTo().performClick()
         org.junit.Assert.assertEquals("VLsaved", (online as OnlineTarget.Album).id)

@@ -4,10 +4,8 @@ package ua.olex.music.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -17,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -87,33 +85,96 @@ private fun CoverPick(track: Track, currentId: String?, shape: Shape, lead: Bool
     }
 }
 
-/** The remainder of the same queue, in swipeable square sleeves with captions outside the image. */
+/** The original Home anchor: one album and two independent starts from the music library. */
 @Composable
-internal fun SleeveRail(songs: List<Track>, currentId: String?, onPlay: (Int) -> Unit, onActions: (Track) -> Unit, start: Int = 3) {
-    val width = if (start == 0) 124.dp else 146.dp
-    val state = rememberLazyListState()
+internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: Track?, librarySongs: List<Track>, favourites: List<Track>,
+    onAlbum: () -> Unit, onPlayAlbum: () -> Unit, onShuffle: () -> Unit, onLiked: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    LazyRow(Modifier.testTag("home-sleeves"), state = state, flingBehavior = rememberSnapFlingBehavior(state),
-        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(songs.size - start, key = { songs[it + start].id.value }) { offset ->
-            val i = offset + start
-            val track = songs[i]
-            val current = track.id.value == currentId || track.matchesPlayback(LocalPlayingTrack.current)
-            val haptics = rememberHaptics()
-            Column(Modifier.width(width).squish(0.025f).clip(RoundedCornerShape(18.dp)).combinedClickable(role = Role.Button,
-                onClickLabel = "Play ${track.title}", onLongClickLabel = "Song actions",
-                onLongClick = { haptics.longPress(); onActions(track) }, onClick = { onPlay(i) })
-                .semantics { if (current) stateDescription = "Current track" }) {
-                Box {
-                    Artwork(track.artworkUri, Modifier.size(width), 18.dp, pixels = ArtworkPlan.MEDIUM)
-                    if (current) Surface(color = cs.primary, shape = CircleShape, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-                        Symbol(Glyph.WAVE, size = 16.dp, modifier = Modifier.padding(6.dp), color = cs.onPrimary)
+    val haptics = rememberHaptics()
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val title = album?.name ?: firstPick?.title ?: return
+    val artist = album?.subtitle ?: firstPick?.artist.orEmpty()
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).height(248.dp + 116.dp * (fontScale - 1f)),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Surface(onClick = onAlbum, shape = RoundedCornerShape(32.dp), color = cs.primaryContainer,
+            modifier = Modifier.weight(1.5f).fillMaxHeight().squish(0.025f)) {
+            Box {
+                Artwork(album?.artworkUri ?: firstPick?.artworkUri, Modifier.fillMaxSize(), 0.dp, pixels = ArtworkPlan.LARGE)
+                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+                    0.28f to androidx.compose.ui.graphics.Color.Transparent, 1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.86f))))
+                Column(Modifier.align(Alignment.BottomStart).padding(start = 15.dp, end = 60.dp, bottom = 16.dp)) {
+                    Text(title, style = MaterialTheme.typography.titleLargeEmphasized, color = androidx.compose.ui.graphics.Color.White,
+                        maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    Text(artist, style = MaterialTheme.typography.bodyMedium, color = androidx.compose.ui.graphics.Color.White,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                Surface(onClick = { haptics.confirm(); onPlayAlbum() }, shape = MaterialShapes.Cookie9Sided.toShape(),
+                    color = cs.primaryContainer, contentColor = cs.onPrimaryContainer,
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(48.dp).semantics { contentDescription = "Play $title" }) {
+                    Box(contentAlignment = Alignment.Center) { Symbol(Glyph.PLAY, filled = true) }
+                }
+            }
+        }
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            StartTile("Shuffle all", songCount(librarySongs.size), Glyph.SHUFFLE, MaterialShapes.Sunny.toShape(),
+                cs.tertiaryContainer, cs.onTertiaryContainer, cs.tertiary, cs.onTertiary, Modifier.weight(1f), enabled = librarySongs.isNotEmpty()) {
+                haptics.confirm(); onShuffle()
+            }
+            StartTile("Liked", songCount(favourites.size), Glyph.FAVOURITE, MaterialShapes.Cookie9Sided.toShape(),
+                cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary, cs.onSecondary, Modifier.weight(1f), enabled = favourites.isNotEmpty()) {
+                haptics.confirm(); onLiked()
+            }
+        }
+    }
+}
+
+/** A bright start tile: the icon in an M3E shape, title and a count. */
+@Composable
+private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
+    container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, accent: androidx.compose.ui.graphics.Color, onAccent: androidx.compose.ui.graphics.Color,
+    modifier: Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Surface(onClick = onClick, enabled = enabled, shape = RoundedCornerShape(28.dp), color = container, contentColor = content, modifier = modifier.fillMaxWidth().squish()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Box(Modifier.size(39.dp).clip(shape).background(accent), contentAlignment = Alignment.Center) { Symbol(glyph, color = onAccent, filled = true) }
+            Column {
+                Text(title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 1)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * Songs in columns of three, swiped sideways a column at a time, the next column peeking in:
+ * many songs in little height, the way YouTube Music opens. A tap plays the shelf from that song.
+ */
+@Composable
+internal fun QuickPicks(songs: List<Track>, currentId: String?, onPlay: (List<Track>, Int) -> Unit, onTrackActions: (Track) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val columns = remember(songs) { songs.chunked(3) }
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    val width = with(androidx.compose.ui.platform.LocalDensity.current) { androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp() } * 0.86f
+    LazyRow(state = state, flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(state),
+        contentPadding = PaddingValues(horizontal = 8.dp)) {
+        items(columns.size) { c ->
+            Column(Modifier.width(width)) {
+                columns[c].forEachIndexed { r, track ->
+                    val index = c * 3 + r
+                    // Tap plays, a long press opens the song's actions (as YouTube Music's quick picks): no
+                    // menu button on every row, so the shelf stays calm.
+                    val haptics = rememberHaptics()
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .combinedClickable(onLongClickLabel = "Song actions", onLongClick = { haptics.longPress(); onTrackActions(track) }) { onPlay(songs, index) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Artwork(track.artworkUri, Modifier.size(48.dp), 12.dp)
+                        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                            Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                color = if (track.id.value == currentId || track.matchesPlayback(LocalPlayingTrack.current)) cs.primary else cs.onSurface)
+                            Text(track.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
-                Text(track.title, Modifier.padding(start = 3.dp, top = 8.dp), style = MaterialTheme.typography.titleSmallEmphasized,
-                    maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(track.artist, Modifier.padding(start = 3.dp, bottom = 4.dp), style = MaterialTheme.typography.bodySmall,
-                    color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

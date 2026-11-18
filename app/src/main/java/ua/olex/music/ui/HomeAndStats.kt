@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.material3.toShape
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import ua.olex.music.model.LibraryIndex
@@ -35,6 +36,7 @@ internal fun HomePage(
     youTubeHome: List<YouTubeMusic.Shelf> = emptyList(), excluded: Set<String> = emptySet(), onlineEnabled: Boolean = true,
     playlists: List<PlaylistUi> = emptyList(), accountPlaylists: List<YouTubeMusic.Card> = emptyList(),
     onOpenPlaylist: (Long) -> Unit = {}, onAllPlaylists: () -> Unit = {},
+    onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onShuffle: (List<Track>) -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember(library) { HomeCache() },
 ) {
@@ -82,18 +84,37 @@ internal fun HomePage(
     val albums = remember(youTubeHome, mood) {
         if (mood != null) emptyList() else youTubeHome.flatMap { it.cards }.filter { it.kind == YouTubeMusic.Card.Kind.ALBUM }.distinctBy { it.id }
     }
+    val feature = key(cache) {
+        rememberOffMain<ua.olex.music.model.MusicCollection?>(library, history, initial = null) {
+            val recent = history.mapIndexed { i, track -> track.id to i }.toMap()
+            val named = library.albums.filter { album -> album.tracks.any { !it.album.isNullOrBlank() } }
+            named.minByOrNull { album -> album.tracks.minOfOrNull { recent[it.id] ?: Int.MAX_VALUE } ?: Int.MAX_VALUE }
+        }
+    }
     Column(modifier.fillMaxSize()) {
         if (moods.isNotEmpty()) MoodBar(moods, mood?.label, onSelect = { label = it })
         Arrival(mode, Place.HOME, deeper = mood != null) {
             stateHolder.SaveableStateProvider(mode) {
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
+                LazyColumn(Modifier.fillMaxSize().testTag("home-feed"), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
                     val contextName = mood?.label ?: "Quick picks"
+                    if (mood == null && (feature != null || songs.isNotEmpty())) item(key = "starts") {
+                        val shuffleSongs = library.songs.ifEmpty { songs }
+                        fun startFeature() {
+                            if (feature != null) onPlay(feature.tracks, 0, feature.name)
+                            else if (songs.isNotEmpty()) onPlay(songs, 0, contextName)
+                        }
+                        HomeStarts(feature, songs.firstOrNull(), shuffleSongs, favourites,
+                            onAlbum = { if (feature != null) onOpenAlbum(feature) else startFeature() },
+                            onPlayAlbum = ::startFeature, onShuffle = { onShuffle(shuffleSongs) }, onLiked = { onPlay(favourites, 0, "Liked") })
+                    }
                     if (songs.isNotEmpty()) {
                         item(key = "title") { SectionTitle(contextName) }
-                        if (hasCollections && songs.size > 3) item(key = "picks") {
-                            SleeveRail(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions, start = 0)
-                        } else item(key = "spread") {
+                        if (mood != null) item(key = "spread") {
                             CoverSpread(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions)
+                        }
+                        val start = if (mood == null) 0 else minOf(3, songs.size)
+                        if (start < songs.size) item(key = "picks") {
+                            QuickPicks(songs.drop(start), currentId, { _, i -> onPlay(songs, i + start, contextName) }, onTrackActions)
                         }
                     } else if (queue == null || moodView?.loading == true) {
                         item(key = "loading") { PlaceholderRow() }
@@ -114,10 +135,6 @@ internal fun HomePage(
                     if (albums.isNotEmpty()) {
                         item(key = "album-title") { SectionTitle("Albums for you") }
                         item(key = "albums") { YouTubeCards(albums, size = 132.dp) }
-                    }
-                    if (!hasCollections && songs.size > 3) {
-                        item(key = "more-title") { SectionTitle("More picks") }
-                        item(key = "sleeves") { SleeveRail(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions) }
                     }
                     if (scanError != null) item(key = "scan-error") { ErrorNotice(scanError, onScanRetry) }
                     if (onAllowFiles != null && mood == null) item(key = "permission") {
