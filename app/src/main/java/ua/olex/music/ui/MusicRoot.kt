@@ -294,6 +294,7 @@ fun MusicRoot(model: LibraryViewModel) {
     androidx.compose.runtime.LaunchedEffect(model.offlineNotice) {
         if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")
     }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
         LocalPlayingTrack provides playing.track,
         LocalOwnedSources provides if (model.allowed) personal.localCopies else emptyMap(),
@@ -306,8 +307,7 @@ fun MusicRoot(model: LibraryViewModel) {
             if (account != null) pending()
         }
     }
-    androidx.compose.animation.SharedTransitionLayout(Modifier.fillMaxSize()) {
-    CompositionLocalProvider(LocalCoverTransition provides this, LocalPlayerCovers provides remember { PlayerCoverMemory() }) {
+    PlayerCoverLayout {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
@@ -458,7 +458,6 @@ fun MusicRoot(model: LibraryViewModel) {
     var dismiss by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var pageHeight by remember { androidx.compose.runtime.mutableIntStateOf(1) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val settle = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
     LaunchedEffect(expanded) { if (expanded) { dismiss = 0f; backProgress = 0f } }
     androidx.activity.compose.PredictiveBackHandler(expanded) { events ->
@@ -572,10 +571,9 @@ fun MusicRoot(model: LibraryViewModel) {
             fileRateHz = file?.sampleRateHz ?: input?.sampleRateHz,
         )
         }
+        } // Player visibility scope
     }
-    } // Player visibility scope
-    } // Cover memory
-    } // Shared transition layout
+    } // PlayerCoverLayout
     } // App composition locals
     model.downloadRequest?.let { requested ->
         DownloadsSheet(context.graph.soulseek, requested, onDismiss = model::dismissDownloads)

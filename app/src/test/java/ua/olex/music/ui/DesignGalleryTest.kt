@@ -416,6 +416,104 @@ class DesignGalleryTest {
         org.junit.Assert.assertEquals(android.graphics.Color.BLUE, centre())
     }
 
+    @Test
+    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
+    fun swipedNeighbourRemainsOnScreenWhenTheControllerCommitsTheSkip() {
+        val red = android.graphics.Color.RED
+        val blue = android.graphics.Color.BLUE
+        val requests = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val images = coil3.compose.AsyncImagePreviewHandler { request ->
+            val uri = request.data.toString()
+            requests.add(uri)
+            Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply {
+                eraseColor(if ("blue.png" in uri) blue else red)
+            }.asImage()
+        }
+        val queue = listOf("red", "blue").map {
+            ua.olex.music.playback.QueueItem(it, it, it, "Artist", "file:///$it.png")
+        }
+        val current = androidx.compose.runtime.mutableIntStateOf(0)
+        var skips = 0
+        compose.setContent { AppTheme {
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
+                coil3.compose.LocalAsyncImagePreviewHandler provides images) {
+                val i = current.intValue
+                val state = PlayerState(connected = true, mediaId = queue[i].mediaId, title = queue[i].title,
+                    artworkUri = queue[i].artworkUri, queue = queue, queueIndex = i, hasNext = i == 0,
+                    hasPrevious = i == 1, nextIndex = if (i == 0) 1 else -1, previousIndex = if (i == 1) 0 else -1)
+                PlayerPage(state, null, null, false, { 0L }, {}, {}, { skips++ }, {}, {}, {}, {}, null,
+                    null, {}, {}, {}, {}, {})
+            }
+        } }
+        val cover = compose.onNodeWithContentDescription("Album artwork")
+        val centre = cover.fetchSemanticsNode().boundsInRoot.center
+        fun pixel() = compose.onRoot().captureToImage().asAndroidBitmap().getPixel(centre.x.toInt(), centre.y.toInt())
+        org.junit.Assert.assertEquals(red, pixel())
+        compose.mainClock.autoAdvance = false
+        try {
+            cover.performTouchInput { swipeLeft() }
+            compose.mainClock.advanceTimeUntil(2_000) { skips == 1 }
+            org.junit.Assert.assertEquals("Incoming page", blue, pixel())
+            compose.runOnUiThread { current.intValue = 1 }
+            repeat(5) {
+                compose.mainClock.advanceTimeByFrame()
+                org.junit.Assert.assertEquals("Commit frame $it", blue, pixel())
+            }
+            org.junit.Assert.assertEquals(1, requests.count { "blue.png" in it })
+        } finally { compose.mainClock.autoAdvance = true }
+    }
+
+    @Test
+    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
+    fun coverTravelsThroughIntermediateBoundsInBothDirections() {
+        val red = android.graphics.Color.RED
+        val expanded = androidx.compose.runtime.mutableStateOf(false)
+        val image = coil3.compose.AsyncImagePreviewHandler {
+            Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).apply { eraseColor(red) }.asImage()
+        }
+        compose.setContent { AppTheme {
+            CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
+                coil3.compose.LocalAsyncImagePreviewHandler provides image) {
+                PlayerCoverLayout {
+                    androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                        PlayerArtwork("file:///cover", Modifier.align(androidx.compose.ui.Alignment.BottomStart).size(48.dp),
+                            14.dp, 192, sharedVisible = !expanded.value)
+                        androidx.compose.animation.AnimatedVisibility(expanded.value,
+                            enter = androidx.compose.animation.fadeIn(), exit = androidx.compose.animation.fadeOut()) {
+                            CompositionLocalProvider(LocalPlayerVisibility provides this) {
+                                PlayerArtwork("file:///cover", Modifier.size(260.dp), 32.dp, 1280, sharedVisible = true)
+                            }
+                        }
+                    }
+                }
+            }
+        } }
+        fun coverHeight(name: String): Int {
+            val b = compose.onRoot().captureToImage().asAndroidBitmap()
+            File("build/reports/ui-previews/player-motion").apply { mkdirs() }.resolve("$name.png")
+                .outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            var height = 0
+            for (y in 0 until b.height) if ((0 until b.width step 4).any { x -> b.getPixel(x, y) == red }) height++
+            return height
+        }
+        val small = coverHeight("mini")
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnUiThread { expanded.value = true }
+            compose.mainClock.advanceTimeBy(144)
+            val opening = coverHeight("expanding")
+            compose.mainClock.advanceTimeBy(600)
+            val full = coverHeight("full")
+            compose.runOnUiThread { expanded.value = false }
+            compose.mainClock.advanceTimeBy(144)
+            val closing = coverHeight("collapsing")
+            compose.mainClock.advanceTimeBy(600)
+            org.junit.Assert.assertTrue("mini=$small opening=$opening full=$full", small > 0 && opening in (small + 1) until full)
+            org.junit.Assert.assertTrue("closing=$closing", closing in (small + 1) until full)
+            org.junit.Assert.assertEquals(small, coverHeight("returned"))
+        } finally { compose.mainClock.autoAdvance = true }
+    }
+
     @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
     fun playerLargeFont() {
         compose.setContent {
