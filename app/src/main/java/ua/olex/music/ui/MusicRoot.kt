@@ -158,6 +158,7 @@ fun MusicRoot(model: LibraryViewModel) {
         val id = playing.mediaId
         if (playing.connected && id != null && currentArtwork != null) model.updateCurrentArtwork(id, currentArtwork)
     }
+    var settingsQuery by rememberSaveable { mutableStateOf("") }
     var expanded by rememberSaveable { mutableStateOf(false) }
     var permissionRequested by rememberSaveable { mutableStateOf(false) }
     val activity = LocalActivity.current
@@ -263,7 +264,9 @@ fun MusicRoot(model: LibraryViewModel) {
         if (place != Place.SEARCH) returnTo = place
         model.setQuery("")
         clearOnline(Place.SEARCH)
-        openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.SEARCH
+        if (artist && youTubeOn) tabHistory.open(Place.SEARCH, OnlineTarget.Artist(target.name))
+        else openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id
+        place = Place.SEARCH
     }
     var trashing by remember { mutableStateOf<List<Track>?>(null) }
     val trashRequest = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
@@ -297,7 +300,7 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             when {
                 onlineStack.isNotEmpty() -> popOnline()
-                page != null -> page = if (page == Page.DUPLICATES) Page.SETTINGS else null
+                page != null -> page = if (page == Page.DUPLICATES || page == Page.LIBRARY_OVERVIEW) Page.SETTINGS else null
                 else -> go(Place.HOME)
             }
         } finally {
@@ -308,15 +311,7 @@ fun MusicRoot(model: LibraryViewModel) {
         OnlineNav(
             open = { target ->
                 expanded = false; actionTrack = null; page = null
-                val twin = model.library.value?.let { libraryTwin(target, it) }
-                if (twin == null) tabHistory.open(place, target)
-                else {
-                    // One artist, one page: the owner's own, with YouTube Music's sections on it.
-                    clearOnline(Place.SEARCH)
-                    if (place != Place.SEARCH) returnTo = place
-                    model.setQuery("")
-                    openInLibrary = twin; place = Place.SEARCH
-                }
+                tabHistory.open(place, target)
             },
             openDownload = model::requestDownloads, play = model::playFrom,
             actions = { actionTrack = it },
@@ -380,14 +375,14 @@ fun MusicRoot(model: LibraryViewModel) {
                 } else TopAppBarDefaults.topAppBarColors(),
                 navigationIcon = {
                     if (onlineTop != null) KickIconButton(onClick = { popOnline() }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
-                    else if (page != null) KickIconButton(onClick = { page = if (page == Page.DUPLICATES) Page.SETTINGS else null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
+                    else if (page != null) KickIconButton(onClick = { page = if (page == Page.DUPLICATES || page == Page.LIBRARY_OVERVIEW) Page.SETTINGS else null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     else if (inCollection) KickIconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { k -> Symbol(Glyph.BACK, kick = k) }
                 },
                 actions = {
                     if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) KickIconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { k -> Symbol(Glyph.SEARCH, kick = k) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
-                        HomeActions(onStats = { page = Page.STATS }, onSettings = { page = Page.SETTINGS })
+                        HomeActions(onStats = { page = Page.STATS }, onSettings = { settingsQuery = ""; page = Page.SETTINGS })
                     }
                 },
             )
@@ -453,8 +448,11 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
-                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES })
+                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES },
+                onLibraryOverview = { page = Page.LIBRARY_OVERVIEW }, initialQuery = settingsQuery)
             page == Page.STATS -> StatsPage(requireNotNull(library), songStats, Modifier.padding(insets), model::play)
+            page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
+                onDuplicates = { page = Page.DUPLICATES }, onStorage = { settingsQuery = "cache"; page = Page.SETTINGS }, onTrash = moveToTrash)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
@@ -477,7 +475,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
-                online = onlineResults, onlineOn = youTubeOn && place == Place.SEARCH,
+                online = onlineResults, onlineOn = youTubeOn,
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, onCollectionClosed = { closeCollection = 0 },
                 focusSearch = if (place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
@@ -920,7 +918,7 @@ private fun SleepDial(fraction: Float, enabled: Boolean, onDrag: (Float) -> Unit
 internal enum class Place(val title: String) { HOME("Home"), LIBRARY("Playlists"), SEARCH("Search") }
 
 /** Pages opened over Home. */
-internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates"), SETTINGS("Settings") }
+internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates"), LIBRARY_OVERVIEW("Library overview"), SETTINGS("Settings") }
 
 /** The navigation bar: Home, Library, Search (M3E short navigation bar). */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)

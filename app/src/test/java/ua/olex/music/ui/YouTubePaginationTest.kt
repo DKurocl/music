@@ -22,6 +22,19 @@ class YouTubePaginationTest {
         assertEquals(1, YouTubeMusic.parseSearch(page("one", "one")).size)
     }
 
+    @Test fun likedPlaylistUsesBrowseIdAndReadsTracksEvenWithoutAHeader() = runBlocking {
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            assertEquals("browse", endpoint)
+            assertTrue(fields.contains("VLLM"))
+            page("one", "two")
+        })
+        val summary = YouTubeMusic.OnlineAlbum("LM", "Liked Music", "Auto playlist", null)
+        val result = source.album("LM", summary = summary)!!
+        assertEquals("Liked Music", result.first.title)
+        assertEquals(listOf("yt:one", "yt:two"), result.second.map { it.id.value })
+        assertTrue(result.second.all { it.album == null })
+    }
+
     @Test fun failedAndCancelledPagesKeepTheirTokenForRetry() = runBlocking {
         var attempt = 0
         val source = YouTubeMusic(transport = { _, fields, _ ->

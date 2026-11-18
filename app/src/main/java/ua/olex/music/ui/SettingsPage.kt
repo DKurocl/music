@@ -45,7 +45,8 @@ internal fun SettingsPage(
     modifier: Modifier, folders: List<String>, scanning: Boolean, ratingsToFiles: Boolean,
     onRatingsToFiles: (Boolean) -> Unit, onEqualizer: () -> Unit, onRescan: () -> Unit,
     onAddFolder: () -> Unit, onClearFolders: () -> Unit, onDownloads: () -> Unit = {},
-    duplicateCount: Int = 0, onDuplicates: () -> Unit = {},
+    duplicateCount: Int = 0, onDuplicates: () -> Unit = {}, onLibraryOverview: () -> Unit = {},
+    initialQuery: String = "",
 ) {
     val context = LocalContext.current
     fun prefs(name: String) = context.getSharedPreferences(name, Context.MODE_PRIVATE)
@@ -66,7 +67,7 @@ internal fun SettingsPage(
 
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
     val soulseekJobs by soulseek.jobs.collectAsStateWithLifecycle()
-    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var query by androidx.compose.runtime.saveable.rememberSaveable(initialQuery) { mutableStateOf(initialQuery) }
     val terms = query.trim().lowercase().split(' ').filter { it.isNotBlank() }
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     LaunchedEffect(query) { list.scrollToItem(0) }
@@ -162,6 +163,7 @@ internal fun SettingsPage(
         }
 
         if (terms.isEmpty()) item(key = "group-Library") { Group("Library") }
+        setting("Library overview clean files delete cleanup") { Row(Glyph.FOLDER, "Library overview", "Find files, review duplicates and manage storage", onClick = onLibraryOverview) }
         setting("Rescan music") { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
         setting("Music folders") { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
             else folders.joinToString(" · "), onClick = onAddFolder) }

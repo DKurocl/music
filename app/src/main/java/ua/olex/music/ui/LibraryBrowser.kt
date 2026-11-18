@@ -63,6 +63,8 @@ import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.rememberCoroutineScope
@@ -438,7 +440,12 @@ internal fun LibraryBrowser(
                                     supportingContent = { Text(listOfNotNull(collection.subtitle, songCount(collection.tracks.size)).joinToString(" · "), maxLines = 1) },
                                     leadingContent = { if (kind == LibraryTab.ARTISTS) ArtistImage(collection.name, Modifier.size(56.dp), 56.dp) else Artwork(collection.artworkUri, Modifier.size(56.dp), corner = 12.dp) },
                                     // Same inset and rounded press as the song rows below, so all results share one left edge.
-                                    modifier = Modifier.padding(horizontal = 8.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).clickable { onSearchUsed(query); openedFromOutside = null; backToArtist = null; returnQuery = query; tabName = kind.name; selectedId = collection.id; onQueryChange("") },
+                                    modifier = Modifier.padding(horizontal = 8.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).clickable { onSearchUsed(query)
+                                        if (kind == LibraryTab.ARTISTS && onlineOn) nav.open(OnlineTarget.Artist(collection.name))
+                                        else {
+                                            openedFromOutside = null; backToArtist = null; returnQuery = query
+                                            tabName = kind.name; selectedId = collection.id; onQueryChange("")
+                                        } },
                                 )
                             }
                         }
@@ -566,7 +573,9 @@ internal fun LibraryBrowser(
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { artist ->
                             Column(Modifier.weight(1f).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-                                .clickable(onClickLabel = "Open ${artist.name}") { selectedId = artist.id }.padding(vertical = 8.dp),
+                                .clickable(onClickLabel = "Open ${artist.name}") {
+                                    if (onlineOn) nav.open(OnlineTarget.Artist(artist.name)) else selectedId = artist.id
+                                }.padding(vertical = 8.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally) {
                                 ArtistImage(artist.name, Modifier.fillMaxWidth(0.86f).aspectRatio(1f), 104.dp)
                                 Text(artist.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -996,34 +1005,58 @@ private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: Libr
 private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Unit, onTile: (BrowseTile) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val tiles = BrowseTile.entries.filter { t ->
-        when (t) { BrowseTile.COMPOSERS -> library.composers.isNotEmpty(); BrowseTile.YEARS -> library.years.size > 1; BrowseTile.GENRES -> library.genres.size > 1
-            BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }; BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }; else -> true }
+    val available = rememberOffMain(library, initial = emptySet<BrowseTile>()) {
+        BrowseTile.entries.filterTo(HashSet()) { tile ->
+            when (tile) {
+                BrowseTile.COMPOSERS -> library.composers.isNotEmpty()
+                BrowseTile.YEARS -> library.years.size > 1
+                BrowseTile.GENRES -> library.genres.size > 1
+                BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }
+                BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }
+                else -> true
+            }
+        }
     }
-    val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer, cs.secondaryContainer to cs.onSecondaryContainer)
+    val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.secondaryContainer to cs.onSecondaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer)
     val columns = if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) 1 else 2
-    val tileRows = tiles.chunked(columns)
+    val groups = listOf("Browse" to listOf(BrowseTile.SONGS, BrowseTile.ALBUMS, BrowseTile.ARTISTS, BrowseTile.GENRES, BrowseTile.COMPOSERS, BrowseTile.YEARS, BrowseTile.FOLDERS),
+        "Listening" to listOf(BrowseTile.HISTORY, BrowseTile.UNPLAYED),
+        "Audio quality" to listOf(BrowseTile.LOSSLESS, BrowseTile.HI_RES))
     val genres = rememberOffMain(LibraryMembership(library.byId), initial = emptyList()) {
         library.genres.sortedByDescending { it.tracks.size }.take(6)
     }
     val genreRows = genres.chunked(columns)
     androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { Text("Browse", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)) }
-        items(tileRows.size) { r ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                tileRows[r].forEachIndexed { c, tile ->
-                    val (bg, fg) = accents[(r * columns + c) % accents.size]
-                    androidx.compose.material3.Surface(onClick = { haptics.tick(); onTile(tile) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                        color = cs.surfaceContainer, modifier = Modifier.weight(1f).heightIn(min = 72.dp).squish(0.03f)) {
-                        Row(Modifier.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Text(tile.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, modifier = Modifier.weight(1f))
-                            Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {
-                                Symbol(tile.glyph, color = fg, filled = true)
+        groups.forEachIndexed { group, (heading, tiles) ->
+            val rows = tiles.filter { it in available }.chunked(columns)
+            if (rows.isNotEmpty()) item(key = heading) {
+                Text(heading, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp))
+            }
+            items(rows.size, key = { "$heading-$it" }) { index ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    rows[index].forEach { tile ->
+                        val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                        val down by interaction.collectIsPressedAsState()
+                        val still = LocalPowerSave.current
+                        val amount by androidx.compose.animation.core.animateFloatAsState(if (down && !still) 1f else 0f,
+                            MaterialTheme.motionScheme.fastSpatialSpec(), label = "Browse icon press")
+                        val (bg, fg) = accents[group]
+                        androidx.compose.material3.Surface(onClick = { haptics.tick(); onTile(tile) }, interactionSource = interaction,
+                            shape = RoundedCornerShape(22.dp), color = cs.surfaceContainer, modifier = Modifier.weight(1f).heightIn(min = 72.dp)) {
+                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Box(Modifier.size(40.dp).graphicsLayer {
+                                    rotationZ = amount * if (group == 1) -16f else 13f
+                                    scaleX = 1f + amount * 0.12f
+                                    scaleY = scaleX
+                                }.clip(RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {
+                                    Symbol(tile.glyph, color = fg, filled = true)
+                                }
+                                Text(tile.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
+                    if (rows[index].size < columns) Spacer(Modifier.weight(1f))
                 }
-                if (tileRows[r].size < columns) Spacer(Modifier.weight(1f))
             }
         }
         // Your genres as big cover cards, as Google Play and Spotify fill their browse pages.

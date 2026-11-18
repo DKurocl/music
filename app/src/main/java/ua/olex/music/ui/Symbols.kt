@@ -50,10 +50,10 @@ enum class Glyph(val codepoint: Int) {
 
     /** The small gesture this glyph plays when its button is tapped. */
     val motion: GlyphMotion get() = when (this) {
-        SEARCH, SETTINGS, TUNE, REFRESH, REPEAT, REPEAT_ONE, SHUFFLE, MIX, RADIO -> GlyphMotion.TILT
+        SEARCH, SETTINGS, TUNE, REFRESH, REPEAT, REPEAT_ONE, SHUFFLE, MIX, RADIO, SLEEP -> GlyphMotion.TILT
         NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
         PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
-        DOWNLOAD, COLLAPSE, DOWN -> GlyphMotion.DROP
+        DOWNLOAD, COLLAPSE, DOWN, MORE -> GlyphMotion.DROP
         UP, ADD_TO_QUEUE, PLAYLIST_ADD, PLAYLIST, QUEUE, LYRICS -> GlyphMotion.RISE
         else -> GlyphMotion.POP
     }
@@ -119,7 +119,7 @@ fun Symbol(
         scaleX = scale
         scaleY = scale
         when (gesture) {
-            GlyphMotion.TILT -> rotationZ = pulse * (if (glyph == Glyph.SEARCH) -12f else 16f)
+            GlyphMotion.TILT -> rotationZ = pulse * (when (glyph) { Glyph.SEARCH, Glyph.SLEEP, Glyph.SHUFFLE -> -16f; Glyph.REPEAT, Glyph.REPEAT_ONE -> 25f; else -> 16f })
             GlyphMotion.NUDGE_RIGHT -> translationX = pulse * 3.dp.toPx()
             GlyphMotion.NUDGE_LEFT -> translationX = pulse * -3.dp.toPx()
             GlyphMotion.DROP -> translationY = pulse * 3.dp.toPx()

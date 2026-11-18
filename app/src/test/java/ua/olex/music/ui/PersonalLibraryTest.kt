@@ -32,9 +32,9 @@ class PersonalLibraryTest {
         var created: String? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(emptyList(), actions(create = { name, _ -> created = name }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }
         compose.onNodeWithText("New playlist").performClick()
-        compose.onNodeWithText("Save").assertIsNotEnabled()
+        compose.onNodeWithText("Create").assertIsNotEnabled()
         compose.onNodeWithText("Playlist name").performTextInput("  Travel  ")
-        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText("Create").performClick()
         compose.runOnIdle { assertEquals("Travel", created) }
     }
 

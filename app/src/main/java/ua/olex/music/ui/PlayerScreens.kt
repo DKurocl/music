@@ -676,8 +676,8 @@ internal fun PlayerPage(
                         if (inlineLyrics != null) lyricsShown = !lyricsShown else onLyrics()
                     }
                     ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
-                    ToggleAction(route.glyph(), "Change output", false, true, null, onOutput)
                     ToggleAction(Glyph.QUEUE, "Open queue", false, true, null, onQueue)
+                    ToggleAction(route.glyph(), "Change output", false, true, null, onOutput)
                 }
             }
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
