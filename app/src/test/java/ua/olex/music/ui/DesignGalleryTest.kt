@@ -800,7 +800,7 @@ class DesignGalleryTest {
         compose.onNodeWithText("Night Drive Mix").performClick()
         org.junit.Assert.assertEquals("radio", mix)
         compose.onNodeWithTag("home-feed").performScrollToNode(hasText("On the train"))
-        compose.onNodeWithText("On the train").performClick()
+        compose.onNodeWithText("On the train").performScrollTo().performClick()
         org.junit.Assert.assertEquals(7L, opened)
         compose.onNodeWithText("Weekend rotation").performScrollTo().performClick()
         org.junit.Assert.assertEquals("VLsaved", (online as OnlineTarget.Album).id)
