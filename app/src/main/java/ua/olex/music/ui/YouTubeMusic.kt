@@ -31,6 +31,8 @@ import java.util.concurrent.TimeUnit
 internal class YouTubeMusic(
     private val transport: (suspend (String, String, String) -> String?)? = null,
     private val ioDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.IO,
+    private val pageStore: OnlinePageStore? = null,
+    private val pageScope: () -> String = { "public" },
     private val account: () -> Map<String, String>? = { null },
 ) {
     private val http = OkHttpClient.Builder().readTimeout(20, TimeUnit.SECONDS).connectTimeout(10, TimeUnit.SECONDS).build()
@@ -62,55 +64,140 @@ internal class YouTubeMusic(
      * it lists) and the artists-only search, asked at the same time.
      */
     suspend fun searchAll(query: String): Found = kotlinx.coroutines.coroutineScope {
+        val scope = pageScope()
         val artists = async(ioDispatcher) { post("search", """"query":${quote(query)},"params":"$ARTISTS_ONLY"""")?.let(::searchCards).orEmpty() }
         val plain = withContext(ioDispatcher) { post("search", """"query":${quote(query)}""") }
             // No answer (refused, limited, signed out) is an error the screen says, not "nothing found".
             ?: throw java.io.IOException(when (lastStatus) { 429 -> "YouTube Music is limiting requests; try again in a minute"; 401, 403 -> "YouTube Music refused the request"; else -> "YouTube Music didn't answer" })
-        val cards = plain?.let(::searchCards).orEmpty()
-        Found(plain?.let(::parseSearch).orEmpty(),
+        val cards = searchCards(plain)
+        Found(parseSearch(plain),
             (cards.filter { it.kind == Card.Kind.ARTIST } + artists.await()).distinctBy { it.id }.take(8),
-            cards.filter { it.kind == Card.Kind.ALBUM }.take(10))
+            cards.filter { it.kind == Card.Kind.ALBUM }.take(10)).also { found ->
+            if (pageScope() == scope) withContext(ioDispatcher) { rememberAlbumLinks(scope, found.songs) }
+        }
     }
     data class OnlineAlbum(val id: String, val title: String, val subtitle: String?, val cover: String?)
 
-    /** The artist's YouTube Music page id for a name: the search's artist whose name matches best. */
-    suspend fun artistId(name: String): String? = withContext(ioDispatcher) {
-        peek<String>("artistId:${TextFold.fold(name)}")?.let { return@withContext it }
-        val text = post("search", """"query":${quote(name)}""") ?: return@withContext null
-        artistIds(text).let { found -> found.firstOrNull { TextFold.fold(it.second) == TextFold.fold(name) } ?: found.firstOrNull() }?.first
-            ?.also { synchronized(pages) { pages["artistId:${TextFold.fold(name)}"] = it } }
+    /** Prefer an exact artist identity and keep confirmed links available offline. */
+    suspend fun artistId(name: String, offline: Boolean = false): String? = withContext(ioDispatcher) {
+        val folded = TextFold.fold(name)
+        val scope = pageScope()
+        val key = "artistId:$folded"
+        val memoryKey = "$scope/$key"
+        peek<String>(memoryKey)?.let { return@withContext it }
+        pageStore?.read(scope, key)?.optString("id")?.takeIf { it.isNotBlank() }?.let {
+            keep(memoryKey, it)
+            return@withContext it
+        }
+        if (offline) return@withContext null
+        val text = post("search", """"query":${quote(name)}"""") ?: return@withContext null
+        if (pageScope() != scope) return@withContext null
+        val found = artistIds(text)
+        val exact = found.filter { TextFold.fold(it.second) == folded }.map { it.first }.distinct().singleOrNull()
+        exact?.also {
+            keep(memoryKey, it)
+            pageStore?.write(scope, key, org.json.JSONObject().put("id", it))
+        } ?: found.firstOrNull()?.first
     }
 
-    suspend fun artist(id: String): OnlineArtist? = cached("artist:$id") { post("browse", """"browseId":${quote(id)}""")?.let { parseArtist(id, it) } }
-
-    /** An album's songs, in order, with the album's cover and artist on each. */
-    suspend fun album(id: String): Pair<OnlineAlbum, List<Track>>? = cached("album:$id") {
-        post("browse", """"browseId":${quote(id)}""")?.let { json -> parseAlbum(id, json)?.also { rememberContinuation(id, continuationOf(json)) } }
+    suspend fun artist(id: String, offline: Boolean = false): OnlineArtist? = withContext(ioDispatcher) {
+        val scope = pageScope()
+        val key = "artist:$id"
+        cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
+            val saved = pageStore?.read(scope, key)?.let { runCatching { OnlinePageJson.artist(it) }.getOrNull() }
+            if (offline) return@cached saved
+            val fresh = networkFallback(saved) {
+                post("browse", """"browseId":${quote(id)}"""")?.let { parseArtist(id, it) }
+            }
+            if (pageScope() != scope) return@cached null
+            if (fresh != null && fresh !== saved) {
+                pageStore?.write(scope, key, OnlinePageJson.artist(fresh))
+                rememberAlbumLinks(scope, fresh.songs + fresh.videos)
+            }
+            fresh
+        }
     }
+
+    /** Cached album metadata can open offline; online opens refresh the disk copy. */
+    suspend fun album(id: String, offline: Boolean = false): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) {
+        val scope = pageScope()
+        val key = "album:$id"
+        cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
+            val saved = pageStore?.read(scope, key)?.let {
+                runCatching { OnlinePageJson.album(it.getJSONObject("album")) to OnlinePageJson.tracks(it, "songs") }.getOrNull()
+            }
+            if (offline) return@cached saved
+            val fresh = networkFallback(saved) {
+                post("browse", """"browseId":${quote(id)}"""")?.let { json ->
+                    parseAlbum(id, json)?.also { if (pageScope() == scope) rememberContinuation("$scope/$id", continuationOf(json)) }
+                }
+            }
+            if (pageScope() != scope) return@cached null
+            if (fresh != null && fresh !== saved) saveAlbum(scope, id, fresh)
+            fresh
+        }
+    }
+
+    private suspend fun <T> networkFallback(saved: T?, fetch: suspend () -> T?): T? = try {
+        fetch() ?: saved
+    } catch (failure: java.io.IOException) {
+        saved ?: throw failure
+    }
+
+    private fun saveAlbum(scope: String, id: String, value: Pair<OnlineAlbum, List<Track>>) {
+        val key = "album:$id"
+        val previousCount = if (more["$scope/$id"] != null) {
+            pageStore?.read(scope, key)?.optJSONArray("songs")?.length() ?: 0
+        } else 0
+        if (more["$scope/$id"] == null || value.second.size >= previousCount) {
+            pageStore?.write(scope, key, org.json.JSONObject().put("album", OnlinePageJson.album(value.first))
+                .put("songs", OnlinePageJson.tracks(value.second)))
+        }
+        rememberAlbumLinks(scope, value.second)
+    }
+
+    private fun rememberAlbumLinks(scope: String, tracks: List<Track>) {
+        val links = tracks.mapNotNull { track -> albumOf(track)?.let { track.id.value to it } }.toMap()
+        if (links.isNotEmpty()) pageStore?.mergeLinks(scope, links)
+    }
+
+    suspend fun savedAlbumId(mediaId: String): String? = withContext(ioDispatcher) {
+        val scope = pageScope()
+        albumIds[mediaId.removePrefix("yt:")]?.takeIf { it.startsWith("MPRE") }
+            ?: pageStore?.read(scope, "song-albums")?.optString(mediaId)?.takeIf { it.startsWith("MPRE") && pageScope() == scope }
+    }
+
 
     /**
      * The next part of a long playlist (YouTube Music answers about a hundred songs at a time): the
      * whole list so far, or null when it has no more. Kept in the session cache with the rest.
      */
-    suspend fun albumMore(id: String): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) { shared("album-more:$id") {
-        val cursor = more[id] ?: return@shared null
-        val token = cursor.token
-        val have = peekAlbum(id) ?: return@shared null
-        // The current form (continuation in the body), then the older one (in the address).
-        val json = post("browse", """"continuation":${quote(token)}""")
-            ?: post("browse", "", "&ctoken=${Uri.encode(token)}&continuation=${Uri.encode(token)}&type=next")
-            // No answer (offline, a hiccup): the token is kept, so opening the page again goes on from here.
-            ?: return@shared null
-        if (ua.olex.music.lyrics.Json.parse(json) !is Map<*, *>) return@shared null
-        val page = parseSearch(json, fallbackArtist = have.second.firstOrNull()?.artist, keepOrder = true)
-        val added = page.map { it.copy(album = it.album ?: have.first.title, artworkUri = it.artworkUri ?: have.first.cover) }
-        val next = continuationOf(json)
-        val visited = cursor.visited + token
-        check(next !in visited) { "YouTube Music repeated a playlist page" }
-        rememberContinuation(id, next, visited)
-        // Repeated video ids are distinct playlist occurrences, including across page boundaries.
-        (have.first to have.second + added).also { keep("album:$id", it) }
-    } }
+    suspend fun albumMore(id: String): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) {
+        val scope = pageScope()
+        shared("album-more:$scope/$id") {
+            val cursor = more["$scope/$id"] ?: return@shared null
+            val token = cursor.token
+            val have = peek<Pair<OnlineAlbum, List<Track>>>("$scope/album:$id") ?: return@shared null
+            // The current form (continuation in the body), then the older one (in the address).
+            val json = post("browse", """"continuation":${quote(token)}""")
+                ?: post("browse", "", "&ctoken=${Uri.encode(token)}&continuation=${Uri.encode(token)}&type=next")
+                // No answer (offline, a hiccup): the token is kept, so opening the page again goes on from here.
+                ?: return@shared null
+            if (ua.olex.music.lyrics.Json.parse(json) !is Map<*, *>) return@shared null
+            val page = parseSearch(json, fallbackArtist = have.second.firstOrNull()?.artist, keepOrder = true)
+            val added = page.map { it.copy(album = it.album ?: have.first.title, artworkUri = it.artworkUri ?: have.first.cover) }
+            val next = continuationOf(json)
+            val visited = cursor.visited + token
+            check(next !in visited) { "YouTube Music repeated a playlist page" }
+            if (pageScope() != scope) return@shared null
+            rememberContinuation("$scope/$id", next, visited)
+            // Repeated video ids are distinct playlist occurrences, including across page boundaries.
+            (have.first to have.second + added).also {
+                keep("$scope/album:$id", it)
+                saveAlbum(scope, id, it)
+            }
+        }
+    }
     private data class PlaylistCursor(val token: String, val visited: Set<String>)
     private val more = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, PlaylistCursor>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PlaylistCursor>?) = size > 48
@@ -122,8 +209,8 @@ internal class YouTubeMusic(
     /** A page already loaded this session, for drawing it in the first frame when it opens again. */
     @Suppress("UNCHECKED_CAST")
     fun <T> peek(key: String): T? = synchronized(pages) { pages[key] } as T?
-    fun peekAlbum(id: String): Pair<OnlineAlbum, List<Track>>? = peek("album:$id")
-    fun peekArtist(id: String): OnlineArtist? = peek("artist:$id")
+    fun peekAlbum(id: String): Pair<OnlineAlbum, List<Track>>? = peek("${pageScope()}/album:$id") ?: peek("album:$id")
+    fun peekArtist(id: String): OnlineArtist? = peek("${pageScope()}/artist:$id") ?: peek("artist:$id")
     /** Puts a page in the session cache, as if it had been loaded (screenshots and tests). */
     internal fun keep(key: String, value: Any) { synchronized(pages) { pages[key] = value } }
 
@@ -160,32 +247,48 @@ internal class YouTubeMusic(
      * Likes or unlikes a song on the owner's YouTube Music account, so a heart in the app is a like
      * there too (and the other way it shows in his "Liked music"). Only when signed in; quiet on failure.
      */
-    suspend fun like(videoId: String, liked: Boolean): Boolean = withContext(ioDispatcher) {
-        if (account() == null) return@withContext false
-        runCatching { post(if (liked) "like/like" else "like/removelike", """"target":{"videoId":${quote(videoId)}}""") != null }.getOrDefault(false)
+    suspend fun like(videoId: String, liked: Boolean, scope: String): Boolean = withContext(ioDispatcher) {
+        if (pageScope() != scope) return@withContext false
+        val headers = account() ?: return@withContext false
+        if (pageScope() != scope) return@withContext false
+        try {
+            post(if (liked) "like/like" else "like/removelike", """"target":{"videoId":${quote(videoId)}}"""", headers = headers) != null
+        } catch (_: java.io.IOException) {
+            false
+        }
     }
 
     /**
      * The owner's own playlists on YouTube Music (Liked music first, as there), when signed in; empty
      * otherwise. Kept for the session.
      */
-    suspend fun accountPlaylists(): List<Card> {
-        if (account() == null) return emptyList()
-        val who = account()?.get("Cookie")?.hashCode() ?: return emptyList()
-        return cached("account-playlists:$who") {
-            var json = post("browse", """"browseId":"FEmusic_liked_playlists"""") ?: return@cached null
-            check(ua.olex.music.lyrics.Json.parse(json) is Map<*, *>) { "Invalid YouTube Music playlist page" }
-            val cards = LinkedHashMap<String, Card>()
-            val visited = HashSet<String>()
-            while (true) {
-                playlistCards(json).forEach { cards.putIfAbsent(it.id, it) }
-                val token = continuationOf(json) ?: break
-                check(visited.add(token)) { "YouTube Music repeated an account playlist page" }
-                json = post("browse", """"continuation":${quote(token)}""")
-                    ?: throw java.io.IOException("Couldn't load the rest of your YouTube Music playlists")
+    suspend fun accountPlaylists(offline: Boolean = false): List<Card> = withContext(ioDispatcher) {
+        val scope = pageScope()
+        val headers = account() ?: return@withContext emptyList()
+        val cookie = headers["Cookie"] ?: return@withContext emptyList()
+        if (pageScope() != scope) return@withContext emptyList()
+        val key = "account-playlists"
+        val saved = pageStore?.read(scope, key)?.let { runCatching { OnlinePageJson.cards(it, "playlists") }.getOrNull() }
+        if (offline) return@withContext saved.orEmpty()
+        cached("account-playlists:${OnlinePageStore.digest(cookie)}") {
+            val fresh = networkFallback(saved) {
+                var json = post("browse", """"browseId":"FEmusic_liked_playlists"""", headers = headers) ?: return@networkFallback null
                 check(ua.olex.music.lyrics.Json.parse(json) is Map<*, *>) { "Invalid YouTube Music playlist page" }
+                val cards = LinkedHashMap<String, Card>()
+                val visited = HashSet<String>()
+                while (true) {
+                    playlistCards(json).forEach { cards.putIfAbsent(it.id, it) }
+                    val token = continuationOf(json) ?: break
+                    check(visited.add(token)) { "YouTube Music repeated an account playlist page" }
+                    json = post("browse", """"continuation":${quote(token)}"""", headers = headers)
+                        ?: throw java.io.IOException("Couldn't load the rest of your YouTube Music playlists")
+                    check(ua.olex.music.lyrics.Json.parse(json) is Map<*, *>) { "Invalid YouTube Music playlist page" }
+                }
+                cards.values.toList()
             }
-            cards.values.toList()
+            if (pageScope() != scope) return@cached null
+            if (fresh != null && fresh !== saved) pageStore?.write(scope, key, org.json.JSONObject().put("playlists", OnlinePageJson.cards(fresh)))
+            fresh
         }.orEmpty()
     }
 
@@ -255,14 +358,14 @@ internal class YouTubeMusic(
     }
 
     /** One call to YouTube Music, as its web app makes it. */
-    private suspend fun post(endpoint: String, fields: String, query: String = ""): String? {
+    private suspend fun post(endpoint: String, fields: String, query: String = "", headers: Map<String, String>? = account()): String? {
         transport?.let { return it(endpoint, fields, query) }
         val body = """{"context":{"client":{"clientName":"WEB_REMIX","clientVersion":"$WEB_REMIX","hl":"en","gl":"${java.util.Locale.getDefault().country.ifEmpty { "US" }}"}}${if (fields.isEmpty()) "" else ",$fields"}}"""
         val request = okhttp3.Request.Builder().url("https://music.youtube.com/youtubei/v1/$endpoint?prettyPrint=false$query")
             .post(body.toRequestBody("application/json".toMediaTypeOrNull()))
             .header("User-Agent", USER_AGENT).header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/")
             // Signed in: the owner's own home, mixes and radio (YouTubeAccount).
-            .apply { account()?.forEach { (k, v) -> header(k, v) } }
+            .apply { headers?.forEach { (k, v) -> header(k, v) } }
             .build()
         // Cancelled with the coroutine that asked (a search replaced by the next keystroke stops its
         // request instead of finishing in the background and holding a connection).
@@ -319,6 +422,8 @@ internal class YouTubeMusic(
 
         /** The YouTube Music album page of an online song seen this session, if its row named one. */
         fun albumOf(track: Track): String? = albumIds[track.id.value.removePrefix("yt:")]
+
+        internal fun rememberAlbum(video: String, album: String) { albumIds[video] = album }
 
         /** Playlist cards anywhere in an answer (a library grid, a shelf), in order, without the "New playlist" tile. */
         fun playlistCards(json: String): List<Card> {
@@ -432,6 +537,10 @@ internal class YouTubeMusic(
             val cover = biggestImage(header?.get("thumbnail"))
             val album = OnlineAlbum(id, title, text(header?.get("subtitle")).ifEmpty { null }, cover)
             val songs = parseSearch(json, fallbackArtist = artist.ifEmpty { null }, keepOrder = true).map { it.copy(album = it.album ?: title, artworkUri = it.artworkUri ?: cover) }
+            if (id.startsWith("MPRE")) songs.forEach { track ->
+                val video = track.id.value.removePrefix("yt:")
+                albumIds.putIfAbsent(video, id)
+            }
             return album to songs
         }
 

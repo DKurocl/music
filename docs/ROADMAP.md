@@ -36,6 +36,10 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Offline online catalogue, source links and search (Codex, 2026-11-18): 49/64/50 and
+      account-scoped outgoing likes (55). Verify the batch before marking it complete.
+
+
 - [~] Playback and artwork reliability (Codex, 2026-11-18, `agent/playback-ui-reliability`):
       one pending selection across mixes and manual app entry points, cold-start player intents,
       motion surface lifecycle, cover-cache locking and widget update ordering (3/23/24/35/67/68).

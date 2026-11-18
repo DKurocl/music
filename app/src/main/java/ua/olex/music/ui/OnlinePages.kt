@@ -71,15 +71,30 @@ internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
 internal fun <T> rememberOffMain(vararg keys: Any?, initial: T, compute: () -> T): T =
     produceState(initial, *keys) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { compute() } }.value
 
+@Composable
+internal fun rememberOnlineAlbumId(mediaId: String?, accountScope: String): String? {
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    return key(mediaId, accountScope) {
+        produceState<String?>(null) {
+            value = mediaId?.takeIf { it.startsWith("yt:") }?.let { graph.youTube.savedAlbumId(it) }
+        }.value
+    }
+}
+
 private sealed interface Load<out T> { data object Wait : Load<Nothing>; data object Failed : Load<Nothing>; data class Done<T>(val value: T) : Load<T> }
 
 /** Loads a page; one opened before this session is there in the first frame ([cached]). */
 @Composable
 private fun <T> rememberLoad(key: Any, retry: Int, cached: T? = null, load: suspend () -> T?): Load<T> =
-    produceState<Load<T>>(cached?.let { Load.Done(it) } ?: Load.Wait, key, retry) {
-        if (value is Load.Done && retry == 0) return@produceState
-        value = Load.Wait; value = runCatching { load() }.getOrNull()?.let { Load.Done(it) } ?: Load.Failed
-    }.value
+    androidx.compose.runtime.key(key) {
+        produceState<Load<T>>(cached?.let { Load.Done(it) } ?: Load.Wait, retry) {
+            if (cached != null && retry == 0) return@produceState
+            val loaded = try { load() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            value = loaded?.let { Load.Done(it) } ?: Load.Failed
+        }.value
+    }
 
 /** Tells the shell when the page's header has scrolled away, so the top bar takes the title. */
 @Composable
@@ -94,7 +109,8 @@ private fun WarmFirst(songs: List<Track>) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val owned = LocalOwnedSources.current
     val first = songs.firstOrNull()?.takeIf(YouTubeMusic::isOnline)?.takeUnless { it.uri in owned }?.id?.value?.removePrefix("yt:")
-    LaunchedEffect(first) { if (first != null) runCatching { graph.youTube.warm(first) } }
+    val network = LocalNetwork.current
+    LaunchedEffect(first, network) { if (network && first != null) runCatching { graph.youTube.warm(first) } }
 }
 
 /** A song row's place while the list loads: the same height as a row, so nothing jumps when it fills. */
@@ -124,9 +140,11 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
-    val state = rememberLoad(target, retry, target.id?.let(graph.youTube::peekArtist)) {
-        val id = target.id ?: graph.youTube.artistId(target.name) ?: return@rememberLoad null
-        graph.youTube.artist(id)
+    val network = LocalNetwork.current
+    val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
+    val state = rememberLoad(Triple(target, accountScope, network), retry, target.id?.let(graph.youTube::peekArtist)) {
+        val id = target.id ?: graph.youTube.artistId(target.name, offline = !network) ?: return@rememberLoad null
+        graph.youTube.artist(id, offline = !network)
     }
     val mine = remember(library, target.name) { library.artists.firstOrNull { TextFold.fold(it.name) == TextFold.fold(target.name) } }
     val cs = MaterialTheme.colorScheme
@@ -220,13 +238,22 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
-    val state = rememberLoad(target, retry, graph.youTube.peekAlbum(target.id)) { graph.youTube.album(target.id) }
+    val network = LocalNetwork.current
+    val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
+    val state = rememberLoad(Triple(target, accountScope, network), retry, graph.youTube.peekAlbum(target.id)) {
+        graph.youTube.album(target.id, offline = !network)
+    }
     // A long playlist arrives in parts: the rest is fetched in the background and added under what is
     // on screen, so nothing moves while the owner reads or plays.
-    var grown by remember(target) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
-    LaunchedEffect(target, state is Load.Done) {
-        if (state !is Load.Done) return@LaunchedEffect
-        while (true) { grown = runCatching { graph.youTube.albumMore(target.id) }.getOrNull() ?: break }
+    var grown by remember(target, accountScope) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
+    LaunchedEffect(target, accountScope, network, state is Load.Done) {
+        if (!network || state !is Load.Done) return@LaunchedEffect
+        while (true) {
+            val next = try { graph.youTube.albumMore(target.id) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            grown = next ?: break
+        }
     }
     val loaded = grown ?: (state as? Load.Done)?.value
     val songs = loaded?.second.orEmpty()

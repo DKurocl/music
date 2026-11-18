@@ -184,6 +184,7 @@ fun MusicRoot(model: LibraryViewModel) {
     // from the library by genre).
     val moods by androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, youTubeOn) { if (youTubeOn) value = context.graph.youTube.moods() }
     // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
+    val onlinePageScope by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
     // A different account (or none) never sees the last one's playlists, home or moods.
     androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
@@ -437,6 +438,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 shape = RoundedCornerShape((backProgress * 40 + (dismiss.value / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
             }) {
         val motionCover by model.motionCover.collectAsStateWithLifecycle()
+        val onlineAlbumId = rememberOnlineAlbumId(playing.mediaId, onlinePageScope)
         NowPlaying(
             playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
                 listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") }
@@ -463,8 +465,7 @@ fun MusicRoot(model: LibraryViewModel) {
             mixFrom = model.mixLabel,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } }
                 // A YouTube Music song: its album page, when its row named one.
-                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { id -> Track(TrackId(id), "", playing.title, playing.artist) }
-                    ?.let { t -> YouTubeMusic.albumOf(t)?.let { albumId -> { onlineNav.open(OnlineTarget.Album(albumId, playing.album ?: playing.title)) } } },
+                ?: onlineAlbumId?.let { albumId -> { onlineNav.open(OnlineTarget.Album(albumId, playing.album ?: playing.title)) } },
             onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } }
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") && playing.artist.isNotBlank() }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } }
                 ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } },
@@ -478,6 +479,7 @@ fun MusicRoot(model: LibraryViewModel) {
     actionTrack?.let { track ->
         val online = YouTubeMusic.isOnline(track)
         val saved = (track.recordingId ?: track.id.value) in personal.favouriteByTrackId
+        val onlineAlbumId = rememberOnlineAlbumId(track.id.value, onlinePageScope)
         TrackActionsSheet(track, saved, rating = stats[track.statsKey]?.rating ?: 0, onRate = { stars ->
             model.setRating(track, stars)
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
@@ -491,7 +493,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 model.dontRecommend(track); scope.launch { snackbar.showSnackbar("${track.title} won't be recommended again") }
             } else null,
             // An online song's album and artist open their pages (the owner's own artist page when he has them).
-            if (online) YouTubeMusic.albumOf(track)?.let { id -> TrackAction(Glyph.ALBUM, "Go to album") { actionTrack = null; onlineNav.open(OnlineTarget.Album(id, track.album ?: track.title, cover = track.artworkUri)) } }
+            if (online) onlineAlbumId?.let { id -> TrackAction(Glyph.ALBUM, "Go to album") { actionTrack = null; onlineNav.open(OnlineTarget.Album(id, track.album ?: track.title, cover = track.artworkUri)) } }
                 else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },
             if (online) TrackAction(Glyph.PERSON, "Go to artist") { actionTrack = null; onlineNav.open(OnlineTarget.Artist(track.artist.substringBefore(",").trim())) }
                 else TrackAction(Glyph.PERSON, "Go to artist") { openOf(track, artist = true) },
