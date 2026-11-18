@@ -21,6 +21,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +52,7 @@ import kotlinx.coroutines.delay
 import ua.olex.music.library.ArtworkUris
 
 /** The revision reopens a file replaced in place by an explicit cover edit. */
-internal data class MotionArtwork(val uri: String, val revision: Number)
+internal data class MotionArtwork(val uri: String, val revision: Long)
 
 @Composable
 internal fun ArtworkFrame(modifier: Modifier, corner: Dp, content: @Composable BoxScope.() -> Unit) {
@@ -72,6 +73,8 @@ internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels:
     val context = LocalContext.current
     val saving = LocalPowerSave.current
     val resolved = remember { mutableStateOf<Painter?>(null) }
+    val requestToken = remember(uri, pixels) { Any() }
+    val latestToken by rememberUpdatedState(requestToken)
     // Capture the outgoing layer once per URI. Keep at most two decoded painters during the fade.
     var outgoing by remember(uri) { mutableStateOf(resolved.value) }
     var ready by remember(uri) { mutableStateOf(false) }
@@ -105,8 +108,14 @@ internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels:
             AsyncImage(
                 model = request, contentDescription = null, contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value },
-                onSuccess = { resolved.value = it.painter; ready = true; failed = false },
-                onError = { failed = true; ready = false },
+                onSuccess = {
+                    if (requestToken === latestToken) {
+                        resolved.value = it.painter
+                        ready = true
+                        failed = false
+                    }
+                },
+                onError = { if (requestToken === latestToken) { failed = true; ready = false } },
             )
         }
         if (motion != null && !saving && !LocalInspectionMode.current) {

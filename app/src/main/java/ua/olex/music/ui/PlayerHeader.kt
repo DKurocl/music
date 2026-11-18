@@ -2,7 +2,6 @@
 
 package ua.olex.music.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -61,7 +60,7 @@ internal fun PlayerHeader(
             )
         }
         if (onLyricsTools != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 lyricsVisible,
                 enter = if (saving) androidx.compose.animation.EnterTransition.None else fadeIn(motion.fastEffectsSpec()) + scaleIn(motion.fastSpatialSpec(), initialScale = 0.88f),
                 exit = if (saving) androidx.compose.animation.ExitTransition.None else fadeOut(motion.fastEffectsSpec()) + scaleOut(motion.fastEffectsSpec(), targetScale = 0.88f),

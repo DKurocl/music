@@ -1,3 +1,25 @@
+# Player cover and interaction polish (Codex, 2026-11-18)
+
+Owner reports a cover flash on track changes and a lyrics settings button sliding into the overflow
+slot. Branch `agent/player-cover-polish` starts from main `79289b2`.
+
+[код] The mini and full player retain the latest decoded still during a cover request. A late result
+cannot replace a newer cover. On swipe, the incoming neighbour is already in its slot. A transport
+skip no longer resets and slides the strip again; a newer queue occurrence cancels the old settle.
+The lyrics action and overflow have permanent tap positions during the lyrics transition.
+
+[код] The motion cover uses an album/folder identity, keeps one decoder across tracks within that
+owner, and opens a replacement file even if its URI has stayed the same. It centre crops, reveals
+only after a first frame, and releases on error, background, Battery Saver or when lyrics cover it.
+Remote cover work is delayed until selection settles. An automatic fetch cannot overwrite a manual
+attachment. Play/pause transitions within a stable button shape; press feedback uses short bounded
+motion and keeps touch targets stable. Navigation no longer stacks two independent glyph effects.
+
+First CI 44247703675 found the implicit RowScope AnimatedVisibility overload inside a Box.
+The call is now qualified. Added Robolectric checks that capture the still during a delayed next
+cover and measure the two header controls through the lyrics exit. Updated CI evidence pending.
+Physical 120 Hz, real video decode, large font and TalkBack acceptance still need the Pixel.
+
 # Now Playing format and motion (Codex, 2026-11-18)
 
 [код] Now Playing reads the selected Media3 input format through its controller state, with
