@@ -4,6 +4,7 @@ package ua.olex.music.ui
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -98,10 +99,12 @@ internal fun HomePage(
                 if (songs.isNotEmpty()) {
                     val first = songs.first()
                     item(key = "lead-" + first.id.value) {
-                        Surface(onClick = { haptics.confirm(); onPlay(songs, 0, contextName) },
-                            shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.primaryContainer,
+                        val shape = RoundedCornerShape(28.dp)
+                        Surface(shape = shape, color = MaterialTheme.colorScheme.primaryContainer,
                             modifier = Modifier.fillMaxWidth().then(if (still) Modifier else Modifier.animateItem()).padding(horizontal = 16.dp, vertical = 6.dp)
-                                .squish(0.02f).semantics { contentDescription = "Play ${first.title} by ${first.artist}" }) {
+                                .squish(0.02f).clip(shape).combinedClickable(
+                                    onLongClickLabel = "Song actions", onLongClick = { haptics.longPress(); onTrackActions(first) },
+                                    onClickLabel = "Play ${first.title}", onClick = { haptics.confirm(); onPlay(songs, 0, contextName) })) {
                             Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Artwork(first.artworkUri, Modifier.size(88.dp), 18.dp)
                                 Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -361,7 +364,7 @@ internal fun HomeSkeleton(modifier: Modifier) {
     val pulse = rememberLoadingPulse()
     Column(modifier.fillMaxSize().graphicsLayer { alpha = pulse() }.semantics { contentDescription = "Loading your library" }) {
         Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            repeat(3) { Box(Modifier.width(104.dp).height(40.dp).clip(RoundedCornerShape(50)).background(tone)) }
+            repeat(2) { Box(Modifier.width(104.dp).height(40.dp).clip(RoundedCornerShape(50)).background(tone)) }
         }
         Box(Modifier.padding(horizontal = 16.dp, vertical = 6.dp).fillMaxWidth().height(112.dp).clip(RoundedCornerShape(28.dp)).background(tone))
         Spacer(Modifier.height(12.dp))

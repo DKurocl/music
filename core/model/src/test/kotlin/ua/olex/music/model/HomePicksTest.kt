@@ -4,6 +4,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class HomePicksTest {
+    @Test fun aPersonalFeedArrivingAfterColdStartKeepsTheOpeningSong() {
+        val files = (1..4).map { Track(TrackId("file:$it"), "file:///$it", "Track $it", "Local") }
+        val remote = (1..30).map { Track(TrackId("yt:$it"), "ytm://$it", "Song $it", "Remote") }
+        fun picks(suggestions: List<Track>) = HomePicks.select(files, suggestions, emptyList(), emptyList(), emptyMap(), 42, { true }, { false })
+        assertEquals(picks(emptyList()).first(), picks(remote).first())
+        assertEquals(remote.first(), picks(remote)[1])
+        assertEquals(24, picks(remote).size)
+    }
+
     @Test fun familiarAndProviderOrderShareOneQueueIncludingOfflineLinkedCopies() {
         val a = Track(TrackId("a"), "file:///a", "Take", "Band")
         val stream = a.copy(id = TrackId("yt:x"), uri = "ytm://x")

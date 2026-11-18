@@ -512,7 +512,7 @@ internal class YouTubeMusic(
             if (pageScope() != scope || (page.playlists.isEmpty() && page.songs.isEmpty())) return@cached null
             if (page.songs.isNotEmpty()) page else {
                 val first = page.playlists.first()
-                page.copy(songs = album(first.id)?.second.orEmpty().take(24))
+                page.copy(songs = networkFallback(emptyList()) { album(first.id)?.second }.orEmpty().take(24))
             }
         }
     }
@@ -529,7 +529,16 @@ internal class YouTubeMusic(
     /** YouTube Music's home: the owner's own when signed in (quick picks, mixes, listen again...). */
     suspend fun home(): List<Shelf> = withContext(ioDispatcher) {
         val scope = pageScope()
-        homeAnswer(scope)?.let(::parseHome).orEmpty().takeIf { pageScope() == scope }.orEmpty().also { if (it.isNotEmpty()) storeHome(scope, it) }
+        val shelves = homeAnswer(scope)?.let(::parseHome).orEmpty()
+        if (pageScope() != scope || shelves.isEmpty()) return@withContext emptyList()
+        // Some accounts get only mix cards. Opening Home should still offer individual songs.
+        val hasSongs = shelves.any { shelf -> shelf.songs.isNotEmpty() || shelf.cards.any { it.kind == Card.Kind.SONG } }
+        val mix = if (hasSongs) null else shelves.firstNotNullOfOrNull { shelf -> shelf.cards.firstOrNull { it.kind == Card.Kind.MIX } }
+        val tracks = mix?.let { networkFallback(emptyList()) { playlistRadio(it.id)?.tracks } }.orEmpty().take(24)
+        val result = if (tracks.isEmpty()) shelves else listOf(Shelf(mix!!.title, tracks, emptyList())) + shelves
+        if (pageScope() != scope) return@withContext emptyList()
+        storeHome(scope, result)
+        result
     }
 
     /** A mix or other watch playlist, played as YouTube Music plays it ("My Mix 1"). */
