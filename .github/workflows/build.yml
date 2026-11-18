@@ -57,18 +57,21 @@ jobs:
           gradle-version: 9.9.1
           # GitHub scopes branch caches separately; reuse new test dependencies on this branch.
           cache-read-only: false
-      - name: Test, lint and build
+      - name: Tests and rendered screens
         run: |
           set -o pipefail
-          # Robolectric runs API 35 until it supports 37; shipped APKs keep minSdk 37.
-          { gradle test -PminSdk=35 --continue --no-daemon &&
-            gradle :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon;
-          } 2>&1 | tee build.log || {
-            grep -E '^e: |error:|ERROR:|What went wrong' -A2 build.log | head -60 | while IFS= read -r l; do
-              [ -n "$l" ] && echo "::error::$l"
-            done
-            exit 1
-          }
+          gradle test -PminSdk=35 --continue --no-daemon 2>&1 | tee build.log
+      - name: Publish Home previews before APK assembly
+        uses: actions/upload-artifact@v4
+        with:
+          name: Home-preview
+          path: |
+            app/build/reports/ui-previews/gallery/01*.png
+            app/build/reports/ui-previews/gallery/13-home-dark.png
+      - name: Lint and assemble APKs
+        run: |
+          set -o pipefail
+          gradle :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon 2>&1 | tee -a build.log
       - name: Verify the signature
         if: steps.key.outputs.owner == 'true'
         run: |

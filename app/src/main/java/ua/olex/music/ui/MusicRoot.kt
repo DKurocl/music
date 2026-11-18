@@ -220,6 +220,19 @@ fun MusicRoot(model: LibraryViewModel) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
         if (network) runCatching { context.graph.youTube.home() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
     }.value }
+    val homePlaylists = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
+        androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network, place == Place.HOME) {
+            if (!youTubeOn || onlinePageScope == "public" || place != Place.HOME) return@produceState
+            try {
+                value = context.graph.youTube.accountPlaylists(offline = true)
+                if (network) value = context.graph.youTube.accountPlaylists()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Keep the saved shelf on failure. The Playlists screen also offers a manual retry.
+            }
+        }.value
+    }
     val homeCache = remember(library, onlinePageScope, youTubeOn) { HomeCache() }
     val excluded = model.excluded
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
@@ -444,6 +457,9 @@ fun MusicRoot(model: LibraryViewModel) {
             place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
                 personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier.padding(insets),
                 onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
+                playlists = personal.playlists, accountPlaylists = homePlaylists,
+                onOpenPlaylist = { id -> clearOnline(Place.LIBRARY); go(Place.LIBRARY); returnTo = Place.HOME; openPlaylist = id },
+                onAllPlaylists = { clearOnline(Place.LIBRARY); go(Place.LIBRARY) },
                 moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
                 youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
             else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
