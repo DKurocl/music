@@ -86,10 +86,14 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
         val primary = snapshot.references.firstOrNull()
         val known = recordings.find(request.copy(sources = listOfNotNull(primary)))
         val owned = known?.references.orEmpty()
-        val wantedCredits = (request.artists + request.artist).map { SongKey.of(it, request.title).value.substringBefore('|') }.toSet() +
+        // Each credited name counts on its own: YouTube writes "A, B" or "A & B" where the file says "A".
+        val credited = (request.artists + request.artist).flatMap { it.split(CREDIT_SPLIT) }.map { it.trim() }.filter { it.isNotEmpty() }
+        val wantedCredits = (request.artists + request.artist + credited).map { SongKey.of(it, request.title).value.substringBefore('|') }.toSet() +
             listOfNotNull(primary?.songKey?.substringBefore('|'))
         val proposed = proposedLocal?.takeIf { local ->
             val source = RecordingSource.from(local)
+            // The file's artist whole (a band name like "Earth, Wind & Fire" is one artist) must be one
+            // of the online song's credits, which are split ("A, B" credits A and B).
             owned.any { it.key == source?.key } || (local.artists + local.artist).any { SongKey.of(it, request.title).value.substringBefore('|') in wantedCredits }
         }?.let(RecordingSource::from)
         val incoming = (listOfNotNull(primary, proposed) + snapshot.references).distinctBy { it.key }
@@ -136,3 +140,6 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
         return PlaybackSourceChoice(reference.copy(path = snapshot.path).displayTrack(), issue)
     }
 }
+
+/** Separators between credited artists in one artist field ("A, B", "A & B", "A feat. B"). */
+private val CREDIT_SPLIT = Regex("""\s*(,|&|\bfeat\.?|\bft\.?|\bwith\b|\bx\b|;)\s*""", RegexOption.IGNORE_CASE)

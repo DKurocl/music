@@ -51,9 +51,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private val player get() = graph.player
 
     /** Null until the first read from the database: the list shows nothing rather than "empty". */
-    val library: StateFlow<LibraryIndex?> = graph.library.index.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // The app's shared index (AppGraph.index): already loading or loaded when the screen opens.
+    val library: StateFlow<LibraryIndex?> = graph.index
     /** The scanned files plus durable online songs; never built in composition or from network pages. */
-    val catalogue: StateFlow<LibraryIndex?> = graph.catalogue.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // Shared and kept by the app (AppGraph.catalogueState): reopening the app doesn't merge it again.
+    val catalogue: StateFlow<LibraryIndex?> = graph.catalogueState
     private val sortPreferences = app.getSharedPreferences("library-sort-v1", android.content.Context.MODE_PRIVATE)
     private val prefs = app.getSharedPreferences("library-options", android.content.Context.MODE_PRIVATE)
     private val _sortOrders = MutableStateFlow(TrackSortScope.entries.associateWith { scope ->

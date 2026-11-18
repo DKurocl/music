@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import kotlinx.coroutines.sync.withLock
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -455,8 +456,41 @@ internal class YouTubeMusic(
 
     /** The moods as YouTube Music's home lists them; the usual set (without filters) when it can't be reached. */
     suspend fun moods(): List<Mood> = moodsCache ?: withContext(ioDispatcher) {
-        (runCatching { post("browse", """"browseId":"FEmusic_home"""")?.let(::parseMoods) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@withContext DEFAULT_MOODS)
-            .also { moodsCache = it }
+        (runCatching { homeAnswer()?.let(::parseMoods) }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@withContext DEFAULT_MOODS)
+            .also { moodsCache = it; storeMoods(it) }
+    }
+
+    // Home and the moods come from the same answer: asked once (not once each), kept a minute.
+    private val homeLock = kotlinx.coroutines.sync.Mutex()
+    @Volatile private var homeAt: Pair<Long, String>? = null
+    private suspend fun homeAnswer(): String? = homeLock.withLock {
+        val now = android.os.SystemClock.elapsedRealtime()
+        homeAt?.takeIf { now - it.first < 60_000 }?.second ?: post("browse", """"browseId":"FEmusic_home"""")?.also { homeAt = now to it }
+    }
+
+    /** Home's shelves as last seen for this account: drawn at once on the next start, then refreshed. */
+    fun storedHome(): List<Shelf> = runCatching {
+        val page = pageStore?.read(pageScope(), "home") ?: return emptyList()
+        val shelves = page.getJSONArray("shelves")
+        (0 until shelves.length()).map { i -> shelves.getJSONObject(i).let { s ->
+            Shelf(s.getString("title"), OnlinePageJson.tracks(s, "songs"), OnlinePageJson.cards(s, "cards")) } }
+    }.getOrDefault(emptyList())
+
+    /** The moods as last seen: the chips are right from the first frame. */
+    fun storedMoods(): List<Mood>? = runCatching {
+        val list = pageStore?.read(pageScope(), "moods")?.getJSONArray("moods") ?: return null
+        (0 until list.length()).map { i -> list.getJSONObject(i).let { Mood(it.getString("label"), it.optString("params").ifEmpty { null }) } }.takeIf { it.isNotEmpty() }
+    }.getOrNull()
+
+    private fun storeHome(shelves: List<Shelf>) = runCatching {
+        val array = org.json.JSONArray()
+        shelves.forEach { array.put(org.json.JSONObject().put("title", it.title).put("songs", OnlinePageJson.tracks(it.songs)).put("cards", OnlinePageJson.cards(it.cards))) }
+        pageStore?.write(pageScope(), "home", org.json.JSONObject().put("shelves", array))
+    }
+    private fun storeMoods(moods: List<Mood>) = runCatching {
+        val array = org.json.JSONArray()
+        moods.forEach { array.put(org.json.JSONObject().put("label", it.label).put("params", it.params ?: "")) }
+        pageStore?.write(pageScope(), "moods", org.json.JSONObject().put("moods", array))
     }
 
     /** One mood's page: YouTube Music's home filtered by it. */
@@ -473,7 +507,7 @@ internal class YouTubeMusic(
 
     /** YouTube Music's home: the owner's own when signed in (quick picks, mixes, listen again...). */
     suspend fun home(): List<Shelf> = withContext(ioDispatcher) {
-        post("browse", """"browseId":"FEmusic_home"""")?.let(::parseHome).orEmpty()
+        homeAnswer()?.let(::parseHome).orEmpty().also { if (it.isNotEmpty()) storeHome(it) }
     }
 
     /** A mix or other watch playlist, played as YouTube Music plays it ("My Mix 1"). */
