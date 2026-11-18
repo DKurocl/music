@@ -33,21 +33,27 @@ internal fun HomePage(
     onPlay: (List<Track>, Int, String) -> Unit, onTrackActions: (Track) -> Unit,
     favourites: List<Track> = emptyList(), moods: List<YouTubeMusic.Mood> = YouTubeMusic.DEFAULT_MOODS,
     youTubeHome: List<YouTubeMusic.Shelf> = emptyList(), excluded: Set<String> = emptySet(), onlineEnabled: Boolean = true,
+    playlists: List<PlaylistUi> = emptyList(), accountPlaylists: List<YouTubeMusic.Card> = emptyList(),
+    onOpenPlaylist: (Long) -> Unit = {}, onAllPlaylists: () -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember(library) { HomeCache() },
 ) {
     var choosing by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     var label by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
-    val mood = moods.firstOrNull { it.label == label }
-    fun back() {
-        if (mood != null) label = null else choosing = false
+    var recentMood by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    fun selectMood(next: String?) {
+        label = next
+        if (next != null) recentMood = next
+        choosing = false
     }
-    androidx.activity.compose.BackHandler(choosing) { back() }
+    val dockMoods = remember(moods, recentMood) { moods.sortedByDescending { it.label == recentMood } }
+    val mood = moods.firstOrNull { it.label == label }
+    androidx.activity.compose.BackHandler(mood != null && !choosing) { label = null }
     val network = LocalNetwork.current
     val online = onlineEnabled && network
     val revision = if (!online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
     val day = java.time.LocalDate.now().toEpochDay()
-    val moodView = if (choosing && mood != null) key(cache, mood, online) { rememberMoodView(mood, online) } else null
+    val moodView = if (mood != null) key(cache, mood, online) { rememberMoodView(mood, online) } else null
     val queue = key(cache, online, mood?.label) {
         produceState(if (mood == null && cache.online == online) cache.last else null,
             library, history, stats, favourites, youTubeHome, excluded, day, revision, moodView?.page) {
@@ -67,62 +73,71 @@ internal fun HomePage(
             if (mood == null) { cache.online = online; cache.last = picks }
         }.value
     }
-    val haptics = rememberHaptics()
     val stateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
-    val mode = if (!choosing) "picks" else mood?.label ?: "chooser"
-    Arrival(mode, Place.HOME, deeper = choosing) {
-        stateHolder.SaveableStateProvider(mode) {
-            LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp + LocalPlayerInset.current)) {
-                item(key = "mode") {
-                    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (choosing) mood?.label ?: "Moods" else "Quick picks", Modifier.weight(1f),
-                            style = MaterialTheme.typography.headlineLargeEmphasized)
-                        FilledTonalButton(onClick = {
-                            haptics.tick()
-                            if (mood != null) label = null else choosing = !choosing
-                        }, contentPadding = PaddingValues(horizontal = 14.dp)) {
-                            Symbol(if (choosing && mood == null) Glyph.PLAY else Glyph.MIX, size = 18.dp)
-                            Spacer(Modifier.width(6.dp))
-                            Text(if (choosing && mood == null) "Quick picks" else "Moods")
+    val mode = mood?.label ?: "picks"
+    val songs = queue.orEmpty()
+    val mixes = remember(youTubeHome, accountPlaylists, mood, moodView?.page, online) {
+        if (mood != null) moodView?.page?.playlists.orEmpty().map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.PLAYLIST) }
+        else {
+            val owned = accountPlaylists.mapTo(HashSet()) { it.id.removePrefix("VL") }
+            youTubeHome.asSequence().flatMap { it.cards.asSequence() }
+                .filter { (it.kind == YouTubeMusic.Card.Kind.PLAYLIST || (online && it.kind == YouTubeMusic.Card.Kind.MIX)) && it.id.removePrefix("VL") !in owned }
+                .distinctBy { it.id.removePrefix("VL") }.toList()
+        }
+    }
+    val hasPersonal = mood == null && (playlists.isNotEmpty() || accountPlaylists.isNotEmpty())
+    val hasCollections = hasPersonal || mixes.isNotEmpty()
+    Box(modifier.fillMaxSize()) {
+        Arrival(mode, Place.HOME, deeper = mood != null) {
+            stateHolder.SaveableStateProvider(mode) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 72.dp + LocalPlayerInset.current)) {
+                    val contextName = mood?.label ?: "Quick picks"
+                    if (songs.isNotEmpty()) {
+                        item(key = "title") { SectionTitle(contextName) }
+                        if (hasCollections) item(key = "picks") {
+                            SleeveRail(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions, start = 0)
+                        } else item(key = "spread") {
+                            CoverSpread(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions)
+                        }
+                    } else if (queue == null || moodView?.loading == true) {
+                        item(key = "loading") { PlaceholderRow() }
+                    } else if (!hasCollections) {
+                        item(key = "empty") {
+                            if (mood != null) EmptyState(moodGlyph(mood.label), "No songs for this mood", "Pick another mood to keep listening.")
+                            else if (onAllowFiles == null) EmptyState(Glyph.NOTE, "No quick picks yet", "Add music to your library to start listening.")
                         }
                     }
+                    if (mixes.isNotEmpty()) {
+                        item(key = "mixes-title") { SectionTitle(if (mood != null) "Mood mixes" else "Made for you") }
+                        item(key = "mixes") { MixRail(mixes) }
+                    }
+                    if (hasPersonal) {
+                        item(key = "my-title") { SectionTitle("Your playlists", onAllPlaylists) }
+                        item(key = "my-playlists") { PersonalPlaylistRail(playlists, accountPlaylists, onOpenPlaylist) }
+                    }
+                    if (!hasCollections && songs.size > 3) {
+                        item(key = "more-title") { SectionTitle("More picks") }
+                        item(key = "sleeves") { SleeveRail(songs, currentId, { onPlay(songs, it, contextName) }, onTrackActions) }
+                    }
+                    if (scanError != null) item(key = "scan-error") { ErrorNotice(scanError, onScanRetry) }
+                    if (onAllowFiles != null && mood == null) item(key = "permission") {
+                        TextButton(onClick = onAllowFiles, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Include music on this device") }
+                    }
                 }
-                if (choosing && mood == null) {
-                    items(moods.chunked(2), key = { "pair-" + it.first().label }) { pair ->
+            }
+        }
+        if (moods.isNotEmpty() && !choosing) MoodBar(dockMoods, mood?.label, ::selectMood, { choosing = true },
+            Modifier.align(Alignment.BottomCenter).padding(start = 10.dp, end = 10.dp, bottom = LocalPlayerInset.current + 4.dp))
+        if (choosing) Box(Modifier.align(Alignment.BottomCenter)) {
+            AppSheet(onDismiss = { choosing = false }) {
+                SectionTitle("Moods")
+                LazyColumn(Modifier.fillMaxWidth(), contentPadding = PaddingValues(bottom = 16.dp)) {
+                    items(moods.chunked(2), key = { it.first().label }) { pair ->
                         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            pair.forEach { choice -> MoodTile(choice.label, Modifier.weight(1f)) { haptics.tick(); label = choice.label } }
+                            pair.forEach { choice -> MoodTile(choice.label, Modifier.weight(1f)) { selectMood(choice.label) } }
                             if (pair.size == 1) Spacer(Modifier.weight(1f))
                         }
                     }
-                    return@LazyColumn
-                }
-                val songs = queue.orEmpty()
-                val contextName = mood?.label ?: "Quick picks"
-                if (songs.isNotEmpty()) {
-                    item(key = "spread") {
-                        CoverSpread(songs, currentId, { i -> onPlay(songs, i, contextName) }, onTrackActions)
-                    }
-                    if (songs.size > 3) {
-                        item(key = "more-title") { SectionTitle("More picks") }
-                        item(key = "sleeves") { SleeveRail(songs, currentId, { i -> onPlay(songs, i, contextName) }, onTrackActions) }
-                    }
-                } else if (queue == null || moodView?.loading == true) {
-                    item(key = "loading") { repeat(3) { PlaceholderRow() } }
-                } else if (moodView?.page?.playlists.isNullOrEmpty()) {
-                    item(key = "empty") {
-                        if (mood != null) EmptyState(moodGlyph(mood.label), "No songs for this mood", "Pick another mood to keep listening.")
-                        else if (onAllowFiles == null) EmptyState(Glyph.NOTE, "No quick picks yet", "Add music to your library to start listening.")
-                    }
-                }
-                val mixes = moodView?.page?.playlists.orEmpty()
-                if (mixes.isNotEmpty()) {
-                    item(key = "mixes-title") { SectionTitle("Mood mixes") }
-                    item(key = "mixes") { YouTubeCards(mixes.map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.PLAYLIST) }) }
-                }
-                if (scanError != null) item(key = "scan-error") { ErrorNotice(scanError, onScanRetry) }
-                if (onAllowFiles != null && mood == null) item(key = "permission") {
-                    TextButton(onClick = onAllowFiles, modifier = Modifier.padding(horizontal = 16.dp)) { Text("Include music on this device") }
                 }
             }
         }

@@ -95,22 +95,23 @@ private fun CoverPick(track: Track, currentId: String?, shape: Shape, lead: Bool
 
 /** The remainder of the same queue, in swipeable square sleeves with captions outside the image. */
 @Composable
-internal fun SleeveRail(songs: List<Track>, currentId: String?, onPlay: (Int) -> Unit, onActions: (Track) -> Unit) {
+internal fun SleeveRail(songs: List<Track>, currentId: String?, onPlay: (Int) -> Unit, onActions: (Track) -> Unit, start: Int = 3) {
+    val width = if (start == 0) 124.dp else 146.dp
     val state = rememberLazyListState()
     val cs = MaterialTheme.colorScheme
     LazyRow(Modifier.testTag("home-sleeves"), state = state, flingBehavior = rememberSnapFlingBehavior(state),
         contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(songs.size - 3, key = { songs[it + 3].id.value }) { offset ->
-            val i = offset + 3
+        items(songs.size - start, key = { songs[it + start].id.value }) { offset ->
+            val i = offset + start
             val track = songs[i]
             val current = track.id.value == currentId || track.matchesPlayback(LocalPlayingTrack.current)
             val haptics = rememberHaptics()
-            Column(Modifier.width(146.dp).squish(0.025f).clip(RoundedCornerShape(18.dp)).combinedClickable(role = Role.Button,
+            Column(Modifier.width(width).squish(0.025f).clip(RoundedCornerShape(18.dp)).combinedClickable(role = Role.Button,
                 onClickLabel = "Play ${track.title}", onLongClickLabel = "Song actions",
                 onLongClick = { haptics.longPress(); onActions(track) }, onClick = { onPlay(i) })
                 .semantics { if (current) stateDescription = "Current track" }) {
                 Box {
-                    Artwork(track.artworkUri, Modifier.size(146.dp), 18.dp, pixels = ArtworkPlan.MEDIUM)
+                    Artwork(track.artworkUri, Modifier.size(width), 18.dp, pixels = ArtworkPlan.MEDIUM)
                     if (current) Surface(color = cs.primary, shape = CircleShape, modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
                         Symbol(Glyph.WAVE, size = 16.dp, modifier = Modifier.padding(6.dp), color = cs.onPrimary)
                     }
