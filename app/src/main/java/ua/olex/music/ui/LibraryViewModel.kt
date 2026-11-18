@@ -159,33 +159,43 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             state.copy(lyrics = ua.olex.music.lyrics.LyricsCleanup.clean(state.lyrics, track?.title, track?.artist))
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalLyricsState())
 
-    internal data class PlaybackMotionCover(val trackId: String, val sourceUri: String, val videoUri: String)
+    internal data class PlaybackMotionCover(val owner: MotionCoverOwner, val video: MotionArtwork)
 
-    /** A moving cover for the selected source, when there is one. */
-    internal val motionCover = combine(lyricTrack, graph.musicFiles.revision, graph.motionCovers.revision) { track, _, _ -> track }
-        .mapLatest { track ->
+    /** Keep a same-album video alive across tracks. Resolve new folders and albums off main. */
+    internal val motionCover = combine(
+        lyricTrack.distinctUntilChanged { a, b -> a?.let(::motionCoverOwner) == b?.let(::motionCoverOwner) },
+        graph.musicFiles.revision,
+        graph.motionCovers.revision,
+    ) { track, files, covers -> Triple(track, files, covers) }
+        .mapLatest { (track, files, covers) ->
             if (track == null) return@mapLatest null
-            // The album's own file first, then a cover.mp4 beside the songs; with neither, Apple
-            // Music is asked once for the album (with the owner's key, on Wi-Fi unless allowed).
-            val video = graph.motionCovers.file(track)?.let { android.net.Uri.fromFile(it).toString() }
-                ?: runCatching { graph.musicFiles.motionCover(track.path) }.getOrNull()
-            if (video == null) {
-                fetchAppleMotion(track)
-                null
-            } else PlaybackMotionCover(track.id.value, track.uri, video)
+            val saved = graph.motionCovers.file(track)
+            val sidecar = if (saved == null) graph.musicFiles.motionCover(track.path) else null
+            val video = when {
+                saved != null -> MotionArtwork(android.net.Uri.fromFile(saved).toString(), covers)
+                sidecar != null -> MotionArtwork(sidecar, files)
+                else -> {
+                    kotlinx.coroutines.delay(250)
+                    fetchAppleMotion(track)?.let { MotionArtwork(android.net.Uri.fromFile(it).toString(), graph.motionCovers.revision.value) }
+                }
+            }
+            video?.let { PlaybackMotionCover(motionCoverOwner(track), it) }
         }
-        .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
 
-    private fun fetchAppleMotion(track: ua.olex.music.model.Track) {
+    private suspend fun fetchAppleMotion(track: ua.olex.music.model.Track): java.io.File? {
         val apple = graph.appleMotion
-        if (!apple.enabled) return
+        if (!apple.enabled) return null
         val net = getApplication<android.app.Application>().getSystemService(android.net.ConnectivityManager::class.java)
-        val caps = net?.getNetworkCapabilities(net.activeNetwork) ?: return
-        if (apple.wifiOnly && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) return
-        viewModelScope.launch(Dispatchers.IO) {
-            val bytes = runCatching { AuxiliaryLoads.run { apple.find(track) } }.getOrNull() ?: return@launch
+        val caps = net?.getNetworkCapabilities(net.activeNetwork) ?: return null
+        if (apple.wifiOnly && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) return null
+        return try {
+            val bytes = AuxiliaryLoads.run { apple.find(track) } ?: return null
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             graph.motionCovers.attachBytes(track, bytes)
-        }
+            graph.motionCovers.file(track)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { null }
     }
 
     fun reloadLyrics() = refreshLocalFiles(rescan = false)

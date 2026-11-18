@@ -4,7 +4,9 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalContentColor
@@ -47,21 +49,17 @@ enum class Glyph(val codepoint: Int) {
 
     /** The small gesture this glyph plays when its button is tapped. */
     val motion: GlyphMotion get() = when (this) {
-        SEARCH -> GlyphMotion.SWING
-        SETTINGS, ADD, CLOSE, TUNE -> GlyphMotion.TURN
-        REFRESH, REPEAT, REPEAT_ONE, MIX, RADIO -> GlyphMotion.SPIN
+        SEARCH, SETTINGS, TUNE, REFRESH, REPEAT, REPEAT_ONE, SHUFFLE, MIX, RADIO -> GlyphMotion.TILT
         NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
         PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
         DOWNLOAD, COLLAPSE, DOWN -> GlyphMotion.DROP
         UP, ADD_TO_QUEUE, PLAYLIST_ADD -> GlyphMotion.RISE
-        SLEEP, DELETE, TIMER, HISTORY -> GlyphMotion.WOBBLE
-        SHUFFLE -> GlyphMotion.FLIP
         else -> GlyphMotion.POP
     }
 }
 
 /** Tap gestures for icons; each glyph picks the one that reads as its own (see [Glyph.motion]). */
-enum class GlyphMotion { POP, SWING, TURN, SPIN, NUDGE_RIGHT, NUDGE_LEFT, DROP, RISE, WOBBLE, FLIP }
+enum class GlyphMotion { POP, TILT, NUDGE_RIGHT, NUDGE_LEFT, DROP, RISE }
 
 private object SymbolFont {
     @Volatile private var typeface: Typeface? = null
@@ -79,40 +77,35 @@ fun Symbol(
     glyph: Glyph, modifier: Modifier = Modifier, size: Dp = 24.dp, color: Color = LocalContentColor.current,
     filled: Boolean = false, bold: Boolean = false,
     /** Bumped by the icon's button on each tap: the glyph plays its own small gesture (see [GlyphMotion]). */
-    kick: Int = 0,
+    kick: Int = 0, pressed: Boolean = LocalIconPressed.current,
 ) {
     val ctx = LocalContext.current
     val motion = MaterialTheme.motionScheme
     val fill by animateFloatAsState(if (filled) 1f else 0f, motion.defaultEffectsSpec(), label = "fill")
     val weight by animateFloatAsState(if (bold) 600f else 400f, motion.fastSpatialSpec(), label = "weight")
-    val pop = remember { Animatable(1f) }
-    val emphasis = filled || bold
-    val first = remember { booleanArrayOf(true) }
-    LaunchedEffect(emphasis) {
-        if (first[0]) { first[0] = false; return@LaunchedEffect }
-        if (emphasis) { pop.snapTo(0.82f); pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 500f)) }
-    }
-    // A tap's gesture, as Google's apps give their icons: the lens swings, the gear turns, an arrow
-    // nudges the way it points. One spring, so it settles the same way everywhere; none in Battery Saver.
-    val tap = remember { Animatable(1f) }
+    val tap = remember { Animatable(0f) }
     val still = LocalPowerSave.current
-    LaunchedEffect(kick) { if (kick > 0 && !still) { tap.snapTo(0f); tap.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 380f)) } }
+    val pressScale by animateFloatAsState(if (pressed && !still) 0.91f else 1f, motion.fastSpatialSpec(), label = "press")
+    LaunchedEffect(kick, still) {
+        if (still || kick == 0) tap.snapTo(0f)
+        else {
+            tap.animateTo(1f, tween(65))
+            tap.animateTo(0f, motion.fastSpatialSpec())
+        }
+    }
     val gesture = glyph.motion
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = SymbolFont.get(ctx); textAlign = Paint.Align.CENTER } }
     Canvas(modifier.size(size).graphicsLayer {
-        val t = tap.value; val left = 1f - t
-        val press = if (gesture == GlyphMotion.POP) 0.8f + 0.2f * t else 1f
-        scaleX = pop.value * press; scaleY = pop.value * press
+        val pulse = tap.value
+        val scale = pressScale * (1f - pulse * if (gesture == GlyphMotion.POP) 0.08f else 0.03f)
+        scaleX = scale
+        scaleY = scale
         when (gesture) {
-            GlyphMotion.SWING -> rotationZ = left * -30f
-            GlyphMotion.TURN -> rotationZ = left * -90f
-            GlyphMotion.SPIN -> rotationZ = left * -360f
-            GlyphMotion.NUDGE_RIGHT -> translationX = left * 5.dp.toPx()
-            GlyphMotion.NUDGE_LEFT -> translationX = left * -5.dp.toPx()
-            GlyphMotion.DROP -> translationY = left * -6.dp.toPx()
-            GlyphMotion.RISE -> translationY = left * 5.dp.toPx()
-            GlyphMotion.WOBBLE -> rotationZ = kotlin.math.sin(t * Math.PI.toFloat() * 3f) * left * 18f
-            GlyphMotion.FLIP -> scaleX = pop.value * (1f - 2f * left).coerceIn(-1f, 1f).let { if (it == 0f) 0.01f else it }
+            GlyphMotion.TILT -> rotationZ = pulse * (if (glyph == Glyph.SEARCH) -12f else 16f)
+            GlyphMotion.NUDGE_RIGHT -> translationX = pulse * 3.dp.toPx()
+            GlyphMotion.NUDGE_LEFT -> translationX = pulse * -3.dp.toPx()
+            GlyphMotion.DROP -> translationY = pulse * 3.dp.toPx()
+            GlyphMotion.RISE -> translationY = pulse * -3.dp.toPx()
             GlyphMotion.POP -> Unit
         }
     }) {
@@ -126,16 +119,26 @@ fun Symbol(
     }
 }
 
-/** An icon button whose glyph plays its tap gesture: content gets the tap count for [Symbol]'s kick. */
+private val LocalIconPressed = androidx.compose.runtime.compositionLocalOf { false }
+
+/** The same interaction drives the button's ripple and the glyph under the finger. */
 @Composable
 internal fun KickIconButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable (Int) -> Unit) {
     var kick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    androidx.compose.material3.IconButton(onClick = { kick++; onClick() }, modifier = modifier, enabled = enabled) { content(kick) }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    androidx.compose.material3.IconButton(onClick = { kick++; onClick() }, modifier = modifier, enabled = enabled, interactionSource = interaction) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalIconPressed provides pressed) { content(kick) }
+    }
 }
 
 /** The tonal variant of [KickIconButton]. */
 @Composable
 internal fun KickFilledTonalIconButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable (Int) -> Unit) {
     var kick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    androidx.compose.material3.FilledTonalIconButton(onClick = { kick++; onClick() }, modifier = modifier, enabled = enabled) { content(kick) }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    androidx.compose.material3.FilledTonalIconButton(onClick = { kick++; onClick() }, modifier = modifier, enabled = enabled, interactionSource = interaction) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalIconPressed provides pressed) { content(kick) }
+    }
 }

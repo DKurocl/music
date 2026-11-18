@@ -12,7 +12,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.flow.map
-import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberUpdatedState
@@ -25,6 +24,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -78,7 +78,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -104,62 +103,16 @@ import ua.olex.music.playback.RepeatMode
 
 // ---- shared pieces --------------------------------------------------------------------------
 
-/** A cover from the shared artwork cache, on a tonal placeholder with a note while it loads or when there is none. */
+/** A cover from the shared cache, with a tonal fallback when it has no image. */
 @Composable
-internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ArtworkPlan.SMALL, motion: String? = null, moving: Boolean = true) {
-    val cs = MaterialTheme.colorScheme
-    Box(modifier.clip(RoundedCornerShape(corner)).background(cs.surfaceContainerHighest), contentAlignment = Alignment.Center) {
-        Symbol(Glyph.NOTE, size = 24.dp, color = cs.onSurfaceVariant, filled = true)
+internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int = ArtworkPlan.SMALL) {
+    ArtworkFrame(modifier, corner) {
+        Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
         if (uri != null) AsyncImage(
             model = ua.olex.music.library.ArtworkUris.variant(uri, LocalContext.current.packageName, pixels),
             contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
         )
-        // A moving cover plays over the still one once its first frame is ready, so nothing flashes.
-        if (motion != null && !LocalInspectionMode.current) androidx.compose.runtime.key(motion) {
-            MotionCover(motion, moving, Modifier.fillMaxSize())
-        }
     }
-}
-
-/** A muted, looping video as the cover (as Apple Music's motion artwork), paused with the music and when the app is away. */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-@Composable
-private fun MotionCover(uri: String, moving: Boolean, modifier: Modifier) {
-    val context = LocalContext.current
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val started by lifecycle.currentStateFlow.collectAsState()
-    var ready by remember(uri) { mutableStateOf(false) }
-    val player = remember(uri) {
-        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
-            // No sound and no audio focus: the music keeps playing untouched.
-            setAudioAttributes(androidx.media3.common.AudioAttributes.DEFAULT, false)
-            trackSelectionParameters = trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_AUDIO, true).build()
-            volume = 0f
-            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
-            setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
-            addListener(object : androidx.media3.common.Player.Listener {
-                override fun onRenderedFirstFrame() { ready = true }
-                // The joined Apple video is a fragmented MP4 without a seek index, so the built-in
-                // repeat stops after one pass; starting it again by hand loops it for good.
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    if (playbackState == androidx.media3.common.Player.STATE_ENDED && playWhenReady) seekTo(0)
-                }
-            })
-        }
-    }
-    DisposableEffect(player) {
-        player.prepare()
-        onDispose { player.release() }
-    }
-    val saving = LocalPowerSave.current
-    // Hardware video decoding is the moving cover's cost: it runs only while the music plays, the
-    // app is on screen and Battery Saver is off; otherwise the still first frame stays.
-    LaunchedEffect(moving, started, saving) { player.playWhenReady = moving && !saving && started.isAtLeast(Lifecycle.State.STARTED) }
-    val alpha by animateFloatAsState(if (ready) 1f else 0f, MaterialTheme.motionScheme.slowEffectsSpec(), label = "motion")
-    androidx.compose.ui.viewinterop.AndroidView(
-        factory = { android.view.TextureView(it).also { view -> player.setVideoTextureView(view) } },
-        modifier = modifier.graphicsLayer { this.alpha = alpha },
-    )
 }
 
 /**
@@ -414,7 +367,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Artwork(state.artworkUri, Modifier.size(48.dp), 14.dp)
+                PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL)
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = when {
@@ -428,14 +381,14 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 // Asked to play but still getting ready (a stream opening, a slow file): a ring around the
                 // button says so, instead of a pause button that seems to do nothing.
                 val preparing = state.playWhenReady && state.buffering
-                IconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() },
-                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (preparing) stateDescription = "Getting ready" }) {
+                KickIconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() },
+                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (preparing) stateDescription = "Getting ready" }) { kick ->
                     if (preparing) CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 2.dp, color = cs.primary)
-                    Symbol(if (state.playWhenReady) Glyph.PAUSE else Glyph.PLAY, size = 28.dp, filled = true)
+                    PlayPauseSymbol(state.playWhenReady, 28.dp, kick)
                 }
-                var nextKick by remember { mutableIntStateOf(0) }
-                IconButton(enabled = state.hasNext, onClick = { nextKick++; onNext() }, modifier = Modifier.semantics { contentDescription = "Next" }) {
-                    Symbol(Glyph.NEXT, filled = true, kick = nextKick)
+                KickIconButton(enabled = state.hasNext, onClick = { haptics.skip(true); onNext() },
+                    modifier = Modifier.semantics { contentDescription = "Next" }) { kick ->
+                    Symbol(Glyph.NEXT, filled = true, kick = kick)
                 }
             }
             // Progress along the bottom edge, inside the card's rounded corners.
@@ -480,7 +433,7 @@ internal fun PlayerPage(
     /** Lyrics shown in place of the cover, toggled by the Lyrics button; null keeps the old sheet behaviour. */
     inlineLyrics: (@Composable (Modifier) -> Unit)? = null, startWithLyrics: Boolean = false,
     /** A moving cover beside the song (cover.mp4 in its folder), played over the still cover. */
-    motionCover: String? = null,
+    motionCover: MotionArtwork? = null,
     /** Opens the lyrics options; shown in the top bar while the lyrics are on. */
     onLyricsTools: (() -> Unit)? = null,
     /** What the queue came from ("Top Hits", "Mix from Teardrop", "Search"), when known. */
@@ -519,34 +472,10 @@ internal fun PlayerPage(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            val hasLyricsTools = lyricsShown && inlineLyrics != null && onLyricsTools != null
-            val headerSide = if (hasLyricsTools) 96.dp else 48.dp
-            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-                // Equal sides keep "Playing from" centred whether the lyrics options show or not.
-                Box(Modifier.width(headerSide)) {
-                    KickIconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close player" }) { k -> Symbol(Glyph.COLLAPSE, size = 28.dp, kick = k) }
-                }
-                // Where the music comes from; a tap opens that album.
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(16.dp)).then(if (onOpenAlbum != null) Modifier.clickable(onClickLabel = if (from == null) "Open album" else "Open playing source", onClick = onOpenAlbum) else Modifier)
-                    .padding(vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                    // What is really playing: the playlist, artist, mix or mood the queue came from, else the
-                    // song's album, else the queue itself. Never the service's name.
-                    Text(from ?: state.album ?: if (state.mediaId?.startsWith("yt:") == true) "Your queue" else "Your library",
-                        style = MaterialTheme.typography.titleSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-                Row(Modifier.width(headerSide), horizontalArrangement = Arrangement.End) {
-                    // With the lyrics on, their options (timing, sources, online) sit up here, clear of the text.
-                    androidx.compose.animation.AnimatedVisibility(hasLyricsTools,
-                        enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.6f),
-                        exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.6f)) {
-                        KickIconButton(onClick = { onLyricsTools?.invoke() }, modifier = Modifier.semantics { contentDescription = "Lyrics options" }) { k -> Symbol(Glyph.TUNE, kick = k) }
-                    }
-                    // Song actions top right, where Google's players keep them.
-                    KickIconButton(enabled = onMore != null, onClick = { onMore?.invoke() }, modifier = Modifier.semantics { contentDescription = "Song actions" }) { k -> Symbol(Glyph.MORE, kick = k) }
-                }
-            }
+            PlayerHeader(
+                state = state, from = from, showLyricsTools = lyricsShown && inlineLyrics != null,
+                onClose = onClose, onOpenOrigin = onOpenAlbum, onLyricsTools = onLyricsTools, onMore = onMore,
+            )
             Spacer(Modifier.height(16.dp))
             // Swipe the cover for the next or previous song; double tap for favourites; long press for actions.
             val haptics = rememberHaptics()
@@ -564,87 +493,99 @@ internal fun PlayerPage(
             // The cover Next really leads to: with shuffle on that is not the neighbour in the list.
             val nextArt = state.queue.getOrNull(state.nextIndex)?.artworkUri
             val previousArt = state.queue.getOrNull(state.previousIndex)?.artworkUri
+            val occurrence = state.queue.getOrNull(state.queueIndex)?.key ?: state.mediaId
+            val canGoPrevious = state.hasPrevious
+            var gestureItem by remember { mutableStateOf(occurrence) }
             var skipping by remember { mutableStateOf(false) }
-            val occurrence = state.queue.getOrNull(state.queueIndex)?.key
-            val nextOccurrence = state.queue.getOrNull(state.nextIndex)?.key
-            val previousOccurrence = state.queue.getOrNull(state.previousIndex)?.key
-            var seenItem by remember { mutableStateOf(occurrence to state.mediaId) }
-            var neighbours by remember { mutableStateOf(previousOccurrence to nextOccurrence) }
-            // The next and previous covers are decoded ahead, so a skip shows its cover at once.
+            var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+            val visibleOffset = { if (gestureItem == occurrence) swipe.value else 0f }
             val context = LocalContext.current
-            DisposableEffect(nextArt, previousArt, coverWidth, lyricsShown) {
+            val powerSave = LocalPowerSave.current
+            LaunchedEffect(occurrence, lyricsShown) {
+                settleJob?.cancel()
+                skipping = false
+                swipe.snapTo(0f)
+                gestureItem = occurrence
+            }
+            DisposableEffect(context, nextArt, previousArt, coverWidth, lyricsShown) {
                 val preloads = if (coverWidth <= 1 || lyricsShown) emptyList() else listOfNotNull(nextArt, previousArt).distinct().map { uri ->
-                    coil3.SingletonImageLoader.get(context).enqueue(coil3.request.ImageRequest.Builder(context)
-                        .data(ua.olex.music.library.ArtworkUris.variant(uri, context.packageName, ArtworkPlan.LARGE)).size(coverWidth).build())
+                    coil3.SingletonImageLoader.get(context).enqueue(playerCoverRequest(context, uri, ArtworkPlan.LARGE, coverWidth))
                 }
                 onDispose { preloads.forEach { it.dispose() } }
             }
-            LaunchedEffect(occurrence, state.mediaId) {
-                val current = occurrence to state.mediaId
-                if (current == seenItem) return@LaunchedEffect
-                val backward = occurrence != null && occurrence == neighbours.first && occurrence != neighbours.second
-                seenItem = current
-                // After a swipe the neighbour already stands in place: it simply becomes this cover.
-                // A button skip slides the strip the same way, from the side the song came from.
-                if (skipping) { skipping = false; swipe.snapTo(0f) }
-                else if (coverWidth > 1) { swipe.snapTo(if (backward) -step else step); swipe.animateTo(0f, spatial) }
-            }
-            LaunchedEffect(previousOccurrence, nextOccurrence) { neighbours = previousOccurrence to nextOccurrence }
-            // The Lyrics button swaps the cover for the lyrics, in the same place and size.
             if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f))
             else Box(contentAlignment = Alignment.Center) {
-            // The neighbours, drawn only while the strip moves, growing to full size as they arrive.
-            listOf(-1 to previousArt, 1 to nextArt).forEach { (side, art) ->
-                if (art != null && swipe.value != 0f && (swipe.value < 0) == (side > 0)) Artwork(art,
-                    Modifier.matchParentSize().graphicsLayer {
-                        val shown = (kotlin.math.abs(swipe.value) / step).coerceIn(0f, 1f)
-                        translationX = swipe.value + side * step
-                        val k = 0.9f + 0.1f * shown
-                        scaleX = k; scaleY = k; alpha = (shown * 1.6f).coerceAtMost(1f)
-                    }, 32.dp, pixels = ArtworkPlan.LARGE)
-            }
-            Artwork(
-                state.artworkUri,
-                Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
-                    .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
-                    .pointerInput(onFavourite, onMore) {
-                        detectTapGestures(
-                            onDoubleTap = { if (onFavourite != null) { if (!favourite) heart = true; haptics.like(!favourite); onFavourite() } },
-                            onLongPress = { if (onMore != null) { haptics.longPress(); onMore() } },
-                        )
-                    }
-                    .pointerInput(state.hasNext) {
-                        detectHorizontalDragGestures(
-                            onDragEnd = {
-                                val x = swipe.value
-                                scope.launch {
-                                    val next = x < -coverWidth * 0.2f && state.hasNext
-                                    // Past three seconds "previous" restarts this song: the cover springs back instead.
-                                    val previous = x > coverWidth * 0.2f && previousArt != null && position() < 3_000
-                                    if (next || previous) {
-                                        haptics.spin(); skipping = true
-                                        swipe.animateTo(if (next) -step else step, androidx.compose.animation.core.tween(220, easing = androidx.compose.animation.core.FastOutSlowInEasing))
-                                        if (next) onNext() else onPrevious()
-                                        delay(600); if (skipping) { skipping = false; swipe.animateTo(0f, spatial) }
-                                    } else {
-                                        if (x > coverWidth * 0.2f) { haptics.skip(false); onPrevious() }
+                val offset = visibleOffset()
+                val side = if (offset < 0f) 1 else -1
+                if (offset != 0f && (if (side > 0) state.hasNext else canGoPrevious)) {
+                    Artwork(if (side > 0) nextArt else previousArt,
+                        Modifier.matchParentSize().graphicsLayer {
+                            val x = visibleOffset()
+                            val progress = (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
+                            translationX = x + side * step
+                            scaleX = 0.94f + 0.06f * progress
+                            scaleY = scaleX
+                        }, 32.dp, pixels = ArtworkPlan.LARGE)
+                }
+                val tapFavourite by rememberUpdatedState(onFavourite)
+                val tapMore by rememberUpdatedState(onMore)
+                val isFavourite by rememberUpdatedState(favourite)
+                val next by rememberUpdatedState(onNext)
+                val previous by rememberUpdatedState(onPrevious)
+                PlayerArtwork(
+                    state.artworkUri,
+                    Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
+                        .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = { tapFavourite?.let { action ->
+                                    if (!isFavourite) heart = true
+                                    haptics.like(!isFavourite)
+                                    action()
+                                } },
+                                onLongPress = { tapMore?.let { haptics.longPress(); it() } },
+                            )
+                        }
+                        .pointerInput(occurrence, state.hasNext, canGoPrevious, step, powerSave) {
+                            detectHorizontalDragGestures(
+                                onDragEnd = {
+                                    if (!skipping) settleJob = scope.launch {
+                                        val x = visibleOffset()
+                                        val goNext = x < -coverWidth * 0.2f && state.hasNext
+                                        val goPrevious = x > coverWidth * 0.2f && canGoPrevious && position() < 3_000
+                                        if (goNext || goPrevious) {
+                                            haptics.skip(goNext)
+                                            skipping = true
+                                            try {
+                                                if (!powerSave) swipe.animateTo(if (goNext) -step else step, motion.fastEffectsSpec())
+                                                if (goNext) next() else previous()
+                                                delay(450)
+                                            } finally {
+                                                skipping = false
+                                            }
+                                        } else if (x > coverWidth * 0.2f) {
+                                            haptics.skip(false)
+                                            previous()
+                                        }
                                         swipe.animateTo(0f, spatial)
                                     }
-                                }
-                            },
-                            onDragCancel = { scope.launch { swipe.animateTo(0f, spatial) } },
-                        ) { change, amount -> change.consume(); scope.launch { swipe.snapTo(swipe.value + amount) } }
-                    }
-                    .graphicsLayer {
-                        // Nothing next: the cover still follows, but resists and springs back.
-                        val x = if (!state.hasNext && swipe.value < 0) rubber(swipe.value, 60.dp.toPx()) else swipe.value
-                        // Leaving, the cover steps back a little, as the arriving one steps forward.
-                        val k = 1f - 0.1f * (kotlin.math.abs(swipe.value) / step).coerceIn(0f, 1f)
-                        scaleX = k; scaleY = k; translationX = x
-                    }
-                    .shadow(24.dp, RoundedCornerShape(32.dp), clip = false, ambientColor = androidx.compose.ui.graphics.Color.Black, spotColor = androidx.compose.ui.graphics.Color.Black),
-                32.dp, pixels = ArtworkPlan.LARGE, motion = motionCover, moving = state.isPlaying,
-            )
+                                },
+                                onDragCancel = { if (!skipping) scope.launch { swipe.animateTo(0f, spatial) } },
+                            ) { change, amount ->
+                                change.consume()
+                                if (!skipping) scope.launch { swipe.snapTo((swipe.value + amount).coerceIn(-step, step)) }
+                            }
+                        }
+                        .graphicsLayer {
+                            val x = visibleOffset()
+                            translationX = if ((!state.hasNext && x < 0) || (!canGoPrevious && x > 0)) rubber(x, 60.dp.toPx()) else x
+                            val scale = 1f - 0.06f * (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                    corner = 32.dp, pixels = ArtworkPlan.LARGE, motion = motionCover,
+                    moving = state.isPlaying && offset == 0f && !skipping,
+                )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
                 modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })
             }
@@ -656,9 +597,9 @@ internal fun PlayerPage(
                     Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = if (onOpenArtist != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open artist", onClick = onOpenArtist) else Modifier)
                 }
-                IconButton(enabled = onFavourite != null, onClick = { haptics.like(!favourite); onFavourite?.invoke() }, modifier = Modifier.semantics {
+                KickIconButton(enabled = onFavourite != null, onClick = { haptics.like(!favourite); onFavourite?.invoke() }, modifier = Modifier.semantics {
                     contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
-                }) { Symbol(Glyph.FAVOURITE, size = 28.dp, filled = favourite, color = if (favourite) cs.primary else cs.onSurfaceVariant) }
+                }) { kick -> Symbol(Glyph.FAVOURITE, size = 28.dp, filled = favourite, color = if (favourite) cs.primary else cs.onSurfaceVariant, kick = kick) }
             }
             state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(20.dp))
@@ -718,8 +659,12 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
                 if (!separateModes) shuffle()
                 SkipButton(Glyph.PREVIOUS, "Previous", true, size = skipSize) { haptics.skip(false); onPrevious() }
+                val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                val pressed by playInteraction.collectIsPressedAsState()
+                var playKick by remember { mutableIntStateOf(0) }
                 androidx.compose.material3.FilledIconToggleButton(
-                    checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
+                    checked = playing, onCheckedChange = { playKick++; if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
+                    interactionSource = playInteraction,
                     shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
                     colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
                         checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
@@ -731,7 +676,7 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
                     if (state.playWhenReady && state.buffering) {
                         CircularProgressIndicator(Modifier.size(minOf(64.dp, width - 8.dp)), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
                     }
-                    Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = if (compact) 36.dp else 44.dp, filled = true)
+                    PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, playKick, pressed)
                 }
                 SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
                 if (!separateModes) repeat()
@@ -744,15 +689,30 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
     }
 }
 
+/** Swap the two transport glyphs inside one fixed footprint and let the container shape respond separately. */
+@Composable
+private fun PlayPauseSymbol(playing: Boolean, size: Dp, kick: Int, pressed: Boolean = false) {
+    val motion = MaterialTheme.motionScheme
+    if (LocalPowerSave.current) {
+        Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true)
+        return
+    }
+    androidx.compose.animation.AnimatedContent(
+        targetState = playing, modifier = Modifier.size(size), contentAlignment = Alignment.Center,
+        transitionSpec = {
+            (androidx.compose.animation.fadeIn(motion.fastEffectsSpec()) +
+                androidx.compose.animation.scaleIn(motion.fastEffectsSpec(), initialScale = 0.86f))
+                .togetherWith(androidx.compose.animation.fadeOut(motion.fastEffectsSpec()))
+        }, label = "play pause",
+    ) { active ->
+        Symbol(if (active) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true, kick = kick, pressed = pressed)
+    }
+}
+
 /** Previous and next: big bare icons (no tile behind), that give a little under the finger. */
 @Composable
 private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp = 64.dp, onClick: () -> Unit) {
-    val source = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.82f else 1f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "skip")
-    var kick by remember { mutableIntStateOf(0) }
-    IconButton(onClick = { kick++; onClick() }, enabled = enabled, interactionSource = source,
-        modifier = Modifier.size(size).graphicsLayer { scaleX = scale; scaleY = scale }.semantics { contentDescription = label }) {
+    KickIconButton(onClick, enabled = enabled, modifier = Modifier.size(size).semantics { contentDescription = label }) { kick ->
         Symbol(glyph, size = minOf(40.dp, size - 12.dp), filled = true, kick = kick)
     }
 }
@@ -768,13 +728,12 @@ private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolea
     val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
     val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
     var kick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(on, glyph) { if (kick >= 0) kick++ }
     Box(Modifier.size(size).clip(CircleShape)
         // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
-        .then(if (switch) Modifier.toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { haptics.toggle(it); onClick() }
-            else Modifier.clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { haptics.toggle(!on); onClick() })
+        .then(if (switch) Modifier.toggleable(on, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { kick++; haptics.toggle(it); onClick() }
+            else Modifier.clickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { kick++; haptics.toggle(!on); onClick() })
         .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick - 1)
+        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick)
         Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp).size(5.dp).graphicsLayer { scaleX = dot; scaleY = dot; alpha = dot }
             .clip(CircleShape).background(cs.primary))
     }
