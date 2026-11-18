@@ -32,7 +32,12 @@ CI 44249325432 passed the header and progress tests. The image fixture exposed a
 that can suppress the incoming image's draw. Use Coil's painter alpha so its request and size
 resolver stay active. The queue edge now scrolls with the pointer held still, uses measured row
 midpoints and cancels the preview when live queue order changes. The playing row no longer offers
-a hidden accessibility-only Remove action. See PHONE_CHECK.md for physical acceptance.
+a hidden accessibility-only Remove action.
+
+[код] The UI follow-up moves song filters and artist album/top-song lookup off the main thread.
+Filtering only publishes the current query, source list and options. Search tiles can grow and
+switch to one column at large font size. Home calculates ranking values once before sorting.
+See PHONE_CHECK.md for physical acceptance.
 Physical 120 Hz, real video decode, large font and TalkBack acceptance still need the Pixel.
 
 # Now Playing format and motion (Codex, 2026-11-18)

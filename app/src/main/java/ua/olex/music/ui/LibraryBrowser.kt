@@ -142,7 +142,7 @@ internal fun LibraryBrowser(
         LibraryTab.COMPOSERS -> library.composers
         else -> emptyList()
     }
-    val selected = groups.firstOrNull { it.id == selectedId }
+    val selected = selectedId?.let { id -> groups.firstOrNull { it.id == id } }
     var collectionSort by rememberSaveable(tabName) { mutableStateOf(CollectionSort.NAME) }
     val shownGroups = rememberOffMain(groups, collectionSort, stats, initial = groups) {
         when (collectionSort) {
@@ -171,7 +171,7 @@ internal fun LibraryBrowser(
         else -> TrackSortScope.FOLDER_TRACKS
     }
     val raw = when {
-        searching -> search?.takeIf { it.query == query && !it.failed }?.tracks?.filter { it.id in library.byId }
+        searching -> search?.takeIf { it.query == query && !it.failed }?.tracks
         selected != null -> selected.tracks
         tab == LibraryTab.SONGS -> library.songs
         else -> null
@@ -179,7 +179,18 @@ internal fun LibraryBrowser(
     var filter by remember { mutableStateOf(ua.olex.music.model.TrackFilter()) }
     var browsing by rememberSaveable { mutableStateOf<String?>(null) }
     val filterStats = if (filter.unplayed || filter.minRating > 0) stats else null
-    val unsorted = remember(raw, filter, filterStats) { raw?.let { list -> filter.apply(list) { stats[it.statsKey] } } }
+    val visibleIds = library.byId.takeIf { searching }
+    val filterRequest = raw?.let(::SortSource)?.takeIf { searching || !filter.empty }?.let {
+        FilterRequest(it, filter, filterStats, visibleIds?.let(::LibraryMembership))
+    }
+    val filtered by produceState<FilteredTracks?>(null, filterRequest) {
+        value = filterRequest?.let { request -> withContext(Dispatchers.Default) {
+            val allowed = request.membership?.let { members -> request.source.tracks.filter { it.id in members.byId } }
+                ?: request.source.tracks
+            FilteredTracks(request, request.filter.apply(allowed) { request.stats?.get(it.statsKey) })
+        } }
+    }
+    val unsorted = if (filterRequest == null) raw else filtered?.takeIf { it.request == filterRequest }?.tracks
     val order = sortOrders[sortScope] ?: TrackSortOrder()
     val source = unsorted?.let(::SortSource)
     val statsKey = if (order.mode == TrackSortMode.PLAYS || order.mode == TrackSortMode.RATING) stats else null
@@ -201,6 +212,19 @@ internal fun LibraryBrowser(
     // An album opened from an artist's page goes back to that artist, not to the album grid.
     var backToArtist by rememberSaveable { mutableStateOf<String?>(null) }
     var allArtistSongs by rememberSaveable(selectedId) { mutableStateOf(false) }
+    val artist = selected.takeIf { tab == LibraryTab.ARTISTS }
+    val artistAlbums = if (artist == null) emptyList() else androidx.compose.runtime.key(LibraryMembership(library.byId), artist.id) {
+        rememberOffMain(library, artist, initial = emptyList()) {
+            val ids = artist.tracks.mapTo(HashSet()) { it.id }
+            library.albums.filter { album -> album.tracks.any { it.id in ids } }
+        }
+    }
+    val topArtistSongs = if (artist == null || allArtistSongs || visible == null || visible.size <= 5) visible.orEmpty()
+        else androidx.compose.runtime.key(SortSource(visible)) {
+            rememberOffMain(SortSource(visible), stats, initial = emptyList()) {
+                visible.sortedByDescending { stats[it.statsKey]?.plays ?: 0 }.take(5)
+            }
+        }
     fun closeSelected() {
         val artist = backToArtist
         backToArtist = null
@@ -326,7 +350,7 @@ internal fun LibraryBrowser(
             }
         }
         // An album keeps its own order and a clean page; long press still selects.
-        val tools = unsorted != null && !(selected != null && tab == LibraryTab.ALBUMS) && !picking
+        val tools = raw != null && !(selected != null && tab == LibraryTab.ALBUMS) && !picking
         if (tools && (mode != BrowserMode.SEARCH || (browsing != null && !searching))) {
             // One row: sort, then filters (song lists only), then select at the end.
             val sortChip: @Composable () -> Unit = { LibrarySortControl(sortScope, order) { onSortOrder(sortScope, it) } }
@@ -427,8 +451,7 @@ internal fun LibraryBrowser(
                 }
                 selected != null && tab == LibraryTab.ARTISTS -> {
                     // The artist's page: who they are, their albums, then their most played songs.
-                    val ids = selected.tracks.mapTo(HashSet()) { it.id }
-                    val albums = library.albums.filter { a -> a.tracks.any { it.id in ids } }
+                    val albums = artistAlbums
                     item(key = "artist-header") {
                         ArtistHeader(selected, albums.size, showBack = mode != BrowserMode.LIBRARY, onBack = ::closeSelected, onPlay = { visible?.let { onPlay(it, 0) } },
                             onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
@@ -446,7 +469,7 @@ internal fun LibraryBrowser(
                     }
                     if (visible == null) item { BrowserMessage("Sorting...") }
                     else {
-                        val shown = if (allArtistSongs || visible.size <= 5) visible else visible.sortedByDescending { stats[it.statsKey]?.plays ?: 0 }.take(5)
+                        val shown = topArtistSongs
                         item(key = "artist-songs-title") {
                             Row(Modifier.fillMaxWidth().padding(top = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played", style = MaterialTheme.typography.titleLarge,
@@ -729,6 +752,20 @@ private class SortSource(val tracks: List<Track>) {
     override fun hashCode() = System.identityHashCode(tracks)
 }
 private data class SortedTracks(val source: SortSource, val order: TrackSortOrder, val tracks: List<Track>)
+private class LibraryMembership(val byId: Map<ua.olex.music.model.TrackId, Track>) {
+    override fun equals(other: Any?) = other is LibraryMembership && byId === other.byId
+    override fun hashCode() = System.identityHashCode(byId)
+}
+
+private data class FilterRequest(
+    val source: SortSource,
+    val filter: ua.olex.music.model.TrackFilter,
+    val stats: Map<String, ua.olex.music.model.SongStats>?,
+    val membership: LibraryMembership?,
+)
+
+private data class FilteredTracks(val request: FilterRequest, val tracks: List<Track>)
+
 
 @Composable
 private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onChange: (TrackSortOrder) -> Unit) {
@@ -946,15 +983,21 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
             BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }; BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }; else -> true }
     }
     val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer, cs.secondaryContainer to cs.onSecondaryContainer)
+    val columns = if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) 1 else 2
+    val tileRows = tiles.chunked(columns)
+    val genres = rememberOffMain(LibraryMembership(library.byId), initial = emptyList()) {
+        library.genres.sortedByDescending { it.tracks.size }.take(6)
+    }
+    val genreRows = genres.chunked(columns)
     androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item { Text("Browse", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 8.dp, bottom = 4.dp)) }
-        items(tiles.chunked(2).size) { r ->
+        items(tileRows.size) { r ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                tiles.chunked(2)[r].forEachIndexed { c, tile ->
-                    val (bg, fg) = accents[(r * 2 + c) % accents.size]
+                tileRows[r].forEachIndexed { c, tile ->
+                    val (bg, fg) = accents[(r * columns + c) % accents.size]
                     androidx.compose.material3.Surface(onClick = { haptics.tick(); onTile(tile) }, shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
-                        color = cs.surfaceContainer, modifier = Modifier.weight(1f).height(72.dp).squish(0.03f)) {
-                        Row(Modifier.padding(start = 16.dp, end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        color = cs.surfaceContainer, modifier = Modifier.weight(1f).heightIn(min = 72.dp).squish(0.03f)) {
+                        Row(Modifier.padding(start = 16.dp, end = 12.dp, top = 12.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text(tile.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, modifier = Modifier.weight(1f))
                             Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {
                                 Symbol(tile.glyph, color = fg, filled = true)
@@ -962,17 +1005,16 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
                         }
                     }
                 }
-                if (tiles.chunked(2)[r].size == 1) Spacer(Modifier.weight(1f))
+                if (tileRows[r].size < columns) Spacer(Modifier.weight(1f))
             }
         }
         // Your genres as big cover cards, as Google Play and Spotify fill their browse pages.
-        val genres = library.genres.sortedByDescending { it.tracks.size }.take(6)
         if (genres.size > 1) {
             item { Text("Your genres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)) }
-            items(genres.chunked(2).size) { r ->
+            items(genreRows.size) { r ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    genres.chunked(2)[r].forEach { genre -> GenreCard(genre, Modifier.weight(1f)) { haptics.tick(); onGenre(genre) } }
-                    if (genres.chunked(2)[r].size == 1) Spacer(Modifier.weight(1f))
+                    genreRows[r].forEach { genre -> GenreCard(genre, Modifier.weight(1f)) { haptics.tick(); onGenre(genre) } }
+                    if (genreRows[r].size < columns) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -983,9 +1025,10 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
 @Composable
 private fun GenreCard(genre: MusicCollection, modifier: Modifier, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val arts = genre.tracks.mapNotNull { it.artworkUri }.distinct().take(3)
+    val arts = genre.tracks.asSequence().mapNotNull { it.artworkUri }.distinct().take(3).toList()
+    val scale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceAtLeast(1f)
     androidx.compose.material3.Surface(onClick = onClick, shape = androidx.compose.foundation.shape.RoundedCornerShape(24.dp), color = cs.secondaryContainer,
-        contentColor = cs.onSecondaryContainer, modifier = modifier.height(112.dp).squish(0.03f)) {
+        contentColor = cs.onSecondaryContainer, modifier = modifier.heightIn(min = 112.dp + 36.dp * (scale - 1f)).squish(0.03f)) {
         Box {
             arts.forEachIndexed { i, art ->
                 Artwork(art, Modifier.align(Alignment.BottomEnd).offset(x = (12 - i * 22).dp, y = (14 - i * 4).dp)
