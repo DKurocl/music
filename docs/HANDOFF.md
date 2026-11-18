@@ -28,7 +28,11 @@ decorative-only exit, and the delayed cover fixture returns a deterministic Load
 Robolectric scenarios cover a
 delayed incoming cover, fixed lyrics action positions and 2:23 displayed before reconnecting
 playback. CI evidence: https://github.com/DKurocl/music/actions/workflows/build.yml
-See PHONE_CHECK.md for physical acceptance.
+CI 44249325432 passed the header and progress tests. The image fixture exposed a transparent layer
+that can suppress the incoming image's draw. Use Coil's painter alpha so its request and size
+resolver stay active. The queue edge now scrolls with the pointer held still, uses measured row
+midpoints and cancels the preview when live queue order changes. The playing row no longer offers
+a hidden accessibility-only Remove action. See PHONE_CHECK.md for physical acceptance.
 Physical 120 Hz, real video decode, large font and TalkBack acceptance still need the Pixel.
 
 # Now Playing format and motion (Codex, 2026-11-18)

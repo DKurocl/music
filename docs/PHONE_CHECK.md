@@ -193,3 +193,5 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
 5. Tap Play and then Next rapidly. The transport buttons retain their positions across play,
    pause and buffering. Review touch response and cover transitions at 120 Hz and with system
    animations disabled.
+6. Hold a queue row at the top or bottom edge without moving your finger. The list scrolls with
+   the row still under your finger. Repeat at large font, and after an external edit to the queue.

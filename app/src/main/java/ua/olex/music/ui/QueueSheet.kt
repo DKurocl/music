@@ -2,7 +2,6 @@
 
 package ua.olex.music.ui
 
-import kotlinx.coroutines.launch
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,9 +27,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onSizeChanged
 import ua.olex.music.playback.PlayerState
-import kotlin.math.roundToInt
 
 /**
  * The play queue. Each row can be dragged by its handle: the other rows make way under the finger
@@ -47,15 +44,78 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
-    val edgeScroll = androidx.compose.runtime.rememberCoroutineScope()
     var draggingKey by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    var rowHeightPx by remember { mutableFloatStateOf(1f) }
-    // The order on screen: changed live while dragging, sent to the player once on drop.
-    var order by remember(state.queue) { mutableStateOf(state.queue) }
-    var startIndex by remember { mutableIntStateOf(-1) }
+    var dragDirection by remember { mutableIntStateOf(0) }
+    var previewOrder by remember { mutableStateOf<List<ua.olex.music.playback.QueueItem>?>(null) }
+    var originalKeys by remember { mutableStateOf<List<String>?>(null) }
+    val keys = remember(state.queue) { state.queue.map { it.key } }
+    val latestKeys by rememberUpdatedState(keys)
+    val latestQueue by rememberUpdatedState(state.queue)
+    val order = previewOrder ?: state.queue
     val currentKey = state.queue.getOrNull(state.queueIndex)?.key
-    val latestOrder by rememberUpdatedState(order)
+    val move by rememberUpdatedState(onMove)
+
+    fun resetDrag() {
+        draggingKey = null
+        dragOffset = 0f
+        dragDirection = 0
+        previewOrder = null
+        originalKeys = null
+    }
+
+    fun moveAcrossVisibleRows(key: String) {
+        val preview = previewOrder ?: return
+        val items = list.layoutInfo.visibleItemsInfo
+        val row = items.firstOrNull { it.key == key } ?: return
+        val from = preview.indexOfFirst { it.key == key }
+        // Wait for LazyColumn to lay out a previous move before evaluating the next midpoint.
+        if (row.index != from) return
+        val centre = row.offset + dragOffset + row.size / 2f
+        val to = when {
+            dragOffset > 0 -> items.lastOrNull { it.index > from && centre >= it.offset + it.size / 2f }
+            dragOffset < 0 -> items.firstOrNull { it.index < from && centre <= it.offset + it.size / 2f }
+            else -> null
+        } ?: return
+        if (preview.getOrNull(to.index)?.key != to.key) return
+        previewOrder = preview.toMutableList().apply { add(to.index, removeAt(from)) }
+        val targetTop = if (to.index > from) to.offset + to.size - row.size else to.offset
+        dragOffset += row.offset - targetTop
+        haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+    }
+
+    LaunchedEffect(keys) {
+        if (originalKeys != null && originalKeys != keys) resetDrag()
+    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    LaunchedEffect(draggingKey, density) {
+        val key = draggingKey ?: return@LaunchedEffect
+        val edge = with(density) { 56.dp.toPx() }
+        val maxSpeed = with(density) { 720.dp.toPx() }
+        var lastFrame = withFrameNanos { it }
+        while (draggingKey == key) {
+            val frame = withFrameNanos { it }
+            val time = ((frame - lastFrame) / 1_000_000_000f).coerceIn(0f, 0.04f)
+            lastFrame = frame
+            moveAcrossVisibleRows(key)
+            val layout = list.layoutInfo
+            val row = layout.visibleItemsInfo.firstOrNull { it.key == key } ?: continue
+            if (previewOrder?.getOrNull(row.index)?.key != key) continue
+            val top = row.offset + dragOffset
+            val bottom = top + row.size
+            val ratio = when {
+                dragDirection < 0 && top < layout.viewportStartOffset + edge -> (top - layout.viewportStartOffset - edge) / edge
+                dragDirection > 0 && bottom > layout.viewportEndOffset - edge -> (bottom - layout.viewportEndOffset + edge) / edge
+                else -> 0f
+            }.coerceIn(-1f, 1f)
+            if (ratio != 0f) {
+                val consumed = list.scrollBy(maxSpeed * ratio * time)
+                if (draggingKey != key) break
+                // Compensate actual travel so the held row follows the finger while the list scrolls.
+                dragOffset += consumed
+            }
+        }
+    }
 
     AppSheet(onDismiss, cs.surfaceContainerLow, gestures = draggingKey == null) { CompositionLocalProvider(LocalIsPlaying provides state.isPlaying) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -106,37 +166,32 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                                 Modifier.size(48.dp).pointerInput(item.key) {
                                     detectVerticalDragGestures(
                                         onDragStart = {
-                                            draggingKey = item.key; dragOffset = 0f
-                                            startIndex = latestOrder.indexOfFirst { it.key == item.key }
+                                            previewOrder = latestQueue
+                                            originalKeys = latestKeys
+                                            draggingKey = item.key
+                                            dragOffset = 0f
                                             haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                         },
                                         onVerticalDrag = { change, amount ->
                                             change.consume()
-                                            dragOffset += amount
-                                            // Near the top or bottom of the list it scrolls by itself, so a song can be
-                                            // carried far down (or up) the queue in one drag.
-                                            val info = list.layoutInfo
-                                            info.visibleItemsInfo.firstOrNull { it.key == item.key }?.let { row ->
-                                                val at = row.offset + dragOffset
-                                                val edge = rowHeightPx
-                                                val step = when { at < info.viewportStartOffset + edge * 0.5f -> -rowHeightPx / 3; at + row.size > info.viewportEndOffset - edge * 0.5f -> rowHeightPx / 3; else -> 0f }
-                                                if (step != 0f) edgeScroll.launch { list.scrollBy(step) }
-                                            }
-                                            val now = latestOrder.indexOfFirst { it.key == item.key }
-                                            // Past half a row, the neighbour swaps places with the dragged row.
-                                            val step = when { dragOffset > rowHeightPx / 2 && now < latestOrder.lastIndex -> 1; dragOffset < -rowHeightPx / 2 && now > 0 -> -1; else -> 0 }
-                                            if (step != 0) {
-                                                order = latestOrder.toMutableList().apply { add(now + step, removeAt(now)) }
-                                                dragOffset -= step * rowHeightPx
-                                                haptics.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                            if (draggingKey == item.key) {
+                                                dragOffset += amount
+                                                if (amount != 0f) dragDirection = amount.compareTo(0f)
+                                                moveAcrossVisibleRows(item.key)
                                             }
                                         },
                                         onDragEnd = {
-                                            val end = latestOrder.indexOfFirst { it.key == item.key }
-                                            if (startIndex >= 0 && end != startIndex) { onMove(item.key, end - startIndex); haptics.performHapticFeedback(HapticFeedbackType.GestureEnd) }
-                                            draggingKey = null; dragOffset = 0f; startIndex = -1
+                                            if (draggingKey == item.key && originalKeys == latestKeys) {
+                                                val from = latestKeys.indexOf(item.key)
+                                                val to = previewOrder?.indexOfFirst { it.key == item.key } ?: -1
+                                                if (from >= 0 && to >= 0 && to != from) {
+                                                    move(item.key, to - from)
+                                                    haptics.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                                }
+                                            }
+                                            resetDrag()
                                         },
-                                        onDragCancel = { order = state.queue; draggingKey = null; dragOffset = 0f; startIndex = -1 },
+                                        onDragCancel = { resetDrag() },
                                     )
                                 },
                                 contentAlignment = Alignment.Center,
@@ -146,7 +201,6 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     colors = ListItemDefaults.colors(containerColor = if (dragging) cs.surfaceContainerHighest else cs.surfaceContainerLow),
                     modifier = Modifier
                         .then(if (dragging) Modifier else Modifier.animateItem())
-                        .onSizeChanged { if (it.height > 0) rowHeightPx = it.height.toFloat() }
                         .zIndexWhen(dragging)
                         .graphicsLayer { if (dragging) { translationY = dragOffset; shadowElevation = 12f } }
                         .clickable { onPlay(item.key) }
@@ -156,7 +210,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                             customActions = listOfNotNull(
                                 if (position > 0) CustomAccessibilityAction("Move up") { onMove(item.key, -1); true } else null,
                                 if (position < order.lastIndex) CustomAccessibilityAction("Move down") { onMove(item.key, 1); true } else null,
-                                CustomAccessibilityAction("Remove from queue") { onRemove(item.key); true },
+                                if (!current) CustomAccessibilityAction("Remove from queue") { onRemove(item.key); true } else null,
                             )
                         },
                 )
