@@ -26,7 +26,7 @@ class UserSchemaTest {
             database.execSQL("INSERT INTO playlists (id, name, createdAt) VALUES (7, 'Keep this playlist', 1000)")
         }
         helper.runMigrationsAndValidate("user-schema.db", 1, true).close()
-        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4).build()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4, UserDatabase.MIGRATION_4_5).build()
         try {
             val playlist = UserRepository(database).playlists.first().single()
             assertEquals(7L, playlist.id)
@@ -43,7 +43,7 @@ class UserSchemaTest {
             database.execSQL("INSERT INTO play_history (songId, playedAt) VALUES ('s1', 9000)")
         }
         helper.runMigrationsAndValidate("user-schema.db", 2, true).close()
-        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4).build()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4, UserDatabase.MIGRATION_4_5).build()
         try {
             val repository = UserRepository(database)
             assertEquals("Old list", repository.playlists.first().single().name)
@@ -64,7 +64,7 @@ class UserSchemaTest {
             database.execSQL("INSERT INTO playlist_entries (playlistId, songId, position) VALUES (1, 'a', 1)")
         }
         helper.runMigrationsAndValidate("user-schema.db", 3, true, UserDatabase.MIGRATION_2_3).close()
-        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4).build()
+        val database = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db").addMigrations(UserDatabase.MIGRATION_2_3, UserDatabase.MIGRATION_3_4, UserDatabase.MIGRATION_4_5).build()
         try {
             assertEquals(listOf("b", "a"), database.userData().entries(1).map { it.songId })
             database.userData().insertEntries(listOf(PlaylistEntryEntity(1, "b", 2)))
@@ -87,7 +87,7 @@ class UserSchemaTest {
         }
         helper.runMigrationsAndValidate("user-schema.db", 4, true, UserDatabase.MIGRATION_3_4).close()
         val db = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db")
-            .addMigrations(UserDatabase.MIGRATION_3_4).build()
+            .addMigrations(UserDatabase.MIGRATION_3_4, UserDatabase.MIGRATION_4_5).build()
         try {
             val repo = UserRepository(db)
             val playlist = repo.playlists.first().single()
@@ -105,6 +105,25 @@ class UserSchemaTest {
             db.openHelper.readableDatabase.query("SELECT definition FROM smart_playlists WHERE id=9").use {
                 org.junit.Assert.assertTrue(it.moveToFirst()); assertEquals("unchanged-definition", it.getString(0))
             }
+        } finally { db.close() }
+    }
+    @Test fun versionFourKeepsOldPlayCountsAndAcceptsMonotonicTimeCheckpoints() = runBlocking {
+        helper.createDatabase("user-schema.db", 4).use { db ->
+            db.execSQL("INSERT INTO saved_songs VALUES ('old', 'artist|song', '', 'Song', 'Artist', NULL, 120000, NULL, 0)")
+            db.execSQL("INSERT INTO play_history VALUES (17, 'old', 300)")
+        }
+        helper.runMigrationsAndValidate("user-schema.db", 5, true, UserDatabase.MIGRATION_4_5).close()
+        val db = Room.databaseBuilder(RuntimeEnvironment.getApplication(), UserDatabase::class.java, "user-schema.db")
+            .addMigrations(UserDatabase.MIGRATION_4_5).build()
+        try {
+            val repo = UserRepository(db)
+            val entry = repo.historySince(0).first().single()
+            assertEquals(17L, entry.id)
+            assertEquals(null, entry.listenedMs)
+            val dao = db.userData()
+            dao.updateListening(17, 12_000)
+            dao.updateListening(17, 7_000)
+            assertEquals(12_000L, repo.historySince(0).first().single().listenedMs)
         } finally { db.close() }
     }
 

@@ -51,6 +51,8 @@ class PlaybackService : MediaLibraryService() {
     private val sleepTimer = SleepTimer()
     private var sleepJob: Job? = null
     private val historyGate = PlaybackHistoryGate()
+    private var listening: PlaybackListening? = null
+    private var listeningOccurrence: String? = null
     private var diagnostics = AudioDiagnostics()
     private val audioTracks = AudioTrackLifecycle()
     private lateinit var equalizer: EqualizerController
@@ -179,6 +181,7 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         })
+        listening = (application as? PlaybackHistoryOwner)?.let(::PlaybackListening)
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
                 AudioLoadPriority.update(player.playWhenReady &&
@@ -191,16 +194,20 @@ class PlaybackService : MediaLibraryService() {
                 lockLyrics?.update()
                 updateFavouriteButton()
                 val key = mediaItem?.mediaMetadata?.extras?.getString(PlayerConnection.QUEUE_KEY) ?: mediaItem?.mediaId
-                historyGate.transition(key, reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT)
+                val replay = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
+                if (replay || listeningOccurrence != key) listening?.finish()
+                listeningOccurrence = key
+                historyGate.transition(key, replay)
                 recordCurrentPlayback()
             }
-            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback(); publishNowPlaying(); lockLyrics?.update() }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { if (isPlaying) recordCurrentPlayback() else listening?.pause(); publishNowPlaying(); lockLyrics?.update() }
             override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) = publishNowPlaying()
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) finishEndOfTrackTimer()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
+                    listening?.finish()
                     historyGate.transition()
                     if (endOfTrack) {
                         player.playWhenReady = false
@@ -361,14 +368,13 @@ class PlaybackService : MediaLibraryService() {
         val item = player.currentMediaItem ?: return
         val meta = item.mediaMetadata
         val occurrence = meta.extras?.getString(PlayerConnection.QUEUE_KEY) ?: item.mediaId
-        val owner = application as? PlaybackHistoryOwner ?: return
-        if (item.mediaId.isBlank() || !historyGate.shouldRecord(occurrence, player.isPlaying)) return
-        val track = PlayerConnection.track(item).let { it.copy(durationMs = it.durationMs.takeIf { ms -> ms > 0 } ?: player.duration.coerceAtLeast(0)) }
-        scope.launch {
-            try { owner.recordPlayback(track) }
-            catch (cancelled: CancellationException) { throw cancelled }
-            catch (error: Exception) { Log.w("MusicHistory", "Could not persist history: ${error.javaClass.simpleName}") }
-        }
+        val meter = listening ?: return
+        if (item.mediaId.isBlank()) return
+        if (historyGate.shouldRecord(occurrence, player.isPlaying)) {
+            val track = PlayerConnection.track(item).let { it.copy(durationMs = it.durationMs.takeIf { ms -> ms > 0 } ?: player.duration.coerceAtLeast(0)) }
+            listeningOccurrence = occurrence
+            meter.begin(track)
+        } else meter.resume()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
@@ -393,6 +399,8 @@ class PlaybackService : MediaLibraryService() {
         equalizerRoute = null
         persistence?.close()
         persistence = null
+        listening?.close()
+        listening = null
         scope.cancel()
         session?.run { player.release(); release() }
         session = null

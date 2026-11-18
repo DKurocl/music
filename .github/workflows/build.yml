@@ -68,6 +68,8 @@ jobs:
           path: |
             app/build/reports/ui-previews/gallery/01*.png
             app/build/reports/ui-previews/gallery/13-home-dark.png
+            app/build/reports/ui-previews/gallery/12*.png
+            core/user/schemas/ua.olex.music.user.UserDatabase/5.json
       - name: Lint and assemble APKs
         run: |
           set -o pipefail

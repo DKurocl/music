@@ -9,7 +9,7 @@ import ua.olex.music.model.SavedSong
 @Database(
     entities = [UserSongEntity::class, FavouriteEntity::class, PlaylistEntity::class, PlaylistEntryEntity::class, HistoryEntity::class, LyricOffsetEntity::class,
         RatingEntity::class, SmartPlaylistEntity::class, RecordingSourceEntity::class, RecordingAliasEntity::class],
-    version = 4, exportSchema = true,
+    version = 5, exportSchema = true,
     // Version 2 only adds tables (ratings, smart playlists): Room migrates it from the exported schemas.
     // Version 3 keys playlist entries by position so a song can be added twice (MIGRATION_2_3).
     autoMigrations = [AutoMigration(from = 1, to = 2)],
@@ -19,7 +19,13 @@ abstract class UserDatabase : RoomDatabase() {
 
     companion object {
         fun open(context: Context): UserDatabase = Room.databaseBuilder(context.applicationContext, UserDatabase::class.java, "user.db")
-            .addMigrations(MIGRATION_2_3, MIGRATION_3_4).build()
+            .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build()
+
+        val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE play_history ADD COLUMN listenedMs INTEGER")
+            }
+        }
 
         /** Preserve every legacy ID and relation while giving recordings independent source links. */
         val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
@@ -135,7 +141,7 @@ data class PlaylistEntryEntity(val playlistId: Long, val songId: String, val pos
 
 /** Append-only playback starts; the UI reads a bounded recent window without deleting history. */
 @Entity(tableName = "play_history", indices = [Index("songId"), Index("playedAt")], foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
-data class HistoryEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val songId: String, val playedAt: Long)
+data class HistoryEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val songId: String, val playedAt: Long, val listenedMs: Long? = null)
 
 /** A signed per-song lyrics adjustment; its lifetime is independent of rescanning music. */
 @Entity(tableName = "lyric_offsets", foreignKeys = [ForeignKey(entity = UserSongEntity::class, parentColumns = ["id"], childColumns = ["songId"], onDelete = ForeignKey.CASCADE)])
@@ -161,7 +167,7 @@ data class PlaylistRelations(
 )
 
 /** One history event joined to its durable display metadata. */
-data class HistoryRow(val eventId: Long, val playedAt: Long, @Embedded val song: UserSongEntity,
+data class HistoryRow(val eventId: Long, val playedAt: Long, val listenedMs: Long?, @Embedded val song: UserSongEntity,
     @Relation(parentColumn = "id", entityColumn = "songId") val sources: List<RecordingSourceEntity>) {
     fun toSong() = song.toSong(sources.sortedWith(compareBy<RecordingSourceEntity> { it.addedAt }.thenBy { it.sourceKey }).map { it.toSource() })
 }
@@ -234,11 +240,11 @@ interface UserDao {
     fun favourites(): Flow<List<RecordingRelations>>
     @Transaction @Query("SELECT * FROM playlists ORDER BY createdAt DESC, id DESC")
     fun playlists(): Flow<List<PlaylistRelations>>
-    @Transaction @Query("SELECT play_history.id AS eventId, play_history.playedAt, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId ORDER BY play_history.playedAt DESC, play_history.id DESC LIMIT :limit")
+    @Transaction @Query("SELECT play_history.id AS eventId, play_history.playedAt, play_history.listenedMs, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId ORDER BY play_history.playedAt DESC, play_history.id DESC LIMIT :limit")
     fun history(limit: Int): Flow<List<HistoryRow>>
 
     @Transaction
-    @Query("SELECT play_history.id AS eventId, play_history.playedAt, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId WHERE playedAt >= :start ORDER BY playedAt DESC, play_history.id DESC")
+    @Query("SELECT play_history.id AS eventId, play_history.playedAt, play_history.listenedMs, saved_songs.* FROM play_history JOIN saved_songs ON saved_songs.id = play_history.songId WHERE playedAt >= :start ORDER BY playedAt DESC, play_history.id DESC")
     fun historySince(start: Long): Flow<List<HistoryRow>>
     @Query("SELECT offsetMs FROM lyric_offsets WHERE songId = :songId") fun lyricOffset(songId: String): Flow<Long?>
 
@@ -253,7 +259,9 @@ interface UserDao {
     @Query("SELECT * FROM playlist_entries WHERE playlistId = :id ORDER BY position") suspend fun entries(id: Long): List<PlaylistEntryEntity>
     @Query("DELETE FROM playlist_entries WHERE playlistId = :id") suspend fun clearEntries(id: Long)
     @Insert suspend fun insertEntries(entries: List<PlaylistEntryEntity>)
-    @Insert suspend fun addHistory(history: HistoryEntity)
+    @Insert suspend fun addHistory(history: HistoryEntity): Long
+    @Query("UPDATE play_history SET listenedMs = :millis WHERE id = :id AND :millis > COALESCE(listenedMs, 0)")
+    suspend fun updateListening(id: Long, millis: Long)
     @Upsert suspend fun setOffset(offset: LyricOffsetEntity)
 
     @Upsert suspend fun setRating(rating: RatingEntity)

@@ -146,7 +146,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         accountWork.launch { graph.youtubeFavourites.refresh() }
     }
 
-    override suspend fun recordPlayback(track: Track) = graph.userLibrary.recordPlay(track)
+    override suspend fun recordPlayback(track: Track, observedAt: Long) = graph.userLibrary.recordPlay(track, observedAt)
+    override suspend fun updateListening(eventId: Long, millis: Long) = graph.userLibrary.updateListening(eventId, millis)
     override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {
         val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
         graph.audioAccess.value = permitted
