@@ -210,7 +210,7 @@ class PlaybackService : MediaLibraryService() {
         val items = (from until player.mediaItemCount).map(player::getMediaItemAt)
         refill = scope.launch {
             try {
-                val tracks = items.map(PlayerConnection::track)
+                val tracks = withContext(Dispatchers.Default) { items.map(PlayerConnection::track) }
                 val extension = owner.extendPlaybackQueue(tracks, current - from) ?: return@launch
                 if (player.currentTimeline !== timeline || player.currentMediaItemIndex != current) return@launch
                 if (extension.commit() && extension.tracks.isNotEmpty()) QueueCommand.enqueue(player, extension.tracks.map { item ->
@@ -352,9 +352,12 @@ class PlaybackService : MediaLibraryService() {
             Futures.immediateFuture(LibraryResult.ofItem(ua.olex.music.model.BrowseNode(ua.olex.music.model.BrowseTree.ROOT, "Library").toMediaItem(), params))
 
         override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
-            val nodes = tree()?.children(parentId) ?: return@future LibraryResult.ofError<com.google.common.collect.ImmutableList<MediaItem>>(SessionError.ERROR_BAD_VALUE)
-            // Only the asked page is turned into media items, not the whole list.
-            LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(nodes, page, pageSize.coerceAtLeast(1)).map { it.toMediaItem() }), params)
+            val snapshot = tree()
+            withContext(Dispatchers.Default) {
+                val nodes = snapshot?.children(parentId)
+                    ?: return@withContext LibraryResult.ofError<com.google.common.collect.ImmutableList<MediaItem>>(SessionError.ERROR_BAD_VALUE)
+                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(nodes, page, pageSize.coerceAtLeast(1)).map { it.toMediaItem() }), params)
+            }
         }
 
         override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String) = future {
@@ -362,13 +365,18 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: LibraryParams?) = future {
-            session.notifySearchResultChanged(browser, query, tree()?.search(query)?.size ?: 0, params)
+            val snapshot = tree()
+            val count = withContext(Dispatchers.Default) { snapshot?.search(query)?.size ?: 0 }
+            session.notifySearchResultChanged(browser, query, count, params)
             LibraryResult.ofVoid()
         }
 
         override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
-            val found = tree()?.search(query).orEmpty()
-            LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(found, page, pageSize.coerceAtLeast(1)).map { PlayerConnection.mediaItem(it) }), params)
+            val snapshot = tree()
+            withContext(Dispatchers.Default) {
+                val found = snapshot?.search(query).orEmpty()
+                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(found, page, pageSize.coerceAtLeast(1)).map { PlayerConnection.mediaItem(it) }), params)
+            }
         }
 
         /**
