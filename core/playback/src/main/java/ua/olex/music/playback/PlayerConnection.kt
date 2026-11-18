@@ -398,7 +398,7 @@ class PlayerConnection(context: Context) {
             artist = meta.artist?.toString().orEmpty(),
             album = meta.albumTitle?.toString(),
             playbackContext = meta.extras?.getString(CONTEXT_KEY),
-            artworkUri = meta.artworkUri?.toString(),
+            artworkUri = (item?.mediaMetadata?.artworkUri ?: meta.artworkUri)?.toString(),
             isPlaying = player.isPlaying,
             playWhenReady = player.playWhenReady && player.playbackState != Player.STATE_ENDED,
             buffering = player.playbackState == Player.STATE_BUFFERING,
