@@ -512,10 +512,6 @@ internal class YouTubeMusic(
         synchronized(streams) { streams[id]?.takeIf { System.currentTimeMillis() - it.second < 4 * 3_600_000L }?.first }?.let { return it }
         val info = StreamInfo.getInfo(ServiceList.YouTube, "https://music.youtube.com/watch?v=$id")
         val best = info.audioStreams.filter { it.isUrl }.maxByOrNull { it.averageBitrate } ?: return null
-        // What the player will say about the sound: codec and bitrate of the stream it plays.
-        val codec = when { best.format?.name?.contains("opus", true) == true || best.codec?.contains("opus", true) == true -> "Opus"
-            best.format?.name?.contains("m4a", true) == true || best.codec?.contains("mp4a", true) == true -> "AAC"; else -> best.format?.name ?: "Stream" }
-        formats[id] = "$codec \u00b7 ${best.averageBitrate.takeIf { it > 0 } ?: best.bitrate / 1000} kbps"
         Uri.parse(best.content).also { synchronized(streams) { streams[id] = it to System.currentTimeMillis() } }
     }.getOrNull()
 
@@ -523,15 +519,8 @@ internal class YouTubeMusic(
     private val streams = object : LinkedHashMap<String, Pair<Uri, Long>>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<Uri, Long>>?) = size > 300
     }
-    private val formats = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, String>(64, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 300
-    })
-
     /** Forgets a stream address that stopped working, so the next open finds a fresh one. */
     fun forget(id: String) { synchronized(streams) { streams.remove(id) } }
-
-    /** "Opus \u00b7 160 kbps" once the song's stream was chosen; null before. Quality only: where it plays from is the row's mark. */
-    fun format(id: String): String? = formats[id]
 
     companion object {
         const val WEB_REMIX = "1.20251110.01.00"
