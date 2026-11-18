@@ -99,19 +99,21 @@ class MotionCovers(private val context: Context) {
 
     /** Removes every fetched moving cover (Clear cache); the owner's own videos stay. */
     fun clearFetched() = synchronized(writes) {
-        dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }?.forEach { it.delete() }
+        fetchedFiles()?.forEach { it.delete() }
         _revision.value++
     }
 
     /** Drops the fetched moving covers shown longest ago while they take more than their share of the budget. */
     fun trim() = synchronized(writes) {
         val limit = ua.olex.music.playback.CacheBudget.motionBytes(context)
-        val fetched = dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }.orEmpty().sortedBy { it.lastModified() }
+        val fetched = fetchedFiles().orEmpty().sortedBy { it.lastModified() }
         var total = fetched.sumOf { it.length() }
         for (f in fetched) { if (total <= limit) break; total -= f.length(); f.delete() }
     }
 
-    fun bytes(): Long = dir.listFiles { f -> f.name.endsWith(".mp4") }?.sumOf { it.length() } ?: 0L
+    private fun fetchedFiles() = dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }
+
+    fun fetchedBytes(): Long = synchronized(writes) { fetchedFiles().orEmpty().sumOf { it.length() } }
 
     companion object { const val MAX_BYTES = 40L * 1024 * 1024 }
 
