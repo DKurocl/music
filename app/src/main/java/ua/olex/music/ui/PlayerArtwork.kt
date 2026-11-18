@@ -14,6 +14,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -124,18 +128,33 @@ internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope
 internal val LocalPlayerTravel = staticCompositionLocalOf<PlayerTravel?> { null }
 
 @Composable
-internal fun PlayerCoverLayout(travel: PlayerTravel, content: @Composable () -> Unit) {
+internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, content: @Composable () -> Unit) {
     androidx.compose.runtime.CompositionLocalProvider(
         LocalPlayerTravel provides travel, LocalPlayerCovers provides remember { PlayerCoverMemory() },
     ) {
-        Box(Modifier.fillMaxSize().onGloballyPositioned { travel.host = it }) { content() }
+        Box(Modifier.fillMaxSize().onGloballyPositioned { travel.host = it }) {
+            content()
+            val p = travel.fraction
+            val small = travel.thumbnail
+            val large = travel.sleeve
+            if (p > 0f && p < 1f && small.width > 0f && large.width > 0f) {
+                val density = LocalDensity.current
+                val x = small.left + (large.left - small.left) * p
+                val y = small.top + (large.top - small.top) * p
+                val width = small.width + (large.width - small.width) * p
+                val height = small.height + (large.height - small.height) * p
+                PlayerArtwork(artwork, Modifier.offset { IntOffset(x.toInt(), y.toInt()) }
+                    .size(with(density) { width.toDp() }, with(density) { height.toDp() }),
+                    14.dp + 18.dp * p, ua.olex.music.model.ArtworkPlan.LARGE)
+            }
+        }
     }
 }
 
 @Composable
 internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
     val travel = LocalPlayerTravel.current ?: return this
-    return onGloballyPositioned { coordinates ->
+    return graphicsLayer { if (!mini && travel.fraction < 1f) alpha = 0f }.onGloballyPositioned { coordinates ->
         val parent = (if (mini) travel.host else travel.page) ?: return@onGloballyPositioned
         if (!parent.isAttached) return@onGloballyPositioned
         val bounds = parent.localBoundingBoxOf(coordinates, clipBounds = false)
@@ -143,24 +162,9 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
     }
 }
 
-/** The page, its artwork and its controls all use this same matrix in both directions. */
+/** Keep the page at full size while its artwork travels separately. */
 internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier = graphicsLayer {
-    val p = travel.fraction
-    val small = travel.thumbnail
-    val large = travel.sleeve
-    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
-    if (small.width > 0f && large.width > 0f && large.top >= 0f) {
-        val scale = p + (1f - p) * (small.width / large.width)
-        scaleX = scale
-        scaleY = scale
-        translationX = (1f - p) * (small.left - large.left * small.width / large.width)
-        translationY = (1f - p) * (small.top - large.top * small.width / large.width)
-    } else {
-        scaleX = 1f; scaleY = 1f
-        translationX = 0f; translationY = (1f - p) * size.height
-    }
-    shape = RoundedCornerShape((28f * (1f - p)).dp)
-    clip = p < 1f
+    alpha = ((travel.fraction - 0.3f) / 0.7f).coerceIn(0f, 1f)
 }.onGloballyPositioned { travel.page = it }
 
 internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean, val preview: CoverFrame? = null)

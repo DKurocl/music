@@ -551,7 +551,7 @@ class DesignGalleryTest {
                 val scope = androidx.compose.runtime.rememberCoroutineScope()
                 val travel = androidx.compose.runtime.remember { PlayerTravel(scope) }
                 androidx.compose.runtime.LaunchedEffect(expanded.value) { travel.settle(expanded.value, false) }
-                PlayerCoverLayout(travel) {
+                PlayerCoverLayout(travel, "file:///cover") {
                     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
                         PlayerArtwork("file:///cover", Modifier.align(androidx.compose.ui.Alignment.BottomStart)
                             .size(48.dp).graphicsLayer { alpha = if (travel.fraction > 0f) 0f else 1f },

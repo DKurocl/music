@@ -204,7 +204,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 artist.about?.let { about -> item(key = "about") { AboutCard(about) } }
                 if (songs.isNotEmpty()) {
                     item(key = "songs-h") { OnlineHeading("Top songs") }
-                    itemsIndexed(songs.take(10), key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
+                    itemsIndexed(songs, key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
                         TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, PlaybackOrigin("artist", artist.id, artist.name).encode()) }
                     }
                 }
@@ -343,12 +343,20 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
     val nav = LocalOnlineNav.current
     val network = LocalNetwork.current
     val account by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
-    val state = rememberLoad(Triple(name, network, account), 0) {
+    var retry by remember(name) { mutableIntStateOf(0) }
+    val state = rememberLoad(Triple(name, network, account), retry) {
         graph.youTube.artistId(name, offline = !network)?.let { graph.youTube.artist(it, offline = !network) }
     }
     val artist = (state as? Load.Done)?.value
-    val popular = artist?.songs.orEmpty().take(5)
-    if (artist == null) return
+    if (artist == null) {
+        when (state) {
+            Load.Wait -> PlaceholderRow()
+            Load.Failed -> ErrorNotice(if (network) "Couldn't load this artist from YouTube Music." else "YouTube Music is unavailable offline.") { retry++ }
+            else -> Unit
+        }
+        return
+    }
+    val popular = artist.songs
     // Albums the owner already has open from his library above; only the others are offered here.
     val owned = key(name) { rememberOffMain(library, initial = emptySet()) {
         val artistName = TextFold.fold(name)

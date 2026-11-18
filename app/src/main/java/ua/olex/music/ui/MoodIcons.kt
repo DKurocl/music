@@ -23,7 +23,8 @@ import kotlin.math.sin
 /** One finite tap gesture per mood. A phase of either zero or one draws the resting symbol. */
 internal fun moodDuration(glyph: Glyph): Int = when (glyph) {
     Glyph.SLEEP, Glyph.RELAX -> 500
-    Glyph.PARTY, Glyph.RAIN, Glyph.FAVOURITE -> 460
+    Glyph.PARTY, Glyph.FAVOURITE -> 460
+    Glyph.HAPPY, Glyph.RAIN -> 560
     Glyph.ENERGY, Glyph.FOCUS -> 320
     else -> 380
 }
@@ -68,13 +69,16 @@ internal fun MoodMark(glyph: Glyph, ink: Color, modifier: Modifier, phase: () ->
                     if (flash > 0f) line(ink.copy(alpha = flash), 17.2f, 5.4f, 18.6f + flash, 4f - flash, 1.6f)
                 }
                 Glyph.HAPPY -> {
-                    drawCircle(ink, 8.5f, Offset(12f, 12f), style = pen)
-                    drawCircle(ink, 1.1f, Offset(8.8f, 10.1f))
-                    val wink = pulse(t, 0.12f, 0.78f)
-                    line(ink, 14.4f - wink, 10.1f, 14.4f + wink, 10.1f, 2.2f)
-                    path.moveTo(8.1f, 14f - swing * 0.4f)
-                    path.quadraticTo(12f, 19.2f + swing * 1.4f, 16f, 14f - swing * 0.4f)
-                    drawPath(path, ink, style = pen)
+                    rotate(-7f * swing, Offset(12f, 12f)) {
+                        drawCircle(ink, 8.5f, Offset(12f, 12f), style = pen)
+                        drawCircle(ink, 1.1f, Offset(8.8f, 10.1f))
+                        val wink = pulse(t, 0.12f, 0.72f)
+                        drawCircle(ink, 1.1f * (1f - wink), Offset(15.2f, 10.1f))
+                        if (wink > 0f) line(ink.copy(alpha = wink), 14.1f, 10.1f, 16.3f, 10.1f, 2f)
+                        path.moveTo(8.1f, 14f - swing * 0.4f)
+                        path.quadraticTo(12f, 19.2f + swing, 16f, 14f - swing * 0.4f)
+                        drawPath(path, ink, style = pen)
+                    }
                 }
                 Glyph.RELAX -> {
                     val root = Offset(12f, 19.5f)
@@ -127,8 +131,8 @@ internal fun MoodMark(glyph: Glyph, ink: Color, modifier: Modifier, phase: () ->
                     path.cubicTo(8f, 1.9f, 16.1f, 1.9f, 17.7f, 7.5f)
                     path.cubicTo(22.4f, 7.4f, 22.5f, 14f, 17.3f, 14f); path.close()
                     drawPath(path, ink, style = pen)
-                    val left = 2.2f * pulse(t, 0f, 0.67f)
-                    val right = 2.2f * pulse(t, 0.27f, 1f)
+                    val left = 2f * pulse(t, 0f, 0.7f)
+                    val right = 2f * pulse(t, 0.2f, 1f)
                     line(ink, 9.5f, 16.8f + left, 8.1f, 19f + left)
                     line(ink, 15.6f, 16.8f + right, 14.2f, 19f + right)
                 }
