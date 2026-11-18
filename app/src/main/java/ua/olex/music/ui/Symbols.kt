@@ -13,6 +13,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -43,7 +44,24 @@ enum class Glyph(val codepoint: Int) {
     CLOUD(0xE2BD), CLOUD_DONE(0xE2BF), CLOUD_OFF(0xE2C1), DOWNLOADING(0xF001), RADIO(0xE03E);
 
     val text: String = String(Character.toChars(codepoint))
+
+    /** The small gesture this glyph plays when its button is tapped. */
+    val motion: GlyphMotion get() = when (this) {
+        SEARCH -> GlyphMotion.SWING
+        SETTINGS, ADD, CLOSE, TUNE -> GlyphMotion.TURN
+        REFRESH, REPEAT, REPEAT_ONE, MIX, RADIO -> GlyphMotion.SPIN
+        NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
+        PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
+        DOWNLOAD, COLLAPSE, DOWN -> GlyphMotion.DROP
+        UP, ADD_TO_QUEUE, PLAYLIST_ADD -> GlyphMotion.RISE
+        SLEEP, DELETE, TIMER, HISTORY -> GlyphMotion.WOBBLE
+        SHUFFLE -> GlyphMotion.FLIP
+        else -> GlyphMotion.POP
+    }
 }
+
+/** Tap gestures for icons; each glyph picks the one that reads as its own (see [Glyph.motion]). */
+enum class GlyphMotion { POP, SWING, TURN, SPIN, NUDGE_RIGHT, NUDGE_LEFT, DROP, RISE, WOBBLE, FLIP }
 
 private object SymbolFont {
     @Volatile private var typeface: Typeface? = null
@@ -60,6 +78,8 @@ private object SymbolFont {
 fun Symbol(
     glyph: Glyph, modifier: Modifier = Modifier, size: Dp = 24.dp, color: Color = LocalContentColor.current,
     filled: Boolean = false, bold: Boolean = false,
+    /** Bumped by the icon's button on each tap: the glyph plays its own small gesture (see [GlyphMotion]). */
+    kick: Int = 0,
 ) {
     val ctx = LocalContext.current
     val motion = MaterialTheme.motionScheme
@@ -72,8 +92,30 @@ fun Symbol(
         if (first[0]) { first[0] = false; return@LaunchedEffect }
         if (emphasis) { pop.snapTo(0.82f); pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 500f)) }
     }
+    // A tap's gesture, as Google's apps give their icons: the lens swings, the gear turns, an arrow
+    // nudges the way it points. One spring, so it settles the same way everywhere; none in Battery Saver.
+    val tap = remember { Animatable(1f) }
+    val still = LocalPowerSave.current
+    LaunchedEffect(kick) { if (kick > 0 && !still) { tap.snapTo(0f); tap.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 380f)) } }
+    val gesture = glyph.motion
     val paint = remember { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = SymbolFont.get(ctx); textAlign = Paint.Align.CENTER } }
-    Canvas(modifier.size(size).graphicsLayer { scaleX = pop.value; scaleY = pop.value }) {
+    Canvas(modifier.size(size).graphicsLayer {
+        val t = tap.value; val left = 1f - t
+        val press = if (gesture == GlyphMotion.POP) 0.8f + 0.2f * t else 1f
+        scaleX = pop.value * press; scaleY = pop.value * press
+        when (gesture) {
+            GlyphMotion.SWING -> rotationZ = left * -30f
+            GlyphMotion.TURN -> rotationZ = left * -90f
+            GlyphMotion.SPIN -> rotationZ = left * -360f
+            GlyphMotion.NUDGE_RIGHT -> translationX = left * 5.dp.toPx()
+            GlyphMotion.NUDGE_LEFT -> translationX = left * -5.dp.toPx()
+            GlyphMotion.DROP -> translationY = left * -6.dp.toPx()
+            GlyphMotion.RISE -> translationY = left * 5.dp.toPx()
+            GlyphMotion.WOBBLE -> rotationZ = kotlin.math.sin(t * Math.PI.toFloat() * 3f) * left * 18f
+            GlyphMotion.FLIP -> scaleX = pop.value * (1f - 2f * left).coerceIn(-1f, 1f).let { if (it == 0f) 0.01f else it }
+            GlyphMotion.POP -> Unit
+        }
+    }) {
         // 960 units per em with the icon standing on the baseline: an em-sized glyph drawn with
         // its baseline at the bottom fills the box exactly.
         val em = this.size.minDimension
@@ -82,4 +124,18 @@ fun Symbol(
         paint.fontVariationSettings = String.format(Locale.ROOT, "'FILL' %.3f, 'wght' %.1f", fill, weight)
         drawContext.canvas.nativeCanvas.drawText(glyph.text, this.size.width / 2, (this.size.height + em) / 2, paint)
     }
+}
+
+/** An icon button whose glyph plays its tap gesture: content gets the tap count for [Symbol]'s kick. */
+@Composable
+internal fun KickIconButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable (Int) -> Unit) {
+    var kick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.material3.IconButton(onClick = { kick++; onClick() }, modifier = modifier, enabled = enabled) { content(kick) }
+}
+
+/** The tonal variant of [KickIconButton]. */
+@Composable
+internal fun KickFilledTonalIconButton(onClick: () -> Unit, modifier: Modifier = Modifier, enabled: Boolean = true, content: @Composable (Int) -> Unit) {
+    var kick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    androidx.compose.material3.FilledTonalIconButton(onClick = { kick++; onClick() }, modifier = modifier, enabled = enabled) { content(kick) }
 }

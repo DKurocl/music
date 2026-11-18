@@ -39,7 +39,11 @@ import kotlin.math.roundToInt
  * stay independent.
  */
 @Composable
-internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (String) -> Unit, onMove: (String, Int) -> Unit, onRemove: (String) -> Unit, mixFrom: String? = null) {
+internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (String) -> Unit, onMove: (String, Int) -> Unit, onRemove: (String) -> Unit, mixFrom: String? = null,
+    /** Keeps the whole queue as a playlist (opens the playlist picker). */
+    onSave: (() -> Unit)? = null,
+    /** Removes every song after the one playing. */
+    onClearNext: (() -> Unit)? = null) {
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
@@ -61,6 +65,13 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     listOfNotNull(mixFrom, "${state.queue.size} songs", if (state.shuffle) "shuffled" else null).joinToString(" · "),
                     style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
                 )
+            }
+            // Two quiet actions where the queue's header is, as in YouTube Music: keep it, or clear what's next.
+            if (onSave != null && state.queue.isNotEmpty()) KickIconButton(onClick = onSave, modifier = Modifier.semantics { contentDescription = "Save queue as a playlist" }) { k ->
+                Symbol(Glyph.PLAYLIST_ADD, color = cs.onSurfaceVariant, kick = k)
+            }
+            if (onClearNext != null && state.queueIndex < state.queue.lastIndex) KickIconButton(onClick = onClearNext, modifier = Modifier.semantics { contentDescription = "Clear songs after this one" }) { k ->
+                Symbol(Glyph.REMOVE, color = cs.onSurfaceVariant, kick = k)
             }
         }
         LazyColumn(state = list, modifier = Modifier.fillMaxWidth().heightIn(max = 600.dp), contentPadding = PaddingValues(bottom = 24.dp)) {

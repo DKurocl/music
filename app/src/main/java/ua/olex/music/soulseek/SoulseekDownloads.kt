@@ -380,7 +380,15 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             .setGroup(CHANNEL)
             .apply {
                 if (job.running) {
-                    setProgress(100, ((job.progress ?: 0f) * 100).toInt(), job.progress == null)
+                    val percent = ((job.progress ?: 0f) * 100).toInt()
+                    setProgress(100, percent, job.progress == null)
+                    // A Live Update (Android 16+): the download's progress in the status bar chip and on the
+                    // lock screen, as Google's own downloads show it. Plain progress stays the fallback.
+                    runCatching {
+                        setStyle(Notification.ProgressStyle().setStyledByProgress(true).setProgress(percent).setProgressIndeterminate(job.progress == null))
+                        setRequestPromotedOngoing(true)
+                        if (job.progress != null) setShortCriticalText("$percent%")
+                    }
                     addAction(Notification.Action.Builder(null, "Cancel", DownloadActions.action(context, job.id, retry = false)).build())
                 } else if (job.failed || job.cancelled) {
                     addAction(Notification.Action.Builder(null, "Retry", DownloadActions.action(context, job.id, retry = true)).build())

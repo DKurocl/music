@@ -83,11 +83,11 @@ internal fun SmartPlaylistBrowser(
             item(key = "header") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { openKey = null }, modifier = Modifier.semantics { contentDescription = "Back to smart playlists" }) { Symbol(Glyph.BACK) }
+                        KickIconButton(onClick = { openKey = null }, modifier = Modifier.semantics { contentDescription = "Back to smart playlists" }) { k -> Symbol(Glyph.BACK, kick = k) }
                         Spacer(Modifier.weight(1f))
                         if (!open.builtIn) {
-                            IconButton(onClick = { editing = open.playlist }, modifier = Modifier.semantics { contentDescription = "Edit rules" }) { Symbol(Glyph.EDIT) }
-                            IconButton(onClick = { deleting = open }, modifier = Modifier.semantics { contentDescription = "Delete smart playlist" }) { Symbol(Glyph.DELETE) }
+                            KickIconButton(onClick = { editing = open.playlist }, modifier = Modifier.semantics { contentDescription = "Edit rules" }) { k -> Symbol(Glyph.EDIT, kick = k) }
+                            KickIconButton(onClick = { deleting = open }, modifier = Modifier.semantics { contentDescription = "Delete smart playlist" }) { k -> Symbol(Glyph.DELETE, kick = k) }
                         } else IconButton(onClick = { editing = open.playlist.copy(name = open.playlist.name + " (copy)") },
                             modifier = Modifier.semantics { contentDescription = "Copy as a new smart playlist" }) { Symbol(Glyph.EDIT) }
                     }
@@ -106,8 +106,8 @@ internal fun SmartPlaylistBrowser(
                         style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 16.dp))
                 }
             }
-            itemsIndexed(open.tracks, key = { _, t -> t.id.value }) { index, track ->
-                TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(open.tracks, index) }
+            itemsIndexed(open.tracks, key = { _, t -> t.id.value }, contentType = { _, _ -> "song" }) { index, track ->
+                TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { onTrackActions(track) }) { onPlay(open.tracks, index) }
             }
         }
     }
@@ -177,7 +177,7 @@ private fun RuleRow(rule: SmartRule, onChange: (SmartRule) -> Unit, onRemove: ((
                 val ops = SmartOp.forKind(rule.field.kind)
                 Choice(null, rule.op.label, ops.map { it.label }) { onChange(rule.copy(op = ops[it])) }
                 Spacer(Modifier.weight(1f))
-                if (onRemove != null) IconButton(onClick = onRemove, modifier = Modifier.semantics { contentDescription = "Remove rule" }) { Symbol(Glyph.CLOSE, size = 20.dp) }
+                if (onRemove != null) KickIconButton(onClick = onRemove, modifier = Modifier.semantics { contentDescription = "Remove rule" }) { k -> Symbol(Glyph.CLOSE, size = 20.dp, kick = k) }
             }
             if (rule.field.kind != SmartField.Kind.FLAG) TextField(
                 rule.value, { onChange(rule.copy(value = it)) }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp),

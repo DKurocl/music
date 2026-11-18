@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -229,7 +230,7 @@ internal fun HomePage(
                                 color = if (track.id.value == currentId) cs.primary else cs.onSurface)
                             Text(track.artist, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1)
                         }
-                        IconButton(onClick = { onTrackActions(track) }, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) { Symbol(Glyph.MORE, color = cs.onSurfaceVariant) }
+                        KickIconButton(onClick = { onTrackActions(track) }, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) { k -> Symbol(Glyph.MORE, color = cs.onSurfaceVariant, kick = k) }
                     }
                 }
             }
@@ -318,7 +319,7 @@ internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modif
                         leadingContent = { Artwork(track.artworkUri, Modifier.size(48.dp), 12.dp) },
                         trailingContent = {
                             if (i == 0) Text("Keep", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                            else IconButton(onClick = { onTrash(listOf(track)) }, modifier = Modifier.semantics { contentDescription = "Move this copy to trash" }) { Symbol(Glyph.DELETE) }
+                            else KickIconButton(onClick = { onTrash(listOf(track)) }, modifier = Modifier.semantics { contentDescription = "Move this copy to trash" }) { k -> Symbol(Glyph.DELETE, kick = k) }
                         },
                         modifier = Modifier.clickable { onPlay(group, i) },
                     )
@@ -346,16 +347,18 @@ internal fun QuickPicks(songs: List<Track>, currentId: String?, onPlay: (List<Tr
             Column(Modifier.width(width)) {
                 columns[c].forEachIndexed { r, track ->
                     val index = c * 4 + r
-                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable { onPlay(songs, index) }.padding(horizontal = 8.dp, vertical = 6.dp),
+                    // Tap plays, a long press opens the song's actions (as YouTube Music's quick picks): no
+                    // menu button on every row, so the shelf stays calm.
+                    val haptics = rememberHaptics()
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                        .combinedClickable(onLongClickLabel = "Song actions", onLongClick = { haptics.longPress(); onTrackActions(track) }) { onPlay(songs, index) }
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Artwork(track.artworkUri, Modifier.size(52.dp), 12.dp)
                         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                             Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
                                 color = if (track.id.value == currentId) cs.primary else cs.onSurface)
                             Text(track.artist, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        IconButton(onClick = { onTrackActions(track) }, modifier = Modifier.semantics { contentDescription = "Actions for ${track.title}" }) {
-                            Symbol(Glyph.MORE, color = cs.onSurfaceVariant)
                         }
                     }
                 }
@@ -563,4 +566,25 @@ private fun homeData(library: LibraryIndex, history: List<Track>, stats: Map<Str
     val fresh = library.songs.filter { it.artist in topArtists && (stats[it.statsKey]?.plays ?: 0) == 0 }.shuffled(random).take(6)
     val quickPicks = (played + fresh).distinctBy { it.id }.ifEmpty { library.songs.shuffled(random).take(20) }.shuffled(random).take(20)
     return HomeData(newest, artists, recentAlbums, addedAlbums, mostPlayed, listened, quickPicks)
+}
+
+/** Home before the library is read: mood chips, the bento and song rows as quiet tonal shapes. */
+@Composable
+internal fun HomeSkeleton(modifier: Modifier) {
+    val tone = MaterialTheme.colorScheme.surfaceContainerHigh
+    val pulse = rememberLoadingPulse()
+    Column(modifier.fillMaxSize().graphicsLayer { alpha = pulse() }.semantics { contentDescription = "Loading your library" }) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(3) { Box(Modifier.width(104.dp).height(40.dp).clip(RoundedCornerShape(50)).background(tone)) }
+        }
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp).height(264.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Box(Modifier.weight(1.45f).fillMaxHeight().clip(RoundedCornerShape(32.dp)).background(tone))
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(tone))
+                Box(Modifier.weight(1f).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(tone))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        repeat(4) { PlaceholderRow() }
+    }
 }

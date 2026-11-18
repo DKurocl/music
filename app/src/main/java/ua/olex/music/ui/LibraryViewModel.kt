@@ -619,6 +619,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun previous() = player.previous()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
     fun setSleepTimer(minutes: Int) = player.setSleepTimer(minutes)
+    fun extendSleepTimer(ms: Long) = player.extendSleepTimer(ms)
     fun toggleShuffle() = player.toggleShuffle()
     fun cycleRepeat() = player.cycleRepeat()
     fun playQueueItem(key: String) {
@@ -627,6 +628,32 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
     fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
     fun removeQueueItem(key: String) = player.removeQueueItem(key)
+
+    // Launcher shortcuts: each waits for what it needs (the player, the library), then acts once.
+    /** Bumped when Search should open with the keyboard (the Search shortcut). */
+    var searchRequest by mutableStateOf(0); private set
+    fun requestSearch() { searchRequest++ }
+    fun resumeFromShortcut() = viewModelScope.launch {
+        val state = kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
+        if (!state.playWhenReady && state.hasTrack) player.toggle()
+        requestPlayer()
+    }
+    fun shuffleAllFromShortcut() = viewModelScope.launch {
+        val songs = kotlinx.coroutines.withTimeoutOrNull(10_000) { library.first { it != null } }?.songs.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
+        if (songs.isNotEmpty()) { playShuffled(songs); requestPlayer() }
+    }
+    fun likedFromShortcut() = viewModelScope.launch {
+        val liked = kotlinx.coroutines.withTimeoutOrNull(10_000) { personal.first { it.favourites.isNotEmpty() } }?.favourites?.mapNotNull { it.track }.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
+        if (liked.isNotEmpty()) { playFrom(liked, 0, null); requestPlayer() }
+    }
+
+    /** Clears every song after the one playing, last first so the keys stay valid. */
+    fun clearUpNext() {
+        val state = playing.value
+        state.queue.drop(state.queueIndex + 1).asReversed().forEach { player.removeQueueItem(it.key) }
+    }
     fun enqueue(tracks: List<Track>, next: Boolean) {
         player.enqueue(tracks, next)
     }

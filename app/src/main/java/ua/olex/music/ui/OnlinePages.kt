@@ -2,6 +2,9 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,7 +36,6 @@ internal sealed interface OnlineTarget {
     data class Artist(val name: String, val id: String? = null, val full: Boolean = false) : OnlineTarget
     /** An album, or a playlist when [playlist] (no album download for a playlist of many artists). */
     data class Album(val id: String, val title: String, val playlist: Boolean = false, val cover: String? = null, val subtitle: String? = null) : OnlineTarget
-    data class Mood(val mood: YouTubeMusic.Mood) : OnlineTarget
 }
 
 /**
@@ -116,8 +118,9 @@ private fun WarmFirst(songs: List<Track>) {
 /** A song row's place while the list loads: the same height as a row, so nothing jumps when it fills. */
 @Composable
 internal fun PlaceholderRow(cover: Boolean = true) {
+    val loadingPulse = rememberLoadingPulse()
     val tone = MaterialTheme.colorScheme.surfaceContainerHigh
-    Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 24.dp).graphicsLayer { alpha = loadingPulse() }, verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(if (cover) 52.dp else 28.dp).clip(RoundedCornerShape(if (cover) 12.dp else 8.dp)).background(tone))
         Spacer(Modifier.width(16.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -141,7 +144,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
     val network = LocalNetwork.current
-    val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
+    val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val state = rememberLoad(Triple(target, accountScope, network), retry, target.id?.let(graph.youTube::peekArtist)) {
         val id = target.id ?: graph.youTube.artistId(target.name, offline = !network) ?: return@rememberLoad null
         graph.youTube.artist(id, offline = !network)
@@ -196,8 +199,8 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 artist.about?.let { about -> item(key = "about") { AboutCard(about) } }
                 if (songs.isNotEmpty()) {
                     item(key = "songs-h") { OnlineHeading("Top songs") }
-                    itemsIndexed(songs.take(10), key = { _, t -> "s-" + t.id.value }) { i, t ->
-                        TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, PlaybackOrigin("artist", artist.id, artist.name).encode()) }
+                    itemsIndexed(songs.take(10), key = { _, t -> "s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
+                        TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, PlaybackOrigin("artist", artist.id, artist.name).encode()) }
                     }
                 }
                 if (artist.albums.isNotEmpty()) {
@@ -239,7 +242,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
     val network = LocalNetwork.current
-    val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
+    val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val state = rememberLoad(Triple(target, accountScope, network), retry, graph.youTube.peekAlbum(target.id)) {
         graph.youTube.album(target.id, offline = !network)
     }
@@ -299,8 +302,8 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
             Load.Failed -> item {
                 OnlineFailed(target.title, Glyph.ALBUM) { retry++ }
             }
-            is Load.Done -> itemsIndexed(songs, key = { i, t -> "a-$i-" + t.id.value }) { i, t ->
-                TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, origin) }
+            is Load.Done -> itemsIndexed(songs, key = { i, t -> "a-$i-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
+                TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }, number = if (mixed) null else i + 1, albumArtist = if (mixed) null else t.artist) { nav.play(songs, i, origin) }
             }
         }
     }
@@ -314,7 +317,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
 @Composable
 internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: String?) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val on by graph.youTubeOn.collectAsState()
+    val on by graph.youTubeOn.collectAsStateWithLifecycle()
     if (!on) return
     val nav = LocalOnlineNav.current
     val state = rememberLoad(name, 0) { graph.youTube.artistId(name)?.let { graph.youTube.artist(it) } }
@@ -393,7 +396,7 @@ private fun OnlineCard(cover: String?, title: String, subtitle: String?, onClick
 @Composable
 internal fun DownloadButton(key: String, owned: Boolean, what: String, onStart: () -> Unit) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val jobs by graph.soulseek.jobs.collectAsState()
+    val jobs by graph.soulseek.jobs.collectAsStateWithLifecycle()
     val job = jobs.lastOrNull { it.key == key }
     val snackbar = LocalSnackbar.current
     val scope = rememberCoroutineScope()
@@ -442,7 +445,7 @@ internal fun DownloadButton(key: String, owned: Boolean, what: String, onStart: 
 @Composable
 internal fun DownloadStatus(key: String) {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val jobs by graph.soulseek.jobs.collectAsState()
+    val jobs by graph.soulseek.jobs.collectAsStateWithLifecycle()
     val job = jobs.lastOrNull { it.key == key }?.takeIf { !it.done }
     val cs = MaterialTheme.colorScheme
     androidx.compose.animation.AnimatedVisibility(job != null,
@@ -480,7 +483,8 @@ internal fun MoodRow(moods: List<YouTubeMusic.Mood>, modifier: Modifier = Modifi
             Surface(onClick = { haptics.tick(); onSelect(if (on) null else mood) }, shape = RoundedCornerShape(50), color = container, contentColor = ink,
                 modifier = Modifier.height(40.dp).squish(0.04f).semantics { selected = on }) {
                 Row(Modifier.padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Symbol(moodGlyph(mood.label), size = 20.dp, color = if (on) cs.onPrimary else cs.primary, filled = on)
+                    // The mood's glyph plays its gesture as the chip is chosen.
+                    Symbol(moodGlyph(mood.label), size = 20.dp, color = if (on) cs.onPrimary else cs.primary, filled = on, kick = if (on) 1 else 0)
                     Spacer(Modifier.width(8.dp))
                     Text(mood.label, style = MaterialTheme.typography.labelLarge)
                 }
@@ -499,7 +503,7 @@ internal class MoodView(val page: YouTubeMusic.MoodPage?, val mine: List<Track>,
 @Composable
 internal fun rememberMoodView(mood: YouTubeMusic.Mood, library: LibraryIndex): MoodView {
     val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val on by graph.youTubeOn.collectAsState()
+    val on by graph.youTubeOn.collectAsStateWithLifecycle()
     val network = LocalNetwork.current
     val mine by produceState(emptyList<Track>(), mood.label, library) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { Mix.moodSongs(mood.label, library.songs).shuffled(java.util.Random(mood.label.hashCode().toLong())).take(30) }
@@ -516,7 +520,7 @@ internal fun rememberMoodView(mood: YouTubeMusic.Mood, library: LibraryIndex): M
 
 /** The mood's part of Home: a big Play, YouTube Music's playlists, the owner's fitting songs, more songs. */
 internal fun androidx.compose.foundation.lazy.LazyListScope.moodItems(mood: YouTubeMusic.Mood, view: MoodView, currentId: String?) {
-    item(key = "mood-play") {
+    item(key = "mood-play") { Box(Modifier.animateItem()) {
         val nav = LocalOnlineNav.current
         val haptics = rememberHaptics()
         val cs = MaterialTheme.colorScheme
@@ -543,95 +547,34 @@ internal fun androidx.compose.foundation.lazy.LazyListScope.moodItems(mood: YouT
                 }
             }
         }
-    }
+    } }
     val playlists = view.page?.playlists.orEmpty()
     if (playlists.isNotEmpty()) {
-        item(key = "mood-pl-h") { OnlineHeading("Playlists") }
-        item(key = "mood-pl") { YouTubeCards(playlists.map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.PLAYLIST) }) }
+        item(key = "mood-pl-h") { Box(Modifier.animateItem()) { OnlineHeading("Playlists") } }
+        item(key = "mood-pl") { Box(Modifier.animateItem()) { YouTubeCards(playlists.map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.PLAYLIST) }) } }
     } else if (view.loading) {
-        item(key = "mood-pl-h") { OnlineHeading("Playlists") }
-        item(key = "mood-pl-wait") {
+        item(key = "mood-pl-h") { Box(Modifier.animateItem()) { OnlineHeading("Playlists") } }
+        item(key = "mood-pl-wait") { Box(Modifier.animateItem()) {
             LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), userScrollEnabled = false) {
                 items(3) { Box(Modifier.size(148.dp).clip(RoundedCornerShape(20.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) }
             }
-        }
+        } }
     }
     if (view.mine.isNotEmpty()) {
-        item(key = "mood-mine-h") { OnlineHeading("From your library") }
-        itemsIndexed(view.mine.take(8), key = { _, t -> "mood-mine-" + t.id.value }) { i, t ->
+        item(key = "mood-mine-h") { Box(Modifier.animateItem()) { OnlineHeading("From your library") } }
+        itemsIndexed(view.mine.take(8), key = { _, t -> "mood-mine-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
             val nav = LocalOnlineNav.current
-            TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(view.mine, i, mood.label) }
+            TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(view.mine, i, mood.label) }
         }
     }
     // YouTube Music's songs for the mood that aren't already shown as the owner's own above.
     val shownMine = view.mine.take(8).mapTo(HashSet()) { it.id }
     val songs = view.songs.filterNot { it.id in shownMine }
     if (songs.isNotEmpty()) {
-        item(key = "mood-songs-h") { OnlineHeading("More for ${mood.label.lowercase()}") }
-        itemsIndexed(songs.take(10), key = { _, t -> "mood-s-" + t.id.value }) { i, t ->
+        item(key = "mood-songs-h") { Box(Modifier.animateItem()) { OnlineHeading("More for ${mood.label.lowercase()}") } }
+        itemsIndexed(songs.take(10), key = { _, t -> "mood-s-" + t.id.value }, contentType = { _, _ -> "song" }) { i, t ->
             val nav = LocalOnlineNav.current
-            TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, mood.label) }
-        }
-    }
-}
-
-/**
- * A mood: its name, Play, YouTube Music's playlists for it and any songs it lists. Play works even
- * when YouTube Music lists nothing here: it grows a mix from the owner's songs of that mood.
- */
-@Composable
-internal fun MoodPage(target: OnlineTarget.Mood, currentId: String?, insets: PaddingValues, library: LibraryIndex = LibraryIndex.EMPTY, onTitleShown: (Boolean) -> Unit = {}) {
-    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val nav = LocalOnlineNav.current
-    val cs = MaterialTheme.colorScheme
-    val haptics = rememberHaptics()
-    val on by graph.youTubeOn.collectAsState()
-    val state = rememberLoad(target, 0) { if (on) graph.youTube.mood(target.mood) ?: YouTubeMusic.MoodPage(emptyList(), emptyList()) else YouTubeMusic.MoodPage(emptyList(), emptyList()) }
-    val page = (state as? Load.Done)?.value
-    val moodSongs = page?.songs.orEmpty()
-    val list = androidx.compose.foundation.lazy.rememberLazyListState()
-    ReportTitle(list, onTitleShown)
-    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
-        item(key = "head") {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Surface(shape = androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(), color = cs.primaryContainer, contentColor = cs.onPrimaryContainer, modifier = Modifier.size(72.dp)) {
-                    Box(contentAlignment = Alignment.Center) { Symbol(moodGlyph(target.mood.label), size = 36.dp, filled = true) }
-                }
-                Spacer(Modifier.height(16.dp))
-                Text(target.mood.label, style = MaterialTheme.typography.displaySmall)
-                Spacer(Modifier.height(16.dp))
-                Button(enabled = state !is Load.Wait, onClick = { haptics.confirm(); nav.playMood(target.mood, page) }, modifier = Modifier.height(52.dp)) {
-                    Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
-                }
-            }
-        }
-        when {
-            state is Load.Wait -> { item { Spacer(Modifier.height(16.dp)) }; placeholders(cover = true) }
-            page == null || (page.playlists.isEmpty() && page.songs.isEmpty()) -> item {
-                Text(if (on) "YouTube Music lists nothing for this mood here. Play makes a mix from your own ${target.mood.label.lowercase()} songs."
-                    else "Play makes a mix from your own ${target.mood.label.lowercase()} songs. Turn on YouTube Music in Settings for its playlists.",
-                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, modifier = Modifier.padding(16.dp))
-            }
-            else -> {
-                if (page.playlists.isNotEmpty()) {
-                    item(key = "pl-h") { OnlineHeading("Playlists") }
-                    item(key = "pl") {
-                        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            items(page.playlists, key = { it.id }) { pl ->
-                                Column(Modifier.width(160.dp).clip(RoundedCornerShape(20.dp)).clickable { nav.open(OnlineTarget.Album(pl.id, pl.title, playlist = true, cover = pl.cover, subtitle = pl.subtitle)) }) {
-                                    Artwork(pl.cover, Modifier.size(160.dp), 20.dp)
-                                    Text(pl.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
-                                    pl.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (page.songs.isNotEmpty()) {
-                    item(key = "s-h") { OnlineHeading("Songs") }
-                    itemsIndexed(moodSongs, key = { _, t -> "m-" + t.id.value }) { i, t -> TrackRow(t, current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(moodSongs, i, target.mood.label) } }
-                }
-            }
+            TrackRow(t, modifier = Modifier.animateItem(), current = t.id.value == currentId, onMore = { nav.actions(t) }) { nav.play(songs, i, mood.label) }
         }
     }
 }
@@ -695,4 +638,16 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
             }
         }
     }
+}
+
+/**
+ * A slow breath for loading shapes (0.55 to 1 alpha), read while drawing so nothing recomposes;
+ * steady in Battery Saver.
+ */
+@Composable
+internal fun rememberLoadingPulse(): () -> Float {
+    if (LocalPowerSave.current) return { 1f }
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "loading").animateFloat(0.55f, 1f,
+        androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse), label = "pulse")
+    return { pulse.value }
 }

@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -116,8 +117,8 @@ internal fun PlaylistBrowser(
     val back = rememberLibraryBack(selected != null) { selectedId = null }
     // Signed in to YouTube Music: his playlists there too (Liked music first), loaded once a session.
     val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
-    val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
-    val youTubeOn by graph.youTubeOn.collectAsState()
+    val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val youTubeOn by graph.youTubeOn.collectAsStateWithLifecycle()
     val network = LocalNetwork.current
     val youTubePlaylists = androidx.compose.runtime.key(accountScope, youTubeOn) {
         val loaded by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network) {
@@ -209,7 +210,7 @@ internal fun PlaylistBrowser(
                 // Like an album page: big mosaic, name, counts, Play all; the playlist's own tools as chips.
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
                     Row(Modifier.fillMaxWidth()) {
-                        IconButton(onClick = { selectedId = null }, modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { Symbol(Glyph.BACK) }
+                        KickIconButton(onClick = { selectedId = null }, modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     }
                     PlaylistCover(selected.playable, 200.dp, 28.dp)
                     Text(selected.name, style = MaterialTheme.typography.headlineSmallEmphasized)

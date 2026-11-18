@@ -118,7 +118,8 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                     onHold = { held = it },
                     onGain = { index, value -> draft = draft.copy(profile = "Custom", bands = draft.bands.mapIndexed { i, item -> if (i == index) item.copy(gainDb = value) else item }) },
                     onDone = { held = null; onApply(state.routeKey, draft) })
-                androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // The row scrolls: its right edge fades out, so the bands past it read as more to come.
+                androidx.compose.foundation.lazy.LazyRow(modifier = Modifier.fadeEnd(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     // Chips in order of frequency (imported profiles list bands in any order); each opens its own band.
                     val order = draft.bands.indices.sortedBy { draft.bands[it].frequencyHz }
                     items(order.size) { position ->
