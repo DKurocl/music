@@ -56,6 +56,19 @@ class UserRepositoryTest {
         assertEquals(setOf(idOf(online), idOf(b)), repository.catalogue.first().map { it.id }.toSet())
     }
 
+    @Test fun undoRestoresTheOccurrenceUnlessAnotherEditChangedTheOrder() = runBlocking {
+        val id = repository.createPlaylist("Loop", listOf(a, b))
+        repository.addToPlaylist(id, listOf(a), duplicates = true)
+        val removed = requireNotNull(repository.removeFromPlaylist(id, idOf(a), position = 0))
+        assertTrue(repository.restorePlaylistOccurrence(removed))
+        assertEquals(listOf("Song 1", "Song 2", "Song 1"), names())
+
+        val stale = requireNotNull(repository.removeFromPlaylist(id, idOf(a), position = 2))
+        repository.addToPlaylist(id, listOf(c))
+        assertFalse(repository.restorePlaylistOccurrence(stale))
+        assertEquals(listOf("Song 1", "Song 2", "Song 3"), names())
+    }
+
     @Test fun duplicatesOnPurposeAndPositionalEdits() = runBlocking {
         val id = repository.createPlaylist("Loop", listOf(a))
         repository.addToPlaylist(id, listOf(b, a), duplicates = true)

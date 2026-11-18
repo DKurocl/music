@@ -339,9 +339,40 @@ internal class YouTubeMusic(
     ): PlaylistSnapshot = withContext(ioDispatcher) {
         val headers = sessionHeaders(scope)
         val before = playlistSnapshot(id, headers)
-        fun List<PlaylistOccurrence>.identity() = map { it.videoId to it.entryId }
-        check(before.entries.identity() == expected.identity()) { "The playlist changed on YouTube Music. Refresh it and try again." }
         check(pageScope() == scope) { "The YouTube Music account changed." }
+        val current = before.entries
+        val entry = change.entry
+        val conflict = "The same playlist entry changed on YouTube Music. Refresh it and try again."
+        if (change.kind != PlaylistChange.Kind.ADD) {
+            val requested = requireNotNull(entry)
+            check(requested in expected) { conflict }
+            fun List<PlaylistOccurrence>.indexOfEntry(key: String) = indexOfFirst { it.entryId == key }
+            val key = requireNotNull(requested.entryId)
+            val actual = current.getOrNull(current.indexOfEntry(key))
+            if (actual == null && change.kind == PlaylistChange.Kind.REMOVE) {
+                check(current.none { it.videoId == requested.videoId && it.entryId == null }) { conflict }
+                rememberPlaylistSnapshot(id, scope, before)
+                return@withContext before
+            }
+            check(actual?.videoId == requested.videoId) { conflict }
+            if (change.kind == PlaylistChange.Kind.MOVE) {
+                val successor = change.successor
+                check(successor == null || current.indexOfEntry(successor) >= 0) { conflict }
+                val known = expected.mapNotNull { it.entryId }.toSet()
+                val nowKnown = current.mapNotNull { it.entryId }.filter { it in known }
+                val previousKnown = expected.mapNotNull { it.entryId }.filter { it in nowKnown }
+                val at = nowKnown.indexOf(key)
+                val was = previousKnown.indexOf(key)
+                val alreadyMoved = current.getOrNull(current.indexOfEntry(key) + 1)?.entryId == successor &&
+                    (successor != null || current.lastOrNull()?.entryId == key)
+                if (alreadyMoved) {
+                    rememberPlaylistSnapshot(id, scope, before)
+                    return@withContext before
+                }
+                check(at > -1 && was > -1 && nowKnown.getOrNull(at - 1) == previousKnown.getOrNull(was - 1) &&
+                    nowKnown.getOrNull(at + 1) == previousKnown.getOrNull(was + 1)) { conflict }
+            }
+        }
         val action = org.json.JSONObject()
         when (change.kind) {
             PlaylistChange.Kind.ADD -> action.put("action", "ACTION_ADD_VIDEO").put("addedVideoId", requireNotNull(change.videoId))
@@ -366,8 +397,16 @@ internal class YouTubeMusic(
         more.remove("$scope/$id")
         val updated = playlistSnapshot(id, headers)
         check(pageScope() == scope) { "The YouTube Music account changed." }
-        saveAlbum(scope, id, updated.album to updated.tracks)
+        rememberPlaylistSnapshot(id, scope, updated)
         updated
+    }
+
+    private fun rememberPlaylistSnapshot(id: String, scope: String, snapshot: PlaylistSnapshot) {
+        synchronized(pages) { pages.remove("$scope/offline/album:$id") }
+        more.remove("$scope/$id")
+        val result = snapshot.album to snapshot.tracks
+        keep("$scope/album:$id", result)
+        saveAlbum(scope, id, result)
     }
 
     private fun sessionHeaders(scope: String): Map<String, String> {

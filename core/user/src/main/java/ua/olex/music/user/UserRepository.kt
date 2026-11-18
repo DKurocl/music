@@ -176,14 +176,27 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         adding.mapIndexed { index, song -> PlaylistEntryEntity(id, song.id, existing.size + index) }.chunked(500).forEach { dao.insertEntries(it) }
     }
 
-    /** Removes the entry at [position] (only if it still holds [songId], so a stale screen removes nothing else). */
-    suspend fun removeFromPlaylist(id: Long, songId: String, position: Int? = null) = database.withTransaction {
+    /** Undo retains the exact occurrence and rejects an intervening edit. */
+    data class RemovedOccurrence(val playlistId: Long, val position: Int, val songId: String, val after: List<String>)
+
+    suspend fun removeFromPlaylist(id: Long, songId: String, position: Int? = null): RemovedOccurrence? = database.withTransaction {
         val ids = dao.entries(id).map { it.songId }.toMutableList()
         val canonical = dao.canonicalId(songId) ?: songId
-        val at = if (position != null) { if (ids.getOrNull(position) != canonical) return@withTransaction; position } else ids.indexOf(canonical)
-        if (at < 0) return@withTransaction
+        val at = position ?: ids.indexOf(canonical)
+        if (ids.getOrNull(at) != canonical) return@withTransaction null
         ids.removeAt(at)
         replaceEntries(id, ids)
+        RemovedOccurrence(id, at, canonical, ids.toList())
+    }
+
+    suspend fun restorePlaylistOccurrence(removed: RemovedOccurrence): Boolean = database.withTransaction {
+        if (!dao.playlistExists(removed.playlistId)) return@withTransaction false
+        val ids = dao.entries(removed.playlistId).map { it.songId }
+        val after = removed.after.map { dao.canonicalId(it) ?: it }
+        if (ids != after) return@withTransaction false
+        val songId = dao.canonicalId(removed.songId) ?: return@withTransaction false
+        replaceEntries(removed.playlistId, ids.toMutableList().apply { add(removed.position, songId) })
+        true
     }
 
     /** Re-read within the transaction so a concurrent add/remove is never overwritten by stale UI. */

@@ -404,7 +404,15 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 Modifier.padding(start = 8.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Artwork(state.artworkUri, Modifier.size(48.dp), 14.dp)
+                Box(Modifier.size(48.dp)) {
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = !covered,
+                        enter = androidx.compose.animation.EnterTransition.None,
+                        exit = androidx.compose.animation.ExitTransition.None,
+                    ) {
+                        Artwork(state.artworkUri, Modifier.fillMaxSize().playerCoverTransition(state.mediaId, this), 14.dp)
+                    }
+                }
                 Column(Modifier.weight(1f)) {
                     Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val subtitle = when {
@@ -581,7 +589,7 @@ internal fun PlayerPage(
             }
             Artwork(
                 state.artworkUri,
-                Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
+                Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f).playerCoverTransition(state.mediaId)
                     .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
                     .pointerInput(onFavourite, onMore) {
                         detectTapGestures(

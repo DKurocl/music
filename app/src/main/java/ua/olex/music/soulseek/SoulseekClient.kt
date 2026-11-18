@@ -187,7 +187,7 @@ class SoulseekClient(
      * when its turn comes it offers the transfer, we accept, and it sends the file over a new
      * connection.
      */
-    suspend fun download(result: Result, target: OutputStream, progress: (Long, Long) -> Unit, waitMs: Long = 10 * 60_000L) = withContext(Dispatchers.IO) {
+    suspend fun download(result: Result, target: OutputStream, progress: (Long, Long) -> Unit, waitMs: Long = 10 * 60_000L, offset: Long = 0L) = withContext(Dispatchers.IO) {
         val offer = CompletableDeferred<Pair<Long, Long>>()
         val refused = CompletableDeferred<String>()
         val k = key(result.username, result.path)
@@ -217,11 +217,12 @@ class SoulseekClient(
                         finally { runCatching { socket.close() } }
                     }
                     try {
+                        if (size != result.size || offset !in 0 until size) throw IOException("The peer's file size changed")
                         socket.soTimeout = 30_000
-                        socket.getOutputStream().apply { write(Out().u64(0).toByteArray()); flush() }
+                        socket.getOutputStream().apply { write(Out().u64(offset).toByteArray()); flush() }
                         val input = socket.getInputStream()
                         val buffer = ByteArray(64 * 1024)
-                        var got = 0L
+                        var got = offset
                         while (got < size) {
                             val n = input.read(buffer, 0, minOf(buffer.size.toLong(), size - got).toInt())
                             if (n < 0) break
