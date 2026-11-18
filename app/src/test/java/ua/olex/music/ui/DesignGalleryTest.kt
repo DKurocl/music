@@ -514,6 +514,47 @@ class DesignGalleryTest {
         } finally { compose.mainClock.autoAdvance = true }
     }
 
+    @Test fun transportGlyphsChangeShapeBetweenPressAndRest() {
+        compose.setContent { AppTheme {
+            val playing = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            val background = MaterialTheme.colorScheme.surface
+            androidx.compose.foundation.layout.Row {
+                KickIconButton({ playing.value = !playing.value }, Modifier.testTag("toggle")) {
+                    androidx.compose.foundation.layout.Box(Modifier.testTag("play shape").background(background)) {
+                        PlayPauseSymbol(playing.value, 40.dp)
+                    }
+                }
+                KickIconButton({}, Modifier.testTag("skip")) { taps ->
+                    androidx.compose.foundation.layout.Box(Modifier.testTag("skip shape").background(background)) {
+                        SkipSymbol(true, 40.dp, taps)
+                    }
+                }
+            }
+        } }
+        fun image(tag: String, name: String): Bitmap {
+            val bitmap = compose.onNodeWithTag(tag, useUnmergedTree = true).captureToImage().asAndroidBitmap()
+            File("build/reports/ui-previews/player-motion").apply { mkdirs() }.resolve("$name.png")
+                .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            return bitmap
+        }
+        val play = image("play shape", "play")
+        val skip = image("skip shape", "skip")
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.onNodeWithTag("toggle").performClick()
+            compose.onNodeWithTag("skip").performClick()
+            compose.mainClock.advanceTimeBy(112)
+            val unfolding = image("play shape", "unfolding")
+            val advancing = image("skip shape", "advancing")
+            compose.mainClock.advanceTimeBy(1000)
+            val pause = image("play shape", "pause")
+            org.junit.Assert.assertFalse(play.sameAs(unfolding))
+            org.junit.Assert.assertFalse(pause.sameAs(unfolding))
+            org.junit.Assert.assertFalse(skip.sameAs(advancing))
+            org.junit.Assert.assertTrue(skip.sameAs(image("skip shape", "skip-settled")))
+        } finally { compose.mainClock.autoAdvance = true }
+    }
+
     @Test @Config(qualifiers = "w412dp-h915dp-xhdpi")
     fun playerLargeFont() {
         compose.setContent {

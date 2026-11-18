@@ -55,7 +55,7 @@ enum class Glyph(val codepoint: Int) {
         NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
         PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
         DOWNLOAD, COLLAPSE, DOWN -> GlyphMotion.DROP
-        UP, ADD_TO_QUEUE, PLAYLIST_ADD -> GlyphMotion.RISE
+        UP, ADD_TO_QUEUE, PLAYLIST_ADD, PLAYLIST, QUEUE, LYRICS -> GlyphMotion.RISE
         else -> GlyphMotion.POP
     }
 }
