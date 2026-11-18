@@ -142,3 +142,13 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
    choice and metadata. Repeat while offline and with local audio permission denied/revoked.
 6. Start a long manual scan, then select a cached or online song. Selection must use the current
    snapshot without waiting for the full scan. Measure actual command latency and rare long frames.
+
+## Sleep timer follow-up
+
+1. Set a timed stop, lock the screen, and verify the session pauses at the deadline.
+2. During the fade, manually pause and resume, then verify that the original deadline still stops playback.
+3. During the fade, cancel or replace the timer. Verify the old deadline does not stop playback and
+   that replacing the timer does not cancel a manual fade.
+4. Run End of this song on the last item and on a queue with a following item. Verify the timer clears,
+   the next item does not start, and the expected queue position is retained. Repeat with shuffle and XM5.
+5. Repeat timed playback over Cast. End-of-track currently relies on the local ExoPlayer end event.
