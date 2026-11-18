@@ -1,3 +1,13 @@
+# Launcher icon and startup motion (2026-11-18)
+
+Music uses the approved rounded Play mark with a white note and a yellow, orange and pink
+gradient. The color and themed layers use the same geometry. The mark is optically centered
+in the round mask; a raster check measured its visible foreground within the adaptive safe zone.
+The platform splash builds the mark in 340 ms and starts a 180 ms transition as soon as Android
+reports the app ready. With system animations disabled, it hands over immediately.
+The generator outputs and animation target names were checked locally. Appearance and startup
+timing on the Pixel remain unverified.
+
 # Listening dashboard (2026-11-18)
 
 Your listening uses local calendar ranges and contextual charts. The period applies to the
