@@ -92,7 +92,7 @@ internal object Mix {
         val scored = songs.asSequence()
             .filter { it.id != seed.id && songKey(it) != seedKey && songKey(it) !in recent }
             .map { t ->
-                val st = stats[t.id.value] ?: SongStats.NONE
+                val st = stats[t.statsKey] ?: SongStats.NONE
                 var score = 0.0
                 if (t.artists.any { fold(it) in seedArtists }) score += 3
                 if (t.genres.any { fold(it) in seedGenres }) score += 2

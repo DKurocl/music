@@ -36,6 +36,11 @@ Poweramp and Symfonium as the reference for a local player.
 
 ## Owner's current delivery order (Pixel only, Android 17+)
 
+- [~] Playback and artwork reliability (Codex, 2026-11-18, `agent/playback-ui-reliability`):
+      one pending selection across mixes and manual app entry points, cold-start player intents,
+      motion surface lifecycle, cover-cache locking and widget update ordering (3/23/24/35/67/68).
+
+
 - [x] Continue the 80-point audit (Codex, 2026-11-17, `bc99d27`, CI 44114015206): shared
       saved-song catalogue (51; 50 partial), playlist pagination/occurrences (60), service mix refill
       (21), shared session lyrics and draw-phase word timing (33/34), cache budgets/events (8/54),

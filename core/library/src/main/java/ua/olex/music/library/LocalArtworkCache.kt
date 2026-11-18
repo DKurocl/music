@@ -22,48 +22,51 @@ class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
     private var maxDiskBytes: Long = 128L * 1024 * 1024) {
     private val app = context.applicationContext
     private val directory = File(app.cacheDir, "local-artwork-v1")
-    // One lock per picture (by its digest), so a slow file never holds up other covers; pruning has
-    // its own lock and runs once per batch of new pictures, not on every write.
-    private val locks = java.util.concurrent.ConcurrentHashMap<String, ReentrantLock>()
+    // Fixed stripes keep waiters on the same lock without keeping one entry per cover forever.
+    private val locks = Array(64) { ReentrantLock() }
     private val pruneLock = ReentrantLock()
     private val written = java.util.concurrent.atomic.AtomicInteger()
     private val known = LruCache<String, String>(256)
 
     fun open(source: ArtworkSource, requestedPixels: Int): ParcelFileDescriptor = run {
         val pixels = requestedPixels.takeIf { it in ArtworkPlan.sizes } ?: ArtworkPlan.MEDIUM
-        if (!directory.exists() && !directory.mkdirs()) throw IOException("Artwork cache unavailable")
+        if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) throw IOException("Artwork cache unavailable")
         val key = "$source|${files.revision.value}"
-        known.get(key)?.let { digest -> variant(digest, pixels).takeIf { it.isFile && it.length() > 0 }?.let { return@run descriptor(it) } }
+        known.get(key)?.let { digest ->
+            lockFor(digest).withLock {
+                val target = variant(digest, pixels)
+                if (target.isFile && target.length() > 0) return@run descriptor(target)
+            }
+        }
         val loaders: List<() -> ByteArray?> = listOf({ embedded(source) }, { files.coverBytesBlocking(source.path) }, { read(source.fallbackUri) })
         for (load in loaders) {
             val bytes = try { load() } catch (_: Exception) { null } ?: continue
             val digest = hash(bytes)
             val target = variant(digest, pixels)
-            val made = locks.getOrPut(digest) { ReentrantLock() }.withLock {
-            if (!target.isFile || target.length() == 0L) {
-                val bitmap = try {
-                    ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
-                        val (width, height) = ArtworkPlan.fit(info.size.width, info.size.height, ArtworkPlan.LARGE)
-                        decoder.setTargetSize(width, height)
-                        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                        decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
-                    }
-                } catch (_: Exception) { continue }
-                try {
-                    for (size in ArtworkPlan.sizes) {
-                        val file = variant(digest, size)
-                        if (file.isFile && file.length() > 0) continue
-                        val (width, height) = ArtworkPlan.fit(bitmap.width, bitmap.height, size)
-                        val scaled = if (width == bitmap.width && height == bitmap.height) bitmap else Bitmap.createScaledBitmap(bitmap, width, height, true)
-                        try { write(file, scaled) } finally { if (scaled !== bitmap) scaled.recycle() }
-                    }
-                } finally { bitmap.recycle() }
-                true
-            } else false
-            }
-            locks.remove(digest)
+            val (result, made) = lockFor(digest).withLock {
+                val needsWrite = !target.isFile || target.length() == 0L
+                if (needsWrite) {
+                    val bitmap = try {
+                        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                            val (width, height) = ArtworkPlan.fit(info.size.width, info.size.height, ArtworkPlan.LARGE)
+                            decoder.setTargetSize(width, height)
+                            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                            decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+                        }
+                    } catch (_: Exception) { return@withLock null }
+                    try {
+                        for (size in ArtworkPlan.sizes) {
+                            val file = variant(digest, size)
+                            if (file.isFile && file.length() > 0) continue
+                            val (width, height) = ArtworkPlan.fit(bitmap.width, bitmap.height, size)
+                            val scaled = if (width == bitmap.width && height == bitmap.height) bitmap else Bitmap.createScaledBitmap(bitmap, width, height, true)
+                            try { write(file, scaled) } finally { if (scaled !== bitmap) scaled.recycle() }
+                        }
+                    } finally { bitmap.recycle() }
+                }
+                descriptor(target) to needsWrite
+            } ?: continue
             known.put(key, digest)
-            val result = descriptor(target)
             if (made && written.incrementAndGet() % PRUNE_EVERY == 0) pruneLock.withLock { prune(digest) }
             return@run result
         }
@@ -102,14 +105,26 @@ class LocalArtworkCache(context: Context, private val files: LocalMusicFiles,
     /** Applies a changed global budget immediately. Call on an IO thread. */
     fun trimTo(bytes: Long) = pruneLock.withLock { maxDiskBytes = bytes.coerceAtLeast(0); prune(null) }
 
+    private fun lockFor(digest: String): ReentrantLock = locks[Math.floorMod(digest.hashCode(), locks.size)]
+
     private fun prune(protectedDigest: String?) {
-        directory.listFiles().orEmpty().filter { it.name.matches(Regex("[a-f0-9]{64}-(192|512|1280)\\.png\\.(new|bak)")) }.forEach { it.delete() }
-        val cached = directory.listFiles().orEmpty().filter { it.extension == "png" }.sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name })
+        val files = directory.listFiles().orEmpty()
+        // AtomicFile's temporary siblings belong to the writer until it releases the same stripe.
+        for (file in files) {
+            if (!TEMP_VARIANT.matches(file.name)) continue
+            lockFor(file.name.substringBefore('-')).withLock { file.delete() }
+        }
+        val cached = files.filter { it.extension == "png" }.sortedWith(compareBy<File> { it.lastModified() }.thenBy { it.name })
         var bytes = cached.sumOf { it.length() }
         for (file in cached) {
             if (bytes <= maxDiskBytes) break
-            if (protectedDigest == null || !file.name.startsWith(protectedDigest)) { val size = file.length(); if (file.delete()) bytes -= size }
+            val digest = file.name.substringBefore('-')
+            if (digest == protectedDigest) continue
+            lockFor(digest).withLock {
+                val size = file.length()
+                if (file.delete()) bytes -= size
+            }
         }
     }
-    companion object { const val MAX_ENCODED_BYTES = 16 * 1024 * 1024; private const val PRUNE_EVERY = 8 }
+    companion object { const val MAX_ENCODED_BYTES = 16 * 1024 * 1024; private const val PRUNE_EVERY = 8; private val TEMP_VARIANT = Regex("""[a-f0-9]{64}-(192|512|1280)[.]png[.](new|bak)""") }
 }
