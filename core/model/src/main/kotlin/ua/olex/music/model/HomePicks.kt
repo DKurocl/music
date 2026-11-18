@@ -30,15 +30,12 @@ object HomePicks {
             chosen.recordingId?.let { recordings += it }
             result += chosen
         }
-        val mine = familiar.iterator()
+        val familiarIds = familiar.mapTo(HashSet()) { it.id }
+        val mine = (familiar.asSequence() + shuffled.asSequence().filter { it.id !in familiarIds }).iterator()
         val service = recommended.iterator()
         while (result.size < 24 && (mine.hasNext() || service.hasNext())) {
             if (mine.hasNext()) add(mine.next())
             if (service.hasNext()) add(service.next())
-        }
-        for (track in shuffled) {
-            if (result.size == 24) break
-            add(track)
         }
         return result
     }
