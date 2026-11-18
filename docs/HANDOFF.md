@@ -29,8 +29,9 @@ Robolectric scenarios cover a
 delayed incoming cover, fixed lyrics action positions and 2:23 displayed before reconnecting
 playback. CI evidence: https://github.com/DKurocl/music/actions/workflows/build.yml
 CI 44249325432 passed the header and progress tests. The image fixture exposed a transparent layer
-that can suppress the incoming image's draw. Use Coil's painter alpha so its request and size
-resolver stay active. The queue edge now scrolls with the pointer held still, uses measured row
+that can suppress the incoming image's draw. After 44250124502 still reproduced a request that
+did not start in the fixture, the player now starts a measured Coil request independently of the
+drawable layers. The next result fades over the retained image only once decoded. The queue edge now scrolls with the pointer held still, uses measured row
 midpoints and cancels the preview when live queue order changes. The playing row no longer offers
 a hidden accessibility-only Remove action.
 

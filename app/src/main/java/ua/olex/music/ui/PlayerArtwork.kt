@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.unit.Dp
@@ -44,11 +45,18 @@ import androidx.media3.common.Player
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
-import coil3.compose.AsyncImage
+import coil3.SingletonImageLoader
+import coil3.annotation.ExperimentalCoilApi
+import coil3.compose.AsyncImagePainter
+import coil3.compose.LocalAsyncImagePreviewHandler
+import coil3.compose.asPainter
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import coil3.request.SuccessResult
 import coil3.size.Scale
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import ua.olex.music.library.ArtworkUris
 
 /** The revision reopens a file replaced in place by an explicit cover edit. */
@@ -67,57 +75,66 @@ internal fun playerCoverRequest(context: Context, uri: String, pixels: Int, size
     ImageRequest.Builder(context).data(ArtworkUris.variant(uri, context.packageName, pixels))
         .crossfade(false).apply { if (size != null) size(size).scale(Scale.FILL) }.build()
 
-/** Keep a decoded image behind the next request, so a cache miss never draws an empty frame. */
+/** Load at the measured size independently of the layers drawing the previous and incoming covers. */
+@OptIn(ExperimentalCoilApi::class)
 @Composable
 internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int, motion: MotionArtwork? = null, moving: Boolean = true) {
     val context = LocalContext.current
     val saving = LocalPowerSave.current
-    val resolved = remember { mutableStateOf<Painter?>(null) }
-    val requestToken = remember(uri, pixels) { Any() }
-    val latestToken by rememberUpdatedState(requestToken)
-    // Capture the outgoing layer once per URI. Keep at most two decoded painters during the fade.
-    var outgoing by remember(uri) { mutableStateOf(resolved.value) }
-    var ready by remember(uri) { mutableStateOf(false) }
-    var failed by remember(uri) { mutableStateOf(false) }
+    val latestSaving by rememberUpdatedState(saving)
+    val loader = SingletonImageLoader.get(context)
+    val preview = if (LocalInspectionMode.current) LocalAsyncImagePreviewHandler.current else null
+    var measured by remember { mutableStateOf(0) }
+    var lastDecoded by remember { mutableStateOf<Painter?>(null) }
+    var outgoing by remember(uri) { mutableStateOf(lastDecoded.takeIf { uri != null }) }
+    var incoming by remember(uri) { mutableStateOf<Painter?>(null) }
     val alpha = remember(uri) { Animatable(0f) }
     val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-    LaunchedEffect(uri, ready, failed, saving) {
-        when {
-            uri == null || failed -> { outgoing = null; resolved.value = null }
-            ready -> {
-                if (outgoing == null || saving) alpha.snapTo(1f) else alpha.animateTo(1f, effects)
-                outgoing = null
-            }
-            else -> {
-                // A slow remote request must not leave the preceding track's artwork up indefinitely.
+
+    LaunchedEffect(uri, loader, preview, pixels, measured) {
+        if (uri == null) {
+            lastDecoded = null
+            return@LaunchedEffect
+        }
+        if (measured == 0) return@LaunchedEffect
+        val request = playerCoverRequest(context, uri, pixels, measured)
+        val decoded = coroutineScope {
+            val timeout = launch {
                 delay(900)
+                // A slow remote request must not keep the preceding track's artwork indefinitely.
                 outgoing = null
-                resolved.value = null
+                if (incoming == null) lastDecoded = null
+            }
+            try {
+                if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
+                else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
+            } finally {
+                timeout.cancel()
             }
         }
+        if (decoded == null) {
+            outgoing = null
+            if (incoming == null) lastDecoded = null
+            return@LaunchedEffect
+        }
+        val animate = incoming == null && outgoing != null && !latestSaving
+        lastDecoded = decoded
+        if (!animate) alpha.snapTo(1f)
+        incoming = decoded
+        if (animate) alpha.animateTo(1f, effects)
+        outgoing = null
     }
-    ArtworkFrame(modifier, corner) {
-        val previous = outgoing.takeUnless { failed || uri == null }
+
+    ArtworkFrame(modifier.onSizeChanged { measured = maxOf(it.width, it.height) }, corner) {
+        val previous = outgoing
         if (previous != null) {
             Image(previous, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else if (!ready || alpha.value < 1f) {
+        } else if (incoming == null) {
             Symbol(Glyph.NOTE, size = 24.dp, color = MaterialTheme.colorScheme.onSurfaceVariant, filled = true)
         }
-        if (uri != null) key(uri) {
-            val request = remember(context, uri, pixels) { playerCoverRequest(context, uri, pixels) }
-            // Keep Coil's draw/size resolver attached even while the incoming image is transparent.
-            AsyncImage(
-                model = request, contentDescription = null, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(), alpha = alpha.value,
-                onSuccess = {
-                    if (requestToken === latestToken) {
-                        resolved.value = it.painter
-                        ready = true
-                        failed = false
-                    }
-                },
-                onError = { if (requestToken === latestToken) { failed = true; ready = false } },
-            )
+        incoming?.let { cover ->
+            Image(cover, contentDescription = null, contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha.value })
         }
         if (motion != null && !saving && !LocalInspectionMode.current) {
             val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
