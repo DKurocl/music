@@ -4,7 +4,7 @@ Based on main `45be07f`, whose GitHub Actions run 44175207911 passed. The record
 migration is already present in main. This branch addresses the remaining app selection races,
 cold-start notification entry, widget ordering, motion cover replacement and local cover locks.
 The widget reads one preferences snapshot and serializes both submissions with its render generation.
-Cover writes use fixed lock stripes so simultaneous requests for the same digest keep the same lock.
+Cover reads, writes and eviction use fixed lock stripes so the same digest keeps one lock.
 Queue taps, shuffles, search and first mix pages supersede older app selections. Mix and search
 preparation and system browse/search page construction run off the UI dispatcher. Local radio
 uses recording-key statistics for ranking and recent-track exclusion. The player intent waits for a connected session with a track.
