@@ -410,12 +410,18 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
 @Composable
 private fun rememberProgress(state: PlayerState, position: () -> Long, everyMs: Long, active: Boolean = true): () -> Float {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    var at by remember(state.mediaId) { mutableLongStateOf(position()) }
-    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, state.positionMs, active) {
+    val occurrence = state.queue.getOrNull(state.queueIndex)?.key
+    var at by remember(state.mediaId, occurrence) { mutableLongStateOf(state.positionMs) }
+    val readPosition by rememberUpdatedState(position)
+    LaunchedEffect(lifecycle, state.connected, state.isPlaying, state.mediaId, occurrence, state.positionMs, active) {
         // Nothing to read while hidden (the mini player under the open player).
         if (!active) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            do { at = position(); if (state.isPlaying) delay(everyMs) } while (state.isPlaying)
+            at = state.positionMs
+            while (state.connected && state.isPlaying) {
+                at = readPosition()
+                delay(everyMs)
+            }
         }
     }
     return { if (state.durationMs > 0) (at.toFloat() / state.durationMs).coerceIn(0f, 1f) else 0f }
@@ -659,10 +665,10 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
         val skipSize = if (compact) 48.dp else 64.dp
         val gap = if (compact) 2.dp else 4.dp
         val centerLimit = maxWidth - if (separateModes) skipSize * 2 + gap * 2 else (modeSize + skipSize) * 2 + gap * 4
-        val width by animateDpAsState(
-            minOf(if (playing) 112.dp else 88.dp, centerLimit).coerceAtLeast(48.dp),
-            MaterialTheme.motionScheme.fastSpatialSpec(), label = "width",
-        )
+        val slotWidth = minOf(112.dp, centerLimit).coerceAtLeast(48.dp)
+        val targetWidth = minOf(if (playing) 112.dp else 88.dp, slotWidth)
+        val animatedWidth by animateDpAsState(targetWidth, MaterialTheme.motionScheme.fastSpatialSpec(), label = "play button shape")
+        val width = if (LocalPowerSave.current) targetWidth else animatedWidth.coerceIn(48.dp, slotWidth)
         val shuffle: @Composable () -> Unit = {
             ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", switch = true, size = modeSize, onClick = onShuffle)
         }
@@ -673,25 +679,28 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
                 if (!separateModes) shuffle()
-                SkipButton(Glyph.PREVIOUS, "Previous", true, size = skipSize) { haptics.skip(false); onPrevious() }
-                val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                val pressed by playInteraction.collectIsPressedAsState()
-                var playKick by remember { mutableIntStateOf(0) }
-                androidx.compose.material3.FilledIconToggleButton(
-                    checked = playing, onCheckedChange = { playKick++; if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
-                    interactionSource = playInteraction,
-                    shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
-                    colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
-                        checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
-                    modifier = Modifier.width(width.coerceAtMost(centerLimit.coerceAtLeast(48.dp))).height(if (compact) 72.dp else 88.dp).semantics {
-                        contentDescription = if (playing) "Pause" else "Play"
-                        if (state.playWhenReady && state.buffering) stateDescription = "Getting ready"
-                    },
-                ) {
-                    if (state.playWhenReady && state.buffering) {
-                        CircularProgressIndicator(Modifier.size(minOf(64.dp, width - 8.dp)), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
+                SkipButton(Glyph.PREVIOUS, "Previous", state.connected, size = skipSize) { haptics.skip(false); onPrevious() }
+                // The button changes shape within its slot. A quick follow-up tap still finds Next.
+                Box(Modifier.width(slotWidth), contentAlignment = Alignment.Center) {
+                    val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val pressed by playInteraction.collectIsPressedAsState()
+                    var playKick by remember { mutableIntStateOf(0) }
+                    androidx.compose.material3.FilledIconToggleButton(
+                        checked = playing, onCheckedChange = { playKick++; if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
+                        interactionSource = playInteraction,
+                        shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
+                        colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
+                            checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
+                        modifier = Modifier.width(width).height(if (compact) 72.dp else 88.dp).semantics {
+                            contentDescription = if (playing) "Pause" else "Play"
+                            if (state.playWhenReady && state.buffering) stateDescription = "Getting ready"
+                        },
+                    ) {
+                        if (state.playWhenReady && state.buffering) {
+                            CircularProgressIndicator(Modifier.size(minOf(64.dp, width - 8.dp)), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
+                        }
+                        PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, playKick, pressed)
                     }
-                    PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, playKick, pressed)
                 }
                 SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
                 if (!separateModes) repeat()
@@ -706,7 +715,7 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
 
 /** Swap the two transport glyphs inside one fixed footprint and let the container shape respond separately. */
 @Composable
-private fun PlayPauseSymbol(playing: Boolean, size: Dp, kick: Int, pressed: Boolean = false) {
+private fun PlayPauseSymbol(playing: Boolean, size: Dp, kick: Int, pressed: Boolean = LocalIconPressed.current) {
     val motion = MaterialTheme.motionScheme
     if (LocalPowerSave.current) {
         Symbol(if (playing) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true)
@@ -835,25 +844,29 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     // Two clocks: [at] moves every frame but is read only by the handle's layout and the line's
     // drawing; [seconds] changes once a second for the time label. A frame recomposes nothing.
     val occurrence = state.queue.getOrNull(state.queueIndex)?.key
-    val at = remember(state.mediaId, occurrence) { androidx.compose.runtime.mutableLongStateOf(position()) }
-    var seconds by remember(state.mediaId, occurrence) { mutableLongStateOf(position() / 1_000) }
+    val at = remember(state.mediaId, occurrence) { mutableLongStateOf(state.positionMs) }
+    var seconds by remember(state.mediaId, occurrence) { mutableLongStateOf(state.positionMs / 1_000) }
+    val readPosition by rememberUpdatedState(position)
     var dragged by remember(state.mediaId, occurrence) { mutableStateOf<Float?>(null) }
     val duration = state.durationMs.coerceAtLeast(1)
     val slider = remember(state.mediaId, occurrence) {
         androidx.compose.material3.SliderState((at.longValue.toFloat() / duration).coerceIn(0f, 1f), 0, 0f..1f)
     }
-    val canSeek = state.seekable && state.durationMs > 0
+    val canSeek = state.connected && state.seekable && state.durationMs > 0
     fun show(ms: Long) { at.longValue = ms; if (dragged == null) slider.value = (ms.toFloat() / duration).coerceIn(0f, 1f); (ms / 1_000).let { if (it != seconds) seconds = it } }
     // Every display frame (120 a second on a 120 Hz screen) the position moves on from the last
     // reading by the time passed; the player itself is asked once a second to stay exact.
-    LaunchedEffect(lifecycle, state.isPlaying, state.mediaId, occurrence, state.positionMs, state.durationMs, canSeek) {
+    LaunchedEffect(lifecycle, state.connected, state.isPlaying, state.mediaId, occurrence, state.positionMs, state.durationMs, canSeek) {
         if (!canSeek) dragged = null
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            show(position())
-            if (!state.isPlaying) return@repeatOnLifecycle
+            if (!state.connected || !state.isPlaying) {
+                show(state.positionMs)
+                return@repeatOnLifecycle
+            }
+            show(readPosition())
             var base = at.longValue; var baseAt = 0L; var lastRead = 0L
             while (true) androidx.compose.animation.core.withInfiniteAnimationFrameMillis { now ->
-                if (baseAt == 0L || now - lastRead >= 1_000) { base = position(); baseAt = now; lastRead = now }
+                if (baseAt == 0L || now - lastRead >= 1_000) { base = readPosition(); baseAt = now; lastRead = now }
                 show((base + (now - baseAt)).coerceAtMost(state.durationMs.coerceAtLeast(base)))
             }
         }
@@ -889,7 +902,7 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
                 androidx.compose.material3.SliderDefaults.Thumb(touch, thumbSize = androidx.compose.ui.unit.DpSize(4.dp, 20.dp), enabled = canSeek)
             },
             track = { st: androidx.compose.material3.SliderState ->
-                WaveTrack({ st.value }, wave = state.isPlaying && dragged == null && lifecycleState.isAtLeast(Lifecycle.State.STARTED))
+                WaveTrack({ st.value }, wave = state.connected && state.isPlaying && dragged == null && lifecycleState.isAtLeast(Lifecycle.State.STARTED))
             },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

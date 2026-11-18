@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
@@ -93,7 +94,7 @@ class DesignGalleryTest {
         val t = library.albums.first().tracks[1]
         val next = library.albums.first().tracks[2]
         PlayerState(connected = true, mediaId = t.id.value, title = t.title, artist = t.artist, album = t.album, artworkUri = t.artworkUri,
-            durationMs = 251_000, playWhenReady = true, isPlaying = true, hasNext = true, shuffle = true, repeat = RepeatMode.ALL,
+            durationMs = 251_000, positionMs = 92_000, playWhenReady = true, isPlaying = true, hasNext = true, shuffle = true, repeat = RepeatMode.ALL,
             queue = listOf(ua.olex.music.playback.QueueItem("a", t.id.value, t.title, t.artist, t.artworkUri), ua.olex.music.playback.QueueItem("b", next.id.value, next.title, next.artist, next.artworkUri)),
             queueIndex = 0)
     }
@@ -327,6 +328,23 @@ class DesignGalleryTest {
             personal = PersonalLibraryState(), personalActions = PersonalLibraryActions({ _, _ -> }, { _, _ -> }, {}, { _, _, _ -> }, { _, _, _ -> }, { _, _, _, _ -> }, {}),
             smart = ua.olex.music.model.SmartPlaylist.BUILT_IN.map { p -> SmartPlaylistUi(p, library.songs.take(5)) }) } }
         shot("31-playlists-empty")
+    }
+
+    @Test fun pausedProgressSurvivesAControllerReconnectBeforePlay() {
+        val saved = PlayerState(mediaId = "local:saved", positionMs = 143_000, durationMs = 214_000)
+        val connection = androidx.compose.runtime.mutableStateOf(saved)
+        compose.setContent { AppTheme {
+            // The live controller read is unavailable before binding. Paused UI uses its snapshot.
+            PlaybackProgress(connection.value, position = { 0L }, onSeek = {})
+        } }
+        compose.onNodeWithText("2:23").assertIsDisplayed()
+        val slider = compose.onNodeWithContentDescription("Position")
+        slider.assertIsNotEnabled()
+        compose.runOnIdle { connection.value = saved.copy(connected = true) }
+        compose.onNodeWithText("2:23").assertIsDisplayed()
+        slider.assertIsEnabled()
+        compose.runOnIdle { connection.value = saved.copy(connected = true, positionMs = 0L) }
+        compose.onNodeWithText("0:00").assertIsDisplayed()
     }
 
     @Test fun lyricActionsKeepTheirPositionsWhileLeaving() {

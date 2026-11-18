@@ -161,12 +161,13 @@ class PlayerConnection(context: Context) {
         val future = connection
         connection = null
         pendingPlay = null
+        val lastPosition = positionMs
         controller?.removeListener(listener)
         controller = null
         if (future != null) MediaController.releaseFuture(future)
         // Keep the last song on screen while the app is in the background: wiping it made the
         // player and mini player slide in again on every return. The next connect refreshes it.
-        _state.value = _state.value.copy(connected = false, connecting = false)
+        _state.value = _state.value.copy(connected = false, connecting = false, positionMs = lastPosition)
         queueSnapshot = emptyList()
     }
 
@@ -177,7 +178,7 @@ class PlayerConnection(context: Context) {
     }
 
     /** The playback position now; cheap, for a progress bar or lyrics to read every frame. */
-    val positionMs: Long get() = controller?.currentPosition?.coerceAtLeast(0) ?: 0
+    val positionMs: Long get() = controller?.currentPosition?.coerceAtLeast(0) ?: _state.value.positionMs
 
     /** Replaces the queue with [tracks] and starts at [index], even during the initial connection. */
     fun play(tracks: List<Track>, index: Int, context: String? = null, startPlayback: Boolean = true) {
@@ -401,7 +402,7 @@ class PlayerConnection(context: Context) {
             isPlaying = player.isPlaying,
             playWhenReady = player.playWhenReady && player.playbackState != Player.STATE_ENDED,
             buffering = player.playbackState == Player.STATE_BUFFERING,
-            durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0,
+            durationMs = player.duration.takeIf { it > 0 } ?: item?.mediaMetadata?.durationMs?.takeIf { it > 0 } ?: 0,
             hasNext = player.hasNextMediaItem(),
             hasPrevious = player.hasPreviousMediaItem(),
             queueSize = player.mediaItemCount,
