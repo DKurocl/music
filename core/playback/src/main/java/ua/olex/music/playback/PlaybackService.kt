@@ -408,6 +408,16 @@ class PlaybackService : MediaLibraryService() {
         publishSleepTimer()
     }
 
+    /** "+10 min": the running deadline moves later by exactly [ms]; the fade is planned again. */
+    private fun extendSleepTimer(ms: Long) {
+        if (endOfTrack || sleepTimer.deadlineMs == null) return
+        sleepJob?.cancel(); sleepJob = null
+        fading?.cancelSleepFade()
+        sleepTimer.extend(ms, SystemClock.elapsedRealtime())
+        publishSleepTimer()
+        scheduleSleep(((sleepTimer.deadlineMs ?: return) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+    }
+
     private fun setSleepTimer(minutes: Int) {
         sleepJob?.cancel()
         sleepJob = null
@@ -416,9 +426,14 @@ class PlaybackService : MediaLibraryService() {
         exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
         sleepTimer.set(if (endOfTrack) 0 else minutes, SystemClock.elapsedRealtime())
         publishSleepTimer()
+        if (sleepTimer.deadlineMs == null) return
+        scheduleSleep(minutes * 60_000L)
+    }
+
+    private fun scheduleSleep(lengthMs: Long) {
         val deadline = sleepTimer.deadlineMs ?: return
         sleepJob = scope.launch {
-            val fadeMs = minOf(30_000L, minutes * 60_000L / 4)
+            val fadeMs = minOf(30_000L, lengthMs / 4)
             awaitSleepDeadline(deadline, fadeMs, SystemClock::elapsedRealtime) { remaining ->
                 val local = exoOrNull()
                 val active = session?.player
@@ -664,8 +679,10 @@ class PlaybackService : MediaLibraryService() {
                 return super.onCustomCommand(session, controller, customCommand, args)
             }
             val minutes = args.getInt(SleepTimerCommand.MINUTES, -1)
+            val extend = args.getLong(SleepTimerCommand.EXTEND_MS, 0L)
             val code = when {
                 controller.uid != Process.myUid() -> SessionError.ERROR_PERMISSION_DENIED
+                extend > 0 -> { extendSleepTimer(extend); SessionResult.RESULT_SUCCESS }
                 minutes != SleepTimerCommand.END_OF_TRACK && minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
                 else -> { setSleepTimer(minutes); SessionResult.RESULT_SUCCESS }
             }

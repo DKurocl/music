@@ -348,10 +348,15 @@ class PlayerConnection(context: Context) {
     fun dismissQueueError() { _state.value = _state.value.copy(queueError = null) }
 
     /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
-    fun setSleepTimer(minutes: Int) {
+    /** Adds exactly [ms] to the running timer. */
+    fun extendSleepTimer(ms: Long) = sendSleep(Bundle().apply { putLong(SleepTimerCommand.EXTEND_MS, ms) })
+
+    fun setSleepTimer(minutes: Int) = sendSleep(Bundle().apply { putInt(SleepTimerCommand.MINUTES, minutes) })
+
+    private fun sendSleep(args: Bundle) {
         val player = controller ?: return
         _state.value = _state.value.copy(sleepTimerError = null)
-        val result = player.sendCustomCommand(SleepTimerCommand.command, Bundle().apply { putInt(SleepTimerCommand.MINUTES, minutes) })
+        val result = player.sendCustomCommand(SleepTimerCommand.command, args)
         result.addListener({
             if (controller !== player) return@addListener
             val success = try {

@@ -167,10 +167,6 @@ class DesignGalleryTest {
         shot("14c-downloads")
     }
 
-    @Test fun moodPage() {
-        compose.setContent { Shell("Home", Place.HOME) { pad -> MoodPage(OnlineTarget.Mood(YouTubeMusic.Mood("Sleep", null)), null, pad) {} } }
-        shot("41-mood")
-    }
 
     /**
      * A YouTube Music playlist (docs/specs/M10_ONLINE.md): the owner's own files show their quality,
@@ -316,7 +312,7 @@ class DesignGalleryTest {
     }
 
     @Test fun loading() {
-        compose.setContent { Shell("Home", Place.HOME) { pad -> Notice(pad, "Your music", "Loading your library…", null) {} } }
+        compose.setContent { Shell("Good evening", Place.HOME) { pad -> HomeSkeleton(Modifier.padding(pad)) } }
         shot("29-loading")
     }
 

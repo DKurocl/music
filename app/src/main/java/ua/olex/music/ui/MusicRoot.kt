@@ -199,12 +199,15 @@ fun MusicRoot(model: LibraryViewModel) {
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) { onlineStack = emptyList(); returnTo = null; baseStates.removeState("place-${to.name}"); if (to == Place.SEARCH && place == Place.SEARCH && page == null) { focusSearch++; return }; if (to != place) haptics.tick(); collectionTitle = null; if (place == Place.SEARCH && to != Place.SEARCH) model.setQuery(""); page = null; place = to }
     /** Opens the album or artist of a song in the Library, from the player or a song's actions. */
-    fun openOf(track: Track, artist: Boolean) {
-        val index = library ?: return
-        val target = if (artist) index.artists.firstOrNull { a -> a.tracks.any { it.id == track.id } && a.name.equals(track.albumArtist ?: track.artist, true) }
+    val openScope = androidx.compose.runtime.rememberCoroutineScope()
+    fun openOf(track: Track, artist: Boolean) = openScope.launch {
+        val index = library ?: return@launch
+        // Every album or artist is walked to find the song's: off the main thread, so a tap never stalls.
+        val target = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            if (artist) index.artists.firstOrNull { a -> a.tracks.any { it.id == track.id } && a.name.equals(track.albumArtist ?: track.artist, true) }
                 ?: index.artists.firstOrNull { a -> a.tracks.any { it.id == track.id } }
             else index.albums.firstOrNull { a -> a.tracks.any { it.id == track.id } }
-        target ?: return
+        } ?: return@launch
         haptics.tick(); expanded = false; actionTrack = null; page = null
         if (place == Place.SEARCH) model.setQuery("") else returnTo = place
         openInLibrary = (if (artist) "ARTISTS" else "ALBUMS") to target.id; place = Place.SEARCH
@@ -271,6 +274,8 @@ fun MusicRoot(model: LibraryViewModel) {
     }
     val powerSave = rememberPowerSave()
     val network by context.graph.network.collectAsStateWithLifecycle()
+    // The Search shortcut: Search with the field focused.
+    androidx.compose.runtime.LaunchedEffect(model.searchRequest) { if (model.searchRequest > 0) { expanded = false; onlineStack = emptyList(); page = null; place = Place.SEARCH; focusSearch++ } }
     androidx.compose.runtime.LaunchedEffect(model.playerRequest, playing.hasTrack) {
         if (model.playerRequest > 0 && playing.hasTrack) {
             expanded = true
@@ -304,22 +309,26 @@ fun MusicRoot(model: LibraryViewModel) {
                     if (onlineTop != null) androidx.compose.animation.AnimatedVisibility(onlineTitleShown,
                         enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.slideInVertically { it / 2 },
                         exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.slideOutVertically { it / 2 }) {
-                        Text(when (onlineTop) { is OnlineTarget.Album -> onlineTop.title; is OnlineTarget.Artist -> onlineTop.name; is OnlineTarget.Mood -> onlineTop.mood.label },
+                        Text(when (onlineTop) { is OnlineTarget.Album -> onlineTop.title; is OnlineTarget.Artist -> onlineTop.name },
                             style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     else if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     else Text(page?.title ?: if (place == Place.HOME) greeting() else place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
                 }, scrollBehavior = scroll,
                 navigationIcon = {
-                    if (onlineTop != null) IconButton(onClick = { onlineStack = onlineStack.dropLast(1) }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) }
-                    else if (page != null) IconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { Symbol(Glyph.BACK) }
-                    else if (inCollection) IconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { Symbol(Glyph.BACK) }
+                    if (onlineTop != null) KickIconButton(onClick = { onlineStack = onlineStack.dropLast(1) }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
+                    else if (page != null) KickIconButton(onClick = { page = null }, modifier = Modifier.semantics { contentDescription = "Back" }) { k -> Symbol(Glyph.BACK, kick = k) }
+                    else if (inCollection) KickIconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { k -> Symbol(Glyph.BACK, kick = k) }
                 },
                 actions = {
-                    if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) IconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { Symbol(Glyph.SEARCH) }
+                    if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) KickIconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { k -> Symbol(Glyph.SEARCH, kick = k) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
-                    if (onlineTop == null && place == Place.HOME && page == null) androidx.compose.material3.FilledTonalIconButton(onClick = { page = Page.SETTINGS },
-                        shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp) }
+                    if (onlineTop == null && place == Place.HOME && page == null) {
+                        // The gear turns as it opens Settings.
+                        var gear by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+                        androidx.compose.material3.FilledTonalIconButton(onClick = { gear++; page = Page.SETTINGS },
+                            shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp, kick = gear) }
+                    }
                 },
             )
         },
@@ -365,15 +374,22 @@ fun MusicRoot(model: LibraryViewModel) {
         // files, it doesn't lock the app. With YouTube Music off there is nothing to show but the ask.
         val withoutFiles = !model.allowed && youTubeOn
         val library = library ?: if (withoutFiles) ua.olex.music.model.LibraryIndex.EMPTY else null
+        // Where the owner is: a new place fades through, a page opened from it slides in from the side.
+        val route = when {
+            onlineStack.isNotEmpty() -> "online:${onlineStack.size}:${onlineStack.last()}"
+            page != null -> "page:${page!!.name}"
+            else -> "place:${place.name}"
+        }
+        Arrival(route, deeper = onlineStack.isNotEmpty() || page != null) {
         when {
             !model.allowed && !youTubeOn -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
             model.scanError != null && list.isNullOrEmpty() && !withoutFiles -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
-            list == null && !withoutFiles -> Notice(insets, "Your music", "Loading your library…", null) {}
+            // Home's own shape while the library loads: the first real frame then lands in place.
+            list == null && !withoutFiles -> HomeSkeleton(Modifier.padding(insets))
             onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
                 // Each page in the stack keeps its own scroll, so Back to a previous online page lands where it was.
                 is OnlineTarget.Artist -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
                 is OnlineTarget.Album -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
-                is OnlineTarget.Mood -> baseStates.SaveableStateProvider("online-${onlineStack.size}-$top") { MoodPage(top, playing.mediaId, insets, requireNotNull(library)) { onlineTitleShown = it } }
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
@@ -414,6 +430,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = songStats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             ) }
+        }
         }
         }
         if (playing.hasTrack) Box(Modifier.align(Alignment.BottomCenter).padding(bottom = insets.calculateBottomPadding()).fillMaxWidth()
@@ -513,7 +530,15 @@ fun MusicRoot(model: LibraryViewModel) {
             position = { model.positionMs }, onClose = { expanded = false },
             motionCover = motionCover?.takeIf { settled && it.trackId == playing.mediaId && it.sourceUri == currentTrack?.uri }?.videoUri,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
-            onSleepTimer = model::setSleepTimer,
+            onSleepTimer = model::setSleepTimer, onExtendSleep = model::extendSleepTimer,
+            onClearNext = model::clearUpNext,
+            // The queue as songs (files from the library, YouTube Music songs as streams), for the playlist picker.
+            onSaveQueue = {
+                playlistTracks = playing.queue.mapNotNull { item ->
+                    library?.byId?.get(TrackId(item.mediaId)) ?: if (item.mediaId.startsWith("yt:")) ua.olex.music.model.Track(TrackId(item.mediaId),
+                        "${ua.olex.music.playback.OnlineStreams.SCHEME}://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, artworkUri = item.artworkUri) else null
+                }.takeIf { it.isNotEmpty() }
+            },
             onEqualizer = { equalizerOpen = true },
             lyricsState = lyricsState, lyricOffset = lyricOffset, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
@@ -632,7 +657,8 @@ internal fun Notice(insets: PaddingValues, title: String, body: String, action: 
 private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
-    onSleepTimer: (Int) -> Unit, from: String? = null,
+    onSleepTimer: (Int) -> Unit, from: String? = null, onExtendSleep: ((Long) -> Unit)? = null,
+    onSaveQueue: (() -> Unit)? = null, onClearNext: (() -> Unit)? = null,
     onEqualizer: () -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
@@ -647,7 +673,8 @@ private fun NowPlaying(
     onOpenAlbum: (() -> Unit)? = null, onOpenArtist: (() -> Unit)? = null, fileRateHz: Int? = null, motionCover: String? = null,
 ) {
     val cs = MaterialTheme.colorScheme
-    val monitor = LocalContext.current.graph.output
+    val context = LocalContext.current
+    val monitor = context.graph.output
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
     var lyricsOpen by rememberSaveable { mutableStateOf(false) }
@@ -672,13 +699,15 @@ private fun NowPlaying(
                 if (c.balance != 0f) "balance ${(c.balance * 100).toInt()}%" else null).joinToString(", ").replaceFirstChar(Char::uppercase) },
             state.replayGain.mode.takeIf { it != ua.olex.music.dsp.ReplayGainMode.OFF }?.let { "ReplayGain: ${it.name.lowercase()}" },
         ))
-    if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove, mixFrom = mixFrom)
+    if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove, mixFrom = mixFrom,
+        onSave = onSaveQueue?.let { save -> { queueSheet = false; save() } }, onClearNext = onClearNext)
     if (timerDialog) {
         SleepTimerDialog(
             deadline = state.sleepDeadlineMs,
             active = state.sleepDeadlineMs != null,
             onDismiss = { timerDialog = false },
             onSet = { minutes -> onSleepTimer(minutes); timerDialog = false },
+            onExtend = onExtendSleep?.let { extend -> { ms: Long -> extend(ms); timerDialog = false } },
         )
     }
 
@@ -695,8 +724,12 @@ private fun NowPlaying(
                 modifier = mod.preferredFrameRate(60f))
         })
     if (outputUnavailable) AppDialog(onDismissRequest = { outputUnavailable = false }, title = { Text("Choose output") },
-        text = { Text("Open Android's media output controls to choose a device.") },
-        confirmButton = { TextButton(onClick = { outputUnavailable = false }) { Text("OK") } })
+        text = { Text("Android didn't open its output picker here. Bluetooth settings list your headphones and speakers.") },
+        confirmButton = { TextButton(onClick = {
+            outputUnavailable = false
+            runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }) { Text("Bluetooth settings") } },
+        dismissButton = { TextButton(onClick = { outputUnavailable = false }) { Text("Cancel") } })
 }
 
 /**
@@ -707,7 +740,7 @@ private fun NowPlaying(
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit, deadline: Long? = null) {
+internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit, deadline: Long? = null, onExtend: ((Long) -> Unit)? = null) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val end = ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK
@@ -769,7 +802,7 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                 }
             }
             if (showingRun) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (leftMs != null) androidx.compose.material3.FilledTonalButton(onClick = { haptics.confirm(); onSet((leftMs / 60_000 + 10).toInt()) },
+                if (leftMs != null) androidx.compose.material3.FilledTonalButton(onClick = { haptics.confirm(); onExtend?.invoke(10 * 60_000L) ?: onSet((leftMs / 60_000 + 10).toInt()) },
                     modifier = Modifier.weight(1f).height(56.dp)) { Text("+10 min") }
                 Button(onClick = { haptics.toggle(false); onSet(0) }, modifier = Modifier.weight(1f).height(56.dp)) { Text("Turn off") }
             } else Button(onClick = { haptics.confirm(); onSet(if (endOfSong) end else minutes) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
@@ -861,4 +894,23 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
 /** Home's title: a greeting for the time of day, as Google's apps greet. */
 internal fun greeting(hour: Int = java.time.LocalTime.now().hour) = when (hour) {
     in 5..11 -> "Good morning"; in 12..17 -> "Good afternoon"; in 18..22 -> "Good evening"; else -> "Late night"
+}
+
+/**
+ * The screen arriving: a new place fades through (in, with a slight grow), a page opened from it
+ * comes in from the side, as Material's motion has them. The leaving screen is gone at once, so a
+ * tap is answered in the same frame. Nothing moves in Battery Saver.
+ */
+@Composable
+internal fun Arrival(key: Any, deeper: Boolean, content: @Composable () -> Unit) {
+    val progress = remember(key) { androidx.compose.animation.core.Animatable(0f) }
+    val still = LocalPowerSave.current
+    val spec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    LaunchedEffect(key) { if (still) progress.snapTo(1f) else progress.animateTo(1f, spec) }
+    Box(Modifier.fillMaxSize().graphicsLayer {
+        val t = progress.value.coerceIn(0f, 1f)
+        alpha = (t * 1.6f).coerceAtMost(1f)
+        if (deeper) translationX = (1f - progress.value) * 40.dp.toPx()
+        else { val k = 0.96f + 0.04f * progress.value; scaleX = k; scaleY = k }
+    }) { content() }
 }

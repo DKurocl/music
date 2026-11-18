@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.width
@@ -52,7 +53,7 @@ internal fun SettingsPage(
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
 
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
-    val soulseekJobs by soulseek.jobs.collectAsState()
+    val soulseekJobs by soulseek.jobs.collectAsStateWithLifecycle()
     LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item { Group("Sound") }
         item { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
@@ -61,7 +62,12 @@ internal fun SettingsPage(
         item { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
 
         item { Group("Playback") }
-        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in a quarter second and out faster, instead of cutting", fades, first = true, last = headphones.isEmpty()) {
+        item {
+            var tint by remember { mutableStateOf(CoverColours.on(context)) }
+            Toggle(Glyph.PHOTO, "Colours from the cover", "The player takes a soft tint of the song's cover", tint, first = true) {
+                tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
+        }
+        item { Toggle(Glyph.PLAY, "Smooth pause and play", "Fades in a quarter second and out faster, instead of cutting", fades, last = headphones.isEmpty()) {
             fades = it; prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, it).apply() } }
         headphones.forEachIndexed { i, name ->
             item(key = "hp-$name") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {
@@ -116,9 +122,9 @@ internal fun SettingsPage(
         item { Group("YouTube Music") }
         item(key = "sync-youtube-likes") {
             val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
-            val signedIn by graph.youTubeAccount.signedIn.collectAsState()
-            val enabled by graph.youTubeOn.collectAsState()
-            val status by graph.youtubeFavourites.status.collectAsState()
+            val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
+            val enabled by graph.youTubeOn.collectAsStateWithLifecycle()
+            val status by graph.youtubeFavourites.status.collectAsStateWithLifecycle()
             val syncScope = rememberCoroutineScope()
             if (signedIn && enabled) Row(Glyph.REFRESH, "Sync YouTube Music likes",
                 status ?: "Refresh likes and send waiting changes",
@@ -126,11 +132,11 @@ internal fun SettingsPage(
         }
         item {
             val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
-            val on by graph.youTubeOn.collectAsState()
-            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have appear under your own in Search. A song you have always plays from your file",
+            val on by graph.youTubeOn.collectAsStateWithLifecycle()
+            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have show under yours. Yours always play from the file",
                 on, first = true, last = !on) { graph.setYouTube(it) }
             if (on) {
-                val signedIn by graph.youTubeAccount.signedIn.collectAsState()
+                val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
                 var confirm by remember { mutableStateOf(false) }
                 Spacer(Modifier.height(4.dp))
                 Row(Glyph.PERSON, "YouTube Music account", if (signedIn) "Signed in: your own home, mixes and radio. Tap to sign out"
@@ -150,7 +156,7 @@ internal fun SettingsPage(
             val downloads = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
             var account by remember { mutableStateOf(downloads.account) }
             var editing by remember { mutableStateOf(false) }
-            val state by downloads.client.state.collectAsState()
+            val state by downloads.client.state.collectAsStateWithLifecycle()
             Row(Glyph.PERSON, "Soulseek account", account?.let { (user, _) ->
                 "$user · " + when (val st = state) { is ua.olex.music.soulseek.SoulseekClient.State.Online -> "online"
                     is ua.olex.music.soulseek.SoulseekClient.State.Failed -> st.reason; ua.olex.music.soulseek.SoulseekClient.State.Connecting -> "signing in…"
@@ -269,7 +275,7 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
             androidx.compose.foundation.layout.Spacer(Modifier.width(16.dp))
             androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 below?.invoke()
             }
             if (trailing != null) { androidx.compose.foundation.layout.Spacer(Modifier.width(12.dp)); trailing() }

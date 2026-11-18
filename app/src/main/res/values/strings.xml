@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Music</string>
+    <string name="shortcut_resume">Resume</string>
+    <string name="shortcut_resume_long">Resume playing</string>
+    <string name="shortcut_shuffle">Shuffle all</string>
+    <string name="shortcut_shuffle_long">Shuffle all songs</string>
+    <string name="shortcut_liked">Liked</string>
+    <string name="shortcut_liked_long">Play liked songs</string>
+    <string name="shortcut_search">Search</string>
+    <string name="shortcut_search_long">Search your music</string>
 </resources>

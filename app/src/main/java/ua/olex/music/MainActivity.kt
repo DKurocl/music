@@ -18,7 +18,7 @@ class MainActivity : ComponentActivity() {
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
         setContent { AppTheme { MusicRoot(model) } }
-        if (savedInstanceState == null) { playFromSearch(intent); openPlayer(intent); openDownloads(intent) }
+        if (savedInstanceState == null) { playFromSearch(intent); openPlayer(intent); openDownloads(intent); shortcut(intent) }
     }
 
     /** The media notification (or the lock screen) was tapped: open the player, not just the app. */
@@ -31,6 +31,17 @@ class MainActivity : ComponentActivity() {
         playFromSearch(intent)
         openPlayer(intent)
         openDownloads(intent)
+        shortcut(intent)
+    }
+
+    /** A launcher shortcut (long-press on the icon): Resume, Shuffle all, Liked or Search. */
+    private fun shortcut(intent: android.content.Intent?) {
+        when (intent?.action) {
+            "ua.olex.music.action.RESUME" -> model.resumeFromShortcut()
+            "ua.olex.music.action.SHUFFLE_ALL" -> model.shuffleAllFromShortcut()
+            "ua.olex.music.action.LIKED" -> model.likedFromShortcut()
+            "ua.olex.music.action.SEARCH" -> model.requestSearch()
+        }
     }
 
     private fun openDownloads(intent: android.content.Intent?) {
