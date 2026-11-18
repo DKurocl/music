@@ -1,8 +1,9 @@
 # Playlists and one-tap moods on Home (2026-11-18)
 
 The horizontal mood strip stays below the Home toolbar. Each chip filters in one tap and
-animates its own glyph. Repeating a selection or pressing Back restores the default feed. With playlist recommendations or saved lists, covers form a compact
-quick-picks rail. Made for you opens the suggested playlist or starts the exact radio mix.
+animates its own glyph. Repeating a selection or pressing Back restores the default feed. Home starts with the recent album and the original Shuffle all and Liked tiles. A tap on the
+album opens it, its play button starts the album, and compact track rows play from the exact
+position in the combined queue. Made for you opens the suggested playlist or starts the exact radio mix.
 Your playlists fills the available width and interleaves local and signed-in account entries,
 including stored account lists offline. Albums supplied by Home have their own shelf. Each opens its existing detail screen. The gallery exercises both opens and the direct
 mood filter. CI now uploads the Home renders immediately after tests, before lint and assembly.
