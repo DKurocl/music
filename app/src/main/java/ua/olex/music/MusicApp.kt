@@ -34,7 +34,13 @@ class AppGraph(context: Context) {
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
     val youTubeAccount by lazy { ua.olex.music.ui.YouTubeAccount(app) }
-    internal val youTube by lazy { ua.olex.music.ui.YouTubeMusic { youTubeAccount.headers() } }
+    internal val youTube by lazy {
+        ua.olex.music.ui.YouTubeMusic(
+            pageStore = ua.olex.music.ui.OnlinePageStore(app.cacheDir.resolve("online-pages-v1")),
+            pageScope = { youTubeAccount.cacheScope.value },
+            account = { youTubeAccount.headers() },
+        )
+    }
     internal val mix by lazy { ua.olex.music.ui.PlaybackMix(this) }
     internal fun excludedRecommendations(): Set<String> = app.getSharedPreferences("not_recommended", Context.MODE_PRIVATE).getStringSet("keys", emptySet()).orEmpty()
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */

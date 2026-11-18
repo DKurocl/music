@@ -17,22 +17,31 @@ class YouTubeAccount(context: Context) {
     private val prefs = context.getSharedPreferences("youtube_account", Context.MODE_PRIVATE)
     private val _signedIn = MutableStateFlow(cookies() != null)
     val signedIn: StateFlow<Boolean> = _signedIn
+    private val _cacheScope = MutableStateFlow(scopeFor(cookies()))
+    internal val cacheScope: StateFlow<String> = _cacheScope
+
+    private fun scopeFor(cookies: String?) = cookies?.let(OnlinePageStore::digest) ?: "public"
 
     fun cookies(): String? = prefs.getString("cookies", null)?.takeIf { hasSession(it) }
     val name: String? get() = prefs.getString("name", null)
 
+    @Synchronized
     fun save(cookies: String, name: String?) {
         prefs.edit().putString("cookies", cookies).putString("name", name).apply()
+        _cacheScope.value = scopeFor(cookies.takeIf(::hasSession))
         _signedIn.value = hasSession(cookies)
     }
 
+    @Synchronized
     fun signOut() {
         prefs.edit().clear().apply()
+        _cacheScope.value = "public"
         _signedIn.value = false
         runCatching { android.webkit.CookieManager.getInstance().removeAllCookies(null) }
     }
 
     /** Headers that make a request the owner's own; null when signed out. */
+    @Synchronized
     fun headers(nowSeconds: Long = System.currentTimeMillis() / 1000): Map<String, String>? {
         val cookies = cookies() ?: return null
         val auth = authorization(cookies, nowSeconds) ?: return null

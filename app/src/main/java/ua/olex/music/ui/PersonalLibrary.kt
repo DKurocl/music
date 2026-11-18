@@ -85,10 +85,18 @@ internal fun PlaylistBrowser(
     BackHandler(selected != null) { selectedId = null }
     // Signed in to YouTube Music: his playlists there too (Liked music first), loaded once a session.
     val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
-    val signedIn by graph.youTubeAccount.signedIn.collectAsState()
+    val accountScope by graph.youTubeAccount.cacheScope.collectAsState()
     val youTubeOn by graph.youTubeOn.collectAsState()
-    val youTubePlaylists by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), signedIn, youTubeOn) {
-        value = if (signedIn && youTubeOn) runCatching { graph.youTube.accountPlaylists() }.getOrDefault(emptyList()) else emptyList()
+    val network = LocalNetwork.current
+    val youTubePlaylists = androidx.compose.runtime.key(accountScope, youTubeOn) {
+        val loaded by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network) {
+            if (accountScope != "public" && youTubeOn) {
+                value = try { graph.youTube.accountPlaylists(offline = !network) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { value }
+            }
+        }
+        loaded
     }
 
     if (create || namingId != null) {
