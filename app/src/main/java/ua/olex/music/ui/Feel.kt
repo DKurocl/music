@@ -171,6 +171,7 @@ val LocalPlayerInset = staticCompositionLocalOf { 0.dp }
  * back. It only watches the touch, so clicks and scrolling are unaffected.
  */
 fun Modifier.squish(amount: Float = 0.04f): Modifier = composed {
+    if (LocalPowerSave.current) return@composed this
     var pressed by remember { androidx.compose.runtime.mutableStateOf(false) }
     val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 1f - amount else 1f,
         MaterialTheme.motionScheme.fastSpatialSpec(), label = "squish")
@@ -178,8 +179,7 @@ fun Modifier.squish(amount: Float = 0.04f): Modifier = composed {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
             pressed = true
-            waitForUpOrCancellation()
-            pressed = false
+            try { waitForUpOrCancellation() } finally { pressed = false }
         }
     }.graphicsLayer { scaleX = scale; scaleY = scale }
 }

@@ -538,7 +538,9 @@ internal fun PlayerPage(
                 swipe.snapTo(0f)
                 gestureItem = occurrence
             }
-            if (lyricsShown && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f))
+            androidx.compose.animation.Crossfade(lyricsShown && inlineLyrics != null,
+                animationSpec = androidx.compose.animation.core.tween(if (powerSave) 0 else 165), label = "Lyrics and artwork") { words ->
+            if (words && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f).playerCoverEndpoint(false))
             else Box(contentAlignment = Alignment.Center) {
                 // Keep the exact three requested images alive across index changes. The neighbour
                 // under the finger and the new centre read the same frame in the same composition.
@@ -645,6 +647,7 @@ internal fun PlayerPage(
                 )
             if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
                 modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })
+            }
             }
             Spacer(Modifier.height(32.dp))
             Row(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
