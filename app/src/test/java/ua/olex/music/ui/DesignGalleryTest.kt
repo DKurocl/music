@@ -940,9 +940,21 @@ class DesignGalleryTest {
         shot("11-duplicates")
     }
 
-    @Test fun statsPage() {
-        compose.setContent { Shell("Your listening", null) { StatsPage(library, stats, Modifier.fillMaxSize().padding(it), { _, _ -> }) } }
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
+    fun statsPage() {
+        val samples = (0..36).map { i ->
+            val track = library.albums[(i % 9) / 3].tracks[i % 3]
+            ua.olex.music.model.HistoryEntry(i.toLong(), ua.olex.music.model.SavedSong.from(track),
+                System.currentTimeMillis() - (i % 3) * 86_400_000L - i * 60_000L, 27_000L + i * 3_000)
+        }
+        compose.setContent { Shell("Your listening", null) {
+            StatsPage(library, Modifier.fillMaxSize().padding(it), { _, _ -> }) { start ->
+                kotlinx.coroutines.flow.flowOf(samples.filter { entry -> entry.playedAt >= start })
+            }
+        } }
         shot("12-stats")
+        compose.onNodeWithTag("listening-cards").performScrollToIndex(2)
+        shot("12b-stats-rankings")
     }
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
