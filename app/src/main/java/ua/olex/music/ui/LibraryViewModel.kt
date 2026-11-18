@@ -193,7 +193,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
     private fun lyricTrackNow() = playingTrack()
     /** Current source tags plus the queue's recording identity and reserves. */
-    fun currentTrack() = playingTrack()
+    fun currentTrack(state: PlayerState = playing.value) = playingTrack(state)
 
     /** Songs kept in more than one file, best copy first in each group (worked out off the main thread). */
     val duplicates: StateFlow<List<List<Track>>> = library.map { index -> index?.let { ua.olex.music.model.Duplicates.find(it.songs) }.orEmpty() }

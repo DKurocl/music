@@ -14,8 +14,11 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -74,7 +77,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.toShape
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
-import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -93,6 +95,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import ua.olex.music.graph
 import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
@@ -104,16 +107,8 @@ import ua.olex.music.playback.PlayerState
  * player page. It proves the path from a file to the earbuds; the designed app (navigation, the
  * expressive player, lyrics) is built over it (docs/ROADMAP.md).
  */
-@OptIn(androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 fun MusicRoot(model: LibraryViewModel) {
-    androidx.compose.animation.SharedTransitionLayout {
-        CompositionLocalProvider(LocalPlayerCoverTransition provides this) { MusicRootContent(model) }
-    }
-}
-
-@Composable
-private fun MusicRootContent(model: LibraryViewModel) {
     val library by model.catalogue.collectAsStateWithLifecycle()
     val tracks = library?.songs
     val query by model.query.collectAsStateWithLifecycle()
@@ -434,12 +429,11 @@ private fun MusicRootContent(model: LibraryViewModel) {
 
     // The player follows the finger down from the top of its page and closes past a quarter of the
     // screen or on a quick flick; predictive back shrinks it toward the mini player.
-    val dismiss = remember { androidx.compose.animation.core.Animatable(0f) }
+    var dismiss by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var backProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var pageHeight by remember { androidx.compose.runtime.mutableIntStateOf(1) }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val settle = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
-    LaunchedEffect(expanded) { if (expanded) { dismiss.snapTo(0f); backProgress = 0f } }
+    val settle = tween<Float>(durationMillis = 220, easing = FastOutSlowInEasing)
+    LaunchedEffect(expanded) { if (expanded) { dismiss = 0f; backProgress = 0f } }
     androidx.activity.compose.PredictiveBackHandler(expanded) { events ->
         try { events.collect { backProgress = it.progress }; haptics.threshold(); expanded = false }
         catch (e: kotlin.coroutines.cancellation.CancellationException) { backProgress = 0f; throw e }
@@ -447,29 +441,42 @@ private fun MusicRootContent(model: LibraryViewModel) {
     val dragToClose = remember {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             override fun onPreScroll(available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (available.y < 0 && dismiss.value > 0f) { val used = maxOf(available.y, -dismiss.value); scope.launch { dismiss.snapTo(dismiss.value + used) }; return androidx.compose.ui.geometry.Offset(0f, used) }
+                if (available.y < 0 && dismiss > 0f && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
+                    val used = maxOf(available.y, -dismiss)
+                    dismiss += used
+                    return androidx.compose.ui.geometry.Offset(0f, used)
+                }
                 return androidx.compose.ui.geometry.Offset.Zero
             }
             override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (available.y > 0 && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) { scope.launch { dismiss.snapTo(dismiss.value + available.y) }; return available.copy(x = 0f) }
+                if (available.y > 0 && source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
+                    val used = minOf(available.y, (pageHeight - dismiss).coerceAtLeast(0f))
+                    dismiss += used
+                    return available.copy(x = 0f, y = used)
+                }
                 return androidx.compose.ui.geometry.Offset.Zero
             }
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
-                if (dismiss.value <= 0f) return androidx.compose.ui.unit.Velocity.Zero
-                if (dismiss.value > pageHeight * 0.25f || available.y > 2_500f) { haptics.threshold(); expanded = false }
-                else dismiss.animateTo(0f, settle)
+                if (dismiss <= 0f) return androidx.compose.ui.unit.Velocity.Zero
+                if (dismiss > pageHeight * 0.25f || available.y > 2_500f) { haptics.threshold(); expanded = false }
+                else androidx.compose.animation.core.animate(dismiss, 0f, animationSpec = settle) { value, _ -> dismiss = value }
                 return available
             }
         }
     }
-    AnimatedVisibility(expanded && playing.hasTrack, enter = slideInVertically(MaterialTheme.motionScheme.defaultSpatialSpec()) { it },
-        exit = slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it }) {
-        val coverVisibility = this
+    AnimatedVisibility(expanded && playing.hasTrack, enter = EnterTransition.None, exit = ExitTransition.None) {
+        // The entire page stays in one layer. On dismissal it travels only the remaining distance.
+        val hidden by transition.animateFloat(
+            transitionSpec = { tween(if (targetState == androidx.compose.animation.EnterExitState.Visible) 300 else 240, easing = FastOutSlowInEasing) },
+            label = "Player travel",
+        ) { if (it == androidx.compose.animation.EnterExitState.Visible) 0f else 1f }
+        val settled = !transition.isRunning && transition.targetState == androidx.compose.animation.EnterExitState.Visible
         Box(Modifier.fillMaxSize().onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.nestedScroll(dragToClose)
             .graphicsLayer {
-                translationY = dismiss.value + backProgress * 120.dp.toPx()
+                val offset = (dismiss + backProgress * 120.dp.toPx()).coerceIn(0f, size.height)
+                translationY = offset + (size.height - offset) * hidden
                 val s = 1f - backProgress * 0.08f; scaleX = s; scaleY = s
-                shape = RoundedCornerShape((backProgress * 40 + (dismiss.value / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
+                shape = RoundedCornerShape((backProgress * 40 + (dismiss / pageHeight).coerceIn(0f, 1f) * 40).dp); clip = true
             }) {
         val motionCover by model.motionCover.collectAsStateWithLifecycle()
         val onlineAlbumId = rememberOnlineAlbumId(playing.mediaId, onlinePageScope)
@@ -485,17 +492,23 @@ private fun MusicRootContent(model: LibraryViewModel) {
                 else -> null
             }
         }
-        CompositionLocalProvider(LocalPlayerCoverVisibility provides coverVisibility) {
+        val currentTrack = model.currentTrack(playing)
+        val input = playing.inputFormat
+        val file = currentTrack?.format
+        val format = remember(file, input) {
+            (file ?: input)?.let { reported ->
+                val matching = input?.takeIf { it.codec.equals(reported.codec, ignoreCase = true) }
+                val source = reported.copy(sampleRateHz = reported.sampleRateHz ?: matching?.sampleRateHz, bitrateKbps = null)
+                listOfNotNull(source.label, source.sampleRateHz?.takeUnless { source.lossless }?.let(::formatKhz),
+                    (reported.bitrateKbps ?: matching?.bitrateKbps)?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString(" · ")
+            }
+        }
         NowPlaying(
-            playing, format = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format }?.let { f ->
-                listOfNotNull(f.label, f.bitrateKbps?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString("  ·  ") }
-                // A YouTube Music song: the stream's codec and bitrate, once the player picked it.
-                // Quality only, the same shape as a file's; nothing until the stream is chosen.
-                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { context.graph.youTube.format(it.removePrefix("yt:")) },
+            playing, format = format,
             from = model.mixLabel ?: origin?.title ?: rawOrigin,
             onOpenOrigin = openOrigin,
             originIsMix = model.mixLabel != null || origin?.kind == "mix",
-            position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover,
+            position = { model.positionMs }, onClose = { expanded = false }, motionCover = motionCover.takeIf { settled },
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
             onSleepTimer = model::setSleepTimer,
             onEqualizer = { equalizerOpen = true },
@@ -505,22 +518,21 @@ private fun MusicRootContent(model: LibraryViewModel) {
             onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
             // Timing belongs to the recording, including a streamed source.
             onSaveLyricTiming = model::saveLyricTiming, onResetLyricTiming = model::resetLyricTiming,
-            favourite = (model.currentTrack()?.recordingId ?: playing.mediaId) in personal.favouriteByTrackId,
+            favourite = (currentTrack?.recordingId ?: playing.mediaId) in personal.favouriteByTrackId,
             // The heart works the same for a file and a YouTube Music song.
-            onFavourite = model.currentTrack()?.let { track -> { model.toggleFavourite(track) } },
+            onFavourite = currentTrack?.let { track -> { model.toggleFavourite(track) } },
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
-            onMore = model.currentTrack()?.let { track -> { actionTrack = track } },
+            onMore = currentTrack?.let { track -> { actionTrack = track } },
             mixFrom = model.mixLabel,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } }
                 // A YouTube Music song: its album page, when its row named one.
                 ?: onlineAlbumId?.let { albumId -> { onlineNav.open(OnlineTarget.Album(albumId, playing.album ?: playing.title)) } },
             onOpenArtist = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = true) } }
-                ?: playing.mediaId?.takeIf { it.startsWith("yt:") && playing.artist.isNotBlank() }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } }
-                ?: playing.mediaId?.takeIf { it.startsWith("yt:") }?.let { { onlineNav.open(OnlineTarget.Artist(playing.artist.substringBefore(",").trim())) } },
-            fileRateHz = playing.mediaId?.let { library?.byId?.get(TrackId(it))?.format?.sampleRateHz },
+                ?: playing.artist.substringBefore(",").trim().takeIf { it.isNotEmpty() && playing.mediaId?.startsWith("yt:") == true }
+                    ?.let { artist -> { onlineNav.open(OnlineTarget.Artist(artist)) } },
+            fileRateHz = file?.sampleRateHz ?: input?.sampleRateHz,
         )
-        }
         }
     }
     model.downloadRequest?.let { requested ->
@@ -649,6 +661,8 @@ private fun NowPlaying(
     var outputUnavailable by rememberSaveable { mutableStateOf(false) }
     val changeOutput: () -> Unit = { outputUnavailable = !monitor.showOutputSwitcher() }
     if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput, onEqualizer = { audioPath = false; onEqualizer() },
+        sourceLabel = if (state.track?.uri?.startsWith("ytm://") == true || state.mediaId?.startsWith("yt:") == true)
+            "YouTube Music input" else "File input",
         fileRateHz = fileRateHz, processing = listOfNotNull(
             state.equalizer.settings.takeIf { it.enabled }?.let { "Equalizer: ${it.profile}" },
             state.equalizer.settings.channels.takeIf { !it.neutral }?.let { c -> listOfNotNull(if (c.mono) "mono" else null, if (c.swap) "left/right swapped" else null,
