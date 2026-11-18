@@ -37,7 +37,7 @@ import ua.olex.music.playback.UsbBitPerfect
 internal fun SettingsPage(
     modifier: Modifier, folders: List<String>, scanning: Boolean, ratingsToFiles: Boolean,
     onRatingsToFiles: (Boolean) -> Unit, onEqualizer: () -> Unit, onRescan: () -> Unit,
-    onAddFolder: () -> Unit, onClearFolders: () -> Unit,
+    onAddFolder: () -> Unit, onClearFolders: () -> Unit, onDownloads: () -> Unit = {},
 ) {
     val context = LocalContext.current
     fun prefs(name: String) = context.getSharedPreferences(name, Context.MODE_PRIVATE)
@@ -49,7 +49,11 @@ internal fun SettingsPage(
     var photos by remember { mutableStateOf(images.enabled) }
     var headphones by remember { mutableStateOf(HeadsetRules.resumeDevices(context).sorted()) }
     val hidden = remember { ua.olex.music.library.LibraryFolders.excludedNow(context).size }
-    val manage = remember { android.provider.MediaStore.canManageMedia(context) }
+    var manage by remember { mutableStateOf(android.provider.MediaStore.canManageMedia(context)) }
+    androidx.lifecycle.compose.LifecycleResumeEffect(context) {
+        manage = android.provider.MediaStore.canManageMedia(context)
+        onPauseOrDispose {}
+    }
     val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
 
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
@@ -161,34 +165,18 @@ internal fun SettingsPage(
                 "$user · " + when (val st = state) { is ua.olex.music.soulseek.SoulseekClient.State.Online -> "online"
                     is ua.olex.music.soulseek.SoulseekClient.State.Failed -> st.reason; ua.olex.music.soulseek.SoulseekClient.State.Connecting -> "signing in…"
                     else -> "signs in when you download" }
-            } ?: "Sign in to download songs and albums, lossless first. A new name is created on first sign-in", first = true, last = soulseekJobs.isEmpty()) { editing = true }
+            } ?: "Sign in to download songs and albums, lossless first. A new name is created on first sign-in", first = true, last = false) { editing = true }
             if (editing) SoulseekDialog(account, onDismiss = { editing = false }) { new -> downloads.account = new; account = new; editing = false }
         }
-        // Recent downloads in the same group, newest first: where each one is, and a retry for a failed one.
-        val recent = soulseekJobs.asReversed()
-        items(recent.size, key = { "job-" + recent[it].id }) { i ->
-            val job = recent[i]
-            val haptics = rememberHaptics()
-            Row(when { job.done -> Glyph.CHECK; job.failed -> Glyph.INFO; else -> Glyph.DOWNLOAD }, job.title, job.status, last = i == recent.lastIndex,
-                trailing = if (!job.done) ({
-                    val label = if (job.running) "Cancel download" else "Try again"
-                    androidx.compose.material3.IconButton(
-                        onClick = { haptics.tick(); if (job.running) soulseek.cancel(job.id) else soulseek.retry(job) },
-                        modifier = Modifier.semantics { contentDescription = label },
-                    ) { Symbol(if (job.running) Glyph.CLOSE else Glyph.REFRESH) }
-                }) else null,
-                below = if (job.running) ({
-                    androidx.compose.foundation.layout.Spacer(Modifier.height(10.dp))
-                    val p = job.progress
-                    // A plain line while it waits, the wave once bytes flow, as Play Store does.
-                    if (p == null) androidx.compose.material3.LinearProgressIndicator(Modifier.fillMaxWidth())
-                    else androidx.compose.material3.LinearWavyProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
-                }) else null)
-        }
-        if (soulseekJobs.any { !it.running }) item(key = "jobs-clear") {
-            androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
-                TextButton(onClick = { soulseek.clearFinished() }) { Text("Clear finished") }
-            }
+        item(key = "all-downloads") {
+            val active = soulseekJobs.count { it.running }
+            val failed = soulseekJobs.count { it.failed }
+            Row(Glyph.DOWNLOAD, "Downloads", when {
+                active > 0 || failed > 0 -> listOfNotNull("$active active".takeIf { active > 0 },
+                    "$failed need attention".takeIf { failed > 0 }).joinToString(" · ")
+                soulseekJobs.isEmpty() -> "Songs and albums you save for offline listening"
+                else -> "View recent transfers"
+            }, last = true, onClick = onDownloads)
         }
 
         // Moving covers from Apple Music, with the owner's own MusicKit key.

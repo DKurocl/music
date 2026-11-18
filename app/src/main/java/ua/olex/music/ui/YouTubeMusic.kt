@@ -203,6 +203,8 @@ internal class YouTubeMusic(
     private val more = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, PlaylistCursor>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PlaylistCursor>?) = size > 48
     })
+    internal fun hasAlbumContinuation(id: String): Boolean = more.containsKey("${pageScope()}/$id")
+
     private fun rememberContinuation(id: String, token: String?, visited: Set<String> = emptySet()) {
         if (token == null) more.remove(id) else more[id] = PlaylistCursor(token, visited)
     }
