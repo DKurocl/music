@@ -1,3 +1,19 @@
+# Home, playback and library follow-up (2026-11-18)
+
+The owner requested uniform playlist cards, stable mood and playback controls, a centered
+voice search button, a floating player and a cover-only handoff. Settings now has search
+and a local file overview with Android trash, duplicate review and cache controls. Browse
+groups collection, listening and audio quality shortcuts. The player keeps output in the
+quick toolbar alongside lyrics, sleep timer and queue. The launcher and startup mark use
+the same terracotta artwork and include a themed icon.
+
+Artist entry points use the YouTube Music catalogue when enabled. The artist page receives
+additional shelves in provider order, while playback selects available local copies through
+the existing service. Playlist browse normalizes IDs and accepts a shelf with card metadata
+when the response omits its header. Live YouTube Music access could not be tested from this
+workspace because the HTTPS proxy denied the connection. Physical Pixel appearance and
+account playback remain unverified.
+
 # Playlists and one-tap moods on Home (2026-11-18)
 
 Filter changes use the direction of the tapped chip, with overlapping motion below the fixed

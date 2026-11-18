@@ -6,17 +6,12 @@ The launcher icon and the animated splash icon, drawn from one geometry.
 Writes app/src/main/res/drawable/ic_launcher_{foreground,background,monochrome}.xml,
 app/src/main/res/drawable/splash_icon.xml and docs/design/icon-preview.svg (for review).
 
-The mark: a nine-scallop "cookie" (Material 3 Expressive's shape family, the same the app uses for
-artists and empty states) in a blue to violet to pink gradient, like a record seen from above, with
-a white note on it. Google's 2025 icons are one bold shape, a soft gradient and a white symbol; the
-note sits a little left of centre so the flag has room, as a note is read.
+The mark pairs a softly rounded four-lobed silhouette with a white music note. Two
+terracotta tones add depth against the launcher's white background. A cutout version
+is available for Android themed icons.
 
-The mark takes about two thirds of what a launcher shows (the inner 72 dp of the 108 dp layers),
-on white, as Google's own icons sit; the first version filled the whole circle and looked loud.
-
-The splash: no white disc behind it (the mark floats on the page colour, as Google's apps start).
-The record grows in with a half turn and settles on a spring; the note pops in a beat later with a
-small tilt that straightens. 700 ms, within Android's 1000 ms for phones.
+The splash settles the silhouette first, followed by the note. Both finish at the
+same scale and angle as the launcher mark.
 """
 import math
 import os
@@ -26,13 +21,13 @@ RES = os.path.join(ROOT, "app/src/main/res")
 
 C = 54.0           # centre of the 108 dp canvas
 R = 30.5           # cookie radius: 61 dp across, inside the 66 dp safe zone
-WAVE = 0.075       # depth of the scallops
-LOBES = 9
+WAVE = 0.045       # depth of the scallops
+LOBES = 4
 
 # The whole mark is drawn at full size and scaled around the centre: 61 dp becomes about 43 dp.
-MARK = 0.7
+MARK = 0.78
 
-STOPS = [(0.0, "#FF2F7BF5"), (0.55, "#FF7B61FF"), (1.0, "#FFF06AB4")]
+STOPS = [(0.0, "#FFD26855"), (1.0, "#FFAD4436")]
 
 
 def f(x):
@@ -136,7 +131,7 @@ def write(name, text):
         out.write(text)
 
 
-def keyframes(prop, frames, duration=700):
+def keyframes(prop, frames, duration=460):
     ks = "".join(
         f'<keyframe android:fraction="{fr:.3f}" android:value="{v}"' + (f' android:interpolator="@interpolator/{i}"' if i else "") + "/>"
         for fr, v, i in frames)
@@ -155,19 +150,19 @@ def main():
     write("ic_launcher_monochrome.xml", HEADER + VECTOR.replace(' xmlns:aapt="http://schemas.android.com/aapt"', "") +
           f'<group android:pivotX="{C}" android:pivotY="{C}" android:scaleX="{MARK}" android:scaleY="{MARK}">'
           f'<path android:fillColor="#FFFFFFFF" android:fillType="evenOdd" android:pathData="{cookie()} {NOTE}"/></group></vector>\n')
-    d = 700
+    d = 460
     anim = "".join([
-        # The record grows in with a half turn; the light under it turns back, so it stays put.
+        # The silhouette turns gently into place; the light under it turns back, so it stays put.
         target("record",
-               keyframes("scaleX", [(0, 0.4, None), (0.58, 1, "splash_spring"), (1, 1, None)], d),
-               keyframes("scaleY", [(0, 0.4, None), (0.58, 1, "splash_spring"), (1, 1, None)], d),
-               keyframes("rotation", [(0, -100, None), (0.58, 0, "w_emphasized"), (1, 0, None)], d)),
-        target("sheen", keyframes("rotation", [(0, 100, None), (0.58, 0, "w_emphasized"), (1, 0, None)], d)),
+               keyframes("scaleX", [(0, 0.74, None), (0.58, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("scaleY", [(0, 0.74, None), (0.58, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("rotation", [(0, -24, None), (0.58, 0, "w_emphasized"), (1, 0, None)], d)),
+        target("sheen", keyframes("rotation", [(0, 24, None), (0.58, 0, "w_emphasized"), (1, 0, None)], d)),
         # The note pops in a beat later and straightens.
         target("note",
-               keyframes("scaleX", [(0, 0, None), (0.22, 0, None), (0.74, 1, "splash_spring"), (1, 1, None)], d),
-               keyframes("scaleY", [(0, 0, None), (0.22, 0, None), (0.74, 1, "splash_spring"), (1, 1, None)], d),
-               keyframes("rotation", [(0, -18, None), (0.22, -18, None), (0.8, 0, "w_emphasized"), (1, 0, None)], d)),
+               keyframes("scaleX", [(0, 0.74, None), (0.12, 0.74, None), (0.74, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("scaleY", [(0, 0.74, None), (0.12, 0.74, None), (0.74, 1, "splash_spring"), (1, 1, None)], d),
+               keyframes("rotation", [(0, -18, None), (0.12, -18, None), (0.8, 0, "w_emphasized"), (1, 0, None)], d)),
     ])
     inner = '<vector tools:ignore="VectorPath" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">'
     write("splash_icon.xml", HEADER + '<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt" xmlns:tools="http://schemas.android.com/tools">'
