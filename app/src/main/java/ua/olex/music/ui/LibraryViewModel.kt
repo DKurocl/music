@@ -513,9 +513,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private fun recentKeys(): Set<String> = recentPlayed() + excluded
 
     private fun recentPlayed(): Set<String> {
-        val byId = library.value?.songs?.associateBy { it.id.value }.orEmpty()
+        val byRecording = catalogue.value?.songs?.associateBy { it.statsKey }.orEmpty()
         return stats.value.entries.filter { it.value.lastPlayedAt != null }.sortedByDescending { it.value.lastPlayedAt }.take(50)
-            .mapNotNull { byId[it.key]?.let(Mix::songKey) }.toSet()
+            .mapNotNull { byRecording[it.key]?.let(Mix::songKey) }.toSet()
     }
 
     /**

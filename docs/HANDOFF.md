@@ -6,7 +6,8 @@ cold-start notification entry, widget ordering, motion cover replacement and loc
 The widget reads one preferences snapshot and serializes both submissions with its render generation.
 Cover writes use fixed lock stripes so simultaneous requests for the same digest keep the same lock.
 Queue taps, shuffles, search and first mix pages supersede older app selections. Mix and search
-preparation run off the UI dispatcher. The player intent waits for a connected session with a track.
+preparation and system browse/search page construction run off the UI dispatcher. Local radio
+uses recording-key statistics for ranking and recent-track exclusion. The player intent waits for a connected session with a track.
 
 Local diff check passed. Local APK compilation is unavailable: no Android SDK or Gradle, and the
 skill's version probe could not reach the artifact endpoints from the shell sandbox. Branch CI and
