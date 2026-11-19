@@ -865,7 +865,7 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
         changed = true
     }
     AppSheet(onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Sleep timer", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.fillMaxWidth())
             // The dial: drag around it in 5 minute steps (up to 2 hours), as Google's Clock sets a timer.
@@ -893,18 +893,18 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                         Text("min · until ${"%02d:%02d".format(at.hour, at.minute)}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
                     }
                 }
-            }
-            if (showingRun) TextButton(onClick = {
-                minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
-                endOfSong = runningEnd
-                changed = true
-                haptics.tick()
-            }) { Text("Edit timer") }
-            else if (!endOfSong) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { selectMinutes(minutes - 5) }, enabled = minutes > 5,
-                    modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
-                TextButton(onClick = { selectMinutes(minutes + 5) }, enabled = minutes < 120,
-                    modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
+                if (showingRun) TextButton(onClick = {
+                    minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
+                    endOfSong = runningEnd
+                    changed = true
+                    haptics.tick()
+                }) { Text("Edit timer") }
+                else if (!endOfSong) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { selectMinutes(minutes - 5) }, enabled = minutes > 5,
+                        modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
+                    TextButton(onClick = { selectMinutes(minutes + 5) }, enabled = minutes < 120,
+                        modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
+                }
             }
             // Quick lengths as one connected group; End of song last.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
