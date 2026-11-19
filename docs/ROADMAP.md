@@ -21,6 +21,8 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-19: Home start tile gestures and the Home/listening transition.
+
 - [x] Codex, 2026-11-18: one playable feed and a separate mood chooser for the same library.
 
 ## What "the best it can be" means here (owner, 2026-11-14)

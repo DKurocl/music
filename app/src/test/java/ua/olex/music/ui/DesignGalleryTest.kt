@@ -117,7 +117,7 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun DemoHome(modifier: Modifier, small: Boolean = false, onToggle: () -> Unit = {}, onPlay: (List<Track>, Int, String) -> Unit = { _, _, _ -> }, onOpenPlaylist: (Long) -> Unit = {}) {
+    private fun DemoHome(modifier: Modifier, small: Boolean = false, onToggle: () -> Unit = {}, onPlay: (List<Track>, Int, String) -> Unit = { _, _, _ -> }, onShuffle: (List<Track>) -> Unit = {}, onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onOpenPlaylist: (Long) -> Unit = {}) {
         val local = androidx.compose.runtime.remember(small) { demoSongs.filterNot { YouTubeMusic.isOnline(it) }.take(if (small) 2 else 3) }
         val index = androidx.compose.runtime.remember(local) { LibraryIndex.build(local) }
         fun card(id: String, name: String, subtitle: String, cover: Int, kind: YouTubeMusic.Card.Kind) =
@@ -146,7 +146,7 @@ class DesignGalleryTest {
         CompositionLocalProvider(LocalPlayingTrack provides playing) {
             HomePage(index, local, emptyMap(), playing?.id?.value, modifier, onPlay, {}, youTubeHome = remote,
                 playlists = own, accountPlaylists = account, favourites = local.take(2), onOpenPlaylist = onOpenPlaylist,
-                transportPlaying = playing != null, onToggle = onToggle)
+                transportPlaying = playing != null, onToggle = onToggle, onOpenAlbum = onOpenAlbum, onShuffle = onShuffle)
         }
     }
 
@@ -175,11 +175,11 @@ class DesignGalleryTest {
     }
 
     @Composable
-    private fun Shell(title: String, place: Place?, current: PlayerState = now, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
+    private fun Shell(title: String, place: Place?, current: PlayerState = now, statsTap: () -> Unit = {}, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
         CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
                 topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) },
-                    actions = { if (place == Place.HOME) HomeActions({}, {}) }) },
+                    actions = { if (place == Place.HOME) HomeActions(statsTap, {}) }) },
                 bottomBar = { PlacesBar(place) {} },
             ) { pad ->
                 // Match the production overlay: the list scrolls behind the shared floating player.
@@ -839,16 +839,30 @@ class DesignGalleryTest {
     @Test fun home() {
         var opened: Long? = null
         var toggles = 0
+        var albumOpens = 0
+        var shuffles = 0
+        val likedPlays = mutableListOf<TrackId>()
         var mix: String? = null
         var online: OnlineTarget? = null
         compose.setContent { Shell("Home", Place.HOME, demoNow) {
             CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { target -> online = target }, playMix = { id, _ -> mix = id })) {
-                DemoHome(Modifier.fillMaxSize().padding(it), onToggle = { toggles++ }) { id -> opened = id }
+                DemoHome(Modifier.fillMaxSize().padding(it), onToggle = { toggles++ },
+                    onPlay = { songs, i, origin -> if (origin == "Liked") likedPlays += songs[i].id },
+                    onShuffle = { if (it.isNotEmpty()) shuffles++ }, onOpenAlbum = { albumOpens++ }) { id -> opened = id }
             }
         } }
         shot("01-home")
-        compose.onNodeWithContentDescription("Pause In Transit").performClick()
+        compose.onNodeWithContentDescription("Pause In Transit").performTouchInput { click() }
         org.junit.Assert.assertEquals(1, toggles)
+        org.junit.Assert.assertEquals(0, albumOpens)
+        compose.onNodeWithText("In Transit").performClick()
+        org.junit.Assert.assertEquals(1, albumOpens)
+        compose.onNodeWithText("Shuffle all").performClick().performClick()
+        org.junit.Assert.assertEquals(2, shuffles)
+        compose.onNodeWithText("Liked").performClick()
+        compose.onNodeWithText("Liked").performTouchInput { longClick() }
+        compose.onNode(hasText(demoSongs[2].title) and hasAnyAncestor(hasTestTag("liked-picker"))).performClick()
+        org.junit.Assert.assertEquals(listOf(demoSongs[0].id, demoSongs[2].id), likedPlays)
         compose.onNodeWithContentDescription("Next picks").performClick()
         compose.onNodeWithContentDescription("First picks").performClick()
         compose.onNodeWithTag("home-feed").performScrollToNode(hasText("Night Drive Mix"))
@@ -862,6 +876,46 @@ class DesignGalleryTest {
         shot("01b-home-lower")
         compose.onNodeWithText("Energize").performClick()
         compose.waitUntil(5_000) { compose.onAllNodesWithText("No songs for this mood").fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
+    fun listeningOpensFromHome() {
+        val open = androidx.compose.runtime.mutableStateOf(false)
+        val catalog = LibraryIndex.build(demoSongs)
+        val sample = ua.olex.music.model.HistoryEntry(1, ua.olex.music.model.SavedSong.from(demoSongs[1]),
+            System.currentTimeMillis(), 168_000)
+        compose.setContent {
+            Shell(if (open.value) "Your listening" else "Home", if (open.value) null else Place.HOME, demoNow,
+                statsTap = { open.value = true }) { pad ->
+                HomeListeningTransition(open.value, 0.84f, false, Modifier.padding(pad)) { shown ->
+                    if (shown) StatsPage(catalog, Modifier, { _, _ -> }) { kotlinx.coroutines.flow.flowOf(listOf(sample)) }
+                    else DemoHome(Modifier)
+                }
+            }
+        }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Shuffle all").fetchSemanticsNodes().isNotEmpty() }
+        compose.mainClock.autoAdvance = false
+        try {
+            fun frame(i: Int) {
+                val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
+                File("build/reports/ui-previews/gallery", "12d-entry-$i.png").apply { parentFile.mkdirs() }
+                    .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            frame(0)
+            compose.onNodeWithContentDescription("Listening stats").performClick()
+            for (i in 1..5) {
+                compose.mainClock.advanceTimeBy(if (i == 1) 32 else 48)
+                frame(i)
+            }
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.onNodeWithTag("listening-cards").assertExists()
+            compose.onNodeWithText("Shuffle all").assertDoesNotExist()
+            compose.runOnUiThread { open.value = false }
+            compose.mainClock.advanceTimeBy(1_000)
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+        compose.onNodeWithText("Shuffle all").assertExists()
     }
 
     @Test fun libraryAlbums() {

@@ -94,7 +94,14 @@ internal fun StatsPage(library: LibraryIndex, modifier: Modifier, onPlay: (List<
             LazyColumn(Modifier.fillMaxSize().testTag("listening-cards"),
                 state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp + viewport),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (frame == null) item(key = "loading") { PlaceholderRow() }
+                if (frame == null) item(key = "loading") {
+                    Column(Modifier.fillMaxWidth().semantics { contentDescription = "Loading listening statistics" },
+                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Box(Modifier.fillMaxWidth().height(206.dp).clip(RoundedCornerShape(32.dp))
+                            .background(cs.tertiaryContainer.copy(alpha = 0.45f)))
+                        Box(Modifier.fillMaxWidth().height(182.dp).clip(RoundedCornerShape(28.dp)).background(cs.surfaceContainer))
+                    }
+                }
                 else {
                     val s = frame.data
                     item(key = "summary") { ListeningOverview(s, frame.period, frame.day) }

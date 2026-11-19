@@ -3,6 +3,11 @@
 package ua.olex.music.ui
 
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
@@ -93,7 +98,7 @@ private fun CoverPick(track: Track, currentId: String?, shape: Shape, lead: Bool
 @Composable
 internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: Track?, librarySongs: List<Track>, favourites: List<Track>,
     currentId: String?, transportPlaying: Boolean, onToggle: () -> Unit,
-    onAlbum: () -> Unit, onPlayAlbum: () -> Unit, onShuffle: () -> Unit, onLiked: () -> Unit) {
+    onAlbum: () -> Unit, onPlayAlbum: () -> Unit, onShuffle: () -> Unit, onLiked: () -> Unit, onChooseLiked: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
@@ -112,10 +117,18 @@ internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: 
     }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).height(248.dp + 116.dp * (fontScale - 1f)),
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Surface(onClick = onAlbum, shape = RoundedCornerShape(32.dp), color = cs.primaryContainer,
-            modifier = Modifier.weight(1.5f).fillMaxHeight().squish(0.025f)) {
-            Box {
-                Artwork(if (album != null) album.artworkUri else firstPick?.artworkUri, Modifier.fillMaxSize(), 0.dp, pixels = ArtworkPlan.LARGE)
+        val coverInput = remember { MutableInteractionSource() }
+        val coverPressed by coverInput.collectIsPressedAsState()
+        val still = LocalPowerSave.current
+        val zoom by animateFloatAsState(if (coverPressed && !still) 1.045f else 1f,
+            if (still) snap() else MaterialTheme.motionScheme.fastSpatialSpec(), label = "Sleeve press")
+        Box(Modifier.weight(1.5f).fillMaxHeight().clip(RoundedCornerShape(32.dp)).background(cs.primaryContainer)) {
+            Box(Modifier.fillMaxSize().clickable(role = Role.Button, interactionSource = coverInput,
+                indication = androidx.compose.foundation.LocalIndication.current,
+                onClickLabel = if (album != null) "Open $title" else "Song actions for $title",
+                onClick = { haptics.tick(); onAlbum() })) {
+                Artwork(if (album != null) album.artworkUri else firstPick?.artworkUri,
+                    Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom }, 0.dp, pixels = ArtworkPlan.LARGE)
                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
                     0.28f to androidx.compose.ui.graphics.Color.Transparent, 1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.86f))))
                 Column(Modifier.align(Alignment.BottomStart).padding(start = 15.dp, end = 60.dp, bottom = 16.dp)) {
@@ -132,10 +145,15 @@ internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: 
                         Text(playing.title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                Surface(onClick = { haptics.confirm(); if (active) onToggle() else onPlayAlbum() }, shape = MaterialShapes.Cookie9Sided.toShape(),
-                    color = cs.primaryContainer, contentColor = cs.onPrimaryContainer,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(48.dp).semantics { contentDescription = transportLabel }) {
-                    Box(contentAlignment = Alignment.Center) { PlayPauseSymbol(active && transportPlaying, size = 24.dp) }
+            }
+            val transportInput = remember { MutableInteractionSource() }
+            val transportPressed by transportInput.collectIsPressedAsState()
+            Surface(onClick = { haptics.confirm(); if (active) onToggle() else onPlayAlbum() },
+                interactionSource = transportInput, shape = MaterialShapes.Cookie9Sided.toShape(),
+                color = cs.primaryContainer, contentColor = cs.onPrimaryContainer,
+                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(48.dp).semantics { contentDescription = transportLabel }) {
+                Box(contentAlignment = Alignment.Center) {
+                    PlayPauseSymbol(active && transportPlaying, size = 24.dp, pressed = transportPressed)
                 }
             }
         }
@@ -145,7 +163,7 @@ internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: 
                 haptics.confirm(); onShuffle()
             }
             StartTile("Liked", songCount(favourites.size), Glyph.FAVOURITE, MaterialShapes.Cookie9Sided.toShape(),
-                cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary, cs.onSecondary, Modifier.weight(1f), enabled = favourites.isNotEmpty(), previews = likedArt) {
+                cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary, cs.onSecondary, Modifier.weight(1f), enabled = favourites.isNotEmpty(), previews = likedArt, onLongClick = onChooseLiked) {
                 haptics.confirm(); onLiked()
             }
         }
@@ -156,22 +174,38 @@ internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: 
 @Composable
 private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
     container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, accent: androidx.compose.ui.graphics.Color, onAccent: androidx.compose.ui.graphics.Color,
-    modifier: Modifier, enabled: Boolean = true, previews: List<String> = emptyList(), onClick: () -> Unit) {
+    modifier: Modifier, enabled: Boolean, previews: List<String> = emptyList(), onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     var taps by remember { mutableIntStateOf(0) }
     val still = LocalPowerSave.current
     val motion = remember { androidx.compose.animation.core.Animatable(0f) }
+    val input = remember { MutableInteractionSource() }
+    val pressed by input.collectIsPressedAsState()
+    val pressure by animateFloatAsState(if (pressed && !still) 1f else 0f,
+        if (still) snap() else MaterialTheme.motionScheme.fastSpatialSpec(), label = "Start tile pressure")
+    val spring = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
     val first = remember { androidx.compose.ui.graphics.Path() }
     val second = remember { androidx.compose.ui.graphics.Path() }
     LaunchedEffect(taps, still) {
         if (taps > 0 && !still) {
-            motion.animateTo(1f, androidx.compose.animation.core.tween(125))
-            motion.animateTo(0f, androidx.compose.animation.core.tween(250))
+            motion.snapTo(0f)
+            motion.animateTo(1f, androidx.compose.animation.core.tween(110))
+            motion.animateTo(0f, spring)
         } else motion.snapTo(0f)
     }
     val outer = 28.dp
     val join = 10.dp
     val tileShape = if (glyph == Glyph.SHUFFLE) RoundedCornerShape(outer, outer, join, join) else RoundedCornerShape(join, join, outer, outer)
-    Surface(onClick = { taps++; onClick() }, enabled = enabled, shape = tileShape, color = container, contentColor = content, modifier = modifier.fillMaxWidth()) {
+    val cs = MaterialTheme.colorScheme
+    Surface(shape = tileShape, color = if (enabled) container else cs.surfaceContainerHigh,
+        contentColor = if (enabled) content else cs.onSurfaceVariant,
+        modifier = modifier.fillMaxWidth().graphicsLayer {
+            scaleX = 1f - pressure * 0.025f
+            scaleY = 1f - pressure * 0.035f
+        }.clip(tileShape).combinedClickable(interactionSource = input, indication = androidx.compose.foundation.LocalIndication.current,
+            enabled = enabled, role = Role.Button, onClickLabel = if (glyph == Glyph.SHUFFLE) "Shuffle library" else "Play liked songs",
+            onLongClickLabel = if (onLongClick != null) "Choose a liked song" else null, onLongClick = onLongClick,
+            onClick = { taps++; onClick() })) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.fillMaxWidth().height(39.dp)) {
                 Box(Modifier.size(39.dp), contentAlignment = Alignment.Center) {
@@ -180,11 +214,12 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
                         rotationZ = if (glyph == Glyph.SHUFFLE) wave * 25f else wave * 12f
                         scaleX = 1f + wave * 0.08f
                         scaleY = scaleX
-                    }.clip(shape).background(accent))
+                    }.clip(shape).background(if (enabled) accent else cs.surfaceContainerHighest))
+                    val ink = if (enabled) onAccent else cs.onSurfaceVariant
                     if (glyph == Glyph.SHUFFLE) {
                         androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
                             val unit = size.width / 24f
-                            val bend = motion.value * 5f
+                            val bend = motion.value * 5f - pressure * 2f
                             val pen = 2.1f * unit
                             first.apply {
                                 rewind()
@@ -197,16 +232,16 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
                                 cubicTo(9f * unit, (18f + bend) * unit, 13f * unit, (6f - bend) * unit, 20f * unit, 6f * unit)
                             }
                             val stroke = androidx.compose.ui.graphics.drawscope.Stroke(pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawPath(first, onAccent, style = stroke)
-                            drawPath(second, onAccent, style = stroke)
-                            drawLine(onAccent, androidx.compose.ui.geometry.Offset(17f * unit, 3f * unit), androidx.compose.ui.geometry.Offset(20f * unit, 6f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(onAccent, androidx.compose.ui.geometry.Offset(20f * unit, 6f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 9f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(onAccent, androidx.compose.ui.geometry.Offset(17f * unit, 15f * unit), androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(onAccent, androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 21f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawPath(first, ink, style = stroke)
+                            drawPath(second, ink, style = stroke)
+                            drawLine(ink, androidx.compose.ui.geometry.Offset(17f * unit, 3f * unit), androidx.compose.ui.geometry.Offset(20f * unit, 6f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(ink, androidx.compose.ui.geometry.Offset(20f * unit, 6f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 9f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(ink, androidx.compose.ui.geometry.Offset(17f * unit, 15f * unit), androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                            drawLine(ink, androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 21f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
                         }
                     } else {
-                        Symbol(glyph, color = onAccent, filled = true, modifier = Modifier.graphicsLayer {
-                            scaleX = 1f + motion.value * 0.20f
+                        Symbol(glyph, color = ink, filled = true, modifier = Modifier.graphicsLayer {
+                            scaleX = 1f - pressure * 0.12f + motion.value * 0.20f
                             scaleY = scaleX
                         })
                     }
@@ -214,7 +249,13 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
                 if (previews.isNotEmpty()) Box(Modifier.align(Alignment.CenterEnd).width(46.dp).height(36.dp)) {
                     previews.forEachIndexed { i, uri ->
                         Artwork(uri, Modifier.align(Alignment.CenterEnd).offset(x = ((i - previews.lastIndex) * 7).dp)
-                            .size(27.dp).graphicsLayer { rotationZ = (i - previews.lastIndex) * 8f }, 5.dp)
+                            .size(27.dp).graphicsLayer {
+                                val depth = i - previews.lastIndex
+                                val direction = if (rtl) -1f else 1f
+                                rotationZ = direction * (depth * 8f + motion.value * (depth * 4f + 5f))
+                                translationX = direction * depth * 2.dp.toPx() * motion.value
+                                translationY = -motion.value * (i + 1).dp.toPx()
+                            }, 5.dp)
                     }
                 }
             }
