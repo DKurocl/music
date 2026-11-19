@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package ua.olex.music.ui
 
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +35,6 @@ import ua.olex.music.playback.FadingPlayer
 import ua.olex.music.playback.HeadsetRules
 import ua.olex.music.playback.LockScreenLyrics
 import ua.olex.music.playback.PlaybackService
-import ua.olex.music.playback.SystemMediaArtwork
 import ua.olex.music.playback.UsbBitPerfect
 
 /**
@@ -69,16 +71,33 @@ internal fun SettingsPage(
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
     val soulseekJobs by soulseek.jobs.collectAsStateWithLifecycle()
     var query by androidx.compose.runtime.saveable.rememberSaveable(initialQuery) { mutableStateOf(initialQuery) }
-    val terms = query.trim().lowercase().split(' ').filter { it.isNotBlank() }
+    val terms = remember(query) { query.trim().lowercase().split(' ').filter { it.isNotBlank() } }
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     LaunchedEffect(query) { list.scrollToItem(0) }
     LazyColumn(modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         item(key = "settings-search") {
-            androidx.compose.material3.OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth(),
-                singleLine = true, placeholder = { Text("Search settings") },
+            val colors = MaterialTheme.colorScheme
+            TextField(query, { query = it }, Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp),
+                singleLine = true, placeholder = { Text("Search settings") }, shape = CircleShape,
                 leadingIcon = { Symbol(Glyph.SEARCH) },
-                trailingIcon = { if (query.isNotEmpty()) androidx.compose.material3.IconButton(onClick = { query = "" },
-                    modifier = Modifier.semantics { contentDescription = "Clear settings search" }) { Symbol(Glyph.CLOSE) } })
+                trailingIcon = { if (query.isNotEmpty()) IconButton(onClick = { query = "" },
+                    modifier = Modifier.semantics { contentDescription = "Clear settings search" }) { Symbol(Glyph.CLOSE) } },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = colors.surfaceContainerHighest,
+                    unfocusedContainerColor = colors.surfaceContainerHigh,
+                    focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                    unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
+                ),
+            )
+        }
+        if (terms.isEmpty()) item(key = "settings-shortcuts") {
+            val colors = MaterialTheme.colorScheme
+            androidx.compose.foundation.layout.Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                HubCard("Equalizer", "EQ & ReplayGain", Glyph.TUNE, MaterialShapes.Cookie9Sided.toShape(),
+                    colors.primaryContainer, colors.onPrimaryContainer, Modifier.weight(1f), onEqualizer)
+                HubCard("Library overview", "Files & storage", Glyph.FOLDER, MaterialShapes.Clover4Leaf.toShape(),
+                    colors.tertiaryContainer, colors.onTertiaryContainer, Modifier.weight(1f), onLibraryOverview)
+            }
         }
         var matches = 0
         fun setting(title: String, content: @Composable () -> Unit) {
@@ -87,12 +106,15 @@ internal fun SettingsPage(
                 item(key = title) { androidx.compose.runtime.CompositionLocalProvider(LocalSettingsResults provides terms.isNotEmpty(), content = content) }
             }
         }
-        if (terms.isEmpty()) item(key = "group-Playback") { Group("Playback") }
-        setting("Smooth pause and play audio fade") {
-            Toggle(Glyph.PLAY, "Smooth pause and play", "Fade audio when playback starts or pauses", fades, first = true, last = true) { enabled ->
-                fades = enabled
-                prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, enabled).apply()
-            }
+        fun setFade(enabled: Boolean) {
+            fades = enabled
+            prefs(FadingPlayer.PREFS).edit().putBoolean(FadingPlayer.KEY, enabled).apply()
+        }
+        if (terms.isEmpty()) {
+            item(key = "group-Playback") { Group("Playback") }
+            item(key = "playback-fade") { PlaybackFadeSetting(fades, ::setFade) }
+        } else setting("Smooth pause and play audio fade") {
+            Toggle(Glyph.PLAY, "Smooth pause and play", "Fade audio on play and pause", fades, onChange = ::setFade)
         }
         headphones.forEachIndexed { i, name ->
             setting("Play when $name connects headphones Bluetooth") { Toggle(Glyph.HEADPHONES, "Play when $name connects", "Turn off to stop starting music on connect", true, last = i == headphones.lastIndex) {
@@ -100,8 +122,8 @@ internal fun SettingsPage(
         }
 
         if (terms.isEmpty()) item(key = "group-Sound") { Group("Sound") }
-        setting("Equalizer and ReplayGain") { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", first = true, onClick = onEqualizer) }
-        setting("Battery saver audio offload") { Toggle(Glyph.BATTERY, "Battery saver", "The phone's audio chip decodes with the screen off, only while nothing processes the sound", offload) {
+        if (terms.isNotEmpty()) setting("Equalizer and ReplayGain") { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", onClick = onEqualizer) }
+        setting("Battery saver audio offload") { Toggle(Glyph.BATTERY, "Battery saver", "Use the audio chip when the screen is off and effects are off", offload, first = true) {
             offload = it; prefs(UsbBitPerfect.PREFS).edit().putBoolean(PlaybackService.OFFLOAD_KEY, it).apply() } }
         setting("Bit-perfect USB output DAC") { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
 
@@ -140,13 +162,6 @@ internal fun SettingsPage(
             Toggle(Glyph.PHOTO, "Colours from the cover", "Adds a soft tint to the player inside Music", tint, first = true) {
                 tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
         }
-        setting("Artwork in Android media controls Quick Settings lock screen") {
-            var artwork by remember { mutableStateOf(SystemMediaArtwork.enabled(context)) }
-            Toggle(Glyph.PHOTO, "Artwork in Android media controls", "Show song covers in Quick Settings and on the lock screen", artwork) {
-                artwork = it
-                SystemMediaArtwork.setEnabled(context, it)
-            }
-        }
         setting("Artist photos Deezer") { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
         // Moving covers from Apple Music, with the owner's own MusicKit key.
 
@@ -171,7 +186,7 @@ internal fun SettingsPage(
         }
 
         if (terms.isEmpty()) item(key = "group-Library") { Group("Library") }
-        setting("Library overview clean files delete cleanup") { Row(Glyph.FOLDER, "Library overview", "Find files, review duplicates and manage storage", onClick = onLibraryOverview) }
+        if (terms.isNotEmpty()) setting("Library overview clean files delete cleanup") { Row(Glyph.FOLDER, "Library overview", "Find files, review duplicates and manage storage", onClick = onLibraryOverview) }
         setting("Rescan music") { Row(Glyph.REFRESH, if (scanning) "Scanning…" else "Rescan music", "Android finds new files by itself; this reads them all again", first = true, onClick = onRescan) }
         setting("Music folders") { Row(Glyph.FOLDER, "Music folders", if (folders.isEmpty()) "Choose where your music is, for lyrics, covers and cue files beside the songs"
             else folders.joinToString(" · "), onClick = onAddFolder) }
@@ -314,14 +329,14 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
     }
     Surface(shape = shape, color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
         // A ListItem pins its icon to the top once the text runs to three lines; settings keep it centred.
-        androidx.compose.foundation.layout.Row(action.padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp).heightIn(min = 48.dp),
+        androidx.compose.foundation.layout.Row(action.padding(horizontal = 16.dp, vertical = 11.dp).heightIn(min = 48.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Surface(shape = androidx.compose.foundation.shape.CircleShape, color = circle, contentColor = onCircle, modifier = Modifier.size(40.dp)) {
                 androidx.compose.foundation.layout.Box(contentAlignment = androidx.compose.ui.Alignment.Center) { Symbol(glyph, size = 22.dp, color = onCircle, filled = true) }
             }
             androidx.compose.foundation.layout.Spacer(Modifier.width(16.dp))
             androidx.compose.foundation.layout.Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                 Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 below?.invoke()
             }

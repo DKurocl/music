@@ -445,9 +445,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     fun stopWatching() { watchingRequested = false; watchJob?.cancel(); watchJob = null }
 
-    /** Connect only while a screen is visible; the service owns ongoing playback independently. */
     fun connectPlayer() = player.connect()
-    fun disconnectPlayer() = player.disconnect()
+    fun setPlaybackScreenVisible(visible: Boolean) = player.setUiVisible(visible)
+
+    override fun onCleared() {
+        player.disconnect()
+        super.onCleared()
+    }
 
     /** Plays a list; any online song the owner also has as a file plays from the file. */
     fun play(list: List<Track>, index: Int) = playFrom(list, index, null)

@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        model.setPlaybackScreenVisible(true)
         model.connectPlayer()
         model.startWatching()
         // Files change behind the app's back (downloads, a cable, another app): look again on return, but
@@ -76,7 +77,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         model.stopWatching()
-        model.disconnectPlayer()
+        model.setPlaybackScreenVisible(false)
         super.onStop()
     }
 }

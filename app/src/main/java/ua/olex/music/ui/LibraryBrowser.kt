@@ -142,7 +142,9 @@ internal fun LibraryBrowser(
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var missingFavourite by rememberSaveable { mutableStateOf<String?>(null) }
     val tab = LibraryTab.valueOf(tabName)
-    val groups = when (tab) {
+    var browsing by rememberSaveable { mutableStateOf<String?>(null) }
+    val showCollection = mode != BrowserMode.SEARCH || browsing != null || selectedId != null
+    val groups = when (tab.takeIf { showCollection }) {
         LibraryTab.ALBUMS -> library.albums
         LibraryTab.ARTISTS -> library.artists
         LibraryTab.GENRES -> library.genres
@@ -182,11 +184,10 @@ internal fun LibraryBrowser(
     val raw = when {
         searching -> search?.takeIf { it.query == query && !it.failed }?.tracks
         selected != null -> selected.tracks
-        tab == LibraryTab.SONGS -> library.songs
+        showCollection && tab == LibraryTab.SONGS -> library.songs
         else -> null
     }
     var filter by rememberSaveable(stateSaver = trackFilterSaver) { mutableStateOf(ua.olex.music.model.TrackFilter()) }
-    var browsing by rememberSaveable { mutableStateOf<String?>(null) }
     val filterStats = if (filter.unplayed || filter.minRating > 0) stats else null
     val visibleIds = library.byId.takeIf { searching }
     val filterRequest = raw?.let(::SortSource)?.takeIf { searching || !filter.empty }?.let {
@@ -457,7 +458,7 @@ internal fun LibraryBrowser(
                     }
                     if (localSongs.isNotEmpty()) item(key = "songs-title") { SearchHeading("Songs") }
                     itemsIndexed(localSongs, key = { _, track -> track.id.value }, contentType = { _, _ -> "song" }) { index, track ->
-                        TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
                             checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
                             onSearchUsed(query)
                             if (webSongs.isEmpty()) onPlay(localSongs, index) else nav.play(localSongs + webSongs, index, "Search")
@@ -467,7 +468,7 @@ internal fun LibraryBrowser(
                     if (webCards.isNotEmpty() || webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("More on YouTube Music") }
                     items(webCards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
                     itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
-                        TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { onTrackActions(track) },
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
                             onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
                             onSearchUsed(query); nav.play(localSongs + webSongs, localSongs.size + i, "Search")
                         }
@@ -1101,7 +1102,7 @@ private fun GenreCard(genre: MusicCollection, modifier: Modifier, onClick: () ->
 
 /** A bright card for Favourites or Smart playlists at the top of the Playlists place. */
 @Composable
-private fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
+internal fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: androidx.compose.ui.graphics.Shape,
     container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, modifier: Modifier, onClick: () -> Unit) {
     val haptics = rememberHaptics()
     androidx.compose.material3.Surface(onClick = { haptics.tick(); onClick() }, shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),

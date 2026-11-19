@@ -21,6 +21,8 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-19: restore standard media notifications, keep a warm controller and stabilize Search entry.
+
 - [x] Codex, 2026-11-19: use Music branding and a stable action set on Android media surfaces.
 
 - [x] Codex, 2026-11-19: stable mixed-script player layout, cheaper tint updates and a finish-song sleep timer.
