@@ -76,10 +76,6 @@ internal fun ArtworkFrame(modifier: Modifier, shape: androidx.compose.ui.graphic
     )
 }
 
-internal fun playerCoverRequest(context: Context, uri: String, pixels: Int, size: Int? = null): ImageRequest =
-    ImageRequest.Builder(context).data(ArtworkUris.variant(uri, context.packageName, pixels))
-        .crossfade(false).apply { if (size != null) size(size).scale(Scale.FILL) }.build()
-
 /** A decoded still can move from a swipe neighbour to the centre or between player sizes. */
 internal data class CoverFrame(val painter: Painter, val pixels: Int)
 
@@ -197,11 +193,16 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
     // Keep the request independent of draw visibility and of the shared element's animated size.
     LaunchedEffect(uri, size, loader, preview, memory) {
         if (uri == null || size <= 0 || (memory[uri]?.pixels ?: 0) >= size) return@LaunchedEffect
-        val request = playerCoverRequest(context, uri, pixels, size)
-        val painter = if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
-            else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
-        if (painter != null) memory.put(uri, CoverFrame(painter, size))
-        else failed = true
+        for (candidate in ArtworkUris.playerVariants(uri, context.packageName, pixels)) {
+            val request = ImageRequest.Builder(context).data(candidate).size(size).scale(Scale.FILL).crossfade(false).build()
+            val painter = if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
+                else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
+            if (painter != null) {
+                memory.put(uri, CoverFrame(painter, size))
+                return@LaunchedEffect
+            }
+        }
+        failed = true
     }
     return CoverImage(frame, frame == null && uri != null && !failed, previewFrame)
 }
@@ -215,7 +216,7 @@ internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels:
 }
 
 /** Keep the outline continuous as the shared element grows from a thumbnail to the album sleeve. */
-private val playerCoverShape = RoundedCornerShape(object : androidx.compose.foundation.shape.CornerSize {
+internal val playerCoverShape = RoundedCornerShape(object : androidx.compose.foundation.shape.CornerSize {
     override fun toPx(shapeSize: androidx.compose.ui.geometry.Size, density: androidx.compose.ui.unit.Density): Float =
         with(density) {
             val fraction = ((shapeSize.minDimension - 48.dp.toPx()) / 272.dp.toPx()).coerceIn(0f, 1f)
@@ -225,12 +226,21 @@ private val playerCoverShape = RoundedCornerShape(object : androidx.compose.foun
 
 /** A ready neighbour paints directly on the commit frame, without a second reveal animation. */
 @Composable
-internal fun PlayerCoverFace(image: CoverImage, modifier: Modifier, corner: Dp, motion: MotionArtwork? = null, moving: Boolean = false, showMotion: Boolean = true, retainWhileLoading: Boolean = true) {
+internal fun PlayerCoverFace(
+    image: CoverImage,
+    modifier: Modifier,
+    corner: Dp,
+    motion: MotionArtwork? = null,
+    moving: Boolean = false,
+    showMotion: Boolean = true,
+    retainWhileLoading: Boolean = true,
+    shape: androidx.compose.ui.graphics.Shape? = null,
+) {
     var previous by remember { mutableStateOf<CoverFrame?>(null) }
     val frame = image.frame ?: previous.takeIf { image.loading && retainWhileLoading }
     androidx.compose.runtime.SideEffect { previous = frame }
     val saving = LocalPowerSave.current
-    ArtworkFrame(modifier, if (LocalPlayerTravel.current != null) playerCoverShape else RoundedCornerShape(corner)) {
+    ArtworkFrame(modifier, shape ?: if (LocalPlayerTravel.current != null) playerCoverShape else RoundedCornerShape(corner)) {
         if (frame != null) {
             val preview = image.preview
             if (preview == null || saving) Image(frame.painter, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

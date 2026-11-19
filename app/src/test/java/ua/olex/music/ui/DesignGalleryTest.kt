@@ -504,12 +504,27 @@ class DesignGalleryTest {
             }
         } }
         val cover = compose.onNodeWithContentDescription("Album artwork")
-        val centre = cover.fetchSemanticsNode().boundsInRoot.center
+        val bounds = cover.fetchSemanticsNode().boundsInRoot
+        val centre = bounds.center
         fun pixel() = compose.onRoot().captureToImage().asAndroidBitmap().getPixel(centre.x.toInt(), centre.y.toInt())
+        fun edges(): List<Int> {
+            val frame = compose.onRoot().captureToImage().asAndroidBitmap()
+            return listOf(bounds.left.toInt() - 3, bounds.right.toInt() + 3).map { frame.getPixel(it, centre.y.toInt()) }
+        }
+        val outsideCover = edges()
         org.junit.Assert.assertEquals(red, pixel())
         compose.mainClock.autoAdvance = false
         try {
-            cover.performTouchInput { swipeLeft() }
+            cover.performTouchInput {
+                down(center)
+                moveBy(androidx.compose.ui.geometry.Offset(-bounds.width * 0.3f, 0f))
+            }
+            compose.mainClock.advanceTimeByFrame()
+            org.junit.Assert.assertEquals("Neighbours are clipped during the drag", outsideCover, edges())
+            cover.performTouchInput {
+                moveBy(androidx.compose.ui.geometry.Offset(-bounds.width * 0.6f, 0f))
+                up()
+            }
             compose.mainClock.advanceTimeUntil(2_000) { skips == 1 }
             org.junit.Assert.assertEquals("Incoming page", blue, pixel())
             compose.mainClock.advanceTimeBy(900)

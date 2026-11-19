@@ -1040,8 +1040,28 @@ internal class YouTubeMusic(
             else -> ""
         }.trim()
 
-        private fun biggestImage(o: Any?): String? = Regex(""""url"\s*:\s*"(https://[^"]+)"""").findAll(dump(o)).map { it.groupValues[1] }.lastOrNull()
-            ?.replace(Regex("""=w\d+-h\d+"""), "=w1080-h1080")
+        private fun biggestImage(o: Any?): String? {
+            var best: String? = null
+            var bestSize = 0
+            fun inspect(value: Any?) {
+                when (value) {
+                    is Map<*, *> -> {
+                        val url = value["url"] as? String
+                        val width = (value["width"] as? Number)?.toInt() ?: 0
+                        val height = (value["height"] as? Number)?.toInt() ?: 0
+                        val size = minOf(width, height)
+                        if (url?.startsWith("https://") == true && size >= bestSize) {
+                            best = url
+                            bestSize = size
+                        }
+                        value.values.forEach(::inspect)
+                    }
+                    is List<*> -> value.forEach(::inspect)
+                }
+            }
+            inspect(o)
+            return best?.let { ua.olex.music.library.ArtworkUris.online(it, 1080) }
+        }
 
         /** Artist ids and names in a search answer (results whose link is an artist page). */
         fun artistIds(json: String): List<Pair<String, String>> {
@@ -1185,9 +1205,7 @@ internal class YouTubeMusic(
                 val clock = Regex("""\d{1,2}(:\d{2}){1,2}""")
                 val fixed = Regex(""""text"\s*:\s*"(\d{1,2}(?::\d{2}){1,2})"""").find(dump(row["fixedColumns"]))?.groupValues?.get(1)
                 val duration = (plain.lastOrNull { it.matches(clock) } ?: fixed)?.split(':')?.fold(0L) { acc, p -> acc * 60 + p.toLong() } ?: 0L
-                val thumbs = Regex(""""url"\s*:\s*"(https://[^"]+)"""").findAll(dump(row["thumbnail"])).map { it.groupValues[1] }.toList()
-                // Album art is served at any size: ask for one large enough for the player.
-                val cover = thumbs.lastOrNull()?.replace(Regex("""=w\d+-h\d+"""), "=w1080-h1080")
+                val cover = biggestImage(row["thumbnail"])
                 if (title.isEmpty()) return@mapNotNull null
                 rank to Track(TrackId("yt:$id"), "${OnlineStreams.SCHEME}://$id", title, artist, album = album, durationMs = duration * 1000, artworkUri = cover, artists = artists.ifEmpty { listOf(artist) })
             }
