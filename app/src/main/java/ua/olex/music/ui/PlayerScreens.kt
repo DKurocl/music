@@ -242,7 +242,7 @@ private fun TrackRowContent(
                     label = "Track number",
                 )
                 Text(number.toString(), modifier = Modifier.graphicsLayer { alpha = numberAlpha }, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
-                NowPlayingOverlay(current, Modifier.matchParentSize())
+                NowPlayingOverlay(current, Modifier.matchParentSize(), onArtwork = false)
             }
             else Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) {
                 Artwork(track.artworkUri, Modifier.fillMaxSize(), 12.dp)

@@ -933,19 +933,25 @@ class DesignGalleryTest {
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
         try {
+            val shuffle = compose.onNodeWithText("Shuffle all")
+            val like = compose.onNodeWithText("Liked")
+            val shuffleBounds = shuffle.fetchSemanticsNode().boundsInRoot
+            val likeBounds = like.fetchSemanticsNode().boundsInRoot
             fun frame(i: Int) {
                 val bitmap = compose.onNodeWithTag("quick-starts").captureToImage().asAndroidBitmap()
-                File("build/reports/ui-previews/gallery", "01h-starts-$i.png").apply { parentFile.mkdirs() }
+                File("build/reports/ui-previews/gallery", "01h-starts-$i.png").apply { parentFile?.mkdirs() }
                     .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             }
             frame(0)
-            compose.onNodeWithText("Shuffle all").performClick()
-            compose.onNodeWithText("Liked").performClick()
+            shuffle.performClick()
+            like.performClick()
             for (i in 1..8) {
                 compose.mainClock.advanceTimeBy(64)
                 frame(i)
+                org.junit.Assert.assertEquals(shuffleBounds, shuffle.fetchSemanticsNode().boundsInRoot)
+                org.junit.Assert.assertEquals(likeBounds, like.fetchSemanticsNode().boundsInRoot)
             }
-            compose.onNodeWithText("Liked").performTouchInput { down(center); cancel() }
+            like.performTouchInput { down(center); cancel() }
             org.junit.Assert.assertEquals(1, shuffles)
             org.junit.Assert.assertEquals(1, liked)
         } finally {

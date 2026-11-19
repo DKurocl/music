@@ -8,66 +8,61 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
-import kotlin.math.PI
-import kotlin.math.sin
 
-/** Motion stays inside the mark. Only the draw pass observes the press and release clocks. */
+/** Quick-start feedback is drawn within the icon's fixed bounds. */
 @Composable
-internal fun StartMark(shuffle: Boolean, ink: Color, badge: Color, phase: () -> Float, pressure: () -> Float) {
-    Spacer(Modifier.size(29.dp).drawWithCache {
-        val pen = Stroke(1.9f, cap = StrokeCap.Round)
-        val crossing = Stroke(4.7f, cap = StrokeCap.Round)
-        fun lane(start: Float, end: Float) = Path().apply {
-            moveTo(3f, start)
-            cubicTo(9.5f, start, 13.5f, end, 20f, end)
-        }
-        val routes = listOf(lane(7f, 17f), lane(17f, 7f))
-        val measures = routes.map { PathMeasure().apply { setPath(it, false) } }
-        val segment = Path()
-        val heart = Path().apply {
-            moveTo(12f, 19.8f)
-            cubicTo(10.9f, 19.1f, 4f, 14.3f, 4f, 9.5f)
-            cubicTo(4f, 5.2f, 9.5f, 3.8f, 12f, 7.7f)
-            cubicTo(14.5f, 3.8f, 20f, 5.2f, 20f, 9.5f)
-            cubicTo(20f, 14.3f, 13.1f, 19.1f, 12f, 19.8f)
-            close()
-        }
+internal fun StartMark(shuffle: Boolean, ink: Color, badge: Color, release: () -> Float, pressure: () -> Float) {
+    if (shuffle) {
+        ShuffleStartMark(ink, badge, release, pressure)
+    } else {
+        Symbol(Glyph.FAVOURITE, size = 24.dp, filled = true, color = ink, modifier = Modifier.graphicsLayer {
+            val press = pressure()
+            val settle = release()
+            scaleX = 1f - 0.045f * press + 0.09f * settle
+            scaleY = 1f - 0.12f * press + 0.13f * settle
+        })
+    }
+}
+
+@Composable
+private fun ShuffleStartMark(ink: Color, badge: Color, release: () -> Float, pressure: () -> Float) {
+    Spacer(Modifier.size(25.dp).drawWithCache {
+        val pen = Stroke(2.15f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        val clearance = Stroke(4.6f, cap = StrokeCap.Round)
+        val route = Path()
+        val arrow = Path()
+
         onDrawBehind {
-            val t = phase()
-            val lift = sin(PI * t).toFloat()
+            val settle = release()
+            val press = pressure()
+            val expansion = 1.05f * settle - 0.85f * press
+            val left = 4f - expansion
+            val right = 20f + expansion
+            val spread = 5.3f + 0.6f * settle - 0.65f * press
+            val crossing = 12f + 2.1f * settle
             scale(size.minDimension / 24f, pivot = Offset.Zero) {
-                if (shuffle) {
-                    // A narrow gap travels down each route in turn, like two passing tape splices.
-                    routes.forEachIndexed { i, path ->
-                        if (i == 1) drawPath(path, badge, style = crossing)
-                        drawPath(path, ink, style = pen)
-                        val progress = ((t - i * 0.10f) / 0.88f).coerceIn(0f, 1f)
-                        val measure = measures[i]
-                        val head = progress * (measure.length + 5f)
-                        segment.rewind()
-                        if (measure.getSegment((head - 5f).coerceAtLeast(0f), head.coerceAtMost(measure.length), segment))
-                            drawPath(segment, badge, style = pen)
-                        val y = if (i == 0) 17f else 7f
-                        val reach = 20f + sin(PI * progress).toFloat() * 1.4f - pressure() * 0.6f
-                        drawLine(ink, Offset(reach - 2.8f, y - 2.8f), Offset(reach, y), pen.width, StrokeCap.Round)
-                        drawLine(ink, Offset(reach, y), Offset(reach - 2.8f, y + 2.8f), pen.width, StrokeCap.Round)
-                    }
-                } else {
-                    // Press seats the heart. Release lifts it far enough to reveal a second impression.
-                    val dy = pressure() * 1.5f - lift * 2.7f
-                    if (lift > 0f) translate(top = lift * 1.8f) {
-                        drawPath(heart, ink, alpha = lift * 0.45f, style = Stroke(1.15f))
-                    }
-                    translate(top = dy) {
-                        drawPath(heart, badge, style = crossing)
-                        drawPath(heart, ink)
-                    }
+                for (lane in 0..1) {
+                    val direction = if (lane == 0) 1f else -1f
+                    val entry = 12f - spread * direction
+                    val exit = 12f + spread * direction
+                    route.rewind()
+                    route.moveTo(left, entry)
+                    route.cubicTo(crossing - 2.6f, entry, crossing - 1.8f, exit, right, exit)
+                    if (lane == 1) drawPath(route, badge, style = clearance)
+                    drawPath(route, ink, style = pen)
+
+                    val wing = 2.8f + 0.2f * settle
+                    arrow.rewind()
+                    arrow.moveTo(right - wing, exit - wing)
+                    arrow.lineTo(right, exit)
+                    arrow.lineTo(right - wing, exit + wing)
+                    drawPath(arrow, ink, style = pen)
                 }
             }
         }
