@@ -25,10 +25,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
@@ -95,7 +95,7 @@ private const val playbackBarScale = 0.35f
 
 /** A playback status mark that stays legible over artwork without looking like a transport control. */
 @Composable
-internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) {
+internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier, onArtwork: Boolean = true) {
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
     val still = LocalPowerSave.current
@@ -103,7 +103,7 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
     val exit = if (still) ExitTransition.None else fadeOut(tween(120))
     Box(modifier, contentAlignment = Alignment.Center) {
         AnimatedVisibility(visible = current && playing, enter = enter, exit = exit) {
-            val tint = if (cs.primary.luminance() > cs.primaryContainer.luminance()) cs.primary else cs.primaryContainer
+            val tint = if (onArtwork) cs.primaryFixed else cs.primary
             val heights = if (still) emptyList() else {
                 val transition = rememberInfiniteTransition(label = "Playback mark")
                 playbackBars.mapIndexed { index, bar ->
@@ -116,20 +116,20 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
                     transition.animateFloat(bar.heights.first(), bar.heights.last(), motion, label = "Playback bar ${index + 1}")
                 }
             }
-            Box(Modifier.size(32.dp).semantics { stateDescription = "Playing" }.drawWithCache {
-                val contrast = cs.scrim.copy(alpha = 0.82f)
+            Box(Modifier.size(28.dp, 23.dp).semantics { stateDescription = "Playing" }.drawWithCache {
+                val backing = cs.onPrimaryFixed.copy(alpha = 0.92f)
+                val corners = CornerRadius(8.dp.toPx())
                 val unit = playbackBarScale.dp.toPx()
                 val spacing = 12f * unit
                 val width = 6f * unit
-                val outlineWidth = 3.8.dp.toPx()
                 onDrawBehind {
+                    if (onArtwork) drawRoundRect(backing, cornerRadius = corners)
                     playbackBars.forEachIndexed { index, bar ->
                         val x = center.x + (index - 2) * spacing
                         val height = heights.getOrNull(index)?.value ?: bar.heights.first()
                         val halfHeight = (height * unit - width) / 2
                         val start = Offset(x, center.y - halfHeight)
                         val end = Offset(x, center.y + halfHeight)
-                        drawLine(contrast, start, end, strokeWidth = outlineWidth, cap = StrokeCap.Round)
                         drawLine(tint, start, end, strokeWidth = width, cap = StrokeCap.Round)
                     }
                 }

@@ -1,8 +1,9 @@
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.
-Current playback is shown with five rounded bars at the center of the artwork. A narrow dark
-outline keeps the mark legible without shading the cover. The geometry, five height keyframes per
+Current playback is shown with five rounded bars at the center of the artwork. A compact tonal
+surface gives the bars contrast on artwork. Numbered album rows draw the mark on their own surface.
+The geometry, five height keyframes per
 bar and separate 1.68 to 2.16 second loops follow the owner's animated SVG. The mark fades out in 120 ms on
 pause or track change. Battery Saver leaves the bars still. Common symbols
 have coordinated press and release motion. Track actions use distinct marks for radio,
@@ -20,8 +21,9 @@ necessary to verify live responses.
 
 # Shuffle, Liked and track switching (2026-11-19)
 
-Quick starts have independent draw-only gestures: a crossing trace on Shuffle and a lifting heart
-on Liked. Their containers, text and artwork stay still. The gallery captures both marks on a tap.
+The Shuffle arrows flex as connected paths. Liked uses a single Material heart that compresses
+on contact and springs back on release. The gallery captures both marks and checks that their
+labels stay in place.
 Home holds ranking inputs during a listening visit. History changes reuse previously resolved rows.
 Smart playlists and lyric sidecars are collected by their consuming screens.
 Source-only Media3 timeline updates reuse the existing queue and checkpoint generation. Bulk
