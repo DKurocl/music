@@ -609,21 +609,19 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             return
         }
         val sameSeed = current != null && (state.mediaId == seed.id.value || seed.matchesPlayback(state.track))
-        val run = video?.let { id ->
-            PlaybackMix.Run(seed, result?.continuation, seen,
-                (upcoming.map { it.id.value } + listOfNotNull(seed.id.value, state.mediaId.takeIf { sameSeed })).toMutableSet(), startFrom = id)
+        val run = PlaybackMix.Run(seed, result?.continuation, seen,
+            (upcoming.map { it.id.value } + listOfNotNull(seed.id.value, state.mediaId.takeIf { sameSeed })).toMutableSet(),
+            startFrom = video)
+        val queue = if (sameSeed) upcoming else listOf(seed) + upcoming
+        if (!applyRadio(run, label, queue, current?.key.takeIf { sameSeed })) {
+            mixFailure = MixFailure("The player couldn't confirm the new queue.") { startMix(seed) }
         }
-        val origin = graph.mix.origin(run, label)
-        if (current != null && sameSeed) {
-            if (!player.replaceUpcomingForRadio(current.key, upcoming, origin)) {
-                mixFailure = MixFailure("The queue changed or the suggested songs couldn't be opened.") { startMix(seed) }
-                return
-            }
-            graph.mix.begin(run, label)
-        } else {
-            graph.mix.begin(run, label)
-            player.play(listOf(seed) + upcoming, 0, origin, shuffle = false)
-        }
+    }
+
+    private suspend fun applyRadio(run: PlaybackMix.Run, label: String, tracks: List<Track>, replaceAfter: String? = null): Boolean {
+        if (!player.startRadio(tracks, graph.mix.origin(run, label), replaceAfter)) return false
+        graph.mix.begin(run, label)
+        return true
     }
 
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, cleaned and endless like any mix. */
@@ -645,7 +643,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
         seen += queue.map(Mix::songKey)
         val run = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
-        player.play(queue, 0, graph.mix.begin(run, label), shuffle = false)
+        if (!applyRadio(run, label, queue)) {
+            mixFailure = MixFailure("The player couldn't open $label.") { startPlaylistRadio(playlistId, label) }
+        }
     }
 
 
@@ -655,7 +655,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      * Plays a mood: its first YouTube Music playlist, cleaned like a mix, flowing into the radio of
      * its first song when it ends; without one, a mix grown from a library song of that mood.
      */
-    internal fun startMood(mood: YouTubeMusic.Mood, page: YouTubeMusic.MoodPage?) = prepareMix {
+    internal fun startMood(mood: YouTubeMusic.Mood, page: YouTubeMusic.MoodPage?): Unit = prepareMix {
         val yt = graph.youTube
         val listed = page?.playlists?.firstOrNull()?.let { runCatching { yt.album(it.id)?.second }.getOrNull() }.orEmpty().ifEmpty { page?.songs.orEmpty() }
         coroutineContext.ensureActive()
@@ -667,7 +667,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             }
             seen += queue.map(Mix::songKey)
             val run = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
-            player.play(queue, 0, graph.mix.begin(run, mood.label))
+            if (!applyRadio(run, mood.label, queue)) {
+                mixFailure = MixFailure("The player couldn't open ${mood.label}.") { startMood(mood, page) }
+            }
             return@prepareMix
         }
         val songs = library.value?.songs.orEmpty()

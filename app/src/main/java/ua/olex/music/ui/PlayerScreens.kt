@@ -469,6 +469,7 @@ internal fun PlayerPage(
     onLyricsTools: (() -> Unit)? = null,
     /** What the queue came from ("Top Hits", "Mix from Teardrop", "Search"), when known. */
     from: String? = null,
+    restoring: Boolean = false,
 ) {
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val travel = LocalPlayerTravel.current
@@ -483,12 +484,12 @@ internal fun PlayerPage(
     val density = androidx.compose.ui.platform.LocalDensity.current
     val queueHaptics = rememberHaptics()
     val openQueue by rememberUpdatedState(onQueue)
-    val upToQueue = remember(density, queueHaptics) {
+    val upToQueue = remember(density, queueHaptics, restoring) {
         object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
             var pulled = 0f
             override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset,
                 source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): androidx.compose.ui.geometry.Offset {
-                if (source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) return androidx.compose.ui.geometry.Offset.Zero
+                if (restoring || source != androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) return androidx.compose.ui.geometry.Offset.Zero
                 if (consumed.y != 0f || available.y > 0f) pulled = 0f
                 if (available.y >= 0f) return androidx.compose.ui.geometry.Offset.Zero
                 pulled -= available.y
@@ -605,7 +606,8 @@ internal fun PlayerPage(
                                 onLongPress = { tapMore?.let { haptics.longPress(); it() } },
                             )
                         }
-                        .pointerInput(occurrence, state.hasNext, canGoPrevious, step, powerSave) {
+                        .pointerInput(occurrence, state.hasNext, canGoPrevious, step, powerSave, restoring) {
+                            if (restoring) return@pointerInput
                             fun finishDrag(commit: Boolean) {
                                 if (skipping) return
                                 val x = dragOffset ?: return
@@ -673,9 +675,9 @@ internal fun PlayerPage(
             Spacer(Modifier.height(32.dp))
             Row(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(state.title, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 1,
+                    Text(state.title.ifBlank { " " }, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 1,
                         modifier = Modifier.basicMarquee(iterations = 1, initialDelayMillis = 1_500))
-                    Text(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    Text(state.artist.ifBlank { " " }, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = if (onOpenArtist != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open artist", onClick = onOpenArtist) else Modifier)
                 }
                 KickIconButton(enabled = onFavourite != null, onClick = { haptics.like(!favourite); onFavourite?.invoke() }, modifier = Modifier.semantics {
@@ -684,8 +686,12 @@ internal fun PlayerPage(
             }
             state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(20.dp))
-            PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp))
-            SignalPath(format, state.buffering && state.error == null, onAudioPath)
+            PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp), restoring)
+            if (restoring) {
+                Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
+                    Text("Restoring playback…", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+                }
+            } else SignalPath(format, state.buffering && state.error == null, onAudioPath)
             state.sleepDeadlineMs?.let { deadline -> SleepCountdown(deadline, onTimer) }
             Spacer(Modifier.height(12.dp))
             Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
@@ -693,12 +699,12 @@ internal fun PlayerPage(
             // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
             Surface(shape = CircleShape, color = cs.surfaceContainerHigh) {
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ToggleAction(Glyph.LYRICS, "Lyrics", lyricsShown && inlineLyrics != null, true, if (lyricsShown) "Shown" else "Hidden") {
+                    ToggleAction(Glyph.LYRICS, "Lyrics", lyricsShown && inlineLyrics != null, !restoring, if (lyricsShown) "Shown" else "Hidden") {
                         if (inlineLyrics != null) lyricsShown = !lyricsShown else onLyrics()
                     }
                     ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
-                    ToggleAction(Glyph.QUEUE, "Open queue", false, true, null, onQueue)
-                    ToggleAction(route.glyph(), "Change output", false, true, null, onOutput)
+                    ToggleAction(Glyph.QUEUE, "Open queue", false, !restoring, null, onQueue)
+                    ToggleAction(route.glyph(), "Change output", false, !restoring, null, onOutput)
                 }
             }
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
@@ -879,7 +885,7 @@ private fun WaveTrack(fraction: () -> Float, wave: Boolean) {
 
 /** The seek bar, in the page's accent, with the time played and the length under it. */
 @Composable
-internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier) {
+internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: (Long) -> Unit, modifier: Modifier = Modifier, restoring: Boolean = false) {
     // Keep the frequent position updates out of artwork, metadata and controls. Composition may
     // survive screen-off, so the poller also follows lifecycle rather than only visibility.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -949,15 +955,16 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
             },
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(clock(dragged?.let { (it * duration).toLong() } ?: (seconds * 1_000)), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-            Text(clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            Text(if (restoring) " " else clock(dragged?.let { (it * duration).toLong() } ?: (seconds * 1_000)), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            Text(if (restoring) " " else clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
     }
 }
 
-private fun OutputRoute?.glyph(): Glyph = when (this?.kind) {
+internal fun OutputRoute?.glyph(): Glyph = when (this?.kind) {
     OutputRoute.Kind.BLUETOOTH, OutputRoute.Kind.LE_AUDIO -> Glyph.HEADPHONES
-    OutputRoute.Kind.WIRED, OutputRoute.Kind.USB -> Glyph.HEADPHONES
+    OutputRoute.Kind.WIRED -> Glyph.HEADPHONES
+    OutputRoute.Kind.USB -> Glyph.USB
     else -> Glyph.SPEAKER
 }
 

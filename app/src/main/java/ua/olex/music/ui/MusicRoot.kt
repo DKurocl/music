@@ -293,7 +293,10 @@ fun MusicRoot(model: LibraryViewModel) {
     val backMotion = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
     var restoreBack by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val systemOpening = model.systemPlayerRequested
-    androidx.activity.compose.BackHandler(systemOpening) { model.dismissSystemPlayerRequest() }
+    androidx.activity.compose.BackHandler(systemOpening || expanded && !playing.hasTrack) {
+        expanded = false
+        model.dismissSystemPlayerRequest()
+    }
     PredictiveBackHandler(!expanded && !systemOpening && (page != null || onlineStack.isNotEmpty() || place != Place.HOME)) { events ->
         restoreBack?.cancel()
         try {
@@ -358,7 +361,11 @@ fun MusicRoot(model: LibraryViewModel) {
             if (account != null) pending()
         }
     }
-    val travel = remember(scope) { PlayerTravel(scope) }
+    val travel = remember(scope) { PlayerTravel(scope, initiallyOpen = expanded) }
+    LifecycleStartEffect(travel) {
+        travel.settle(expanded, instant = true)
+        onStopOrDispose { travel.settle(expanded, instant = true) }
+    }
     val directOpen = systemOpening && playing.hasTrack && playing.connected
     LaunchedEffect(directOpen) {
         if (directOpen) {
@@ -368,9 +375,11 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     val openPlayer = (expanded || directOpen) && playing.hasTrack
-    LaunchedEffect(openPlayer, powerSave) { travel.settle(openPlayer, powerSave || !playing.hasTrack) }
+    // The screen stays open during a service reconnect. Only the user's expand/collapse changes travel.
+    LaunchedEffect(expanded, powerSave) { travel.settle(expanded, powerSave) }
+    val openingSurface = systemOpening && !directOpen || expanded && !playing.hasTrack
     PlayerCoverLayout(travel, playing.artworkUri, directOpen = directOpen) {
-    if (!systemOpening || directOpen) Scaffold(
+    if (!openingSurface) Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
             .graphicsLayer { alpha = if (systemOpening) 0f else 1f }
             .then(if (systemOpening || expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
@@ -640,13 +649,13 @@ fun MusicRoot(model: LibraryViewModel) {
         }
 
     }
-    if (systemOpening && !directOpen) {
+    if (openingSurface) {
         val preview by androidx.compose.runtime.produceState<ua.olex.music.playback.LastPlayedPreview?>(null) {
             value = model.lastPlayedPreview()
         }
         PlayerOpening(preview, empty = playing.connected && playing.queueRestored && !playing.hasTrack,
             error = playing.error.takeIf { !playing.connected && !playing.connecting },
-            onClose = model::dismissSystemPlayerRequest, onRetry = model::connectPlayer)
+            onClose = { expanded = false; model.dismissSystemPlayerRequest() }, onRetry = model::connectPlayer)
     }
     if (model.mixLoading && !systemOpening) Box(Modifier.fillMaxSize().safeDrawingPadding(),
         contentAlignment = Alignment.TopCenter) {
