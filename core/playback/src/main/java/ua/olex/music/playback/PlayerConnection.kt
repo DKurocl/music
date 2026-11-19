@@ -109,6 +109,7 @@ class PlayerConnection(context: Context) {
     private var pendingPlay: Pair<List<Track>, Int>? = null
     private var pendingContext: String? = null
     private var pendingStart = true
+    private var uiVisible = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val queueMutex = Mutex()
     private var queueSnapshot: List<QueueItem> = emptyList()
@@ -135,7 +136,10 @@ class PlayerConnection(context: Context) {
         _state.value = _state.value.copy(connecting = true, error = null)
         val token = SessionToken(app, ComponentName(app, PlaybackService::class.java))
         val future = MediaController.Builder(app, token)
-            .setConnectionHints(Bundle().apply { putBoolean(LockScreenLyrics.APP_UI_HINT, true) })
+            .setConnectionHints(Bundle().apply {
+                putBoolean(LockScreenLyrics.APP_UI_HINT, true)
+                putBoolean(LockScreenLyrics.APP_UI_VISIBLE, uiVisible)
+            })
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
                     if (this@PlayerConnection.controller === controller) {
@@ -169,6 +173,7 @@ class PlayerConnection(context: Context) {
                 val connected = Futures.getDone(future)
                 controller = connected
                 connected.addListener(listener)
+                sendUiVisibility(connected)
                 publish(connected, updateQueue = true)
                 pendingPlay?.let { (tracks, index) ->
                     pendingPlay = null
@@ -180,6 +185,19 @@ class PlayerConnection(context: Context) {
                 connectionFailed()
             }
         }, app.mainExecutor)
+    }
+
+    /** An Activity going into the background is separate from tearing down its playback binding. */
+    fun setUiVisible(visible: Boolean) {
+        if (uiVisible == visible) return
+        uiVisible = visible
+        controller?.let(::sendUiVisibility)
+    }
+
+    private fun sendUiVisibility(player: MediaController) {
+        player.sendCustomCommand(LockScreenLyrics.uiVisibilityCommand, Bundle().apply {
+            putBoolean(LockScreenLyrics.APP_UI_VISIBLE, uiVisible)
+        })
     }
 
     /** Releases both completed and pending bindings without stopping the service's music. */

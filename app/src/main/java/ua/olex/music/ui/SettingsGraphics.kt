@@ -36,7 +36,7 @@ internal fun PlaybackFadeSetting(enabled: Boolean, onChange: (Boolean) -> Unit) 
         if (LocalPowerSave.current) snap() else tween(260), label = "Playback envelope")
     val haptics = rememberHaptics()
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(108.dp).clip(RoundedCornerShape(28.dp)).background(colors.surfaceContainerHigh)) {
+        Canvas(Modifier.fillMaxWidth().height(72.dp).clip(RoundedCornerShape(24.dp)).background(colors.surfaceContainerHigh)) {
             val width = size.width * 0.76f
             val start = (size.width - width) / 2f
             for (index in 0..40) {
