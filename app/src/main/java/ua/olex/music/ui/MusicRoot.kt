@@ -175,6 +175,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val haptics = rememberHaptics()
     var focusSearch by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
+    var searchVisit by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by rememberSaveable { mutableStateOf<Place?>(null) }
     val onlinePageScope by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
@@ -237,11 +238,16 @@ fun MusicRoot(model: LibraryViewModel) {
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
     fun go(to: Place) {
-        if (to == place) clearOnline(to)
+        if (to == place || to == Place.SEARCH) clearOnline(to)
         returnTo = null
-        if (to == Place.SEARCH && place == Place.SEARCH && page == null) {
-            focusSearch++
-            return
+        if (to == Place.SEARCH) {
+            val focus = place == Place.SEARCH && page == null
+            baseStates.removeState("place-SEARCH-$searchVisit")
+            searchVisit++
+            model.setQuery("")
+            openInLibrary = null
+            openTile = null
+            focusSearch = if (focus) focusSearch + 1 else 0
         }
         if (to != place) haptics.tick()
         collectionTitle = null
@@ -468,7 +474,8 @@ fun MusicRoot(model: LibraryViewModel) {
         // Without access to the files, YouTube Music still works: the permission opens the owner's own
         // files, it doesn't lock the app. With YouTube Music off there is nothing to show but the ask.
         val withoutFiles = !model.allowed && youTubeOn
-        val library = library ?: if (withoutFiles || (youTubeOn && model.scanError != null)) ua.olex.music.model.LibraryIndex.EMPTY else null
+        val library = library ?: if (place == Place.SEARCH || withoutFiles || (youTubeOn && model.scanError != null))
+            ua.olex.music.model.LibraryIndex.EMPTY else null
         // Where the owner is: a new place fades through, a page opened from it slides in from the side.
         val route = when {
             onlineStack.isNotEmpty() -> "online:${onlineStack.size}:${onlineStack.last()}"
@@ -513,9 +520,10 @@ fun MusicRoot(model: LibraryViewModel) {
                     moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
                     youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
             }
-            else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
+            else -> baseStates.SaveableStateProvider(if (place == Place.SEARCH) "place-SEARCH-$searchVisit" else "place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
-                query = if (place == Place.SEARCH) query else "", search = model.search.collectAsStateWithLifecycle().value, onQueryChange = model::setQuery,
+                query = query.takeIf { place == Place.SEARCH && it == model.query.value }.orEmpty(),
+                search = model.search.collectAsStateWithLifecycle().value, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
@@ -1138,7 +1146,8 @@ internal fun Modifier.arrivalMotion(route: Any?, section: Any, depth: Int): Modi
     var previousDepth by remember { androidx.compose.runtime.mutableIntStateOf(depth) }
     val direction = remember(route, section) { if (section == previousSection) depth.compareTo(previousDepth) else 0 }
     val progress = remember(route, section) {
-        androidx.compose.animation.core.Animatable(if (route == previousRoute && section == previousSection || still) 1f else 0f)
+        val switchingTabs = section != previousSection && depth == 0
+        androidx.compose.animation.core.Animatable(if (route == previousRoute && section == previousSection || still || switchingTabs) 1f else 0f)
     }
     androidx.compose.runtime.SideEffect { previousRoute = route; previousSection = section; previousDepth = depth }
     val spec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()

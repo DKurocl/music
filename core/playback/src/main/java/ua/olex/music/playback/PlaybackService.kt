@@ -12,7 +12,6 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
@@ -105,9 +104,6 @@ class PlaybackService : MediaLibraryService() {
     private val lanServer by lazy { LanMediaServer(this) }
     private var fading: FadingPlayer? = null
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
-    private val mediaArtworkPreferences = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        (session?.player as? LyricLinePlayer)?.showArtwork = SystemMediaArtwork.enabled(this)
-    }
     private val lyricPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> lockLyrics?.update() }
 
     override fun onCreate() {
@@ -131,9 +127,7 @@ class PlaybackService : MediaLibraryService() {
                 .setRemotePlayer(androidx.media3.cast.RemoteCastPlayer.Builder(this).setMediaItemConverter(LanMediaItemConverter(lanServer)).build())
                 .build()
         }.getOrElse { faded }
-        val shown = LyricLinePlayer(castable) { sourceAttempts.reset(); recovery?.cancel() }.apply {
-            showArtwork = SystemMediaArtwork.enabled(this@PlaybackService)
-        }
+        val shown = LyricLinePlayer(castable) { sourceAttempts.reset(); recovery?.cancel() }
         shown.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
@@ -152,11 +146,7 @@ class PlaybackService : MediaLibraryService() {
         packageManager.getLaunchIntentForPackage(packageName)?.apply { putExtra(OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
-        setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this).build().apply {
-            setSmallIcon(R.drawable.music_notification_icon)
-        })
         session = builder.build()
-        SystemMediaArtwork.preferences(this).registerOnSharedPreferenceChangeListener(mediaArtworkPreferences)
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(routeCallback, null)
         scope.launch { devicesSeen = true }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(outputPrefs)
@@ -396,7 +386,6 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         AudioLoadPriority.update(false)
         lockLyrics?.release()
-        SystemMediaArtwork.preferences(this).unregisterOnSharedPreferenceChangeListener(mediaArtworkPreferences)
         runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
         usb.clear()
@@ -598,13 +587,7 @@ class PlaybackService : MediaLibraryService() {
          */
         override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, isForPlayback: Boolean) = future {
             val saved = persistence?.resumption() ?: throw UnsupportedOperationException("Nothing to resume")
-            val items = if (isForPlayback || SystemMediaArtwork.enabled(this@PlaybackService)) saved.items else {
-                saved.items.toMutableList().apply {
-                    val item = this[saved.index]
-                    this[saved.index] = item.buildUpon().setMediaMetadata(item.mediaMetadata.hideSongArtwork()).build()
-                }
-            }
-            MediaSession.MediaItemsWithStartPosition(items, saved.index, saved.positionMs)
+            MediaSession.MediaItemsWithStartPosition(saved.items, saved.index, saved.positionMs)
         }
 
         override fun onSetMediaItems(
@@ -640,7 +623,12 @@ class PlaybackService : MediaLibraryService() {
         }
 
         override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
-            if (appScreens.remove(controller)) lockLyrics?.appVisible = appScreens.isNotEmpty()
+            setScreenVisible(controller, false)
+        }
+
+        private fun setScreenVisible(controller: MediaSession.ControllerInfo, visible: Boolean) {
+            val changed = if (visible) appScreens.add(controller) else appScreens.remove(controller)
+            if (changed) lockLyrics?.appVisible = appScreens.isNotEmpty()
         }
 
         override fun onConnectAsync(
@@ -648,13 +636,14 @@ class PlaybackService : MediaLibraryService() {
         ): ListenableFuture<MediaSession.ConnectionResult> {
             val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
             if (controller.uid == Process.myUid() && controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_HINT)) {
-                appScreens += controller; lockLyrics?.appVisible = true
+                setScreenVisible(controller, controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_VISIBLE, true))
             }
             // Preserve Media3's default read-only permissions for untrusted controllers.
             if (controller.uid == Process.myUid()) {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                         .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command)
+                        .add(LockScreenLyrics.uiVisibilityCommand)
                         .build(),
                 )
             }
@@ -664,6 +653,13 @@ class PlaybackService : MediaLibraryService() {
         override fun onCustomCommand(
             session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
         ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == LockScreenLyrics.uiVisibilityCommand.customAction) {
+                if (controller.uid != Process.myUid() || !controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_HINT)) {
+                    return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                }
+                setScreenVisible(controller, args.getBoolean(LockScreenLyrics.APP_UI_VISIBLE))
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             if (customCommand.customAction == ReplayGainCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 val accepted = runCatching {

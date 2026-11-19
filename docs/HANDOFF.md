@@ -1,13 +1,15 @@
-# Android media controls
+# Playback recovery, Search and Settings
 
-Quick Settings and lock-screen notifications use the Music play-and-note glyph in the
-monochrome slot. The session no longer publishes a favourite action or queries favourites
-during skips. Song artwork is off by default for system controls and can be enabled under
-Appearance and artwork. The current item retains its original image, and a transparent
-system placeholder also supersedes artwork requests that were already in flight.
-The sleep sheet keeps the primary buttons visible beneath a scrollable body.
-Local check: `git diff --check`. CI covers the timer actions and session artwork.
-The exact system card tint and layout remain device checks.
+After the v1236 report, restore standard Media3 notifications and unmodified session
+artwork. Override only the Media3 icon resource and leave the system favourite action
+out. Keep the UI controller bound until its ViewModel is cleared and signal visibility
+separately for lock-screen lyrics. This avoids releasing the controller and interrupting
+pending commands on Activity stop.
+Search starts on its browse page on a tab tap. Its first frame does not use Home's
+loading surface, and removed results no longer fade over the new page. Settings uses
+a search pill, two shortcuts and the playback fade illustration.
+Local check: `git diff --check`. Pixel Quick Settings and background audio still need
+a device check on the reported Android 17 build.
 
 # Stable player layout and sleep countdowns
 
