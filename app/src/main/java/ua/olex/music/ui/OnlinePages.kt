@@ -261,11 +261,11 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     }
     // A long playlist arrives in parts: the rest is fetched in the background and added under what is
     // on screen, so nothing moves while the owner reads or plays.
-    var grown by remember(target, accountScope) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
+    var grown by remember(state) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
     var pageRetry by remember(target, accountScope) { mutableIntStateOf(0) }
     var moreFailed by remember(target, accountScope) { mutableStateOf(false) }
     var loadingMore by remember(target, accountScope) { mutableStateOf(false) }
-    LaunchedEffect(target, accountScope, network, state is Load.Done, pageRetry) {
+    LaunchedEffect(target, accountScope, network, state, pageRetry) {
         loadingMore = false
         moreFailed = false
         if (!network || state !is Load.Done) return@LaunchedEffect
@@ -324,7 +324,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                     Text("Offline · ${songCount(songs.size)} in the saved list", style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
                 }
-                if (album?.partial == true) item(key = "retry-album") {
+                if (album?.partial == true && !loadingMore && !moreFailed) item(key = "retry-album") {
                     ErrorNotice("Showing available tracks. The full list couldn't load.") { retry++ }
                 }
                 itemsIndexed(songs, key = { i, track -> "a-$i-" + track.id.value }, contentType = { _, _ -> "song" }) { i, track ->
