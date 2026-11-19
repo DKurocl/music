@@ -26,6 +26,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CancellationException
@@ -48,6 +49,8 @@ import ua.olex.music.model.TrackId
 class PlaybackService : MediaLibraryService() {
     private var session: MediaLibrarySession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private data class PlaybackSurface(val title: String?, val artist: String?, val artworkUri: String?, val playing: Boolean)
+    private val surfaceUpdates = Channel<PlaybackSurface>(Channel.CONFLATED)
     private val sleepTimer = SleepTimer()
     private var sleepJob: Job? = null
     private val historyGate = PlaybackHistoryGate()
@@ -108,6 +111,17 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        scope.launch(Dispatchers.IO) {
+            for (surface in surfaceUpdates) {
+                try {
+                    NowPlaying.publish(this@PlaybackService, surface.title, surface.artist, surface.artworkUri, surface.playing)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    Log.w("MusicPlayback", "Could not update playback surfaces: ${failure.javaClass.simpleName}")
+                }
+            }
+        }
         Thread { NowPlaying.publishPreview(this) }.start()
         equalizer = EqualizerController(this) { state -> session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply { putBundle(EqualizerCommand.KEY, EqualizerCommand.bundle(state)) })
@@ -354,7 +368,8 @@ class PlaybackService : MediaLibraryService() {
     private fun publishNowPlaying() {
         val player = exoOrNull() ?: return
         val meta = player.mediaMetadata
-        NowPlaying.publish(this, meta.title?.toString(), meta.artist?.toString(), meta.artworkUri?.toString(), player.isPlaying)
+        // Widget and tile queries go through Android services and can block the main looper on a skip.
+        surfaceUpdates.trySend(PlaybackSurface(meta.title?.toString(), meta.artist?.toString(), meta.artworkUri?.toString(), player.isPlaying))
     }
 
     private fun recordCurrentPlayback() {
