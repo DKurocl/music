@@ -377,6 +377,10 @@ fun MusicRoot(model: LibraryViewModel) {
     val openPlayer = (expanded || directOpen) && playing.hasTrack
     // The screen stays open during a service reconnect. Only the user's expand/collapse changes travel.
     LaunchedEffect(expanded, powerSave) { travel.settle(expanded, powerSave) }
+    var lastPlayerPreview by remember { mutableStateOf<ua.olex.music.playback.LastPlayedPreview?>(null) }
+    if (playing.hasTrack) androidx.compose.runtime.SideEffect {
+        lastPlayerPreview = ua.olex.music.playback.LastPlayedPreview(playing.title, playing.artist, playing.artworkUri)
+    }
     val openingSurface = systemOpening && !directOpen || expanded && !playing.hasTrack
     PlayerCoverLayout(travel, playing.artworkUri, directOpen = directOpen) {
     if (!openingSurface) Scaffold(
@@ -609,7 +613,7 @@ fun MusicRoot(model: LibraryViewModel) {
         }
         NowPlaying(
             playing, format = format,
-            from = model.mixLabel ?: origin?.title ?: rawOrigin,
+            from = origin?.title ?: model.mixLabel ?: rawOrigin,
             onOpenOrigin = openOrigin,
             originIsMix = model.mixLabel != null || origin?.kind == "mix",
             position = { model.positionMs }, onClose = { expanded = false },
@@ -637,7 +641,7 @@ fun MusicRoot(model: LibraryViewModel) {
             onShuffle = model::toggleShuffle, onRepeat = model::cycleRepeat,
             onQueuePlay = model::playQueueItem, onQueueMove = model::moveQueueItem, onQueueRemove = model::removeQueueItem,
             onMore = currentTrack?.let { track -> { actionTrack = track } },
-            mixFrom = model.mixLabel,
+            mixFrom = origin?.takeIf { it.kind == "mix" }?.title ?: model.mixLabel,
             onOpenAlbum = playing.mediaId?.let { library?.byId?.get(TrackId(it)) }?.let { track -> { openOf(track, artist = false) } }
                 // A YouTube Music song: its album page, when its row named one.
                 ?: onlineAlbumId?.let { albumId -> { onlineNav.open(OnlineTarget.Album(albumId, playing.album ?: playing.title, cover = playing.artworkUri, seed = currentTrack)) } },
@@ -650,8 +654,8 @@ fun MusicRoot(model: LibraryViewModel) {
 
     }
     if (openingSurface) {
-        val preview by androidx.compose.runtime.produceState<ua.olex.music.playback.LastPlayedPreview?>(null) {
-            value = model.lastPlayedPreview()
+        val preview by androidx.compose.runtime.produceState(lastPlayerPreview) {
+            if (value == null) value = model.lastPlayedPreview()
         }
         PlayerOpening(preview, empty = playing.connected && playing.queueRestored && !playing.hasTrack,
             error = playing.error.takeIf { !playing.connected && !playing.connecting },
