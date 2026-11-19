@@ -53,7 +53,7 @@ class YouTubeMusicTest {
         fun run(text: String, page: String? = null) = if (page == null) """{"text":"$text"}"""
             else """{"text":"$text","navigationEndpoint":{"browseEndpoint":{"browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"$page"}}}}}"""
         fun item(id: String, type: String, title: String, runs: String) = """{"musicResponsiveListItemRenderer":{
-            "thumbnail":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[{"url":"https://lh3.googleusercontent.com/a=w60-h60-l90-rj"},{"url":"https://lh3.googleusercontent.com/a=w120-h120-l90-rj"}]}}},
+            "thumbnail":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[{"url":"https://lh3.googleusercontent.com/a=w120-h120-l90-rj","width":120,"height":120},{"url":"https://lh3.googleusercontent.com/smaller=s60-l90-rj","width":60,"height":60}]}}},
             "overlay":{"musicItemThumbnailOverlayRenderer":{"content":{"musicPlayButtonRenderer":{"playNavigationEndpoint":{"watchEndpoint":{"videoId":"$id","watchEndpointMusicSupportedConfigs":{"watchEndpointMusicConfig":{"musicVideoType":"$type"}}}}}}}},
             "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"$title"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[$runs]}}}],
             "playlistItemData":{"videoId":"$id"}}}"""

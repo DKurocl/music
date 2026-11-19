@@ -1,3 +1,14 @@
+# Mix queues and cover swipes
+
+Starting radio from the active track keeps its source, occurrence and progress while making
+it the first item in a fresh queue. The previous context and its tracks drop out of Up next.
+The player deck clips the two slides together inside one stationary rounded frame. The
+gesture settles without overshoot and holds its selected cover through the session update.
+Full-screen YouTube artwork prefers the largest supplied thumbnail and requests larger
+renditions where the host supports it. Local art retains its source resolution.
+Local check: `git diff --check`. CI verifies queue and artwork regressions plus the
+Robolectric gallery. Frame pacing and provider availability on Pixel are device checks.
+
 # Output sheet, radio acknowledgement and player resume
 
 Playback device shows a tonal card with the actual route and its connection type. Switching,

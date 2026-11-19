@@ -552,7 +552,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /**
      * Starts a mix from [seed]: YouTube Music's radio for it when online, else the library. A song
-     * already playing keeps playing and the mix replaces what comes after it.
+     * already playing keeps its position and becomes the first song in the mix.
      */
     fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
 

@@ -700,7 +700,7 @@ class PlaybackService : MediaLibraryService() {
                             val usable = items.filter { PlaybackSourceItems.error(it) == null }
                             val active = session.player
                             val accepted = request == sourceRequest && if (replaceAfter == null) QueueCommand.startRadio(active, usable)
-                                else QueueCommand.replaceUpcomingForRadio(active, replaceAfter, usable)
+                                else QueueCommand.startRadioFromCurrent(active, replaceAfter, usable)
                             val receipt = Bundle()
                             if (accepted) receipt.putString(QueueCommand.RADIO_TAIL, occurrence(usable.last()))
                             result.set(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE, receipt))

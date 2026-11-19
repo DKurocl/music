@@ -98,4 +98,17 @@ class LocalArtworkCacheTest {
         assertNull(Uri.parse(uri).getQueryParameter("f"))
         assertEquals("content://media/albumart/1", ArtworkUris.variant("content://media/albumart/1", context.packageName, ArtworkPlan.LARGE))
     }
+
+    @Test fun playerUsesLargerOnlineArtworkWithTheSuppliedThumbnailAsFallback() {
+        val video = "https://i.ytimg.com/vi/example/hqdefault.jpg?sqp=signed"
+        assertEquals(listOf(
+            "https://i.ytimg.com/vi/example/maxresdefault.jpg",
+            "https://i.ytimg.com/vi/example/sddefault.jpg",
+            video,
+        ), ArtworkUris.playerVariants(video, context.packageName, ArtworkPlan.LARGE))
+        assertEquals(listOf(video), ArtworkUris.playerVariants(video, context.packageName, ArtworkPlan.SMALL))
+        val album = "https://lh3.googleusercontent.com/cover=s60-l90-rj"
+        assertEquals(listOf("https://lh3.googleusercontent.com/cover=s1280-l90-rj", album),
+            ArtworkUris.playerVariants(album, context.packageName, ArtworkPlan.LARGE))
+    }
 }
