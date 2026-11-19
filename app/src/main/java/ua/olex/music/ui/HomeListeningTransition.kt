@@ -37,17 +37,20 @@ internal fun HomeListeningTransition(listening: Boolean, gestureCommitted: Boole
     val effects = motion.defaultEffectsSpec<Float>()
     val background = MaterialTheme.colorScheme.surface
     Box(modifier.fillMaxSize().clipToBounds().background(background)) {
-        Box(Modifier.fillMaxSize().then(if (listening) Modifier.clearAndSetSemantics {} else Modifier)) { content(false) }
+        Box(Modifier.fillMaxSize().then(if (listening) inactivePane else Modifier)) { content(false) }
         AnimatedVisibility(listening,
             enter = if (still) EnterTransition.None else slideInHorizontally(move) { distance } + fadeIn(effects, initialAlpha = 0.82f),
             exit = if (still || gestureCommitted) ExitTransition.None else slideOutHorizontally(move) { distance } + fadeOut(effects),
             label = "Listening page") {
             Box(Modifier.fillMaxSize().libraryBackMotion(backProgress).background(background)
-                .then(if (listening) Modifier else Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
-                    awaitPointerEventScope {
-                        while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-                    }
-                })) { content(true) }
+                .then(if (listening) Modifier else inactivePane)) { content(true) }
         }
+    }
+}
+
+
+private val inactivePane = Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
+    awaitPointerEventScope {
+        while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
     }
 }
