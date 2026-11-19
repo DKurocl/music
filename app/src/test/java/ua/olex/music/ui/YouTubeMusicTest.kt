@@ -57,6 +57,21 @@ class YouTubeMusicTest {
         assertTrue(artist.videos.all { it.artist == "Tame Impala" && it.uri.startsWith("ytm://") })
     }
 
+    @Test fun musicWebClientUsesServerConfigurationWithoutFallingBackToAYouTubeClient() {
+        val html = """<script>ytcfg.set({"INNERTUBE_CONTEXT_CLIENT_VERSION":"2.20261119.01.00","INNERTUBE_CLIENT_VERSION":"1.20261119.01.00","INNERTUBE_API_KEY":"example-public-api-key-1234","VISITOR_DATA":"example-visitor%3D"});</script>"""
+        val web = YouTubeMusic.parseWebClient(html)
+        assertEquals(YouTubeMusic.WebClient("1.20261119.01.00", "example-public-api-key-1234", "example-visitor%3D"), web)
+        assertNull(YouTubeMusic.parseWebClient("""<html>{"INNERTUBE_CLIENT_VERSION":"2.20261119.01.00"}</html>"""))
+    }
+
+    @Test fun browseTracksCanUseThePlayButtonEndpointForTheirVideoId() {
+        val json = """{"playlistHeaderRenderer":{"title":{"simpleText":"Public playlist"}},"musicPlaylistShelfRenderer":{"contents":[{"musicResponsiveListItemRenderer":{"overlay":{"watchEndpoint":{"videoId":"song"}},"flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Track"}]}}},{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Artist"}]}}}]}}]}}"""
+        val result = YouTubeMusic.parseAlbum("VLexample", json)
+        assertEquals("Public playlist", result?.first?.title)
+        assertEquals("yt:song", result?.second?.single()?.id?.value)
+        assertEquals("Artist", result?.second?.single()?.artist)
+    }
+
     @Test fun artistLookupUsesExactCreditWhenFilteredSearchReturnsADifferentArtist() = kotlinx.coroutines.runBlocking {
         val filtered = """{"musicCardShelfRenderer":{"title":{"runs":[{"text":"Someone else"}]},"onTap":{"browseEndpoint":{"browseId":"UCwrong","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}"""
         val credit = """{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"melancholicjoana","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_USER_CHANNEL"}}}]}}}"""

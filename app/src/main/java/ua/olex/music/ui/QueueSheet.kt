@@ -178,7 +178,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                 closeSearch()
                 jumpToCurrent = true
             }, enabled = draggingKey == null, modifier = Modifier.semantics { contentDescription = "Show current song" }) {
-                Symbol(Glyph.WAVE, kick = it)
+                Symbol(Glyph.FOCUS, kick = it)
             }
             if (!searchOpen && (onSave != null || onClearNext != null) && state.queue.isNotEmpty()) Box {
                 var menu by remember { mutableStateOf(false) }
@@ -221,7 +221,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                     leadingContent = {
                         Box(Modifier.size(48.dp).androidxClip()) {
                             Artwork(item.artworkUri, Modifier.fillMaxSize(), 12.dp)
-                            if (current) NowPlayingOverlay(Modifier.matchParentSize())
+                            NowPlayingOverlay(current, Modifier.matchParentSize())
                         }
                     },
                     trailingContent = {

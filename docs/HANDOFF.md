@@ -1,3 +1,15 @@
+# Catalogue and playback feedback follow-up
+
+Home retains recommendation and album order when a new catalogue snapshot is published.
+Current playback is shown at the center of the artwork with a short fade. Common symbols
+have coordinated press and release motion. Track actions use distinct marks for radio,
+queue and playlist actions. Audio Path and Settings provide access to the equalizer.
+
+YouTube Music reads public web client configuration at runtime. Continuation requests use
+the same signed-in or public mode as the first page. The parser accepts alternate browse
+headers and video IDs linked by a song's play button. The execution network blocks direct
+access to music.youtube.com, so Pixel sessions remain necessary to verify live responses.
+
 # Shuffle, Liked and track switching (2026-11-19)
 
 Quick starts have independent draw-only gestures: a crossing trace on Shuffle and a lifting heart
