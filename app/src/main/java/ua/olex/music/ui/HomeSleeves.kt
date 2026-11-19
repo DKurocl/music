@@ -4,6 +4,8 @@ package ua.olex.music.ui
 
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -199,12 +201,12 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
     val input = remember { MutableInteractionSource() }
     val pressed by input.collectIsPressedAsState()
     val pressure = animateFloatAsState(if (pressed && !still) 1f else 0f,
-        if (still) snap() else MaterialTheme.motionScheme.fastSpatialSpec(), label = "Start tile pressure")
+        if (still) snap() else tween(if (pressed) 75 else 120), label = "Start tile pressure")
     LaunchedEffect(taps, still) {
         if (still) motion.snapTo(0f)
         else if (taps > 0) {
-            // A second tap continues from the visible frame. Each whole turn ends at rest.
-            motion.animateTo(kotlin.math.floor(motion.value) + 1f, tween(390))
+            motion.animateTo(1f, tween(100, easing = LinearOutSlowInEasing))
+            motion.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 510f))
         }
     }
     val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
@@ -223,7 +225,7 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
                 val badge = if (enabled) accent else cs.surfaceContainerHighest
                 val ink = if (enabled) onAccent else cs.onSurfaceVariant
                 Box(Modifier.size(39.dp).clip(shape).background(badge), contentAlignment = Alignment.Center) {
-                    StartMark(glyph == Glyph.SHUFFLE, ink, badge, { motion.value % 1f }, { pressure.value })
+                    StartMark(glyph == Glyph.SHUFFLE, ink, badge, { motion.value }, { pressure.value })
                 }
                 if (previews.isNotEmpty()) Box(Modifier.align(Alignment.CenterEnd).width(46.dp).height(36.dp)) {
                     previews.forEachIndexed { i, uri ->
