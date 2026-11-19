@@ -956,6 +956,7 @@ class DesignGalleryTest {
     @Test fun playingTrackMark() {
         val playing = androidx.compose.runtime.mutableStateOf(true)
         val current = androidx.compose.runtime.mutableStateOf(true)
+        compose.mainClock.autoAdvance = false
         compose.setContent { AppTheme { CompositionLocalProvider(LocalIsPlaying provides playing.value) {
             NowPlayingOverlay(current.value, Modifier.size(46.dp).background(MaterialTheme.colorScheme.surface).testTag("track-mark"))
         } } }
@@ -969,10 +970,12 @@ class DesignGalleryTest {
             File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile?.mkdirs() }
                 .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
-        badge.assertExists()
-        saveFrame("active")
-        compose.mainClock.autoAdvance = false
         try {
+            compose.mainClock.advanceTimeBy(64)
+            badge.assertExists()
+            saveFrame("active")
+            compose.mainClock.advanceTimeBy(240)
+            saveFrame("pulse")
             compose.runOnIdle { playing.value = false }
             repeat(5) {
                 compose.mainClock.advanceTimeByFrame()

@@ -171,7 +171,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 placeholders(cover = true)
             }
             Load.Failed -> {
-                item { OnlineFailed(target.name, Glyph.SEARCH) { retry++ } }
+                item { OnlineFailed(target.name, Glyph.SEARCH, target.id) { retry++ } }
                 mine?.let { local -> item {
                     TextButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("From your library") }
                 } }
@@ -325,7 +325,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                         modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
                 }
                 if (album?.partial == true) item(key = "retry-album") {
-                    ErrorNotice("Showing available tracks. The full release couldn't load.") { retry++ }
+                    ErrorNotice("Showing available tracks. The full list couldn't load.") { retry++ }
                 }
                 itemsIndexed(songs, key = { i, track -> "a-$i-" + track.id.value }, contentType = { _, _ -> "song" }) { i, track ->
                     TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { nav.actions(track) },
@@ -336,7 +336,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 else if (songs.isEmpty()) item { EmptyState(Glyph.NOTE, "No songs available", "There are no playable songs in this list.") }
             }
             state is Load.Wait -> placeholders(cover = mixed)
-            else -> item { OnlineFailed(target.title, Glyph.ALBUM) { retry++ } }
+            else -> item { OnlineFailed(target.title, Glyph.ALBUM, target.id) { retry++ } }
         }
     }
 }
@@ -396,15 +396,22 @@ internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: 
  * back online; online it offers to try again.
  */
 @Composable
-private fun OnlineFailed(name: String, glyph: Glyph, retry: () -> Unit) {
+private fun OnlineFailed(name: String, glyph: Glyph, id: String?, retry: () -> Unit) {
     val network = LocalNetwork.current
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val link = id?.let(YouTubeMusic::catalogueUrl)?.toString()
     val again by rememberUpdatedState(retry)
     // Only when the connection comes back, not on every failure (that would retry in a loop).
     var wasOffline by remember { mutableStateOf(!network) }
     LaunchedEffect(network) { if (network && wasOffline) again(); wasOffline = !network }
     if (!network) EmptyState(Glyph.CLOUD_OFF, "You're offline", "Your own songs still play. $name opens as soon as the phone is back online.")
-    else EmptyState(glyph, "Couldn't open $name", "YouTube Music didn't answer. Try again in a moment.",
-        actions = { Button(onClick = retry) { Text("Try again") } })
+    else EmptyState(glyph, "Couldn't open $name", "The page couldn't be loaded in Music.",
+        actions = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Button(onClick = retry) { Text("Try again") }
+                if (link != null) TextButton(onClick = { uriHandler.openUri(link) }) { Text("Open in YouTube Music") }
+            }
+        })
 }
 
 @Composable

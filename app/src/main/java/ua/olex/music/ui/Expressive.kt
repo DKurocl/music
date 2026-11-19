@@ -3,11 +3,14 @@ package ua.olex.music.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialShapes
@@ -18,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -79,6 +83,12 @@ internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
 private val playbackBarHeights = floatArrayOf(3f, 7f, 11f, 14f, 8f)
+private const val FULL_TURN = 2 * Math.PI
+
+internal fun playbackBarHeight(index: Int, phase: Float): Float {
+    val oscillation = kotlin.math.sin(FULL_TURN * phase - index * 0.93).toFloat()
+    return playbackBarHeights[index] * (1f + 0.29f * oscillation)
+}
 
 /** A playback status mark that stays legible over artwork without looking like a transport control. */
 @Composable
@@ -91,20 +101,29 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
     Box(modifier, contentAlignment = Alignment.Center) {
         AnimatedVisibility(visible = current && playing, enter = enter, exit = exit) {
             val tint = if (cs.primary.luminance() > cs.primaryContainer.luminance()) cs.primary else cs.primaryContainer
-            Canvas(Modifier.size(32.dp).semantics { stateDescription = "Playing" }) {
-                drawCircle(Brush.radialGradient(
+            val phase = if (still) null else rememberInfiniteTransition(label = "Playback mark").animateFloat(
+                0f, 1f, infiniteRepeatable(tween(960, easing = LinearEasing)), label = "Playback bars",
+            )
+            Box(Modifier.size(32.dp).semantics { stateDescription = "Playing" }.drawWithCache {
+                val scrim = Brush.radialGradient(
                     0f to cs.scrim.copy(alpha = 0.82f),
                     0.58f to cs.scrim.copy(alpha = 0.72f),
                     1f to cs.scrim.copy(alpha = 0f),
                     radius = size.minDimension / 2,
-                ))
-                playbackBarHeights.forEachIndexed { index, height ->
-                    val x = center.x + ((index - 2) * 3.8f).dp.toPx()
-                    val halfHeight = height.dp.toPx() / 2
-                    drawLine(tint, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
-                        strokeWidth = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                )
+                val spacing = 3.8.dp.toPx()
+                val width = 2.2.dp.toPx()
+                onDrawBehind {
+                    drawCircle(scrim)
+                    val position = phase?.value
+                    playbackBarHeights.forEachIndexed { index, height ->
+                        val x = center.x + (index - 2) * spacing
+                        val halfHeight = (position?.let { playbackBarHeight(index, it) } ?: height).dp.toPx() / 2
+                        drawLine(tint, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
+                            strokeWidth = width, cap = StrokeCap.Round)
+                    }
                 }
-            }
+            })
         }
     }
 }

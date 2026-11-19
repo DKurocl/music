@@ -72,6 +72,38 @@ class YouTubeMusicTest {
         assertEquals("Artist", result?.second?.single()?.artist)
     }
 
+    @Test fun catalogueLinksUseTheCorrectCanonicalPathsAndIgnoreUntrustedIds() {
+        assertEquals("https://music.youtube.com/playlist?list=PLabc", YouTubeMusic.catalogueUrl("VLPLabc").toString())
+        assertEquals("https://music.youtube.com/playlist?list=OLAK5uy_test", YouTubeMusic.catalogueUrl("OLAK5uy_test").toString())
+        assertEquals("https://music.youtube.com/channel/UCexample", YouTubeMusic.catalogueUrl("UCexample").toString())
+        assertEquals("https://music.youtube.com/browse/MPREexample", YouTubeMusic.catalogueUrl("MPREexample").toString())
+        assertNull(YouTubeMusic.catalogueUrl("VL/../../example"))
+        val response = """{"contents":{},"header":{"title":"Guitar } and \"keys\""}}"""
+        assertEquals(response, YouTubeMusic.initialCatalogueData("""<script>var ytInitialData = $response;</script>"""))
+        assertNull(YouTubeMusic.initialCatalogueData("""<script>var ytInitialData = {"error":{}};</script>"""))
+    }
+
+    @Test fun playlistQueueKeepsOccurrencesAndRetryCanReplaceTheIncompleteResult() = kotlinx.coroutines.runBlocking {
+        val row = """{"playlistPanelVideoRenderer":{"videoId":"song","title":{"simpleText":"Song"},"longBylineText":{"simpleText":"Artist"}}}"""
+        val queue = """{"playlistPanelRenderer":{"playlistId":"PLtest","contents":[$row,$row]}}"""
+        val full = """{"musicDetailHeaderRenderer":{"title":{"simpleText":"The playlist"}},"musicPlaylistShelfRenderer":{"contents":[]}}"""
+        var missing = true
+        val source = YouTubeMusic(transport = { endpoint, _, _ ->
+            when (endpoint) {
+                "browse" -> full.takeUnless { missing }
+                "next" -> queue
+                else -> null
+            }
+        })
+        val summary = YouTubeMusic.OnlineAlbum("PLtest", "Playlist", null, null)
+        val fallback = source.albumPage(summary, null, false)!!
+        assertTrue(fallback.first.partial)
+        assertEquals(listOf("yt:song", "yt:song"), fallback.second.map { it.id.value })
+        assertTrue(YouTubeMusic.confirmedPlaylistQueue("PLdifferent", queue).isEmpty())
+        missing = false
+        assertFalse(source.albumPage(summary, null, false)!!.first.partial)
+    }
+
     @Test fun artistLookupUsesExactCreditWhenFilteredSearchReturnsADifferentArtist() = kotlinx.coroutines.runBlocking {
         val filtered = """{"musicCardShelfRenderer":{"title":{"runs":[{"text":"Someone else"}]},"onTap":{"browseEndpoint":{"browseId":"UCwrong","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}"""
         val credit = """{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"melancholicjoana","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_USER_CHANNEL"}}}]}}}"""
