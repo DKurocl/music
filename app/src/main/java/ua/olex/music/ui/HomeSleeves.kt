@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
@@ -74,10 +75,7 @@ private fun CoverPick(track: Track, currentId: String?, shape: Shape, lead: Bool
         .semantics { if (current) stateDescription = "Current track" }) {
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Artwork(track.artworkUri, Modifier.fillMaxSize(), 0.dp, pixels = if (lead) ArtworkPlan.LARGE else ArtworkPlan.MEDIUM)
-            if (current) Surface(shape = CircleShape, color = cs.primary, contentColor = cs.onPrimary,
-                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-                Symbol(if (LocalIsPlaying.current) Glyph.PLAY else Glyph.PAUSE, size = 16.dp, filled = true, modifier = Modifier.padding(6.dp))
-            }
+            if (current) NowPlayingOverlay(Modifier.matchParentSize())
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = if (lead) 14.dp else 10.dp, vertical = if (lead) 12.dp else 7.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -94,77 +92,95 @@ private fun CoverPick(track: Track, currentId: String?, shape: Shape, lead: Bool
     }
 }
 
-/** The original Home anchor: one album and two independent starts from the music library. */
+/** A shelf entry opens a local collection or the original YouTube Music album. */
+internal data class HomeAlbumPick(val id: String, val title: String, val artist: String?, val cover: String?,
+    val local: ua.olex.music.model.MusicCollection? = null)
+
 @Composable
-internal fun HomeStarts(album: ua.olex.music.model.MusicCollection?, firstPick: Track?, librarySongs: List<Track>, favourites: List<Track>,
-    currentId: String?, transportPlaying: Boolean, onToggle: () -> Unit,
-    onAlbum: () -> Unit, onPlayAlbum: () -> Unit, onShuffle: () -> Unit, onLiked: () -> Unit, onChooseLiked: () -> Unit) {
+internal fun HomeStarts(albums: List<HomeAlbumPick>, shuffleCount: Int, favourites: List<Track>,
+    onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit, onShuffle: () -> Unit, onLiked: () -> Unit, onChooseLiked: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
-    val title = album?.name ?: firstPick?.title ?: return
-    val artist = album?.subtitle ?: firstPick?.artist.orEmpty()
-    val playing = LocalPlayingTrack.current
-    val active = remember(album, firstPick?.id, playing, currentId) {
-        fun matches(t: Track) = t.id.value == currentId || t.matchesPlayback(playing)
-        album?.tracks?.any(::matches) ?: (firstPick?.let(::matches) == true)
-    }
     val likedArt = remember(favourites) { favourites.asSequence().take(20).mapNotNull { it.artworkUri }.distinct().take(3).toList() }
-    val transportLabel = when {
-        active && transportPlaying -> "Pause $title"
-        active -> "Resume $title"
-        else -> "Play $title"
-    }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).height(248.dp + 116.dp * (fontScale - 1f)),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        val coverInput = remember { MutableInteractionSource() }
-        val coverPressed by coverInput.collectIsPressedAsState()
-        val still = LocalPowerSave.current
-        val zoom by animateFloatAsState(if (coverPressed && !still) 1.045f else 1f,
-            if (still) snap() else MaterialTheme.motionScheme.fastSpatialSpec(), label = "Sleeve press")
-        Box(Modifier.weight(1.5f).fillMaxHeight().clip(RoundedCornerShape(32.dp)).background(cs.primaryContainer)) {
-            Box(Modifier.fillMaxSize().clickable(role = Role.Button, interactionSource = coverInput,
-                indication = androidx.compose.foundation.LocalIndication.current,
-                onClickLabel = if (album != null) "Open $title" else "Song actions for $title",
-                onClick = { haptics.tick(); onAlbum() })) {
-                Artwork(if (album != null) album.artworkUri else firstPick?.artworkUri,
-                    Modifier.fillMaxSize().graphicsLayer { scaleX = zoom; scaleY = zoom }, 0.dp, pixels = ArtworkPlan.LARGE)
-                Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
-                    0.28f to androidx.compose.ui.graphics.Color.Transparent, 1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.86f))))
-                Column(Modifier.align(Alignment.BottomStart).padding(start = 15.dp, end = 60.dp, bottom = 16.dp)) {
-                    Text(title, style = MaterialTheme.typography.titleLargeEmphasized, color = androidx.compose.ui.graphics.Color.White,
-                        maxLines = 3, overflow = TextOverflow.Ellipsis)
-                    Text(artist, style = MaterialTheme.typography.bodyMedium, color = androidx.compose.ui.graphics.Color.White,
-                        maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-                if (active && playing != null) Surface(color = cs.surfaceContainerHigh, shape = CircleShape,
-                    modifier = Modifier.align(Alignment.TopStart).padding(12.dp)) {
-                    Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp), horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Symbol(if (transportPlaying) Glyph.WAVE else Glyph.PAUSE, size = 14.dp, color = cs.primary)
-                        Text(playing.title, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-            }
-            val transportInput = remember { MutableInteractionSource() }
-            val transportPressed by transportInput.collectIsPressedAsState()
-            Surface(onClick = { haptics.confirm(); if (active) onToggle() else onPlayAlbum() },
-                interactionSource = transportInput, shape = MaterialShapes.Cookie9Sided.toShape(),
-                color = cs.primaryContainer, contentColor = cs.onPrimaryContainer,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).size(48.dp).semantics { contentDescription = transportLabel }) {
-                Box(contentAlignment = Alignment.Center) {
-                    PlayPauseSymbol(active && transportPlaying, size = 24.dp, pressed = transportPressed)
-                }
-            }
-        }
-        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            StartTile("Shuffle all", songCount(librarySongs.size), Glyph.SHUFFLE, MaterialShapes.Sunny.toShape(),
-                cs.tertiaryContainer, cs.onTertiaryContainer, cs.tertiary, cs.onTertiary, Modifier.weight(1f), enabled = librarySongs.isNotEmpty()) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        .height((if (albums.isEmpty()) 112.dp else 224.dp) + 116.dp * (fontScale - 1f)),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (albums.isNotEmpty()) AlbumPocket(albums, Modifier.weight(1.35f).fillMaxHeight(), onOpenAlbum)
+        val actions: @Composable (Modifier) -> Unit = { tile ->
+            StartTile("Shuffle all", songCount(shuffleCount), Glyph.SHUFFLE, MaterialShapes.Sunny.toShape(),
+                cs.tertiaryContainer, cs.onTertiaryContainer, cs.tertiary, cs.onTertiary, tile, enabled = shuffleCount > 0) {
                 haptics.confirm(); onShuffle()
             }
             StartTile("Liked", songCount(favourites.size), Glyph.FAVOURITE, MaterialShapes.Cookie9Sided.toShape(),
-                cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary, cs.onSecondary, Modifier.weight(1f), enabled = favourites.isNotEmpty(), previews = likedArt, onLongClick = onChooseLiked) {
+                cs.secondaryContainer, cs.onSecondaryContainer, cs.secondary, cs.onSecondary, tile, enabled = favourites.isNotEmpty(), previews = likedArt, onLongClick = onChooseLiked) {
                 haptics.confirm(); onLiked()
+            }
+        }
+        if (albums.isEmpty()) actions(Modifier.weight(1f).fillMaxHeight())
+        else Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            actions(Modifier.weight(1f))
+        }
+    }
+}
+
+/** Art stays put during transport changes. The only movement follows a tap or a horizontal swipe. */
+@Composable
+private fun AlbumPocket(albums: List<HomeAlbumPick>, modifier: Modifier,
+    onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val pager = rememberPagerState { albums.size }
+    val nav = LocalOnlineNav.current
+    val haptics = rememberHaptics()
+    val scope = rememberCoroutineScope()
+    val still = LocalPowerSave.current
+    Column(modifier.clip(RoundedCornerShape(26.dp)).background(cs.surfaceContainerHigh)) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 3.dp).heightIn(min = 44.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text("Album picks", Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
+            if (albums.size > 1) KickIconButton(onClick = {
+                val next = (pager.targetPage + 1) % albums.size
+                haptics.tick()
+                scope.launch { if (still) pager.scrollToPage(next) else pager.animateScrollToPage(next) }
+            }, modifier = Modifier.semantics { contentDescription = "Next album pick" }) { kick ->
+                Symbol(Glyph.CHEVRON, size = 18.dp, kick = kick)
+            }
+        }
+        HorizontalPager(pager, Modifier.fillMaxSize().testTag("album-picks"), key = { i -> (if (albums[i].local == null) "yt:" else "local:") + albums[i].id }) { i ->
+            val pick = albums[i]
+            val input = remember { MutableInteractionSource() }
+            val pressed by input.collectIsPressedAsState()
+            val pressure by animateFloatAsState(if (pressed && !still) 1f else 0f,
+                if (still) snap() else MaterialTheme.motionScheme.fastSpatialSpec(), label = "Album sleeve")
+            Column(Modifier.fillMaxSize().clickable(role = Role.Button, interactionSource = input,
+                indication = androidx.compose.foundation.LocalIndication.current, onClickLabel = "Open ${pick.title}",
+                onClick = {
+                    haptics.tick()
+                    if (pick.local != null) onOpenAlbum(pick.local)
+                    else nav.open(OnlineTarget.Album(pick.id, pick.title, cover = pick.cover, subtitle = pick.artist))
+                }).padding(start = 14.dp, end = 14.dp, bottom = 12.dp)) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxHeight().aspectRatio(1f).padding(4.dp)) {
+                        androidx.compose.foundation.Canvas(Modifier.matchParentSize().graphicsLayer {
+                            translationX = (12f + 4f * pressure).dp.toPx()
+                        }) {
+                            val radius = size.minDimension / 2
+                            drawCircle(cs.secondary, radius)
+                            for (ring in 3..5) drawCircle(cs.onSecondary.copy(alpha = 0.42f), radius * ring / 6f,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+                        }
+                        Artwork(pick.cover, Modifier.fillMaxSize().graphicsLayer {
+                            translationX = -6.dp.toPx()
+                            rotationZ = -4f + pressure * 4f
+                            scaleX = 1f - pressure * 0.035f
+                            scaleY = scaleX
+                        }, 9.dp, pixels = ArtworkPlan.MEDIUM)
+                    }
+                }
+                Text(pick.title, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.titleMediumEmphasized,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                pick.artist?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall,
+                    color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             }
         }
     }

@@ -76,9 +76,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.toShape
-import androidx.compose.ui.layout.findRootCoordinates
-import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -170,7 +167,6 @@ fun MusicRoot(model: LibraryViewModel) {
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
     // Three places (Home, Library, Search) and pages over Home (Stats, Duplicates): docs/DESIGN_SYSTEM.md.
     var place by rememberSaveable { mutableStateOf(Place.HOME) }
-    var statsAnchor by remember { androidx.compose.runtime.mutableFloatStateOf(0.84f) }
     var statsBackCommitted by remember { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
     var openPlaylist by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -397,7 +393,7 @@ fun MusicRoot(model: LibraryViewModel) {
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
                         HomeActions(onStats = { statsBackCommitted = false; page = Page.STATS },
-                            onSettings = { settingsQuery = ""; page = Page.SETTINGS }, onStatsAnchor = { statsAnchor = it })
+                            onSettings = { settingsQuery = ""; page = Page.SETTINGS })
                     }
                 },
             )
@@ -471,13 +467,13 @@ fun MusicRoot(model: LibraryViewModel) {
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
-            place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsAnchor, statsBackCommitted, Modifier.padding(insets)) { listening ->
+            place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsBackCommitted, Modifier.padding(insets)) { listening ->
                 if (listening) StatsPage(requireNotNull(library), Modifier, model::play, context.graph.userLibrary::historySince)
                 else baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
-                    personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier,
-                    onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
+                    remember(personal.history) { personal.history.mapNotNull { it.track } }, songStats, playing.mediaId, Modifier,
+                    onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = remember(personal.favourites) { personal.favourites.mapNotNull { it.track } },
                     playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
-                    homeActive = page == null, transportPlaying = playing.playWhenReady, onToggle = model::toggle,
+                    homeActive = page == null,
                     onOpenAlbum = { album ->
                         clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME
                         openInLibrary = "ALBUMS" to album.id; place = Place.SEARCH
@@ -967,12 +963,9 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
 
 /** Shared toolbar for Home and its rendered design previews. */
 @Composable
-internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit, onStatsAnchor: (Float) -> Unit = {}) {
+internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit) {
     val haptics = rememberHaptics()
-    KickIconButton(onClick = { haptics.tick(); onStats() }, modifier = Modifier.onGloballyPositioned { button ->
-        val width = button.findRootCoordinates().size.width
-        if (width > 0) onStatsAnchor((button.boundsInRoot().center.x / width).coerceIn(0f, 1f))
-    }.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
+    KickIconButton(onClick = { haptics.tick(); onStats() }, modifier = Modifier.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
     // The gear turns as it opens Settings.
     var gear by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     androidx.compose.material3.FilledTonalIconButton(onClick = { gear++; onSettings() },
