@@ -281,7 +281,7 @@ internal fun LibraryBrowser(
     val browserRoute = if (searching) "results" else selected?.id ?: browsing ?: tabName
     val browserDepth = (if (browsing != null || mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS) 1 else 0) +
         if (selected != null) 1 else 0
-    Column(Modifier.fillMaxSize().padding(insets).libraryBackMotion(back).then(arrivalMotion(browserRoute, mode, browserDepth))) {
+    Column(Modifier.fillMaxSize().padding(insets).libraryBackMotion(back).arrivalMotion(browserRoute, mode, browserDepth)) {
         // A search pill, as in Google's apps, and the library's sections as chips below it.
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
         // The lens swings each time the field is entered, as in Google's own search fields.

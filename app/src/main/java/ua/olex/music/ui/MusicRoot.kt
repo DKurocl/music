@@ -1069,7 +1069,7 @@ internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit) {
 
 /** Move within a hierarchy and keep peer tabs anchored to the same viewport. */
 @Composable
-internal fun arrivalMotion(route: Any?, section: Any, depth: Int): Modifier {
+internal fun Modifier.arrivalMotion(route: Any?, section: Any, depth: Int): Modifier {
     val still = LocalPowerSave.current
     var previousRoute by remember { mutableStateOf(route) }
     var previousSection by remember { mutableStateOf(section) }
@@ -1084,7 +1084,7 @@ internal fun arrivalMotion(route: Any?, section: Any, depth: Int): Modifier {
         if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f, spec)
     }
     val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
-    return Modifier.graphicsLayer {
+    return graphicsLayer {
         val remaining = if (still) 0f else 1f - progress.value
         alpha = 1f - 0.10f * remaining
         translationX = remaining * (if (rtl) -direction else direction) * 20.dp.toPx()
@@ -1093,5 +1093,5 @@ internal fun arrivalMotion(route: Any?, section: Any, depth: Int): Modifier {
 
 @Composable
 internal fun Arrival(route: Any, place: Place, depth: Int, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().then(arrivalMotion(route, place, depth))) { content() }
+    Box(Modifier.fillMaxSize().arrivalMotion(route, place, depth)) { content() }
 }
