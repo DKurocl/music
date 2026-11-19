@@ -184,13 +184,15 @@ class PlaybackPersistenceTest {
         val allow = kotlinx.coroutines.CompletableDeferred<Unit>()
         val started = kotlinx.coroutines.CompletableDeferred<Unit>()
         persistence = PlaybackPersistence(player, journal, backgroundScope) { items ->
-            if (started.isCompleted) allow.await() else started.complete(Unit)
+            started.complete(Unit)
+            allow.await()
             items
         }
         runCurrent(); journal.read(); runCurrent()
         val result = kotlinx.coroutines.CompletableDeferred<PlaybackCheckpoint?>()
         backgroundScope.launch { result.complete(persistence?.resumption()) }
         runCurrent()
+        assertTrue(started.isCompleted)
         assertFalse(result.isCompleted)
         persistence?.supersedeRestore()
         allow.complete(Unit); runCurrent()
