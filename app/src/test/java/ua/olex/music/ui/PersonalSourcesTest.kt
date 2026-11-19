@@ -5,6 +5,19 @@ import org.junit.Test
 import ua.olex.music.model.*
 
 class PersonalSourcesTest {
+    @Test fun repeatedSkipsReuseUnchangedHistoryAndRefreshEditedMetadata() {
+        val file = Track(TrackId("local:a"), "content://a", "Song", "Artist")
+        val resolver = HistoryRows(LibraryIndex.build(listOf(file)))
+        val first = HistoryEntry(1, SavedSong.from(file), 0)
+        val second = HistoryEntry(2, SavedSong.from(file.copy(id = TrackId("yt:b"), uri = "ytm://b")), 1)
+        val original = resolver.resolve(listOf(first)).single()
+        val rows = resolver.resolve(listOf(second, first.copy(id = 3), first))
+        assertEquals(2, rows.size)
+        assertSame(original, rows.last())
+        val edit = first.copy(song = first.song.copy(title = "Edited"))
+        assertEquals("Edited", resolver.resolve(listOf(edit)).single().song.title)
+    }
+
     @Test fun everyPhysicalCopyAndTheVideoShareTheSameHeart() {
         val online = Track(TrackId("yt:one"), "ytm://one", "Song", "Artist", durationMs = 200_000)
         val a = online.copy(id = TrackId("local:a"), uri = "content://a", path = "Music/a.flac", format = AudioFormat("flac"))

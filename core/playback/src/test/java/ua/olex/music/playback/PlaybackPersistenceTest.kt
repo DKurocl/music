@@ -58,6 +58,25 @@ class PlaybackPersistenceTest {
         persistence?.close(); journal.read()
     }
 
+    @Test fun sourcePreparationKeepsTheQueueGenerationButAReplacementChangesIt() = runTest {
+        val listener = PlaybackPersistence(player, journal, backgroundScope)
+        persistence = listener
+        player.setMediaItems(listOf(item(1), item(2)))
+        shadowOf(Looper.getMainLooper()).idle()
+        val before = requireNotNull(journal.read())
+        player.seekTo(1, 1200L)
+        listener.onTimelineChanged(player.currentTimeline, Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE)
+        listener.onEvents(player, Player.Events(androidx.media3.common.FlagSet.Builder().add(Player.EVENT_TIMELINE_CHANGED).build()))
+        val after = requireNotNull(journal.read())
+        assertEquals(before.generation, after.generation)
+        assertEquals(1, after.index)
+        player.replaceMediaItem(0, item(3))
+        shadowOf(Looper.getMainLooper()).idle()
+        val edited = requireNotNull(journal.read())
+        assertNotEquals(before.generation, edited.generation)
+        assertEquals("local:3", edited.items.first().mediaId)
+    }
+
     @Test fun explicitSelectionWinsOverPendingDiskRestore() = runTest {
         journal.write(saved())
         persistence = PlaybackPersistence(player, journal, backgroundScope)

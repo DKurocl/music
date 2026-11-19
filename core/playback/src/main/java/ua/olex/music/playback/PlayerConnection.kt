@@ -109,9 +109,17 @@ class PlayerConnection(context: Context) {
     private var queueSnapshot: List<QueueItem> = emptyList()
 
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = publish(
-            player, events.contains(Player.EVENT_TIMELINE_CHANGED),
-        )
+        private var playlistChanged = false
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) playlistChanged = true
+        }
+
+        override fun onEvents(player: Player, events: Player.Events) {
+            val rebuild = playlistChanged || queueSnapshot.size != player.mediaItemCount
+            playlistChanged = false
+            publish(player, rebuild)
+        }
     }
 
     /** Idempotent, main-thread connection. A failed connection can be retried on the next action. */

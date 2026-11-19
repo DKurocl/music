@@ -128,8 +128,14 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
-    val personal: StateFlow<PersonalLibraryState> = combine(catalogue, graph.userLibrary.favourites, graph.userLibrary.playlists, graph.userLibrary.history, graph.userLibrary.recordingIds) { index, favourites, playlists, history, aliases ->
-        PersonalLibraryState.resolve(index ?: LibraryIndex.EMPTY, favourites, playlists, history, aliases)
+    private val collections = combine(catalogue, graph.userLibrary.favourites.distinctUntilChanged(),
+        graph.userLibrary.playlists.distinctUntilChanged(), graph.userLibrary.recordingIds) { index, favourites, playlists, aliases ->
+        val library = index ?: LibraryIndex.EMPTY
+        val base = PersonalLibraryState.resolve(library, favourites, playlists, emptyList(), aliases)
+        base to HistoryRows(library)
+    }
+    val personal: StateFlow<PersonalLibraryState> = combine(collections, graph.userLibrary.history) { (base, rows), events ->
+        base.copy(history = rows.resolve(events))
     }.flowOn(Dispatchers.Default).catch {
         userError = "Couldn't open your personal library. Your saved data has not been reset."
         emit(PersonalLibraryState())
@@ -302,8 +308,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Plays and ratings per recording, with unique legacy keys for unsaved files. */
     /** Ratings in the files count when the app has none of its own, so they survive a reinstall. */
-    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, catalogue) { own, index ->
-        val fromFiles = index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.statsKey to it } }.orEmpty()
+    private val fileRatings = catalogue.map { index ->
+        index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.statsKey to it } }.orEmpty()
+    }.distinctUntilChanged()
+    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, fileRatings) { own, fromFiles ->
         if (fromFiles.isEmpty()) own else own.toMutableMap().apply {
             for ((key, stars) in fromFiles) { val s = get(key) ?: ua.olex.music.model.SongStats.NONE; if (!s.ratingSet) put(key, s.copy(rating = stars, ratingSet = true)) }
         }
