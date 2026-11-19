@@ -1,6 +1,7 @@
 # Home start controls and listening navigation (2026-11-19)
 
 Home and listening now share one reversible page transition below the measured toolbar button.
+An opaque rounded reveal keeps the two pages readable at intermediate frames.
 The mini player and navigation stay in place. Home keeps its saved scroll position and mood.
 The album face and transport receive independent presses. Tap Liked to play or hold it to pick
 a song. Shuffle skips the current recording when another unique recording is available.
