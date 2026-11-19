@@ -34,13 +34,13 @@ import ua.olex.music.R
  * its FILL and wght axes, so icons fill in and thicken smoothly as Google's own apps do.
  */
 enum class Glyph(val codepoint: Int) {
-    PLAY(0xE037), PAUSE(0xE034), NEXT(0xE044), PREVIOUS(0xE045), SHUFFLE(0xE043), REPEAT(0xE040), REPEAT_ONE(0xE041),
+    PLAY(0xE037), NEXT(0xE044), PREVIOUS(0xE045), SHUFFLE(0xE043), REPEAT(0xE040), REPEAT_ONE(0xE041),
     QUEUE(0xE03D), MORE(0xE5D4), SEARCH(0xEF7A), CLOSE(0xE5CD), COLLAPSE(0xE5CF), BACK(0xE5C4), NOTE(0xE405),
     ALBUM(0xE019), PERSON(0xF0D3), FOLDER(0xE2C7), FAVOURITE(0xE87E), PLAYLIST_ADD(0xE03B), PLAYLIST(0xE05F),
     LYRICS(0xEC0B), SLEEP(0xF159), SPEAKER(0xE32D), HEADPHONES(0xF01F), BLUETOOTH(0xE1A7), WAVE(0xE1B8),
     HISTORY(0xE8B3), LIBRARY(0xE030), REFRESH(0xE5D5), CHECK(0xE668), ADD(0xE145), DELETE(0xE92E), EDIT(0xF097),
-    DRAG(0xE25D), TUNE(0xE429), INFO(0xE88E), PLAY_NEXT(0xE066), ADD_TO_QUEUE(0xE05C), UP(0xE5D8), DOWN(0xE5DB),
-    REMOVE(0xF08F), GENRE(0xE01D), STAR(0xF09A), SMART(0xE65F), HOME(0xE9B2), STATS(0xF092), DUPLICATES(0xEB7D),
+    DRAG(0xE25D), TUNE(0xE429), INFO(0xE88E), PLAY_NEXT(0xE066), ADD_TO_QUEUE(0xE05C), DOWN(0xE5DB),
+    REMOVE(0xF08F), GENRE(0xE01D), STAR(0xF09A), SMART(0xE65F), STATS(0xF092), DUPLICATES(0xEB7D),
     SETTINGS(0xE8B8), MIX(0xE51E), ENERGY(0xEA0B), HAPPY(0xE813), RELAX(0xEB4C), PARTY(0xEA65), WORKOUT(0xEB43), COMMUTE(0xE940), RAIN(0xF176), FOCUS(0xE719), MOTION(0xF49A), DOWNLOAD(0xF090), CHEVRON(0xE5CC), SORT(0xE164), BATTERY(0xEFDE), USB(0xE1E0), PHOTO(0xE3F4), LOCK(0xE899), TIMER(0xE425), HIDDEN(0xE8F5),
     CALENDAR(0xEBCC), PIANO(0xE521), HI_RES(0xE024), MIC(0xE31D), UNPLAYED(0xE440),
     // Where a song plays from (docs/specs/M10_ONLINE.md, D2), and an artist's radio.
@@ -50,17 +50,18 @@ enum class Glyph(val codepoint: Int) {
 
     /** The small gesture this glyph plays when its button is tapped. */
     val motion: GlyphMotion get() = when (this) {
-        SEARCH, SETTINGS, TUNE, REFRESH, REPEAT, REPEAT_ONE, SHUFFLE, MIX, RADIO, SLEEP -> GlyphMotion.TILT
+        SETTINGS, TUNE, REFRESH, REPEAT, REPEAT_ONE, SHUFFLE, MIX, RADIO, SLEEP -> GlyphMotion.TILT
         NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
         PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
         DOWNLOAD, COLLAPSE, DOWN, MORE -> GlyphMotion.DROP
-        UP, ADD_TO_QUEUE, PLAYLIST_ADD, PLAYLIST, QUEUE, LYRICS -> GlyphMotion.RISE
+        ADD_TO_QUEUE, PLAYLIST_ADD, PLAYLIST, QUEUE, LYRICS -> GlyphMotion.RISE
+        FAVOURITE, CHECK, STAR, ADD -> GlyphMotion.CONFIRM
         else -> GlyphMotion.POP
     }
 }
 
 /** Tap gestures for icons; each glyph picks the one that reads as its own (see [Glyph.motion]). */
-enum class GlyphMotion { POP, TILT, NUDGE_RIGHT, NUDGE_LEFT, DROP, RISE }
+enum class GlyphMotion { POP, TILT, NUDGE_RIGHT, NUDGE_LEFT, DROP, RISE, CONFIRM }
 
 private object SymbolFont {
     @Volatile private var typeface: Typeface? = null
@@ -107,24 +108,30 @@ fun Symbol(
     val pressScale by animateFloatAsState(if (pressed && !still) 0.94f else 1f, if (pressed) tween(75) else motion.fastSpatialSpec(), label = "press")
     val tap = if (kick > 0 && !still) remember { Animatable(0f) }.also { pulse ->
         LaunchedEffect(kick) {
-            pulse.animateTo(1f, tween(90))
-            pulse.animateTo(0f, motion.fastSpatialSpec())
+            pulse.animateTo(1f, tween(90, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+            pulse.animateTo(0f, tween(155, easing = androidx.compose.animation.core.FastOutSlowInEasing))
         }
     } else null
     val gesture = glyph.motion
     val paint = remember(ctx) { SymbolPaint(ctx) }
     Canvas(modifier.size(size).graphicsLayer {
         val pulse = tap?.value ?: 0f
-        val scale = pressScale * (1f + pulse * if (gesture == GlyphMotion.POP) 0.13f else 0.05f)
+        val growth = when (gesture) {
+            GlyphMotion.CONFIRM -> 0.18f
+            GlyphMotion.POP -> 0.07f
+            else -> 0.03f
+        }
+        val scale = pressScale * (1f + pulse * growth)
         scaleX = scale
         scaleY = scale
         when (gesture) {
-            GlyphMotion.TILT -> rotationZ = pulse * (when (glyph) { Glyph.SEARCH, Glyph.SLEEP, Glyph.SHUFFLE -> -16f; Glyph.REPEAT, Glyph.REPEAT_ONE -> 25f; else -> 16f })
-            GlyphMotion.NUDGE_RIGHT -> translationX = pulse * 3.dp.toPx()
-            GlyphMotion.NUDGE_LEFT -> translationX = pulse * -3.dp.toPx()
-            GlyphMotion.DROP -> translationY = pulse * 3.dp.toPx()
-            GlyphMotion.RISE -> translationY = pulse * -3.dp.toPx()
-            GlyphMotion.POP -> translationY = -pulse * 1.5.dp.toPx()
+            GlyphMotion.TILT -> rotationZ = pulse * (when (glyph) { Glyph.SLEEP, Glyph.SHUFFLE -> -14f; Glyph.REPEAT, Glyph.REPEAT_ONE -> 25f; else -> 16f })
+            GlyphMotion.NUDGE_RIGHT -> translationX = pulse * 2.5.dp.toPx()
+            GlyphMotion.NUDGE_LEFT -> translationX = pulse * -2.5.dp.toPx()
+            GlyphMotion.DROP -> translationY = pulse * 2.5.dp.toPx()
+            GlyphMotion.RISE -> translationY = pulse * -2.5.dp.toPx()
+            GlyphMotion.POP -> translationY = -pulse * 1.dp.toPx()
+            GlyphMotion.CONFIRM -> translationY = 0f
         }
     }) {
         // 960 units per em with the icon standing on the baseline: an em-sized glyph drawn with

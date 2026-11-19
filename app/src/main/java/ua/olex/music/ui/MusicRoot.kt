@@ -227,7 +227,7 @@ fun MusicRoot(model: LibraryViewModel) {
             }
         }.value
     }
-    val homeCache = remember(library, onlinePageScope, youTubeOn) { HomeCache() }
+    val homeCache = remember(onlinePageScope, youTubeOn) { HomeCache() }
     val excluded = model.excluded
     // A download asked for before the Soulseek account was set: it starts once the owner signs in.
     var afterSignIn by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -636,7 +636,7 @@ fun MusicRoot(model: LibraryViewModel) {
         },
             plays = stats[track.statsKey]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
             // A mix grown from this song, as YouTube Music's "Start radio", local files first.
-            TrackAction(Glyph.MIX, "Start mix") { haptics.spin(); model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
+            TrackAction(Glyph.RADIO, "Start mix") { haptics.spin(); model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             // Never offered again in mixes, autoplay and Home; out of the queue now.
             if (online) TrackAction(Glyph.HIDDEN, "Don't recommend this song") {
@@ -672,7 +672,6 @@ fun MusicRoot(model: LibraryViewModel) {
             if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
             if (online || '#' in track.id.value) null else TrackAction(Glyph.DELETE, "Move to trash") { moveToTrash(listOf(track)) },
             if (youTubeOn && network) TrackAction(Glyph.MOTION, "Find music video") { actionTrack = null; videoTrack = track } else null,
-            TrackAction(Glyph.TUNE, "Equalizer") { equalizerOpen = true },
         ))
     }
     editingTags?.let { tracks ->
