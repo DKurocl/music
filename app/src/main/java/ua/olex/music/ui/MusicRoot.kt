@@ -358,17 +358,18 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     val travel = remember(scope) { PlayerTravel(scope) }
-    LaunchedEffect(systemOpening, playing.hasTrack, playing.connected) {
-        if (systemOpening && playing.hasTrack && playing.connected) {
+    val directOpen = systemOpening && playing.hasTrack && playing.connected
+    LaunchedEffect(directOpen) {
+        if (directOpen) {
             travel.settle(open = true, instant = true)
             expanded = true
             model.dismissSystemPlayerRequest()
         }
     }
-    val openPlayer = expanded && playing.hasTrack
+    val openPlayer = (expanded || directOpen) && playing.hasTrack
     LaunchedEffect(openPlayer, powerSave) { travel.settle(openPlayer, powerSave || !playing.hasTrack) }
-    PlayerCoverLayout(travel, playing.artworkUri) {
-    Scaffold(
+    PlayerCoverLayout(travel, playing.artworkUri, directOpen = directOpen) {
+    if (!systemOpening || directOpen) Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
             .graphicsLayer { alpha = if (systemOpening) 0f else 1f }
             .then(if (systemOpening || expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
@@ -566,11 +567,11 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     val travelling by remember { androidx.compose.runtime.derivedStateOf { travel.fraction > 0f } }
-    if (playing.hasTrack && (expanded || travelling)) {
+    if (openPlayer || playing.hasTrack && travelling) {
         val settled by remember { androidx.compose.runtime.derivedStateOf { travel.fraction == 1f } }
         var videoReady by remember { mutableStateOf(false) }
         LaunchedEffect(settled) { if (settled) videoReady = true }
-        Box(Modifier.fillMaxSize().then(if (!expanded) Modifier.clearAndSetSemantics {} else Modifier)
+        Box(Modifier.fillMaxSize().then(if (!openPlayer) Modifier.clearAndSetSemantics {} else Modifier)
             .onSizeChanged { pageHeight = it.height.coerceAtLeast(1) }.playerTransform(travel).nestedScroll(dragToClose)) {
         val motionCover by model.motionCover.collectAsStateWithLifecycle()
         val onlineAlbumId = rememberOnlineAlbumId(playing.mediaId, onlinePageScope)
@@ -639,7 +640,7 @@ fun MusicRoot(model: LibraryViewModel) {
         }
 
     }
-    if (systemOpening) {
+    if (systemOpening && !directOpen) {
         val preview by androidx.compose.runtime.produceState<ua.olex.music.playback.LastPlayedPreview?>(null) {
             value = model.lastPlayedPreview()
         }
