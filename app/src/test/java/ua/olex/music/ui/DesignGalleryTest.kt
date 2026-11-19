@@ -1074,10 +1074,10 @@ class DesignGalleryTest {
             badge.assertDoesNotExist()
         } finally { compose.mainClock.autoAdvance = true }
         val paused = saveFrame("paused")
-        // This point fell inside the previous badge but stays outside every rounded bar.
+        // The entire sleeve takes on the matte tone, including the area above the bars.
         val x = paused.width / 2
-        val y = paused.height * 13 / 46
-        org.junit.Assert.assertEquals(paused.getPixel(x, y), visible.getPixel(x, y))
+        val y = paused.height / 8
+        org.junit.Assert.assertNotEquals(paused.getPixel(x, y), visible.getPixel(x, y))
         compose.runOnIdle { playing.value = true }
         badge.assertExists()
         compose.runOnIdle { current.value = false }

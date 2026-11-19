@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
@@ -41,7 +42,6 @@ private fun ShuffleStartMark(ink: Color, badge: Color, release: () -> Float, pre
         val pen = Stroke(2.15f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         val clearance = Stroke(4.6f, cap = StrokeCap.Round)
         val route = Path()
-        val arrow = Path()
 
         onDrawBehind {
             val open = release()
@@ -59,15 +59,15 @@ private fun ShuffleStartMark(ink: Color, badge: Color, release: () -> Float, pre
                     route.rewind()
                     route.moveTo(left, entry)
                     route.cubicTo(left + 6f, entry, right - 6f, exit, right, exit)
-                    if (lane == 1) drawPath(route, badge, style = clearance)
-                    drawPath(route, ink, style = pen)
-
+                    // Only clear the intersection. Erasing the full lane can cut into the other arrowhead.
+                    if (lane == 1) clipRect(left = 7f, top = 0f, right = 15.5f, bottom = 24f) {
+                        drawPath(route, badge, style = clearance)
+                    }
                     val wing = 2.8f
-                    arrow.rewind()
-                    arrow.moveTo(right - wing, exit - wing)
-                    arrow.lineTo(right, exit)
-                    arrow.lineTo(right - wing, exit + wing)
-                    drawPath(arrow, ink, style = pen)
+                    route.lineTo(right - wing, exit - wing)
+                    route.moveTo(right, exit)
+                    route.lineTo(right - wing, exit + wing)
+                    drawPath(route, ink, style = pen)
                 }
             }
         }
