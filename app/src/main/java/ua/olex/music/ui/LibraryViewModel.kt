@@ -627,7 +627,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, cleaned and endless like any mix. */
-    fun startPlaylistRadio(playlistId: String, label: String) = prepareMix {
+    fun startPlaylistRadio(playlistId: String, label: String): Unit = prepareMix {
         val page = kotlinx.coroutines.withTimeoutOrNull(8_000) {
             try { graph.youTube.playlistRadio(playlistId) }
             catch (cancelled: CancellationException) { throw cancelled }
