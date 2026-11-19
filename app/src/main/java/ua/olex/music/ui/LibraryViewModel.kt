@@ -623,7 +623,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         cancelPendingPlay()
         graph.mix.stop()
         playingFrom = null
-        player.play(list, list.indices.random(), shuffle = true)
+        val pick = list.indices.random()
+        val now = playing.value
+        val sameSong = list[pick].id.value == now.mediaId || list[pick].matchesPlayback(now.track)
+        // Keep a second shuffle from starting the current recording again on a deduplicated queue.
+        val start = if (sameSong && list.size > 1) {
+            val other = (0 until list.lastIndex).random()
+            if (other < pick) other else other + 1
+        } else pick
+        player.play(list, start, shuffle = true)
     }
     fun setPlaybackParameters(speed: Float, pitch: Float) = player.setPlaybackParameters(speed, pitch)
     fun toggle() = player.toggle()
