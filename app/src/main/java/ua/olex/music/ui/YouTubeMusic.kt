@@ -378,7 +378,7 @@ internal class YouTubeMusic(
                 it.copy(album = it.album ?: have.first.title.takeIf { id.startsWith("MPRE") }, artworkUri = it.artworkUri ?: have.first.cover)
             }
             val visited = cursor.visited + cursor.page.key
-            if (next != null && next.key in visited) return@shared null
+            check(next == null || next.key !in visited) { "YouTube Music repeated a playlist page" }
             if (pageScope() != scope) return@shared null
             rememberContinuation("$scope/$id", next, visited)
             // Repeated video ids are distinct playlist occurrences, including across page boundaries.
@@ -398,9 +398,7 @@ internal class YouTubeMusic(
         val fields = if (watch == null) "" else queueFields(watch)
         fun parse(json: String): RadioPage? = if (watch == null) parseBrowseContinuation(json, fallbackArtist) else parseQueueContinuation(watch, json)
         val body = listOf(fields, """"continuation":${quote(source.token)}"""").filter(String::isNotEmpty).joinToString(",")
-        val page = catalogueRequest {
-            post(endpoint, body, headers = headers)?.let(::parse)
-        } ?: catalogueRequest {
+        val page = post(endpoint, body, headers = headers)?.let(::parse) ?: run {
             val token = java.net.URLEncoder.encode(source.token, Charsets.UTF_8.name())
             val legacy = "&ctoken=$token&continuation=$token" + if (watch == null) "&type=next" else ""
             post(endpoint, fields, legacy, headers = headers)?.let(::parse)
@@ -963,19 +961,23 @@ internal class YouTubeMusic(
             }
 
         private fun playlistBrowseToken(json: String): String? {
-            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val root = ua.olex.music.lyrics.Json.parse(json) as? Map<*, *> ?: return null
             val shelves = collect(root, "musicPlaylistShelfRenderer").ifEmpty { collect(root, "musicShelfRenderer") }
-            return shelves.firstNotNullOfOrNull { pageToken(it["contents"], it["continuations"]) }
+            return if (shelves.isEmpty()) pageToken(root["contents"], root["continuations"])
+                else shelves.firstNotNullOfOrNull { pageToken(it["contents"], it["continuations"]) }
         }
 
         private fun parseBrowseContinuation(json: String, fallbackArtist: String?): RadioPage? {
-            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val root = ua.olex.music.lyrics.Json.parse(json) as? Map<*, *> ?: return null
             val shelf = collect(root, "musicPlaylistShelfContinuation").firstOrNull()
                 ?: collect(root, "musicShelfContinuation").firstOrNull()
-            val contents = (shelf?.get("contents") ?: collect(root, "appendContinuationItemsAction")
-                .firstNotNullOfOrNull { it["continuationItems"] as? List<*> }) as? List<*> ?: return null
+            val appended = collect(root, "appendContinuationItemsAction")
+                .firstNotNullOfOrNull { action ->
+                    (action["continuationItems"] as? List<*>)?.takeIf { collect(it, "musicResponsiveListItemRenderer").isNotEmpty() }
+                }
+            val contents = (shelf?.get("contents") ?: appended ?: root["contents"]) as? List<*> ?: return null
             val tracks = songRows(collect(contents, "musicResponsiveListItemRenderer"), fallbackArtist, keepOrder = true)
-            return RadioPage(tracks, pageToken(contents, shelf?.get("continuations")))
+            return RadioPage(tracks, pageToken(contents, shelf?.get("continuations") ?: root["continuations"]))
         }
 
         /** The search filter YouTube Music's web app sends for "Artists". */
