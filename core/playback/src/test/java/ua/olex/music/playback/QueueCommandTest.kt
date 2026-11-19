@@ -40,6 +40,23 @@ class QueueCommandTest {
         assertFalse(player.playWhenReady)
     }
 
+    @Test fun radioLeavesTheLiveSongAndPositionAndReplacesOnlyTheFuture() {
+        val seed = item(2)
+        val key = requireNotNull(seed.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))
+        player.setMediaItems(listOf(item(1), seed, item(3)), 1, 12_000)
+        player.shuffleModeEnabled = true
+        assertFalse(QueueCommand.replaceUpcomingForRadio(player, "stale", listOf(item(4))))
+        assertEquals("local:3", player.getMediaItemAt(2).mediaId)
+        val radio = PlayerConnection.mediaItem(Track(TrackId("yt:radio"), "ytm://radio", "Next song", "Artist"), playbackContext = "Mix")
+        assertTrue(QueueCommand.replaceUpcomingForRadio(player, key, listOf(radio)))
+        assertEquals("local:2", player.currentMediaItem?.mediaId)
+        assertEquals(12_000L, player.currentPosition)
+        assertEquals("local:1", player.getMediaItemAt(0).mediaId)
+        assertEquals("yt:radio", player.getMediaItemAt(2).mediaId)
+        assertEquals("Mix", player.currentMediaItem?.mediaMetadata?.extras?.getString(PlayerConnection.CONTEXT_KEY))
+        assertFalse(player.shuffleModeEnabled)
+    }
+
     @Test fun stableKeyStillAddressesTheSameDuplicateAfterReorderAndRemoval() {
         val first = item(1)
         val duplicate = item(1)

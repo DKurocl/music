@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -404,7 +405,6 @@ fun MusicRoot(model: LibraryViewModel) {
                     else if (inCollection) KickIconButton(onClick = { closeCollection++ }, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { k -> Symbol(Glyph.BACK, kick = k) }
                 },
                 actions = {
-                    if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) KickIconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { k -> Symbol(Glyph.SEARCH, kick = k) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
                         HomeActions(onStats = { statsBackCommitted = false; page = Page.STATS },
@@ -462,7 +462,7 @@ fun MusicRoot(model: LibraryViewModel) {
             page != null -> "page:${page!!.name}"
             else -> "place:${place.name}"
         }
-        Arrival(route, place, deeper = onlineStack.isNotEmpty() || page != null) {
+        Arrival(route, place, depth = onlineStack.size + if (page != null && page != Page.STATS) 1 else 0) {
         when {
             !model.allowed && !youTubeOn && page != Page.SETTINGS -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
             model.scanError != null && list.isNullOrEmpty() && !youTubeOn && page != Page.SETTINGS -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
@@ -648,6 +648,18 @@ fun MusicRoot(model: LibraryViewModel) {
             error = playing.error.takeIf { !playing.connected && !playing.connecting },
             onClose = model::dismissSystemPlayerRequest, onRetry = model::connectPlayer)
     }
+    if (model.mixLoading && !systemOpening) Box(Modifier.fillMaxSize().safeDrawingPadding(),
+        contentAlignment = Alignment.TopCenter) {
+        androidx.compose.material3.Surface(Modifier.padding(top = 68.dp), shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 3.dp) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!powerSave) androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                Text("Preparing mix…", style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+            }
+        }
+    }
     } // PlayerCoverLayout
     } // App composition locals
     model.downloadRequest?.let { requested ->
@@ -668,7 +680,7 @@ fun MusicRoot(model: LibraryViewModel) {
         },
             plays = stats[track.statsKey]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
             // A mix grown from this song, as YouTube Music's "Start radio", local files first.
-            TrackAction(Glyph.RADIO, "Start mix") { haptics.spin(); model.startMix(track); scope.launch { snackbar.showSnackbar("Making a mix from ${track.title}") } },
+            TrackAction(Glyph.RADIO, "Start mix") { haptics.spin(); model.startMix(track) },
             TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             // Never offered again in mixes, autoplay and Home; out of the queue now.
             if (online) TrackAction(Glyph.HIDDEN, "Don't recommend this song") {
@@ -720,6 +732,11 @@ fun MusicRoot(model: LibraryViewModel) {
     playing.queueError?.let { message ->
         AppDialog(onDismissRequest = model::dismissQueueError, title = { Text("Couldn't update queue") }, text = { Text(message) },
             confirmButton = { TextButton(onClick = model::dismissQueueError) { Text("OK") } })
+    }
+    model.mixFailure?.let { failure ->
+        AppDialog(onDismissRequest = model::dismissMixFailure, title = { Text("Couldn't start mix") },
+            text = { Text(failure.message) }, dismissButton = { TextButton(onClick = model::dismissMixFailure) { Text("Close") } },
+            confirmButton = { TextButton(onClick = failure.retry) { Text("Try again") } })
     }
     model.userError?.let { message ->
         AppDialog(onDismissRequest = model::dismissUserError, title = { Text("Couldn't save changes") }, text = { Text(message) },
@@ -1050,23 +1067,31 @@ internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit) {
     shapes = androidx.compose.material3.IconButtonDefaults.shapes(), modifier = Modifier.padding(end = 8.dp).size(44.dp).semantics { contentDescription = "Settings" }) { Symbol(Glyph.SETTINGS, size = 22.dp, kick = gear) }
 }
 
-/** A tab arrives from its position in the bar. Content is readable on the first frame, even on rapid taps. */
+/** Move within a hierarchy and keep peer tabs anchored to the same viewport. */
 @Composable
-internal fun Arrival(key: Any, place: Place, deeper: Boolean, content: @Composable () -> Unit) {
+internal fun arrivalMotion(route: Any?, section: Any, depth: Int): Modifier {
     val still = LocalPowerSave.current
-    var lastRoute by remember { mutableStateOf(key) }
-    var lastPlace by remember { mutableStateOf(place) }
-    val direction = remember(key) { place.ordinal.compareTo(lastPlace.ordinal) }
-    val progress = remember(key) { androidx.compose.animation.core.Animatable(if (key == lastRoute || still) 1f else 0f) }
-    androidx.compose.runtime.SideEffect { lastRoute = key; lastPlace = place }
-    val spec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-    LaunchedEffect(key, still) {
+    var previousRoute by remember { mutableStateOf(route) }
+    var previousSection by remember { mutableStateOf(section) }
+    var previousDepth by remember { androidx.compose.runtime.mutableIntStateOf(depth) }
+    val direction = remember(route, section) { if (section == previousSection) depth.compareTo(previousDepth) else 0 }
+    val progress = remember(route, section) {
+        androidx.compose.animation.core.Animatable(if (route == previousRoute && section == previousSection || still) 1f else 0f)
+    }
+    androidx.compose.runtime.SideEffect { previousRoute = route; previousSection = section; previousDepth = depth }
+    val spec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    LaunchedEffect(route, section, still) {
         if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f, spec)
     }
-    val sign = if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) -1 else 1
-    Box(Modifier.fillMaxSize().graphicsLayer {
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
+    return Modifier.graphicsLayer {
         val remaining = if (still) 0f else 1f - progress.value
-        alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
-        translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()
-    }) { content() }
+        alpha = 1f - 0.10f * remaining
+        translationX = remaining * (if (rtl) -direction else direction) * 20.dp.toPx()
+    }
+}
+
+@Composable
+internal fun Arrival(route: Any, place: Place, depth: Int, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().then(arrivalMotion(route, place, depth))) { content() }
 }

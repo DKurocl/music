@@ -24,6 +24,13 @@ internal object Mix {
         return title + "\u0000" + TextFold.fold(t.artist.substringBefore(",").substringBefore("&").substringBefore(" feat").trim())
     }
 
+    /** Linked files keep their original YouTube match even after the player chooses a local source. */
+    fun videoId(track: Track): String? =
+        track.uri.takeIf { it.startsWith("ytm://") }?.removePrefix("ytm://")
+            ?: track.requestedId?.takeIf { it.startsWith("yt:") }?.removePrefix("yt:")
+            ?: track.id.value.takeIf { it.startsWith("yt:") }?.removePrefix("yt:")
+            ?: track.sources.firstNotNullOfOrNull { source -> source.uri?.takeIf { it.startsWith("ytm://") }?.removePrefix("ytm://") }
+
     private fun word(w: String) = Regex("""(^|[^a-z0-9])${Regex.escape(w)}([^a-z0-9]|$)""")
 
     /** Marks that never belong to a real song title, wherever they stand. */
@@ -55,12 +62,13 @@ internal object Mix {
     /** A radio page cleaned for the queue, in the radio's order. */
     fun clean(batch: List<Track>, seed: Track, seen: Set<String>): List<Track> {
         val allowed = marks(seed)
+        val shortest = if (seed.durationMs > 0) (seed.durationMs * 3 / 4).coerceIn(45_000L, 90_000L) else 90_000L
         val longest = maxOf(8 * 60_000L, seed.durationMs + 3 * 60_000L)
         val keys = HashSet(seen)
         val kept = batch.filter { t ->
             // The radio starts with the seed itself: never play it twice, whatever its artist line says.
             t.id != seed.id && t.id.value !in keys && (marks(t) - allowed).isEmpty() &&
-                (t.durationMs <= 0 || t.durationMs in 90_000L..longest) &&
+                (t.durationMs <= 0 || t.durationMs in shortest..longest) &&
                 keys.add(songKey(t))
         }
         return spaceArtists(kept, seed)
@@ -84,13 +92,14 @@ internal object Mix {
      * A mix from the library alone: songs near the seed (same artist, shared genre, close years),
      * favourites and often played a little ahead, at most two of one artist in ten.
      */
-    fun local(seed: Track, songs: List<Track>, stats: Map<String, SongStats>, recent: Set<String>, size: Int = 50, random: kotlin.random.Random = kotlin.random.Random.Default): List<Track> {
+    fun local(seed: Track, songs: List<Track>, stats: Map<String, SongStats>, recent: Set<String>, size: Int = 50,
+        random: kotlin.random.Random = kotlin.random.Random.Default, excluded: Set<String> = emptySet()): List<Track> {
         fun fold(s: String?) = TextFold.fold(s.orEmpty().trim())
         val seedArtists = seed.artists.map(::fold).toSet()
         val seedGenres = seed.genres.map(::fold).toSet()
         val seedKey = songKey(seed)
         val scored = songs.asSequence()
-            .filter { it.id != seed.id && songKey(it) != seedKey && songKey(it) !in recent }
+            .filter { it.id != seed.id && !it.matchesPlayback(seed) && it.id.value !in excluded && songKey(it) !in excluded && songKey(it) != seedKey }
             .map { t ->
                 val st = stats[t.statsKey] ?: SongStats.NONE
                 var score = 0.0
@@ -101,13 +110,17 @@ internal object Mix {
                 score += random.nextDouble() * 1.5
                 t to score
             }
-            .filter { it.second >= 2.0 }
             .sortedByDescending { it.second }
-            .map { it.first }
             .toList()
+        val fresh = scored.filter { (track, _) -> songKey(track) !in recent }
+        val candidates = fresh.ifEmpty { scored }
+        val related = candidates.takeWhile { it.second >= 2.0 }
+        // Files without genre/year tags can still form a short mix from the owner's library.
+        val ranked = if (related.size >= 8) related else candidates.take(16)
+        val unique = ranked.map { it.first }.distinctBy(::songKey)
         // At most two songs of one artist in any ten.
         val out = ArrayList<Track>()
-        val pool = scored.toMutableList()
+        val pool = unique.toMutableList()
         while (out.size < size && pool.isNotEmpty()) {
             val window = out.takeLast(9).map { fold(it.artist.substringBefore(",")) }
             val i = pool.indexOfFirst { t -> window.count { it == fold(t.artist.substringBefore(",")) } < 2 }

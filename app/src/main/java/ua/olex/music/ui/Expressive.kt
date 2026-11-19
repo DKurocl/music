@@ -25,7 +25,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -117,19 +116,19 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier, 
                 }
             }
             Box(Modifier.size(28.dp, 23.dp).semantics { stateDescription = "Playing" }.drawWithCache {
-                val backing = cs.onPrimaryFixed.copy(alpha = 0.92f)
-                val corners = CornerRadius(8.dp.toPx())
+                val outline = cs.onPrimaryFixed
+                val edge = 1.3.dp.toPx()
                 val unit = playbackBarScale.dp.toPx()
                 val spacing = 12f * unit
                 val width = 6f * unit
                 onDrawBehind {
-                    if (onArtwork) drawRoundRect(backing, cornerRadius = corners)
                     playbackBars.forEachIndexed { index, bar ->
                         val x = center.x + (index - 2) * spacing
                         val height = heights.getOrNull(index)?.value ?: bar.heights.first()
                         val halfHeight = (height * unit - width) / 2
                         val start = Offset(x, center.y - halfHeight)
                         val end = Offset(x, center.y + halfHeight)
+                        if (onArtwork) drawLine(outline, start, end, strokeWidth = width + edge, cap = StrokeCap.Round)
                         drawLine(tint, start, end, strokeWidth = width, cap = StrokeCap.Round)
                     }
                 }

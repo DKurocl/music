@@ -278,7 +278,10 @@ internal fun LibraryBrowser(
         }
     }
     var fieldFocused by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().padding(insets).libraryBackMotion(back)) {
+    val browserRoute = if (searching) "results" else selected?.id ?: browsing ?: tabName
+    val browserDepth = (if (browsing != null || mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS) 1 else 0) +
+        if (selected != null) 1 else 0
+    Column(Modifier.fillMaxSize().padding(insets).libraryBackMotion(back).then(arrivalMotion(browserRoute, mode, browserDepth))) {
         // A search pill, as in Google's apps, and the library's sections as chips below it.
         val focus = remember { androidx.compose.ui.focus.FocusRequester() }
         // The lens swings each time the field is entered, as in Google's own search fields.
@@ -350,16 +353,8 @@ internal fun LibraryBrowser(
                 Text(BrowseTile.valueOf(name).title, style = MaterialTheme.typography.titleLarge)
             }
         }
-        // Library: the four main kinds as a connected button group (M3E); the rest live in Search's tiles.
-        // The Playlists place: Favourites and Smart playlists as two cards above your own playlists;
-        // each opens in place with a way back.
-        if (!searching && mode == BrowserMode.LIBRARY && selected == null) {
-            if (tab == LibraryTab.PLAYLISTS) Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                HubCard("Favourites", "${personal.favourites.size} songs", Glyph.FAVOURITE, androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(),
-                    MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer, Modifier.weight(1f)) { tabName = LibraryTab.FAVOURITES.name }
-                HubCard("Smart", "${smart.count { it.tracks.isNotEmpty() }} lists", Glyph.SMART, androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(),
-                    MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer, Modifier.weight(1f)) { tabName = LibraryTab.SMART.name }
-            } else Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!searching && mode == BrowserMode.LIBRARY && selected == null && tab != LibraryTab.PLAYLISTS) {
+            Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 KickIconButton(onClick = { tabName = LibraryTab.PLAYLISTS.name },
                     modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { taps -> Symbol(Glyph.BACK, kick = taps) }
                 Text(tab.title, style = MaterialTheme.typography.titleLarge)
@@ -413,7 +408,17 @@ internal fun LibraryBrowser(
                 onSave = onSaveSmart, onDelete = onDeleteSmart)
         } else if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
             PlaylistBrowser(personal.playlists, personalActions, modifier = Modifier.weight(1f), currentId = currentId, onPlay = onPlay, onTrackActions = onTrackActions, library = library,
-                openPlaylist = openPlaylist, onOpenedPlaylist = onOpenedPlaylist, onPlayFrom = onPlayWithOrigin)
+                openPlaylist = openPlaylist, onOpenedPlaylist = onOpenedPlaylist, onPlayFrom = onPlayWithOrigin,
+                shortcuts = {
+                    val cs = MaterialTheme.colorScheme
+                    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        HubCard("Favourites", songCount(personal.favourites.size), Glyph.FAVOURITE, androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(),
+                            cs.tertiaryContainer, cs.onTertiaryContainer, Modifier.weight(1f)) { tabName = LibraryTab.FAVOURITES.name }
+                        val count = smart.count { it.tracks.isNotEmpty() }
+                        HubCard("Smart playlists", if (count == 1) "1 list" else "$count lists", Glyph.SMART, androidx.compose.material3.MaterialShapes.Cookie9Sided.toShape(),
+                            cs.secondaryContainer, cs.onSecondaryContainer, Modifier.weight(1f)) { tabName = LibraryTab.SMART.name }
+                    }
+                })
         } else Box(Modifier.weight(1f)) {
         val listState = if (searching) resultList else androidx.compose.runtime.key(tabName, selected?.id) { androidx.compose.foundation.lazy.rememberLazyListState() }
         val headerGone by remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex > 0 } }
@@ -1100,11 +1105,11 @@ private fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: androi
     container: androidx.compose.ui.graphics.Color, content: androidx.compose.ui.graphics.Color, modifier: Modifier, onClick: () -> Unit) {
     val haptics = rememberHaptics()
     androidx.compose.material3.Surface(onClick = { haptics.tick(); onClick() }, shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
-        color = container, contentColor = content, modifier = modifier.height(120.dp).squish()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Box(Modifier.size(44.dp).clip(shape).background(content.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) { Symbol(glyph, filled = true) }
+        color = container, contentColor = content, modifier = modifier.heightIn(min = 108.dp).squish()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(38.dp).clip(shape).background(content.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) { Symbol(glyph, filled = true) }
             Column {
-                Text(title, style = MaterialTheme.typography.titleMediumEmphasized)
+                Text(title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall)
             }
         }

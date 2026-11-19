@@ -467,6 +467,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         playJob?.cancel()
         playJob = null
         mixLoading = false
+        dismissMixFailure()
     }
 
     private fun prepareMix(block: suspend kotlinx.coroutines.CoroutineScope.() -> Unit) {
@@ -521,6 +522,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         private set(value) { graph.mix.label = value }
     /** True while the first page of a mix is being found. */
     var mixLoading by mutableStateOf(false); private set
+    internal data class MixFailure(val message: String, val retry: () -> Unit)
+    internal var mixFailure by mutableStateOf<MixFailure?>(null); private set
+    internal fun dismissMixFailure() { mixFailure = null }
 
     // "Don't recommend": YouTube Music songs the owner never wants offered again, by their video
     // id and by the song (so another upload of it does not slip through). Kept on the phone.
@@ -553,43 +557,87 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
 
     private suspend fun playMix(seed: Track, label: String) {
-        val recent = withContext(Dispatchers.Default) { recentKeys() }
+        val atRequest = playing.value
+        val seedOccurrence = atRequest.queue.getOrNull(atRequest.queueIndex)?.takeIf {
+            it.mediaId == seed.id.value || seed.matchesPlayback(atRequest.track)
+        }?.key
+        val recent = withContext(Dispatchers.Default) { recentPlayed() }
+        val excludedSongs = excluded
         val yt = graph.youTube
-        val page = if (!graph.youTubeOn.value) null else runCatching {
-            val id = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else yt.find(seed)?.id?.value?.removePrefix("yt:")
-            id?.let { yt.radio(it) }
-        }.getOrNull()
-        // Cleaning, the local fallback and mix ordering run off the main
-        // thread: with a large library they are the part that made the screen stall.
-        val seen = (recent + Mix.songKey(seed)).toMutableSet()
-        val stats = stats.value
-        val (online, upcoming) = withContext(Dispatchers.Default) {
-            val online = page?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
-            val upcoming = if (online.size >= 5) online else {
-                // Use the catalogue's bound file copies so their stats keys match the user database.
-                val files = (catalogue.value ?: library.value)?.songs.orEmpty().filterNot(YouTubeMusic::isOnline)
-                Mix.local(seed, files, stats, recent)
+        val indexed = (catalogue.value ?: library.value)
+        val linked = indexed?.let { it.byId[seed.id] ?: it.localCopiesById[seed.id] }
+        var video = Mix.videoId(seed) ?: linked?.let(Mix::videoId)
+        var page: YouTubeMusic.RadioPage? = null
+        if (graph.youTubeOn.value && graph.network.value) {
+            kotlinx.coroutines.withTimeoutOrNull(6_000) {
+                try {
+                    val id = video ?: yt.find(seed)?.let(Mix::videoId)
+                    video = id
+                    if (id != null) {
+                        page = yt.radio(id)
+                        val first = page
+                        if (first?.continuation != null && first.tracks.none { it.id.value != "yt:$id" }) {
+                            yt.radioMore(first.continuation)?.let { page = it }
+                        }
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* The available local library is the fallback. */ }
             }
-            online to upcoming
         }
-        if (upcoming.isEmpty()) { userError = "Couldn't make a mix from this song."; return }
+
+        val seen = (excludedSongs + recent + listOfNotNull(Mix.songKey(seed), video?.let { "yt:$it" })).toMutableSet()
+        val result = page
+        val weights = stats.value
+        val upcoming = withContext(Dispatchers.Default) {
+            val radio = result?.tracks?.let { Mix.clean(it, seed, seen) }.orEmpty()
+            if (radio.size >= 8) radio else {
+                val files = indexed?.songs.orEmpty().filterNot(YouTubeMusic::isOnline)
+                val used = radio.mapTo(HashSet(), Mix::songKey)
+                radio + Mix.local(seed, files, weights, recent, size = if (radio.isEmpty()) 50 else 8 - radio.size,
+                    excluded = excludedSongs + used)
+            }
+        }
+        if (upcoming.isEmpty()) {
+            mixFailure = MixFailure("No other playable songs were found for ${seed.title}.") { startMix(seed) }
+            return
+        }
         seen += upcoming.map(Mix::songKey)
         val state = playing.value
-        val current = state.mediaId
-        val run = if (online.size >= 5) PlaybackMix.Run(seed, page?.continuation, seen, (upcoming.map { it.id.value } + seed.id.value).toMutableSet()) else null
-        val origin = graph.mix.begin(run, label)
-        if (current == seed.id.value) {
-            player.clearUpcoming()
-            player.enqueue(upcoming, false, origin)
-        } else player.play(listOf(seed) + upcoming, 0, origin)
+        val current = state.queue.getOrNull(state.queueIndex)
+        if (seedOccurrence != null && seedOccurrence != current?.key) {
+            mixFailure = MixFailure("The song changed while the mix was getting ready.") { startMix(seed) }
+            return
+        }
+        val sameSeed = current != null && (state.mediaId == seed.id.value || seed.matchesPlayback(state.track))
+        val run = video?.let { id ->
+            PlaybackMix.Run(seed, result?.continuation, seen,
+                (upcoming.map { it.id.value } + listOfNotNull(seed.id.value, state.mediaId.takeIf { sameSeed })).toMutableSet(), startFrom = id)
+        }
+        val origin = graph.mix.origin(run, label)
+        if (current != null && sameSeed) {
+            if (!player.replaceUpcomingForRadio(current.key, upcoming, origin)) {
+                mixFailure = MixFailure("The queue changed or the suggested songs couldn't be opened.") { startMix(seed) }
+                return
+            }
+            graph.mix.begin(run, label)
+        } else {
+            graph.mix.begin(run, label)
+            player.play(listOf(seed) + upcoming, 0, origin, shuffle = false)
+        }
     }
 
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, cleaned and endless like any mix. */
     fun startPlaylistRadio(playlistId: String, label: String) = prepareMix {
-        val page = runCatching { graph.youTube.playlistRadio(playlistId) }.getOrNull()
-        coroutineContext.ensureActive()
+        val page = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+            try { graph.youTube.playlistRadio(playlistId) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        }
         val tracks = page?.tracks.orEmpty()
-        if (tracks.isEmpty()) { userError = "YouTube Music didn't answer. Check the connection."; return@prepareMix }
+        if (tracks.isEmpty()) {
+            mixFailure = MixFailure("YouTube Music didn't return songs for $label.") { startPlaylistRadio(playlistId, label) }
+            return@prepareMix
+        }
         val first = tracks.first()
         val (queue, seen) = withContext(Dispatchers.Default) {
             val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
@@ -597,7 +645,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
         seen += queue.map(Mix::songKey)
         val run = PlaybackMix.Run(first, page?.continuation, seen, queue.map { it.id.value }.toMutableSet())
-        player.play(queue, 0, graph.mix.begin(run, label))
+        player.play(queue, 0, graph.mix.begin(run, label), shuffle = false)
     }
 
 

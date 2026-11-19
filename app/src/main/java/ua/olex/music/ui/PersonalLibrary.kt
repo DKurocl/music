@@ -39,6 +39,7 @@ internal fun PlaylistBrowser(
     library: LibraryIndex = LibraryIndex.EMPTY,
     openPlaylist: Long? = null, onOpenedPlaylist: () -> Unit = {},
     onPlayFrom: ((List<Track>, Int, String) -> Unit)? = null,
+    shortcuts: (@Composable () -> Unit)? = null,
 ) {
     var selectedId by rememberSaveable { mutableStateOf<Long?>(null) }
     androidx.compose.runtime.LaunchedEffect(openPlaylist, playlists) {
@@ -53,6 +54,7 @@ internal fun PlaylistBrowser(
     }
     var namingId by rememberSaveable { mutableStateOf<Long?>(null) }
     var create by rememberSaveable { mutableStateOf(false) }
+    var playlistMenu by remember { mutableStateOf(false) }
     var adding by rememberSaveable(selectedId) { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf<Long?>(null) }
     var editingSong by rememberSaveable(selectedId) { mutableStateOf<Int?>(null) }
@@ -178,57 +180,55 @@ internal fun PlaylistBrowser(
 
     val playlistList = androidx.compose.foundation.lazy.rememberLazyListState()
     val songList = androidx.compose.runtime.key(selected?.id) { androidx.compose.foundation.lazy.rememberLazyListState() }
-    LazyColumn(modifier.libraryBackMotion(back), state = if (selected == null) playlistList else songList, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
+    val nav = LocalOnlineNav.current
+    LazyColumn(modifier.libraryBackMotion(back).then(arrivalMotion(selected?.id, "playlists", if (selected == null) 0 else 1)),
+        state = if (selected == null) playlistList else songList, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
-            // Two starts as cards: make one, or bring one from another player (M3U8).
-            item {
-                Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    androidx.compose.material3.Surface(onClick = { create = true }, shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer,
-                        modifier = Modifier.weight(1f).height(64.dp).squish()) {
-                        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Symbol(Glyph.ADD, bold = true); Spacer(Modifier.width(10.dp)); Text("New playlist", style = MaterialTheme.typography.titleMedium)
-                        }
-                    }
-                    androidx.compose.material3.Surface(enabled = !loadingDocument, onClick = { importFile.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "application/octet-stream")) },
-                        shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.weight(1f).height(64.dp).squish()) {
-                        Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                            Symbol(Glyph.FOLDER); Spacer(Modifier.width(10.dp)); Text("Import M3U8", style = MaterialTheme.typography.titleMedium)
+            if (shortcuts != null) item(key = "playlist-shortcuts") { shortcuts() }
+            item(key = "playlist-heading") {
+                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 8.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("Your playlists", Modifier.weight(1f), style = MaterialTheme.typography.titleLargeEmphasized)
+                    Box {
+                        FilledTonalIconButton(onClick = { playlistMenu = true }, enabled = !loadingDocument,
+                            modifier = Modifier.semantics { contentDescription = "Add a playlist" }) { Symbol(Glyph.ADD) }
+                        DropdownMenu(expanded = playlistMenu, onDismissRequest = { playlistMenu = false }) {
+                            DropdownMenuItem(text = { Text("New playlist") }, leadingIcon = { Symbol(Glyph.ADD) },
+                                onClick = { playlistMenu = false; create = true })
+                            DropdownMenuItem(text = { Text("Import M3U8") }, leadingIcon = { Symbol(Glyph.FOLDER) }, onClick = {
+                                playlistMenu = false
+                                importFile.launch(arrayOf("audio/x-mpegurl", "audio/mpegurl", "application/x-mpegurl", "application/vnd.apple.mpegurl", "text/plain", "application/octet-stream"))
+                            })
                         }
                     }
                 }
             }
-            if (remoteLoading) item(key = "loading-remote-playlists") { PlaceholderRow() }
+            if (remoteLoading && youTubePlaylists.isEmpty()) item(key = "loading-remote-playlists") { PlaceholderRow() }
             if (remoteFailed) item(key = "retry-remote-playlists") { ErrorNotice("Couldn't load your YouTube Music playlists.") { remoteRetry++ } }
-            if (!remoteLoading && !remoteFailed && playlists.isEmpty() && youTubePlaylists.isEmpty()) item { EmptyState(Glyph.PLAYLIST, "No playlists yet", "Make one here, then add songs or whole albums from their menus.") }
-            items(playlists, key = { it.id }) { playlist ->
-                ListItem(
-                    headlineContent = { Text(playlist.name, style = MaterialTheme.typography.titleMedium) },
-                    supportingContent = { Text(if (playlist.songs.size == 1) "1 song" else "${playlist.songs.size} songs") },
-                    leadingContent = { PlaylistCover(playlist.playable, 56.dp) },
-                    trailingContent = { Symbol(Glyph.CHEVRON, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                    modifier = Modifier.padding(horizontal = 8.dp).clip(RoundedCornerShape(20.dp)).clickable { selectedId = playlist.id },
-                )
+            if (!remoteLoading && !remoteFailed && playlists.isEmpty() && youTubePlaylists.isEmpty()) item(key = "empty-playlists") {
+                Text("No playlists yet", Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
-            // One list. Remote rows retain their source and editing capabilities.
+            items(playlists, key = { it.id }) { playlist ->
+                PlaylistListRow(playlist.name, songCount(playlist.songs.size),
+                    cover = { PlaylistCover(playlist.playable, 52.dp, 13.dp) }, onOpen = { selectedId = playlist.id })
+            }
             items(youTubePlaylists, key = { "yt-" + it.id }) { card ->
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) { OnlineResultRow(card) }
-                    if (card.id.removePrefix("VL").startsWith("PL")) {
-                        IconButton(onClick = { editingRemote = card }, enabled = network,
-                            modifier = Modifier.semantics { contentDescription = "Edit ${card.title} on YouTube Music" }) { Symbol(Glyph.MORE) }
-                    }
-                }
+                val edit: (() -> Unit)? = if (card.id.removePrefix("VL").startsWith("PL") && network) ({ editingRemote = card }) else null
+                PlaylistListRow(card.title, card.subtitle, fromYouTube = true, onEdit = edit,
+                    cover = { Artwork(card.cover, Modifier.size(52.dp), 13.dp) },
+                    onOpen = { nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle)) })
             }
         } else {
             item {
                 // Like an album page: big mosaic, name, counts, Play all; the playlist's own tools as chips.
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                    Row(Modifier.fillMaxWidth()) {
-                        KickIconButton(onClick = { selectedId = null }, modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { k -> Symbol(Glyph.BACK, kick = k) }
+                    Box(Modifier.fillMaxWidth(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        PlaylistCover(selected.playable, if (selected.songs.isEmpty()) 96.dp else 200.dp, 28.dp)
+                        KickIconButton(onClick = { selectedId = null }, modifier = Modifier.align(androidx.compose.ui.Alignment.TopStart)
+                            .semantics { contentDescription = "Back to playlists" }) { k -> Symbol(Glyph.BACK, kick = k) }
                     }
-                    PlaylistCover(selected.playable, if (selected.songs.isEmpty()) 96.dp else 200.dp, 28.dp)
                     Text(selected.name, style = MaterialTheme.typography.headlineSmallEmphasized)
                     val missing = selected.songs.size - selected.playable.size
                     Text(listOfNotNull(if (selected.songs.size == 1) "1 song" else "${selected.songs.size} songs", if (missing > 0) "$missing unavailable" else null).joinToString(" · "),
@@ -285,6 +285,38 @@ internal fun PlaylistBrowser(
                     if (row.track != null) playPlaylist(selected, selected.songs.take(position).count { it.track != null })
                 }, onMore = { editingSongId = row.song.id; editingSong = position })
             }
+        }
+    }
+}
+
+/** Local and online collections share row and cover geometry. */
+@Composable
+private fun PlaylistListRow(title: String, subtitle: String?, cover: @Composable () -> Unit, onOpen: () -> Unit,
+    fromYouTube: Boolean = false, onEdit: (() -> Unit)? = null) {
+    val cs = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    Surface(Modifier.padding(horizontal = 16.dp, vertical = 2.dp).fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp), color = cs.surfaceContainerLow) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Row(Modifier.weight(1f).clickable(onClickLabel = "Open playlist") { haptics.tick(); onOpen() }
+                .padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                cover()
+                Column(Modifier.weight(1f)) {
+                    Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (!subtitle.isNullOrBlank() || fromYouTube) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (fromYouTube) Symbol(Glyph.CLOUD, size = 15.dp, color = cs.onSurfaceVariant,
+                            modifier = Modifier.semantics { contentDescription = "On YouTube Music" })
+                        subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    }
+                }
+                if (onEdit == null) Symbol(Glyph.CHEVRON, size = 18.dp, color = cs.onSurfaceVariant)
+            }
+            if (onEdit != null) IconButton(onClick = onEdit, modifier = Modifier.semantics {
+                contentDescription = "Edit $title on YouTube Music"
+            }) { Symbol(Glyph.MORE) }
         }
     }
 }

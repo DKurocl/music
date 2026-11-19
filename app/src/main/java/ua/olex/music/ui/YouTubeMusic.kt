@@ -488,7 +488,7 @@ internal class YouTubeMusic(
         if (pageScope() != scope) return@withContext emptyList()
         val key = "account-playlists"
         val saved = pageStore?.read(scope, key)?.let { runCatching { OnlinePageJson.cards(it, "playlists") }.getOrNull() }
-        if (offline) return@withContext saved.orEmpty()
+        if (offline) return@withContext saved.orEmpty().filterNot { it.id.removePrefix("VL") == "SE" }
         cached("account-playlists:${OnlinePageStore.digest(cookie)}") {
             val fresh = networkFallback(saved) {
                 var json = post("browse", """"browseId":"FEmusic_liked_playlists"""", headers = headers) ?: return@networkFallback null
@@ -508,7 +508,7 @@ internal class YouTubeMusic(
             if (pageScope() != scope) return@cached null
             if (fresh != null && fresh !== saved) pageStore?.write(scope, key, org.json.JSONObject().put("playlists", OnlinePageJson.cards(fresh)))
             fresh
-        }.orEmpty()
+        }.orEmpty().filterNot { it.id.removePrefix("VL") == "SE" }
     }
 
     internal data class PlaylistOccurrence(val videoId: String, val entryId: String?, val title: String)
@@ -652,12 +652,21 @@ internal class YouTubeMusic(
      * in its order, which keeps tempo and mood flowing from one song to the next.
      */
     suspend fun radio(videoId: String): RadioPage? = withContext(ioDispatcher) {
-        post("next", """"videoId":${quote(videoId)},"playlistId":${quote("RDAMVM$videoId")},"params":"wAEB","isAudioOnly":true""")?.let(::parseRadio)
+        val video = """"videoId":${quote(videoId)},"isAudioOnly":true"""
+        val radio = """$video,"playlistId":${quote("RDAMVM$videoId")}"""
+        val primary = post("next", """$radio,"params":"wAEB"""")?.let(::parseRadio)
+        if (primary?.tracks?.any { it.id.value != "yt:$videoId" } == true || primary?.continuation != null) return@withContext primary
+        post("next", radio)?.let(::parseRadio)?.takeIf { it.tracks.any { song -> song.id.value != "yt:$videoId" } || it.continuation != null }
+            ?: post("next", video)?.let(::parseRadio)
     }
 
-    /** The radio's next page. */
+    /** Accept both continuation forms used by the Music watch endpoint. */
     suspend fun radioMore(continuation: String): RadioPage? = withContext(ioDispatcher) {
-        post("next", """"continuation":${quote(continuation)}""")?.let(::parseRadio)
+        val body = """"continuation":${quote(continuation)}"""
+        post("next", body)?.let(::parseRadio) ?: run {
+            val token = java.net.URLEncoder.encode(continuation, Charsets.UTF_8.name())
+            post("next", "", "&ctoken=$token&continuation=$token")?.let(::parseRadio)
+        }
     }
 
     /** The song on YouTube Music for a file in the library: the best match of a search for artist and title. */
@@ -1189,10 +1198,15 @@ internal class YouTubeMusic(
         /** A radio answer: each queued song (title, "Artist • Album • Year", length, cover) and the continuation. */
         fun parseRadio(json: String): RadioPage? {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
-            val tracks = queueTracks(root).distinctBy { it.id }
-            val token = Regex(""""nextRadioContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
-                ?: Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
-            return RadioPage(tracks, token)
+            val panel = collect(root, "playlistPanelContinuation").firstOrNull()
+                ?: collect(root, "playlistPanelRenderer").firstOrNull()
+            val contents = panel?.get("contents") ?: collect(root, "appendContinuationItemsAction")
+                .firstNotNullOfOrNull { action ->
+                    action["continuationItems"]?.takeIf { queueTracks(it).isNotEmpty() }
+                } ?: root
+            val tracks = queueTracks(contents).distinctBy { it.id }
+            val token = pageToken(contents, panel?.get("continuations") ?: root)
+            return if (tracks.isEmpty() && token == null) null else RadioPage(tracks, token)
         }
 
         internal data class PlaylistQueue(val tracks: List<Track>, val continuation: String?, val total: Int?)

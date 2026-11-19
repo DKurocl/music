@@ -10,6 +10,28 @@ import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
 class YouTubeMusicTest {
+    @Test fun radioFollowsTheWatchPanelTokenAndRetriesOnTheQueryEndpoint() = kotlinx.coroutines.runBlocking {
+        val radio = """{"playlistPanelRenderer":{"contents":[{"playlistPanelVideoRenderer":{"videoId":"next",
+            "title":{"simpleText":"Next song"},"longBylineText":{"simpleText":"Artist"}}},
+            {"continuationItemRenderer":{"continuationEndpoint":{"continuationCommand":{"token":"after"}}}}]}}"""
+        var calls = 0
+        val source = YouTubeMusic(transport = { endpoint, fields, query ->
+            assertEquals("next", endpoint)
+            calls++
+            when {
+                query.contains("ctoken=after") -> radio
+                fields.contains("continuation") || fields.contains("wAEB") -> "{}"
+                fields.contains("RDAMVMseed") -> radio
+                else -> null
+            }
+        })
+        val first = source.radio("seed")
+        assertEquals(listOf("yt:next"), first?.tracks?.map { it.id.value })
+        assertEquals("after", first?.continuation)
+        assertEquals(first, source.radioMore("after"))
+        assertEquals(4, calls)
+    }
+
     @Test fun savedOnlineSnapshotsAreNeverSubstitutedAsLocalFiles() {
         val online = Track(TrackId("yt:one"), "ytm://one", "Halo", "Beyoncé", durationMs = 260_000)
         val saved = LibraryIndex.build(listOf(online))
