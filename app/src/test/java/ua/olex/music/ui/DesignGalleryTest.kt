@@ -974,10 +974,10 @@ class DesignGalleryTest {
             compose.mainClock.advanceTimeBy(64)
             badge.assertExists()
             saveFrame("active")
-            compose.mainClock.advanceTimeBy(240)
-            saveFrame("compact")
-            compose.mainClock.advanceTimeBy(440)
-            saveFrame("expanded")
+            compose.mainClock.advanceTimeBy(416)
+            saveFrame("phase-one")
+            compose.mainClock.advanceTimeBy(416)
+            saveFrame("phase-two")
             compose.runOnIdle { playing.value = false }
             repeat(5) {
                 compose.mainClock.advanceTimeByFrame()
