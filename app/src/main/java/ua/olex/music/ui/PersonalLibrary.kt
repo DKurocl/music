@@ -181,7 +181,7 @@ internal fun PlaylistBrowser(
     val playlistList = androidx.compose.foundation.lazy.rememberLazyListState()
     val songList = androidx.compose.runtime.key(selected?.id) { androidx.compose.foundation.lazy.rememberLazyListState() }
     val nav = LocalOnlineNav.current
-    LazyColumn(modifier.libraryBackMotion(back).then(arrivalMotion(selected?.id, "playlists", if (selected == null) 0 else 1)),
+    LazyColumn(modifier.libraryBackMotion(back).arrivalMotion(selected?.id, "playlists", if (selected == null) 0 else 1),
         state = if (selected == null) playlistList else songList, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current)) {
         if (loadingDocument) item { Text("Working with playlist file...", Modifier.padding(16.dp)) }
         if (selected == null) {
