@@ -819,7 +819,9 @@ class DesignGalleryTest {
         strip.performScrollToNode(hasText("Focus"))
         compose.onNodeWithText("Focus").performClick()
         strip.performScrollToNode(hasText("Relax"))
-        compose.onNodeWithText("Relax").performClick().assertIsSelected()
+        val relax = compose.onNode(hasText("Relax") and hasAnyAncestor(hasTestTag("home-moods")))
+        relax.performClick().assertIsSelected()
+        relax.performClick().assertIsSelected()
         val expected = demoSongs.first()
         compose.waitUntil(5_000) {
             compose.onAllNodes(hasText(expected.title) and hasAnyAncestor(hasTestTag("home-feed"))).fetchSemanticsNodes().size == 1
