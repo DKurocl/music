@@ -1209,7 +1209,11 @@ internal class YouTubeMusic(
             val contents = panel["contents"] as? List<*> ?: return null
             val tracks = queueTracks(contents)
             val token = pageToken(contents, panel["continuations"])
-            val count = panel["totalVideos"]?.toString()?.toIntOrNull()
+            val count = when (val total = panel["totalVideos"]) {
+                is Number -> total.toInt()
+                is String -> total.toIntOrNull()
+                else -> null
+            }?.takeIf { it >= 0 }
             return PlaylistQueue(tracks, token, count)
         }
 
