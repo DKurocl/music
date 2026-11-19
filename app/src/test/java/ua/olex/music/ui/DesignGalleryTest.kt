@@ -869,7 +869,8 @@ class DesignGalleryTest {
         compose.onNodeWithTag("home-feed").performScrollToNode(hasText("Night Drive Mix"))
         compose.onNodeWithText("Night Drive Mix").performClick()
         org.junit.Assert.assertEquals("radio", mix)
-        compose.onNodeWithTag("home-feed").performScrollToNode(hasText("On the train"))
+        // Bring the shelf above the floating player before sending a physical tap.
+        compose.onNodeWithTag("home-feed").performScrollToKey("my-playlists")
         compose.onNodeWithText("On the train").performScrollTo().performClick()
         org.junit.Assert.assertEquals(7L, opened)
         compose.onNodeWithText("Weekend rotation").performScrollTo().performClick()
