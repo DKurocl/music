@@ -17,6 +17,7 @@ internal object PlaybackSourceItems {
 
     /** Bundle reference equality must not rebuild an unchanged timeline after each cache event. */
     fun same(a: MediaItem, b: MediaItem): Boolean {
+        if (a === b) return true
         val x = a.mediaMetadata; val y = b.mediaMetadata
         return a.mediaId == b.mediaId && a.localConfiguration?.uri == b.localConfiguration?.uri &&
             a.requestMetadata.mediaUri == b.requestMetadata.mediaUri && a.clippingConfiguration == b.clippingConfiguration &&

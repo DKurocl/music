@@ -3,6 +3,8 @@
 package ua.olex.music.ui
 
 import kotlinx.coroutines.launch
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -193,84 +195,42 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
     modifier: Modifier, enabled: Boolean, previews: List<String> = emptyList(), onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     var taps by remember { mutableIntStateOf(0) }
     val still = LocalPowerSave.current
-    val motion = remember { androidx.compose.animation.core.Animatable(0f) }
+    val motion = remember { Animatable(0f) }
     val input = remember { MutableInteractionSource() }
     val pressed by input.collectIsPressedAsState()
-    val pressure by animateFloatAsState(if (pressed && !still) 1f else 0f,
+    val pressure = animateFloatAsState(if (pressed && !still) 1f else 0f,
         if (still) snap() else MaterialTheme.motionScheme.fastSpatialSpec(), label = "Start tile pressure")
-    val spring = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
-    val first = remember { androidx.compose.ui.graphics.Path() }
-    val second = remember { androidx.compose.ui.graphics.Path() }
     LaunchedEffect(taps, still) {
-        if (taps > 0 && !still) {
-            motion.snapTo(0f)
-            motion.animateTo(1f, androidx.compose.animation.core.tween(110))
-            motion.animateTo(0f, spring)
-        } else motion.snapTo(0f)
+        if (still) motion.snapTo(0f)
+        else if (taps > 0) {
+            // A second tap continues from the visible frame. Each whole turn ends at rest.
+            motion.animateTo(kotlin.math.floor(motion.value) + 1f, tween(390))
+        }
     }
+    val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
     val outer = 28.dp
     val join = 10.dp
     val tileShape = if (glyph == Glyph.SHUFFLE) RoundedCornerShape(outer, outer, join, join) else RoundedCornerShape(join, join, outer, outer)
     val cs = MaterialTheme.colorScheme
     Surface(shape = tileShape, color = if (enabled) container else cs.surfaceContainerHigh,
         contentColor = if (enabled) content else cs.onSurfaceVariant,
-        modifier = modifier.fillMaxWidth().graphicsLayer {
-            scaleX = 1f - pressure * 0.025f
-            scaleY = 1f - pressure * 0.035f
-        }.clip(tileShape).combinedClickable(interactionSource = input, indication = androidx.compose.foundation.LocalIndication.current,
+        modifier = modifier.fillMaxWidth().clip(tileShape).combinedClickable(interactionSource = input, indication = androidx.compose.foundation.LocalIndication.current,
             enabled = enabled, role = Role.Button, onClickLabel = if (glyph == Glyph.SHUFFLE) "Shuffle library" else "Play liked songs",
             onLongClickLabel = if (onLongClick != null) "Choose a liked song" else null, onLongClick = onLongClick,
             onClick = { taps++; onClick() })) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.fillMaxWidth().height(39.dp)) {
-                Box(Modifier.size(39.dp), contentAlignment = Alignment.Center) {
-                    Box(Modifier.matchParentSize().graphicsLayer {
-                        val wave = motion.value
-                        rotationZ = if (glyph == Glyph.SHUFFLE) wave * 25f else wave * 12f
-                        scaleX = 1f + wave * 0.08f
-                        scaleY = scaleX
-                    }.clip(shape).background(if (enabled) accent else cs.surfaceContainerHighest))
-                    val ink = if (enabled) onAccent else cs.onSurfaceVariant
-                    if (glyph == Glyph.SHUFFLE) {
-                        androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
-                            val unit = size.width / 24f
-                            val bend = motion.value * 5f - pressure * 2f
-                            val pen = 2.1f * unit
-                            first.apply {
-                                rewind()
-                                moveTo(3f * unit, 6f * unit)
-                                cubicTo(9f * unit, (6f - bend) * unit, 13f * unit, (18f + bend) * unit, 20f * unit, 18f * unit)
-                            }
-                            second.apply {
-                                rewind()
-                                moveTo(3f * unit, 18f * unit)
-                                cubicTo(9f * unit, (18f + bend) * unit, 13f * unit, (6f - bend) * unit, 20f * unit, 6f * unit)
-                            }
-                            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawPath(first, ink, style = stroke)
-                            drawPath(second, ink, style = stroke)
-                            drawLine(ink, androidx.compose.ui.geometry.Offset(17f * unit, 3f * unit), androidx.compose.ui.geometry.Offset(20f * unit, 6f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(ink, androidx.compose.ui.geometry.Offset(20f * unit, 6f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 9f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(ink, androidx.compose.ui.geometry.Offset(17f * unit, 15f * unit), androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                            drawLine(ink, androidx.compose.ui.geometry.Offset(20f * unit, 18f * unit), androidx.compose.ui.geometry.Offset(17f * unit, 21f * unit), pen, cap = androidx.compose.ui.graphics.StrokeCap.Round)
-                        }
-                    } else {
-                        Symbol(glyph, color = ink, filled = true, modifier = Modifier.graphicsLayer {
-                            scaleX = 1f - pressure * 0.12f + motion.value * 0.20f
-                            scaleY = scaleX
-                        })
-                    }
+                val badge = if (enabled) accent else cs.surfaceContainerHighest
+                val ink = if (enabled) onAccent else cs.onSurfaceVariant
+                Box(Modifier.size(39.dp).clip(shape).background(badge), contentAlignment = Alignment.Center) {
+                    StartMark(glyph == Glyph.SHUFFLE, ink, badge, { motion.value % 1f }, { pressure.value })
                 }
                 if (previews.isNotEmpty()) Box(Modifier.align(Alignment.CenterEnd).width(46.dp).height(36.dp)) {
                     previews.forEachIndexed { i, uri ->
-                        Artwork(uri, Modifier.align(Alignment.CenterEnd).offset(x = ((i - previews.lastIndex) * 7).dp)
+                        val depth = i - previews.lastIndex
+                        Artwork(uri, Modifier.align(Alignment.CenterEnd).offset(x = (depth * 7).dp)
                             .size(27.dp).graphicsLayer {
-                                val depth = i - previews.lastIndex
-                                val direction = if (rtl) -1f else 1f
-                                rotationZ = direction * (depth * 8f + motion.value * (depth * 4f + 5f))
-                                translationX = direction * depth * 2.dp.toPx() * motion.value
-                                translationY = -motion.value * (i + 1).dp.toPx()
+                                rotationZ = depth * 6f * if (rtl) -1f else 1f
                             }, 5.dp)
                     }
                 }

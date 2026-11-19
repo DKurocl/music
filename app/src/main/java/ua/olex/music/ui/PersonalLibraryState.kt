@@ -14,24 +14,32 @@ data class PlaylistUi(val id: Long, val name: String, val songs: List<SavedSongR
     val playable = songs.mapNotNull { it.track }
 }
 
+/** Keep resolutions for just the current history window and catalogue. */
+internal class HistoryRows(private val library: LibraryIndex) {
+    private var previous: Map<String, SavedSongRow> = emptyMap()
+
+    fun resolve(events: List<HistoryEntry>): List<SavedSongRow> {
+        val next = LinkedHashMap<String, SavedSongRow>()
+        for (event in events) {
+            val song = event.song
+            next.getOrPut(song.id) {
+                previous[song.id]?.takeIf { it.song == song } ?: SavedSongRow(song, song.resolve(library))
+            }
+        }
+        previous = next
+        return next.values.toList()
+    }
+}
+
 /** Resolved once per library/user-data change, rather than on every player-state emission. */
 data class PersonalLibraryState(
     val favourites: List<SavedSongRow> = emptyList(),
     val playlists: List<PlaylistUi> = emptyList(),
     val history: List<SavedSongRow> = emptyList(),
-    private val linkedFavourites: Map<String, SavedSong> = emptyMap(),
     /** Confirmed current file per linked video URI, prepared off main for row source marks. */
     val localCopies: Map<String, Track> = emptyMap(),
+    val favouriteByTrackId: Map<String, SavedSong> = emptyMap(),
 ) {
-    val favouriteByTrackId = linkedFavourites + buildMap {
-        for (row in favourites) {
-            put(row.song.id, row.song)
-            if (!row.song.persistent) row.track?.let { put(it.id.value, row.song) }
-            row.song.references.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE }
-                .forEach { put("yt:${it.uri!!.removePrefix(SavedSong.ONLINE_PREFIX)}", row.song) }
-        }
-    }
-
     companion object {
         fun resolve(library: LibraryIndex, favourites: List<SavedSong>, playlists: List<UserPlaylist>, history: List<HistoryEntry>, aliases: Map<String, String> = emptyMap()): PersonalLibraryState {
             fun row(song: SavedSong) = SavedSongRow(song, song.resolve(library))
@@ -41,15 +49,24 @@ data class PersonalLibraryState(
                 val id = track.recordingId?.let { aliases[it] ?: it }
                 byRecording[id]?.let { track.id.value to it }
             }.toMap() + aliases.mapNotNull { (alias, target) -> byRecording[target]?.let { alias to it } }.toMap()
+            val favouriteRows = favourites.map(::row)
+            val lookup = linked.toMutableMap().apply {
+                for (row in favouriteRows) {
+                    put(row.song.id, row.song)
+                    if (!row.song.persistent) row.track?.let { put(it.id.value, row.song) }
+                    row.song.references.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE }
+                        .forEach { put("yt:${it.uri!!.removePrefix(SavedSong.ONLINE_PREFIX)}", row.song) }
+                }
+            }
             return PersonalLibraryState(
-                favourites.map(::row),
+                favouriteRows,
                 playlists.map { PlaylistUi(it.id, it.name, it.songs.map(::row)) },
-                history.map { row(it.song) }.distinctBy { it.song.id },
-                linked,
+                HistoryRows(library).resolve(history),
                 physical.filterNot { it.uri.startsWith(SavedSong.ONLINE_PREFIX) }.flatMap { track ->
                     track.sources.filter { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE && it.uri != null }
                         .map { it.uri!! to track }
                 }.groupBy({ it.first }, { it.second }).mapValues { (_, copies) -> copies.maxBy { it.format?.rank ?: 0 } },
+                lookup,
             )
         }
     }

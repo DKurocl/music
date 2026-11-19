@@ -1,3 +1,13 @@
+# Shuffle, Liked and track switching (2026-11-19)
+
+Quick starts have independent draw-only gestures: a crossing trace on Shuffle and a lifting heart
+on Liked. Their containers, text and artwork stay still. The gallery captures both marks on a tap.
+Home holds ranking inputs during a listening visit. History changes reuse previously resolved rows.
+Smart playlists and lyric sidecars are collected by their consuming screens.
+Source-only Media3 timeline updates reuse the existing queue and checkpoint generation. Bulk
+source comparison runs on a worker. Local check: `git diff --check`. CI runs the regression tests,
+gallery, lint and APK build on push. Frame timing on the physical Pixel remains unmeasured.
+
 # Home start controls and listening navigation (2026-11-19)
 
 Home and listening use a short horizontal shared-axis transition. The mini player and navigation

@@ -114,16 +114,9 @@ fun MusicRoot(model: LibraryViewModel) {
     val library by model.catalogue.collectAsStateWithLifecycle()
     val tracks = library?.songs
     val query by model.query.collectAsStateWithLifecycle()
-    val search by model.search.collectAsStateWithLifecycle()
     val personal by model.personal.collectAsStateWithLifecycle()
-    val smart by model.smart.collectAsStateWithLifecycle()
-    val songStats by model.stats.collectAsStateWithLifecycle()
     val stats by model.stats.collectAsStateWithLifecycle()
-    val sortOrders by model.sortOrders.collectAsStateWithLifecycle()
-    val lyricsState by model.localLyrics.collectAsStateWithLifecycle()
     val musicFolders by model.musicFolders.collectAsStateWithLifecycle()
-    val lyricOffset by model.lyricOffset.collectAsStateWithLifecycle()
-    val onlineResults by model.online.collectAsStateWithLifecycle()
     val youTubeOn by LocalContext.current.graph.youTubeOn.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<Track?>(null) }
     var editingTags by remember { mutableStateOf<List<Track>?>(null) }
@@ -174,7 +167,6 @@ fun MusicRoot(model: LibraryViewModel) {
     var collectionTitle by remember { mutableStateOf<String?>(null) }
     var openTile by remember { mutableStateOf<String?>(null) }
     var closeCollection by remember { androidx.compose.runtime.mutableIntStateOf(0) }
-    val duplicates by model.duplicates.collectAsStateWithLifecycle()
     val snackbar = remember { androidx.compose.material3.SnackbarHostState() }
     val haptics = rememberHaptics()
     var focusSearch by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(0) }
@@ -460,17 +452,17 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
-                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES },
+                onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = model.duplicates.collectAsStateWithLifecycle().value.size, onDuplicates = { page = Page.DUPLICATES },
                 onLibraryOverview = { page = Page.LIBRARY_OVERVIEW }, initialQuery = settingsQuery)
             page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
                 onDuplicates = { page = Page.DUPLICATES }, onStorage = { settingsQuery = "cache"; page = Page.SETTINGS }, onTrash = moveToTrash)
-            page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
+            page == Page.DUPLICATES -> DuplicatesPage(model.duplicates.collectAsStateWithLifecycle().value, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
             place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsBackCommitted, Modifier.padding(insets)) { listening ->
                 if (listening) StatsPage(requireNotNull(library), Modifier, model::play, context.graph.userLibrary::historySince)
                 else baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
-                    remember(personal.history) { personal.history.mapNotNull { it.track } }, songStats, playing.mediaId, Modifier,
+                    remember(personal.history) { personal.history.mapNotNull { it.track } }, stats, playing.mediaId, Modifier,
                     onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = remember(personal.favourites) { personal.favourites.mapNotNull { it.track } },
                     playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
                     homeActive = page == null,
@@ -485,21 +477,21 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
-                query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
+                query = if (place == Place.SEARCH) query else "", search = model.search.collectAsStateWithLifecycle().value, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
-                online = onlineResults, onlineOn = youTubeOn,
+                online = model.online.collectAsStateWithLifecycle().value, onlineOn = youTubeOn,
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, onCollectionClosed = { closeCollection = 0 },
                 focusSearch = if (place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
-                smart = smart, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
+                smart = model.smart.collectAsStateWithLifecycle().value, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
                 onEditTags = { editingTags = it }, onTrash = moveToTrash,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
                 openPlaylist = openPlaylist.takeIf { place == Place.LIBRARY }, onOpenedPlaylist = { openPlaylist = null }, onPlayWithOrigin = model::playFrom,
-                personal = personal, personalActions = model.personalActions, sortOrders = sortOrders, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = songStats,
+                personal = personal, personalActions = model.personalActions, sortOrders = model.sortOrders.collectAsStateWithLifecycle().value, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = stats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             ) }
         }
@@ -600,7 +592,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 }.takeIf { it.isNotEmpty() }
             },
             onEqualizer = { equalizerOpen = true }, onPlaybackParameters = model::setPlaybackParameters,
-            lyricsState = lyricsState, lyricOffset = lyricOffset, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
+            lyricsState = model.localLyrics.collectAsStateWithLifecycle().value, lyricOffset = model.lyricOffset.collectAsStateWithLifecycle().value, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
             onClearMusicFolders = model::clearMusicFolders, onReloadLyrics = model::reloadLyrics,
             onFindLyricsOnline = model::findLyricsOnline, onlineLyricsStatus = model.onlineLyricsStatus,
