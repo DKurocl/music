@@ -77,7 +77,7 @@ private fun CoverPick(track: Track, currentId: String?, shape: Shape, lead: Bool
         .semantics { if (current) stateDescription = "Current track" }) {
         Box(Modifier.fillMaxWidth().weight(1f)) {
             Artwork(track.artworkUri, Modifier.fillMaxSize(), 0.dp, pixels = if (lead) ArtworkPlan.LARGE else ArtworkPlan.MEDIUM)
-            if (current) NowPlayingOverlay(Modifier.matchParentSize())
+            NowPlayingOverlay(current, Modifier.matchParentSize())
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = if (lead) 14.dp else 10.dp, vertical = if (lead) 12.dp else 7.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -278,7 +278,7 @@ internal fun QuickPicks(title: String, songs: List<Track>, currentId: String?, o
                     .padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(46.dp).clip(RoundedCornerShape(12.dp))) {
                         Artwork(track.artworkUri, Modifier.fillMaxSize(), 0.dp)
-                        if (marked) NowPlayingOverlay(Modifier.matchParentSize())
+                        NowPlayingOverlay(marked, Modifier.matchParentSize())
                     }
                     Column(Modifier.weight(1f).padding(horizontal = 11.dp)) {
                         Text(track.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,

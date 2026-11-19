@@ -57,7 +57,7 @@ internal fun HomePage(
     homeActive: Boolean = true,
     onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onShuffle: (List<Track>) -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
-    cache: HomeCache = remember(library) { HomeCache() },
+    cache: HomeCache = remember { HomeCache() },
 ) {
     var label by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     val mood = moods.firstOrNull { it.label == label }
@@ -73,8 +73,9 @@ internal fun HomePage(
     val seeds = remember(cache, day, mood, history.isEmpty()) { history }
     val weights = remember(cache, day, mood, stats.isEmpty()) { stats }
     val queue = key(cache, online, mood?.label) {
-        produceState(if (mood == null && cache.online == online) cache.last else null,
+        produceState(if (mood == null && cache.online == online && cache.day == day) cache.last else null,
             library, seeds, weights, favourites, youTubeHome, excluded, day, revision, moodView?.page) {
+            val previous = cache.last.orEmpty().takeIf { mood == null && cache.online == online && cache.day == day }.orEmpty()
             val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val retained = (seeds + favourites).filter { YouTubeMusic.isOnline(it) }
                 val catalogue = library.songs + retained
@@ -82,13 +83,17 @@ internal fun HomePage(
                 val suggested = if (mood != null) moodView?.page?.songs.orEmpty() else youTubeHome.flatMap { shelf ->
                     shelf.songs + shelf.cards.filter { it.kind == YouTubeMusic.Card.Kind.SONG }.map { it.song() }
                 }
-                ua.olex.music.model.HomePicks.select(candidates, suggested, seeds, favourites, weights,
-                    day + (mood?.label?.hashCode() ?: 0), { t ->
-                        online || !t.uri.startsWith("ytm://") || ua.olex.music.playback.CacheBudget.isStreamCached(t.uri)
-                    }, { t -> excluded.isNotEmpty() && (t.id.value in excluded || Mix.songKey(t) in excluded) })
+                fun playable(track: Track) = online || !YouTubeMusic.isOnline(track) ||
+                    ua.olex.music.playback.CacheBudget.isStreamCached(track.uri)
+                fun hidden(track: Track) = excluded.isNotEmpty() && (track.id.value in excluded || Mix.songKey(track) in excluded)
+                val ranked = ua.olex.music.model.HomePicks.select(candidates, suggested, seeds, favourites, weights,
+                    day + (mood?.label?.hashCode() ?: 0), ::playable, ::hidden)
+                val byId = (suggested + catalogue).associateBy { it.id }
+                val kept = previous.mapNotNull { byId[it.id] }.filter { playable(it) && !hidden(it) }
+                (kept + ranked).distinctBy { it.recordingId ?: it.id.value }.take(24)
             }
             value = picks
-            if (mood == null) { cache.online = online; cache.last = picks }
+            if (mood == null) { cache.online = online; cache.day = day; cache.last = picks }
         }.value
     }
     val cacheRevision = ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value
@@ -119,20 +124,23 @@ internal fun HomePage(
     // Freeze the local selection for this catalogue. Skipping songs must not rebuild the album shelf.
     val localAlbums = key(cache) {
         produceState(cache.albums.orEmpty(), library) {
-            if (cache.albums == null) {
-                val initialTrack = currentId
-                val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val previous = cache.albums.orEmpty()
+            val initialTrack = currentId
+            val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                val all = library.albums.associateBy { it.id }
+                val retained = previous.mapNotNull { all[it.id] }
+                if (retained.size >= 6) retained else {
                     val recent = history.take(40).mapTo(HashSet()) { it.artist }
-                    library.albums.asSequence().filter { it.tracks.any { t -> !t.album.isNullOrBlank() } }
-                        .map { album ->
-                            val score = (if (album.tracks.any { it.id.value == initialTrack }) 0 else 4) +
+                    val ranked = library.albums.asSequence().filter { album -> album.tracks.any { !it.album.isNullOrBlank() } }
+                        .sortedByDescending { album ->
+                            (if (album.tracks.any { it.id.value == initialTrack }) 0 else 4) +
                                 (if (album.tracks.size > 1) 2 else 0) + (if (album.subtitle in recent) 1 else 0)
-                            album to score
-                        }.sortedByDescending { it.second }.take(6).map { it.first }.toList()
+                        }
+                    (retained.asSequence() + ranked).distinctBy { it.id }.take(6).toList()
                 }
-                cache.albums = picks
-                value = picks
             }
+            cache.albums = picks
+            value = picks
         }.value
     }
     val albumPicks = remember(localAlbums, albums, online) {
@@ -243,6 +251,7 @@ internal fun HomePage(
 /** Retains the personal queue across tab changes within the same catalogue and account. */
 internal class HomeCache {
     var online = false
+    var day = Long.MIN_VALUE
     var last: List<Track>? = null
     var albums: List<ua.olex.music.model.MusicCollection>? = null
 }

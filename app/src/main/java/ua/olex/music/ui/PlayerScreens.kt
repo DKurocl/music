@@ -236,12 +236,12 @@ private fun TrackRowContent(
             if (selecting) Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
                 modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
             else if (number != null) Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                if (current) NowPlayingOverlay(Modifier.matchParentSize(), Alignment.Center)
-                else Text(number.toString(), style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                Text(number.toString(), modifier = Modifier.graphicsLayer { alpha = if (current) 0f else 1f }, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                NowPlayingOverlay(current, Modifier.matchParentSize())
             }
             else Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) {
                 Artwork(track.artworkUri, Modifier.fillMaxSize(), 12.dp)
-                if (current) NowPlayingOverlay(Modifier.matchParentSize())
+                NowPlayingOverlay(current, Modifier.matchParentSize())
             }
         },
         trailingContent = {
@@ -991,12 +991,17 @@ internal fun TrackActionsSheet(
                 androidx.compose.material3.Switch(ratingsToFiles, onRatingsToFiles)
             }
             androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = cs.outlineVariant)
-            actions.forEachIndexed { actionIndex, action ->
+            actions.forEach { action ->
+                val interaction = remember(action.label) { MutableInteractionSource() }
+                val pressed by interaction.collectIsPressedAsState()
                 ListItem(
                     headlineContent = { Text(action.label) },
-                    leadingContent = { Symbol(action.glyph, filled = action.filled, color = cs.onSurfaceVariant) },
+                    leadingContent = { Symbol(action.glyph, filled = action.filled, color = cs.onSurfaceVariant, pressed = pressed) },
                     colors = ListItemDefaults.colors(containerColor = cs.surfaceContainerLow),
-                    modifier = Modifier.clickable { action.run(); onDismiss() },
+                    modifier = Modifier.clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple()) {
+                        action.run()
+                        onDismiss()
+                    },
                 )
             }
         }
