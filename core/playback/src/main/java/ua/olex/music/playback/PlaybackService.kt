@@ -152,13 +152,10 @@ class PlaybackService : MediaLibraryService() {
             session?.let { current ->
                 current.setSessionExtras(Bundle(current.sessionExtras).apply { putBoolean(QUEUE_RESTORED, true) })
             }
+            scope.launch { refreshQueueSources() }
         }) { selectSources(it, allowDirect = true) }
         (application as? MediaCatalogOwner)?.let { owner -> scope.launch {
-            owner.playbackSourceChanges.collectLatest {
-                try { refreshFutureSources() }
-                catch (cancelled: CancellationException) { throw cancelled }
-                catch (failure: Exception) { Log.w("MusicSource", "Could not refresh queue sources: ${failure.javaClass.simpleName}") }
-            }
+            owner.playbackSourceChanges.collectLatest { refreshQueueSources() }
         } }
         updateOffload()
         player.addAnalyticsListener(object : AnalyticsListener {
@@ -283,6 +280,12 @@ class PlaybackService : MediaLibraryService() {
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { Log.w("MusicMix", "Could not extend queue: ${failure.javaClass.simpleName}") }
         }
+    }
+
+    private suspend fun refreshQueueSources() {
+        try { refreshFutureSources() }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { Log.w("MusicSource", "Could not refresh queue sources: ${failure.javaClass.simpleName}") }
     }
 
     private suspend fun refreshFutureSources() {
@@ -683,8 +686,9 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == QueueCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 persistence?.supersedeRestore()
-                val request = sourceRequest
                 val replaceAfter = args.getString(QueueCommand.REPLACE_AFTER)
+                val radio = args.getBoolean(QueueCommand.RADIO)
+                val request = if (radio && replaceAfter == null) ++sourceRequest else sourceRequest
                 val result = SettableFuture.create<SessionResult>()
                 val job = scope.launch {
                     try {
@@ -692,11 +696,14 @@ class PlaybackService : MediaLibraryService() {
                         val items = selectSources(decoded, allowDirect = true)
                         if (this@PlaybackService.session !== session) {
                             result.set(SessionResult(SessionError.ERROR_SESSION_DISCONNECTED))
-                        } else if (replaceAfter != null) {
+                        } else if (radio) {
                             val usable = items.filter { PlaybackSourceItems.error(it) == null }
-                            val accepted = request == sourceRequest && session.player.currentMediaItem?.let(::occurrence) == replaceAfter &&
-                                QueueCommand.replaceUpcomingForRadio(exo, replaceAfter, usable)
-                            result.set(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
+                            val active = session.player
+                            val accepted = request == sourceRequest && if (replaceAfter == null) QueueCommand.startRadio(active, usable)
+                                else QueueCommand.replaceUpcomingForRadio(active, replaceAfter, usable)
+                            val receipt = Bundle()
+                            if (accepted) receipt.putString(QueueCommand.RADIO_TAIL, occurrence(usable.last()))
+                            result.set(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE, receipt))
                         } else {
                             QueueCommand.enqueue(exo, items, args.getBoolean(QueueCommand.NEXT))
                             result.set(SessionResult(SessionResult.RESULT_SUCCESS))

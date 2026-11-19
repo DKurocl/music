@@ -14,6 +14,7 @@ import androidx.media3.session.SessionToken
 import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -119,7 +120,9 @@ class PlayerConnection(context: Context) {
         }
 
         override fun onEvents(player: Player, events: Player.Events) {
-            val rebuild = playlistChanged || queueSnapshot.size != player.mediaItemCount
+            val count = player.mediaItemCount
+            val tailChanged = events.contains(Player.EVENT_TIMELINE_CHANGED) && count > 0 && queueSnapshot.lastOrNull()?.key != queueKey(player, count - 1)
+            val rebuild = playlistChanged || queueSnapshot.size != count || tailChanged
             playlistChanged = false
             publish(player, rebuild)
         }
@@ -351,24 +354,33 @@ class PlayerConnection(context: Context) {
         }
     }
 
-    /** The service verifies the occurrence again after resolving the new sources. */
-    suspend fun replaceUpcomingForRadio(key: String, tracks: List<Track>, origin: String): Boolean {
-        val player = controller ?: return false
-        return queueMutex.withLock {
-            val items = withContext(Dispatchers.Default) {
-                tracks.map { currentCoroutineContext().ensureActive(); mediaItem(it, playbackContext = origin) }
+    /** A mix is ready once the service has accepted it and its last occurrence is visible. */
+    suspend fun startRadio(tracks: List<Track>, origin: String, replaceAfter: String? = null): Boolean =
+        kotlinx.coroutines.withTimeoutOrNull(10_000) {
+            if (controller == null) {
+                connect()
+                _state.first { it.connected || !it.connecting && it.error != null }
             }
-            if (controller !== player || items.isEmpty()) return@withLock false
-            try {
-                player.sendCustomCommand(QueueCommand.command, QueueCommand.arguments(items, next = false, replaceAfter = key))
-                    .await().resultCode == SessionResult.RESULT_SUCCESS
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                false
-            }
-        }
-    }
+            val player = controller ?: return@withTimeoutOrNull false
+            val tail = queueMutex.withLock {
+                val items = withContext(Dispatchers.Default) {
+                    tracks.map { currentCoroutineContext().ensureActive(); mediaItem(it, playbackContext = origin) }
+                }
+                if (controller !== player || items.isEmpty()) return@withLock null
+                try {
+                    val args = QueueCommand.arguments(items, next = false, replaceAfter = replaceAfter, radio = true)
+                    val result = player.sendCustomCommand(QueueCommand.command, args).await()
+                    result.extras.getString(QueueCommand.RADIO_TAIL).takeIf { result.resultCode == SessionResult.RESULT_SUCCESS }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    null
+                }
+            } ?: return@withTimeoutOrNull false
+            val last = player.mediaItemCount - 1
+            if (controller === player && last >= 0 && queueKey(player, last) == tail) publish(player, updateQueue = true)
+            _state.first { !it.connected || it.queue.lastOrNull()?.key == tail }.connected
+        } ?: false
 
     fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) {
         val player = controller ?: return
@@ -421,6 +433,11 @@ class PlayerConnection(context: Context) {
     private var lastInputTracks: Tracks? = null
     private var lastInputFormat: AudioFormat? = null
 
+    private fun queueKey(player: Player, index: Int): String {
+        val item = player.getMediaItemAt(index)
+        return item.mediaMetadata.extras?.getString(QUEUE_KEY) ?: "$index:${item.mediaId}"
+    }
+
     private fun publish(player: Player, updateQueue: Boolean = false) {
         if (updateQueue) queueSnapshot = (0 until player.mediaItemCount).map { index ->
             val queued = player.getMediaItemAt(index)
@@ -446,7 +463,7 @@ class PlayerConnection(context: Context) {
             title = meta.title?.toString().orEmpty(),
             artist = meta.artist?.toString().orEmpty(),
             album = meta.albumTitle?.toString(),
-            playbackContext = meta.extras?.getString(CONTEXT_KEY),
+            playbackContext = item?.mediaMetadata?.extras?.getString(CONTEXT_KEY) ?: meta.extras?.getString(CONTEXT_KEY),
             artworkUri = (item?.mediaMetadata?.artworkUri ?: meta.artworkUri)?.toString(),
             isPlaying = player.isPlaying,
             speed = player.playbackParameters.speed,

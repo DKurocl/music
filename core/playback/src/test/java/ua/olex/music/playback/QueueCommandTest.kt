@@ -40,6 +40,22 @@ class QueueCommandTest {
         assertFalse(player.playWhenReady)
     }
 
+    @Test fun aRadioFromAnotherSongReplacesAnEqualLengthQueueAndStartsAtTheNewSeed() {
+        player.setMediaItems(listOf(item(1), item(2), item(3)), 1, 12_000)
+        player.shuffleModeEnabled = true
+        player.repeatMode = Player.REPEAT_MODE_ONE
+        val replacement = listOf(item(20), item(21), item(22))
+        assertFalse(QueueCommand.startRadio(player, emptyList()))
+        assertEquals("local:2", player.currentMediaItem?.mediaId)
+        assertTrue(QueueCommand.startRadio(player, replacement))
+        assertEquals(3, player.mediaItemCount)
+        assertEquals("local:20", player.currentMediaItem?.mediaId)
+        assertEquals("local:22", player.getMediaItemAt(2).mediaId)
+        assertTrue(player.playWhenReady)
+        assertFalse(player.shuffleModeEnabled)
+        assertEquals(Player.REPEAT_MODE_OFF, player.repeatMode)
+    }
+
     @Test fun radioLeavesTheLiveSongAndPositionAndReplacesOnlyTheFuture() {
         val seed = item(2)
         val key = requireNotNull(seed.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))

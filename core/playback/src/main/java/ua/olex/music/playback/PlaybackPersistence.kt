@@ -27,7 +27,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     private var playlistDirty = false
     private var pendingResumption: PlaybackCheckpoint? = null
     private val initial = serviceScope.async {
-        try { journal.read()?.let { it.copy(items = resolveSources(it.items)) } }
+        try { journal.read() }
         catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: Exception) { Log.w("MusicPlayback", "Could not restore playback: ${failure.javaClass.simpleName}"); null }
     }
@@ -36,19 +36,33 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         player.addListener(this)
         serviceScope.launch {
             val saved = initial.await()
-            // An explicit selection always wins over the asynchronous disk read.
-            if (closed) return@launch
-            if (!restoreSuperseded && !changed && player.mediaItemCount == 0 && saved != null && saved.items.isNotEmpty()) {
-                player.setMediaItems(saved.items, saved.index, saved.positionMs)
-                player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
-                player.shuffleModeEnabled = saved.shuffle
-                player.repeatMode = saved.repeat
-                // Leave the restored queue paused until the user explicitly presses Play.
+            // Resolve the current item before showing the player. The service refreshes the other
+            // saved sources after the paused timeline is visible.
+            if (canRestore() && saved != null && saved.items.isNotEmpty()) {
+                val seed = saved.items[saved.index]
+                val current = try { resolveSources(listOf(seed)).single() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    Log.w("MusicPlayback", "Could not resolve restored track: ${failure.javaClass.simpleName}")
+                    seed
+                }
+                if (canRestore()) install(saved, current)
             }
             // Let the player publish the restored timeline before the controller sees the ready flag.
             yield()
             if (!closed) onRestoreComplete()
         }
+    }
+
+    private fun canRestore() = !closed && !restoreSuperseded && !changed && player.mediaItemCount == 0
+
+    private fun install(saved: PlaybackCheckpoint, current: MediaItem) {
+        val items = saved.items.toMutableList().apply { set(saved.index, current) }
+        player.setMediaItems(items, saved.index, saved.positionMs)
+        player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
+        player.shuffleModeEnabled = saved.shuffle
+        player.repeatMode = saved.repeat
+        // Leave the restored queue paused until the user explicitly presses Play.
     }
 
     override fun onEvents(player: Player, events: Player.Events) {
