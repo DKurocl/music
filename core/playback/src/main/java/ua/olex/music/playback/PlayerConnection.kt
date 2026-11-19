@@ -78,6 +78,7 @@ data class PlayerState(
     val canSetPlaybackParameters: Boolean = false,
     val queueRestored: Boolean = false,
     val sleepDurationMs: Long? = null,
+    val sleepFinishesTrack: Boolean = false,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -142,6 +143,7 @@ class PlayerConnection(context: Context) {
                             queueRestored = extras.getBoolean(PlaybackService.QUEUE_RESTORED),
                             sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 },
                             sleepDurationMs = extras.getLong(SleepTimerCommand.DURATION).takeIf { it > 0 },
+                            sleepFinishesTrack = extras.getBoolean(SleepTimerCommand.FINISH_TRACK),
                             audio = AudioDiagnostics.fromExtras(extras),
                             equalizer = EqualizerCommand.fromExtras(extras),
                             replayGain = ReplayGainCommand.fromExtras(extras),
@@ -413,7 +415,10 @@ class PlayerConnection(context: Context) {
     /** Adds exactly [ms] to the running timer. */
     fun extendSleepTimer(ms: Long) = sendSleep(Bundle().apply { putLong(SleepTimerCommand.EXTEND_MS, ms) })
 
-    fun setSleepTimer(minutes: Int) = sendSleep(Bundle().apply { putInt(SleepTimerCommand.MINUTES, minutes) })
+    fun setSleepTimer(minutes: Int, finishTrack: Boolean) = sendSleep(Bundle().apply {
+        putInt(SleepTimerCommand.MINUTES, minutes)
+        putBoolean(SleepTimerCommand.FINISH_TRACK, finishTrack)
+    })
 
     private fun sendSleep(args: Bundle) {
         val player = controller ?: return
@@ -494,6 +499,7 @@ class PlayerConnection(context: Context) {
             seekable = player.isCurrentMediaItemSeekable,
             queueRestored = (player as? MediaController)?.sessionExtras?.getBoolean(PlaybackService.QUEUE_RESTORED) == true,
             sleepDurationMs = (player as? MediaController)?.sessionExtras?.getLong(SleepTimerCommand.DURATION)?.takeIf { it > 0 },
+            sleepFinishesTrack = (player as? MediaController)?.sessionExtras?.getBoolean(SleepTimerCommand.FINISH_TRACK) == true,
         )
     }
 

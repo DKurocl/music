@@ -128,6 +128,17 @@ class PlaybackService : MediaLibraryService() {
                 .build()
         }.getOrElse { faded }
         val shown = LyricLinePlayer(castable) { sourceAttempts.reset(); recovery?.cancel() }
+        shown.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+                    stopRemoteAtBoundary()
+                }
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) stopRemoteAtBoundary()
+            }
+        })
         lockLyrics = LockScreenLyrics(this, player, shown, scope)
         getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
         val builder = MediaLibrarySession.Builder(this, shown, Callback())
@@ -210,7 +221,7 @@ class PlaybackService : MediaLibraryService() {
                 if (playbackState == Player.STATE_ENDED) {
                     listening?.finish()
                     historyGate.transition()
-                    if (endOfTrack) {
+                    if (endOfTrack && !usesRemotePlayback()) {
                         player.playWhenReady = false
                         finishEndOfTrackTimer()
                     }
@@ -426,6 +437,21 @@ class PlaybackService : MediaLibraryService() {
 
     private var endOfTrack = false
 
+    private fun usesRemotePlayback(): Boolean =
+        session?.player?.deviceInfo?.playbackType == androidx.media3.common.DeviceInfo.PLAYBACK_TYPE_REMOTE
+
+    private fun stopRemoteAtBoundary() {
+        if (!endOfTrack || !usesRemotePlayback()) return
+        session?.player?.pause()
+        finishEndOfTrackTimer()
+    }
+
+    private fun armEndOfTrack() {
+        val active = session?.player ?: return
+        endOfTrack = active.currentMediaItem != null && active.playbackState != Player.STATE_ENDED
+        exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
+    }
+
     private fun finishEndOfTrackTimer() {
         if (!endOfTrack) return
         endOfTrack = false
@@ -443,13 +469,19 @@ class PlaybackService : MediaLibraryService() {
         scheduleSleep(((sleepTimer.deadlineMs ?: return) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
     }
 
-    private fun setSleepTimer(minutes: Int) {
+    private fun setSleepTimer(minutes: Int, finishTrack: Boolean) {
         sleepJob?.cancel()
         sleepJob = null
         fading?.cancelSleepFade()
-        endOfTrack = minutes == SleepTimerCommand.END_OF_TRACK
-        exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
-        sleepTimer.set(if (endOfTrack) 0 else minutes, SystemClock.elapsedRealtime())
+        endOfTrack = false
+        exoOrNull()?.pauseAtEndOfMediaItems = false
+        val now = SystemClock.elapsedRealtime()
+        if (minutes == SleepTimerCommand.END_OF_TRACK) {
+            sleepTimer.set(0, now)
+            armEndOfTrack()
+        } else {
+            sleepTimer.set(minutes, now, if (finishTrack) SleepTimer.Expiry.FINISH_TRACK else SleepTimer.Expiry.PAUSE)
+        }
         publishSleepTimer()
         if (sleepTimer.deadlineMs == null) return
         scheduleSleep(minutes * 60_000L)
@@ -458,7 +490,7 @@ class PlaybackService : MediaLibraryService() {
     private fun scheduleSleep(lengthMs: Long) {
         val deadline = sleepTimer.deadlineMs ?: return
         sleepJob = scope.launch {
-            val fadeMs = minOf(30_000L, lengthMs / 4)
+            val fadeMs = if (sleepTimer.expiry == SleepTimer.Expiry.PAUSE) minOf(30_000L, lengthMs / 4) else 0L
             awaitSleepDeadline(deadline, fadeMs, SystemClock::elapsedRealtime) { remaining ->
                 val local = exoOrNull()
                 val active = session?.player
@@ -466,11 +498,17 @@ class PlaybackService : MediaLibraryService() {
                     fading?.sleepFade(remaining)
                 }
             }
-            if (sleepTimer.expire(SystemClock.elapsedRealtime())) {
-                session?.player?.pause()
-                fading?.cancelSleepFade()
-                publishSleepTimer()
+            when (sleepTimer.expire(SystemClock.elapsedRealtime())) {
+                SleepTimer.Expiry.PAUSE -> {
+                    session?.player?.pause()
+                    fading?.cancelSleepFade()
+                }
+                SleepTimer.Expiry.FINISH_TRACK -> {
+                    if (session?.player?.playWhenReady == true) armEndOfTrack()
+                }
+                null -> return@launch
             }
+            publishSleepTimer()
         }
     }
 
@@ -481,6 +519,7 @@ class PlaybackService : MediaLibraryService() {
                 val deadline = sleepTimer.deadlineMs
                 putLong(SleepTimerCommand.DURATION, if (start != null && deadline != null) deadline - start else 0)
                 putLong(SleepTimerCommand.DEADLINE, if (endOfTrack) SleepTimerCommand.END_OF_TRACK_DEADLINE else sleepTimer.deadlineMs ?: 0)
+                putBoolean(SleepTimerCommand.FINISH_TRACK, sleepTimer.expiry == SleepTimer.Expiry.FINISH_TRACK)
             })
         }
     }
@@ -724,7 +763,7 @@ class PlaybackService : MediaLibraryService() {
                 controller.uid != Process.myUid() -> SessionError.ERROR_PERMISSION_DENIED
                 extend > 0 -> { extendSleepTimer(extend); SessionResult.RESULT_SUCCESS }
                 minutes != SleepTimerCommand.END_OF_TRACK && minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
-                else -> { setSleepTimer(minutes); SessionResult.RESULT_SUCCESS }
+                else -> { setSleepTimer(minutes, args.getBoolean(SleepTimerCommand.FINISH_TRACK)); SessionResult.RESULT_SUCCESS }
             }
             return Futures.immediateFuture(SessionResult(code))
         }

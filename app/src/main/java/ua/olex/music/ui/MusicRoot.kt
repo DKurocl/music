@@ -20,6 +20,7 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -778,7 +779,7 @@ internal fun Notice(insets: PaddingValues, title: String, body: String, action: 
 private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
-    onSleepTimer: (Int) -> Unit, from: String? = null, onExtendSleep: ((Long) -> Unit)? = null,
+    onSleepTimer: (Int, Boolean) -> Unit, from: String? = null, onExtendSleep: ((Long) -> Unit)? = null,
     onSaveQueue: (() -> Unit)? = null, onClearNext: (() -> Unit)? = null,
     onEqualizer: () -> Unit, onPlaybackParameters: (Float, Float) -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
@@ -844,9 +845,10 @@ private fun NowPlaying(
         SleepTimerDialog(
             deadline = state.sleepDeadlineMs,
             durationMs = state.sleepDurationMs,
+            finishingTrack = state.sleepFinishesTrack,
             active = state.sleepDeadlineMs != null,
             onDismiss = { timerDialog = false },
-            onSet = { minutes -> onSleepTimer(minutes); timerDialog = false },
+            onSet = { minutes, finishTrack -> onSleepTimer(minutes, finishTrack); timerDialog = false },
             onExtend = onExtendSleep?.let { extend -> { ms: Long -> extend(ms); timerDialog = false } },
         )
     }
@@ -866,25 +868,37 @@ private fun NowPlaying(
 
 }
 
-/**
- * The sleep timer as a sheet, not a list of buttons in a dialog. While a timer runs, what is left
- * comes first with +10 min and Turn off. Below: the common lengths as large tiles (one tap sets and
- * closes), "When this song ends" as its own wide tile, and a slider for any other length. Each choice
- * says in words what happens, and the timer fades the music out over its last 30 seconds.
- */
+/** A running countdown and its stop behavior stay visible until the owner edits or cancels it. */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit, deadline: Long? = null, onExtend: ((Long) -> Unit)? = null, durationMs: Long? = null) {
+internal fun SleepTimerDialog(
+    active: Boolean,
+    onDismiss: () -> Unit,
+    onSet: (Int, Boolean) -> Unit,
+    deadline: Long? = null,
+    onExtend: ((Long) -> Unit)? = null,
+    durationMs: Long? = null,
+    finishingTrack: Boolean = false,
+) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val end = ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK
+    val runningEnd = active && deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
+    val preferences = LocalContext.current.getSharedPreferences("sleep_timer", android.content.Context.MODE_PRIVATE)
     var minutes by rememberSaveable { mutableStateOf(30) }
     var endOfSong by rememberSaveable { mutableStateOf(false) }
+    var finishTrack by rememberSaveable {
+        mutableStateOf(if (active && !runningEnd) finishingTrack else preferences.getBoolean("finish_track", true))
+    }
     var changed by rememberSaveable { mutableStateOf(!active) }
     // A running timer counts down on the dial, once a second.
     var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(active, deadline) { while (active && deadline != null) { now = android.os.SystemClock.elapsedRealtime(); kotlinx.coroutines.delay(1_000) } }
-    val runningEnd = active && deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
+    LaunchedEffect(active, deadline, changed) {
+        while (active && deadline != null && !runningEnd && !changed) {
+            now = android.os.SystemClock.elapsedRealtime()
+            kotlinx.coroutines.delay(1_000)
+        }
+    }
     val leftMs = if (active && deadline != null && !runningEnd) (deadline - now).coerceAtLeast(0) else null
     val showingRun = active && !changed
     val runningSpan = durationMs ?: remember(deadline) { leftMs?.coerceAtLeast(1) ?: 1 }
@@ -916,7 +930,8 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                     }
                     (showingRun && runningEnd) || endOfSong -> {
                         Symbol(Glyph.NOTE, size = 44.dp, filled = true, color = cs.primary)
-                        Text("End of this song", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                        Text(if (showingRun) "Finishing this song" else "End of this song",
+                            style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
                     }
                     else -> {
                         Text("$minutes", style = MaterialTheme.typography.displayLargeEmphasized)
@@ -927,6 +942,7 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                 if (showingRun) TextButton(onClick = {
                     minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
                     endOfSong = runningEnd
+                    if (!runningEnd) finishTrack = finishingTrack
                     changed = true
                     haptics.tick()
                 }) { Text("Edit timer") }
@@ -954,14 +970,41 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                     }
                 }
             }
+            if (showingRun && !runningEnd) {
+                Text(if (finishingTrack) "The song playing when time is up will finish." else "Music fades out before the timer ends.",
+                    modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+            } else if (!showingRun && !endOfSong) {
+                fun changeFinishTrack(checked: Boolean) {
+                    haptics.toggle(checked)
+                    finishTrack = checked
+                }
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                    .background(cs.surfaceContainerHigh)
+                    .then(Modifier.toggleable(finishTrack, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = ::changeFinishTrack))
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Finish the song", style = MaterialTheme.typography.titleMedium)
+                        Text(if (finishTrack) "When the countdown ends" else "Fade out when the countdown ends",
+                            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    }
+                    androidx.compose.material3.Switch(checked = finishTrack, onCheckedChange = null)
+                }
+            }
             if (showingRun) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (leftMs != null) androidx.compose.material3.FilledTonalButton(onClick = { haptics.confirm(); onExtend?.invoke(10 * 60_000L) ?: onSet((leftMs / 60_000 + 10).toInt()) },
+                if (leftMs != null) androidx.compose.material3.FilledTonalButton(onClick = {
+                    haptics.confirm()
+                    onExtend?.invoke(10 * 60_000L) ?: onSet((leftMs / 60_000 + 10).toInt(), finishingTrack)
+                },
                     modifier = Modifier.weight(1f).height(56.dp)) { Text("+10 min") }
-                Button(onClick = { haptics.toggle(false); onSet(0) }, modifier = Modifier.weight(1f).height(56.dp)) { Text("Turn off") }
-            } else Button(onClick = { haptics.confirm(); onSet(if (endOfSong) end else minutes) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Button(onClick = { haptics.toggle(false); onSet(0, false) }, modifier = Modifier.weight(1f).height(56.dp)) { Text("Turn off") }
+            } else Button(onClick = {
+                haptics.confirm()
+                if (!endOfSong) preferences.edit().putBoolean("finish_track", finishTrack).apply()
+                onSet(if (endOfSong) end else minutes, !endOfSong && finishTrack)
+            }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
                 Text(if (active) "Change timer" else "Start", style = MaterialTheme.typography.titleMedium)
             }
-            Text("The music fades out over the last half minute, then pauses.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
         }
     }
 }

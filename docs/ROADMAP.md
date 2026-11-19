@@ -21,6 +21,8 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-19: stable mixed-script player layout, cheaper tint updates and a finish-song sleep timer.
+
 - [x] Codex, 2026-11-19: start radio at the seed, clip player cover swipes and load sharper online artwork.
 
 - [x] Codex, 2026-11-19: confirmed radio queues, direct output picker handoff and stable player startup/resume.
