@@ -99,6 +99,7 @@ fun Symbol(
     filled: Boolean = false, bold: Boolean = false,
     /** Bumped by the icon's button on each tap: the glyph plays its own small gesture (see [GlyphMotion]). */
     kick: Int = 0, pressed: Boolean = LocalIconPressed.current,
+    fillFraction: (() -> Float)? = null,
 ) {
     val ctx = LocalContext.current
     val motion = MaterialTheme.motionScheme
@@ -139,7 +140,7 @@ fun Symbol(
         val em = this.size.minDimension
         paint.textSize = em
         paint.color = color.toArgb()
-        paint.setAxes(fill, weight)
+        paint.setAxes(fillFraction?.invoke() ?: fill, weight)
         drawContext.canvas.nativeCanvas.drawText(glyph.text, this.size.width / 2, (this.size.height + em) / 2, paint)
     }
 }

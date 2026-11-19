@@ -4,8 +4,7 @@ package ua.olex.music.ui
 
 import kotlinx.coroutines.launch
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
@@ -205,8 +204,8 @@ private fun StartTile(title: String, subtitle: String, glyph: Glyph, shape: andr
     LaunchedEffect(taps, still) {
         if (still) motion.snapTo(0f)
         else if (taps > 0) {
-            motion.animateTo(1f, tween(100, easing = LinearOutSlowInEasing))
-            motion.animateTo(0f, spring(dampingRatio = 0.86f, stiffness = 510f))
+            motion.animateTo(1f, tween(145, easing = FastOutSlowInEasing))
+            motion.animateTo(0f, tween(260, easing = FastOutSlowInEasing))
         }
     }
     val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl

@@ -21,8 +21,8 @@ necessary to verify live responses.
 
 # Shuffle, Liked and track switching (2026-11-19)
 
-The Shuffle arrows flex as connected paths. Liked uses a single Material heart that compresses
-on contact and springs back on release. The gallery captures both marks and checks that their
+The Shuffle arrows separate into parallel paths and then cross again. Liked opens a Material
+heart into an outline and fills it as the gesture settles. The gallery captures both marks and checks that their
 labels stay in place.
 Home holds ranking inputs during a listening visit. History changes reuse previously resolved rows.
 Smart playlists and lyric sidecars are collected by their consuming screens.
