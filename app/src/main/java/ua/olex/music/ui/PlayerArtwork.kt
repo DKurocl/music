@@ -105,8 +105,9 @@ internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope
         private set
     var thumbnail by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
     var sleeve by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
+    var lyricsVisible by mutableStateOf(false)
     val coverInFlight: Boolean
-        get() = fraction > 0f && fraction < 1f && thumbnail.width > 0f && sleeve.width > 0f
+        get() = !lyricsVisible && fraction > 0f && fraction < 1f && thumbnail.width > 0f && sleeve.width > 0f
     var page: androidx.compose.ui.layout.LayoutCoordinates? = null
     var host: androidx.compose.ui.layout.LayoutCoordinates? = null
     private var settling: kotlinx.coroutines.Job? = null
@@ -168,7 +169,7 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
 
 /** Keep the page at full size while its artwork travels separately. */
 internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier = graphicsLayer {
-    alpha = ((travel.fraction - 0.3f) / 0.7f).coerceIn(0f, 1f)
+    alpha = travel.fraction
 }.onGloballyPositioned { travel.page = it }
 
 internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean, val preview: CoverFrame? = null)

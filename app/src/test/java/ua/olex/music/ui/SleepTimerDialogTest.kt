@@ -25,6 +25,16 @@ class SleepTimerDialogTest {
         compose.runOnIdle { assertEquals(15, minutes) }
     }
 
+    @Test fun anArbitraryLengthCanBeSetWithoutDragging() {
+        var minutes = -1
+        compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) {
+            SleepTimerDialog(false, {}, { minutes = it })
+        } } }
+        compose.onNodeWithContentDescription("Add five minutes").performClick()
+        compose.onNodeWithText("Start").performClick()
+        compose.runOnIdle { assertEquals(35, minutes) }
+    }
+
     @Test fun cancellingAnActiveTimerSendsZero() {
         var minutes = -1
         compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) { SleepTimerDialog(true, {}, { minutes = it }, deadline = android.os.SystemClock.elapsedRealtime() + 600_000) } } }

@@ -290,6 +290,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val artistName = songs.firstOrNull()?.artist?.substringBefore(",")?.trim().orEmpty()
     // A playlist mixes albums: its rows show covers. An album's rows show track numbers.
     val mixed = target.playlist || remember(songs) { songs.any { it.album != songs.firstOrNull()?.album } }
+    val incomplete = loadingMore || moreFailed || album?.partial == true
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -302,7 +303,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, origin) }, modifier = Modifier.height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(if (loadingMore || moreFailed || album?.partial == true) "Play loaded songs" else "Play all")
+                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(if (incomplete) "Play loaded songs" else "Play all")
                     }
                     KickFilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, origin) },
                         modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { taps -> Symbol(Glyph.SHUFFLE, kick = taps) }
@@ -312,6 +313,10 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                         owned = songs.none(YouTubeMusic::isOnline), what = "the album") {
                         nav.download { graph.soulseek.album(artistName, title) }
                     }
+                }
+                if (incomplete && songs.isNotEmpty()) {
+                    Text(if (loadingMore) "${songCount(songs.size)} loaded · Loading more…" else "${songCount(songs.size)} available · Partial list",
+                        Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (!target.playlist && songs.isNotEmpty()) DownloadStatus(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title))
                 // Room between the buttons and the first song, so a playing row's highlight never touches them.

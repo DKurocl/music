@@ -1,15 +1,14 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package ua.olex.music.ui
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -26,28 +25,29 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
-/** A horizontal shared-axis transition between Home and its listening detail page. */
+/** The opaque destination moves over Home, which is also the predictive Back preview. */
 @Composable
 internal fun HomeListeningTransition(listening: Boolean, gestureCommitted: Boolean, modifier: Modifier,
-    content: @Composable (Boolean) -> Unit) {
+    backProgress: () -> Float = { 0f }, content: @Composable (Boolean) -> Unit) {
     val still = LocalPowerSave.current
-    val end = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
-    val distance = with(LocalDensity.current) { 30.dp.roundToPx() } * end
-    AnimatedContent(listening, modifier.fillMaxSize().clipToBounds().background(MaterialTheme.colorScheme.surface), transitionSpec = {
-        if (still || (!targetState && gestureCommitted)) EnterTransition.None togetherWith ExitTransition.None
-        else {
-            val shift = if (targetState) distance else -distance
-            val move = tween<IntOffset>(260, easing = FastOutSlowInEasing)
-            val enter = slideInHorizontally(move) { shift } + fadeIn(tween(175, delayMillis = 85))
-            val exit = slideOutHorizontally(move) { -shift } + fadeOut(tween(85))
-            enter togetherWith exit
+    val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+    val distance = with(LocalDensity.current) { 24.dp.roundToPx() } * direction
+    val motion = MaterialTheme.motionScheme
+    val move = motion.defaultSpatialSpec<IntOffset>()
+    val effects = motion.defaultEffectsSpec<Float>()
+    val background = MaterialTheme.colorScheme.surface
+    Box(modifier.fillMaxSize().clipToBounds().background(background)) {
+        Box(Modifier.fillMaxSize().then(if (listening) Modifier.clearAndSetSemantics {} else Modifier)) { content(false) }
+        AnimatedVisibility(listening,
+            enter = if (still) EnterTransition.None else slideInHorizontally(move) { distance } + fadeIn(effects, initialAlpha = 0.82f),
+            exit = if (still || gestureCommitted) ExitTransition.None else slideOutHorizontally(move) { distance } + fadeOut(effects),
+            label = "Listening page") {
+            Box(Modifier.fillMaxSize().libraryBackMotion(backProgress).background(background)
+                .then(if (listening) Modifier else Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                    }
+                })) { content(true) }
         }
-    }, label = "Home and listening") { shown ->
-        val input = if (shown == listening) Modifier else Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
-            awaitPointerEventScope {
-                while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
-            }
-        }
-        Box(Modifier.fillMaxSize().then(input)) { content(shown) }
     }
 }

@@ -17,13 +17,13 @@ class MainActivity : ComponentActivity() {
         SplashHandoff.install(this)
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
-        setContent { AppTheme { MusicRoot(model) } }
         if (savedInstanceState == null) { playFromSearch(intent); openPlayer(intent); openDownloads(intent); shortcut(intent) }
+        setContent { AppTheme { MusicRoot(model) } }
     }
 
     /** The media notification (or the lock screen) was tapped: open the player, not just the app. */
     private fun openPlayer(intent: android.content.Intent?) {
-        if (intent?.getBooleanExtra(ua.olex.music.playback.PlaybackService.OPEN_PLAYER, false) == true) model.requestPlayer()
+        if (intent?.getBooleanExtra(ua.olex.music.playback.PlaybackService.OPEN_PLAYER, false) == true) model.openPlayerFromSystem()
     }
 
     override fun onNewIntent(intent: android.content.Intent) {

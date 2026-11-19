@@ -2,7 +2,10 @@
 
 package ua.olex.music.ui
 
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.input.pointer.pointerInput
@@ -188,31 +191,46 @@ private fun EqCurve(settings: EqualizerSettings, enabled: Boolean, held: Int?, o
         Modifier.fillMaxWidth().height(200.dp).semantics { contentDescription = "Equalizer curve" }
             .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
-                var index = -1
-                var lastDb = 0
-                var raw = 0.0
-                detectVerticalDragGestures(
-                    onDragStart = { at ->
-                        // The dot under the finger, by real distance: AutoEq often stacks bands a few
-                        // hundred hertz apart, one above another, and frequency alone can't tell them apart.
-                        val perDb = (size.height / 2f - 16.dp.toPx()) / range.toFloat()
-                        index = bands.indices.minByOrNull {
-                            val dx = xOf(bands[it].frequencyHz, size.width.toFloat()) - at.x
-                            val dy = (size.height / 2f - bands[it].gainDb.coerceIn(-range, range) * perDb).toFloat() - at.y
-                            dx * dx + dy * dy
-                        } ?: -1
-                        if (index >= 0) { onHold(index); raw = bands[index].gainDb; lastDb = raw.toInt(); haptics.tick() }
-                    },
-                    onDragEnd = { if (index >= 0) onDone(); index = -1 },
-                    onDragCancel = { if (index >= 0) onDone(); index = -1 },
-                ) { change, dy ->
-                    if (index < 0) return@detectVerticalDragGestures
-                    change.consume()
+                awaitEachGesture {
+                    val down = awaitFirstDown()
+                    val points = bands
                     val perDb = (size.height / 2f - 16.dp.toPx()) / range.toFloat()
-                    raw = (raw - dy / perDb).coerceIn(-range, range)
-                    val rounded = kotlin.math.round(raw * 2) / 2
-                    if (rounded.toInt() != lastDb) { lastDb = rounded.toInt(); haptics.tick() }
-                    onGain(index, rounded)
+                    val pickRadius = 24.dp.toPx()
+                    fun distance(index: Int): Float {
+                        val band = points[index]
+                        val dx = xOf(band.frequencyHz, size.width.toFloat()) - down.position.x
+                        val dy = (size.height / 2f - band.gainDb.coerceIn(-range, range) * perDb).toFloat() - down.position.y
+                        return dx * dx + dy * dy
+                    }
+                    val index = points.indices.minByOrNull(::distance) ?: return@awaitEachGesture
+                    if (distance(index) > pickRadius * pickRadius) return@awaitEachGesture
+                    var initialDrag = 0f
+                    val start = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
+                        initialDrag = overSlop
+                        change.consume()
+                    } ?: return@awaitEachGesture
+                    var raw = points[index].gainDb
+                    var lastGain = raw
+                    onHold(index)
+                    haptics.tick()
+                    fun applyDrag(dy: Float) {
+                        raw = (raw - dy / perDb).coerceIn(-range, range)
+                        val rounded = kotlin.math.round(raw * 2) / 2
+                        if (rounded.toInt() != lastGain.toInt()) haptics.tick()
+                        if (rounded != lastGain) {
+                            lastGain = rounded
+                            onGain(index, rounded)
+                        }
+                    }
+                    try {
+                        applyDrag(initialDrag)
+                        verticalDrag(start.id) { change ->
+                            applyDrag(change.position.y - change.previousPosition.y)
+                            change.consume()
+                        }
+                    } finally {
+                        onDone()
+                    }
                 }
             },
     ) {

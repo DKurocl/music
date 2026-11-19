@@ -26,6 +26,9 @@ class NowPlayingWidget : AppWidgetProvider() {
     }
 }
 
+/** The last visible media metadata, available before a new controller has restored its queue. */
+data class LastPlayedPreview(val title: String, val artist: String, val artworkUri: String?)
+
 /** What the widget and the Quick Settings tile show; written only by the playback service. */
 internal object NowPlaying {
     private const val PREFS = "now_playing"
@@ -40,6 +43,12 @@ internal object NowPlaying {
         val ids = manager.getAppWidgetIds(ComponentName(context, NowPlayingWidget::class.java))
         if (ids.isNotEmpty()) Thread { render(context, ids) }.start()
         MusicTileService.refresh(context)
+    }
+
+    fun preview(context: Context): LastPlayedPreview? {
+        val snapshot = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).all
+        val title = (snapshot["title"] as? String)?.takeIf { it.isNotBlank() } ?: return null
+        return LastPlayedPreview(title, (snapshot["artist"] as? String).orEmpty(), snapshot["art"] as? String)
     }
 
     fun playing(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("playing", false)
@@ -85,7 +94,7 @@ internal object NowPlaying {
                 setOnClickPendingIntent(R.id.widget_previous, button(context, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
                 // A tap on the widget opens the player itself, as the media notification does.
                 context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply { putExtra(PlaybackService.OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let {
-                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 0, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 1, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
                 }
             }
         }

@@ -148,7 +148,11 @@ class PlaybackService : MediaLibraryService() {
             equalizer.routeChanged(monitor.route.value)
             scope.launch { monitor.route.collect(equalizer::routeChanged) }
         }
-        persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope) { selectSources(it, allowDirect = true) }
+        persistence = PlaybackPersistence(player, PlaybackJournal.get(filesDir), scope, onRestoreComplete = {
+            session?.let { current ->
+                current.setSessionExtras(Bundle(current.sessionExtras).apply { putBoolean(QUEUE_RESTORED, true) })
+            }
+        }) { selectSources(it, allowDirect = true) }
         (application as? MediaCatalogOwner)?.let { owner -> scope.launch {
             owner.playbackSourceChanges.collectLatest {
                 try { refreshFutureSources() }
@@ -470,6 +474,9 @@ class PlaybackService : MediaLibraryService() {
     private fun publishSleepTimer() {
         session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply {
+                val start = sleepTimer.startedAtMs
+                val deadline = sleepTimer.deadlineMs
+                putLong(SleepTimerCommand.DURATION, if (start != null && deadline != null) deadline - start else 0)
                 putLong(SleepTimerCommand.DEADLINE, if (endOfTrack) SleepTimerCommand.END_OF_TRACK_DEADLINE else sleepTimer.deadlineMs ?: 0)
             })
         }
@@ -722,6 +729,7 @@ class PlaybackService : MediaLibraryService() {
 
     companion object {
         /** Extra on the app's launch intent: open the player (the media notification and lock screen tap). */
+        internal const val QUEUE_RESTORED = "ua.olex.music.queue_restored"
         const val OPEN_PLAYER = "ua.olex.music.open_player"
         /** In [UsbBitPerfect.PREFS]: the owner's battery-saver offload switch. */
         const val OFFLOAD_KEY = "offload"
