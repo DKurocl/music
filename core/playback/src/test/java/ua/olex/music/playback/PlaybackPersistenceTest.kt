@@ -175,6 +175,26 @@ class PlaybackPersistenceTest {
         assertEquals(Player.REPEAT_MODE_ALL, player.repeatMode)
     }
 
+    @Test fun aSystemPlayDuringColdRestoreUsesTheRestoredQueue() = runTest {
+        journal.write(saved())
+        val allowCurrent = kotlinx.coroutines.CompletableDeferred<Unit>()
+        persistence = PlaybackPersistence(player, journal, backgroundScope) { items ->
+            if (items.size == 1) allowCurrent.await()
+            items
+        }
+        runCurrent(); journal.read(); runCurrent()
+        val result = kotlinx.coroutines.CompletableDeferred<PlaybackCheckpoint?>()
+        backgroundScope.launch { result.complete(persistence?.resumption()) }
+        runCurrent()
+        assertFalse(result.isCompleted)
+        allowCurrent.complete(Unit)
+        runCurrent()
+        val resumed = requireNotNull(result.await())
+        assertEquals(1, resumed.index)
+        assertEquals(42_000L, resumed.positionMs)
+        assertEquals(listOf("local:1", "local:2"), resumed.items.map { it.mediaId })
+    }
+
     @Test fun aNewPlaybackIntentRejectsResumptionBeforeTheNewTimelineIsReady() = runTest {
         persistence = PlaybackPersistence(player, journal, backgroundScope)
         runCurrent(); journal.read(); runCurrent()
