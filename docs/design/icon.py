@@ -1,4 +1,4 @@
-"""Generate Music's adaptive launch icon from the approved Play and note artwork."""
+"""Generate Music's launcher and notification marks from the approved Play and note artwork."""
 
 from pathlib import Path
 
@@ -103,6 +103,19 @@ def main():
     write("ic_launcher_foreground.xml", f'<vector {ANDROID} {AAPT} {SIZE}>{vector()}</vector>')
     write("ic_launcher_background.xml", f'<shape {ANDROID}><solid android:color="{BACKGROUND}"/></shape>')
     write("ic_launcher_monochrome.xml", f'<vector {ANDROID} {SIZE}>{vector(themed=True)}</vector>')
+    notification = ROOT / "core/playback/src/main/res/drawable/music_notification_icon.xml"
+    notification.write_text(HEADER + f'''<vector {ANDROID}
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group android:scaleX="0.022" android:scaleY="0.022"
+        android:translateX="-2.34" android:translateY="-2.28">
+        <path android:fillColor="#FFFFFFFF" android:fillType="evenOdd"
+            android:pathData="{PLAY} {NOTE}" />
+    </group>
+</vector>
+''', encoding="utf-8")
 
     motion = (target("mark", animator("scaleX", 0.88, 1, 250), animator("scaleY", 0.88, 1, 250))
               + target("note", animator("translationY", -53, 0, DURATION - NOTE_DELAY, NOTE_DELAY),

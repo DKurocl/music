@@ -910,85 +910,91 @@ internal fun SleepTimerDialog(
         changed = true
     }
     AppSheet(onDismiss) {
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Sleep timer", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.fillMaxWidth())
-            // The dial: drag around it in 5 minute steps (up to 2 hours), as Google's Clock sets a timer.
-            SleepDial(
-                fraction = when {
-                    showingRun && leftMs != null -> (leftMs.toFloat() / runningSpan).coerceIn(0f, 1f)
-                    showingRun && runningEnd || endOfSong -> 1f
-                    else -> minutes / 120f
-                },
-                enabled = !showingRun,
-                onDrag = { fraction -> selectMinutes(kotlin.math.round(fraction * 24).toInt() * 5) },
+            Column(
+                Modifier.weight(1f, fill = false).fillMaxWidth().verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                when {
-                    showingRun && leftMs != null -> {
-                        Text("%d:%02d".format(leftMs / 60_000, leftMs / 1_000 % 60), style = MaterialTheme.typography.displayMediumEmphasized)
-                        Text("left", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                // The dial: drag around it in 5 minute steps (up to 2 hours), as Google's Clock sets a timer.
+                SleepDial(
+                    fraction = when {
+                        showingRun && leftMs != null -> (leftMs.toFloat() / runningSpan).coerceIn(0f, 1f)
+                        showingRun && runningEnd || endOfSong -> 1f
+                        else -> minutes / 120f
+                    },
+                    enabled = !showingRun,
+                    onDrag = { fraction -> selectMinutes(kotlin.math.round(fraction * 24).toInt() * 5) },
+                ) {
+                    when {
+                        showingRun && leftMs != null -> {
+                            Text("%d:%02d".format(leftMs / 60_000, leftMs / 1_000 % 60), style = MaterialTheme.typography.displayMediumEmphasized)
+                            Text("left", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                        }
+                        (showingRun && runningEnd) || endOfSong -> {
+                            Symbol(Glyph.NOTE, size = 44.dp, filled = true, color = cs.primary)
+                            Text(if (showingRun) "Finishing this song" else "End of this song",
+                                style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                        }
+                        else -> {
+                            Text("$minutes", style = MaterialTheme.typography.displayLargeEmphasized)
+                            val at = java.time.LocalTime.now().plusMinutes(minutes.toLong())
+                            Text("min · until ${"%02d:%02d".format(at.hour, at.minute)}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
+                        }
                     }
-                    (showingRun && runningEnd) || endOfSong -> {
-                        Symbol(Glyph.NOTE, size = 44.dp, filled = true, color = cs.primary)
-                        Text(if (showingRun) "Finishing this song" else "End of this song",
-                            style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
-                    }
-                    else -> {
-                        Text("$minutes", style = MaterialTheme.typography.displayLargeEmphasized)
-                        val at = java.time.LocalTime.now().plusMinutes(minutes.toLong())
-                        Text("min · until ${"%02d:%02d".format(at.hour, at.minute)}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
-                    }
-                }
-                if (showingRun) TextButton(onClick = {
-                    minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
-                    endOfSong = runningEnd
-                    if (!runningEnd) finishTrack = finishingTrack
-                    changed = true
-                    haptics.tick()
-                }) { Text("Edit timer") }
-                else if (!endOfSong) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TextButton(onClick = { selectMinutes(minutes - 5) }, enabled = minutes > 5,
-                        modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
-                    TextButton(onClick = { selectMinutes(minutes + 5) }, enabled = minutes < 120,
-                        modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
-                }
-            }
-            // Quick lengths as one connected group; End of song last.
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
-                val options = listOf(15, 30, 45, 60, end)
-                options.forEachIndexed { i, m ->
-                    val checked = !showingRun && if (m == end) endOfSong else !endOfSong && minutes == m
-                    androidx.compose.material3.ToggleButton(checked = checked, onCheckedChange = {
-                        haptics.tick(); changed = true
-                        if (m == end) endOfSong = true else { endOfSong = false; minutes = m }
-                    }, shapes = when (i) { 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
-                        options.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
-                        else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes() },
-                        contentPadding = PaddingValues(0.dp),
-                        modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = if (m == end) "When this song ends" else "$m minutes" }) {
-                        if (m == end) Symbol(Glyph.NOTE, size = 20.dp, filled = checked) else Text("$m")
+                    if (showingRun) TextButton(onClick = {
+                        minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
+                        endOfSong = runningEnd
+                        if (!runningEnd) finishTrack = finishingTrack
+                        changed = true
+                        haptics.tick()
+                    }) { Text("Edit timer") }
+                    else if (!endOfSong) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { selectMinutes(minutes - 5) }, enabled = minutes > 5,
+                            modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
+                        TextButton(onClick = { selectMinutes(minutes + 5) }, enabled = minutes < 120,
+                            modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
                     }
                 }
-            }
-            if (showingRun && !runningEnd) {
-                Text(if (finishingTrack) "The song playing when time is up will finish." else "Music fades out before the timer ends.",
-                    modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-            } else if (!showingRun && !endOfSong) {
-                fun changeFinishTrack(checked: Boolean) {
-                    haptics.toggle(checked)
-                    finishTrack = checked
-                }
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
-                    .background(cs.surfaceContainerHigh)
-                    .then(Modifier.toggleable(finishTrack, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = ::changeFinishTrack))
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Finish the song", style = MaterialTheme.typography.titleMedium)
-                        Text(if (finishTrack) "When the countdown ends" else "Fade out when the countdown ends",
-                            style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                // Quick lengths as one connected group; End of song last.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
+                    val options = listOf(15, 30, 45, 60, end)
+                    options.forEachIndexed { i, m ->
+                        val checked = !showingRun && if (m == end) endOfSong else !endOfSong && minutes == m
+                        androidx.compose.material3.ToggleButton(checked = checked, onCheckedChange = {
+                            haptics.tick(); changed = true
+                            if (m == end) endOfSong = true else { endOfSong = false; minutes = m }
+                        }, shapes = when (i) { 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
+                            options.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
+                            else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes() },
+                            contentPadding = PaddingValues(0.dp),
+                            modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = if (m == end) "When this song ends" else "$m minutes" }) {
+                            if (m == end) Symbol(Glyph.NOTE, size = 20.dp, filled = checked) else Text("$m")
+                        }
                     }
-                    androidx.compose.material3.Switch(checked = finishTrack, onCheckedChange = null)
+                }
+                if (showingRun && !runningEnd) {
+                    Text(if (finishingTrack) "The song playing when time is up will finish." else "Music fades out before the timer ends.",
+                        modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                } else if (!showingRun && !endOfSong) {
+                    fun changeFinishTrack(checked: Boolean) {
+                        haptics.toggle(checked)
+                        finishTrack = checked
+                    }
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
+                        .background(cs.surfaceContainerHigh)
+                        .then(Modifier.toggleable(finishTrack, role = androidx.compose.ui.semantics.Role.Switch, onValueChange = ::changeFinishTrack))
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Finish the song", style = MaterialTheme.typography.titleMedium)
+                            Text(if (finishTrack) "When the countdown ends" else "Fade out when the countdown ends",
+                                style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                        }
+                        androidx.compose.material3.Switch(checked = finishTrack, onCheckedChange = null)
+                    }
                 }
             }
             if (showingRun) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
