@@ -955,30 +955,33 @@ class DesignGalleryTest {
 
     @Test fun playingTrackMark() {
         val playing = androidx.compose.runtime.mutableStateOf(true)
+        val current = androidx.compose.runtime.mutableStateOf(true)
         compose.mainClock.autoAdvance = false
         compose.setContent { AppTheme { CompositionLocalProvider(LocalIsPlaying provides playing.value) {
-            NowPlayingOverlay(Modifier.size(26.dp).testTag("track-mark"))
+            NowPlayingOverlay(current.value, Modifier.size(46.dp).background(MaterialTheme.colorScheme.surface).testTag("track-mark"))
         } } }
         try {
             val mark = compose.onNodeWithTag("track-mark")
-            fun frame(i: Int): Bitmap {
+            fun frame(name: String): Bitmap {
+                compose.waitForIdle()
                 val bitmap = mark.captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false)
-                File("build/reports/ui-previews/gallery", "01g-bars-$i.png").apply { parentFile.mkdirs() }
+                File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile.mkdirs() }
                     .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                 return bitmap
             }
-            compose.mainClock.advanceTimeBy(32)
-            val initial = frame(0)
-            repeat(11) { i ->
-                compose.mainClock.advanceTimeBy(96)
-                val next = frame(i + 1)
-                if (i == 2) org.junit.Assert.assertFalse(initial.sameAs(next))
-            }
+            compose.mainClock.advanceTimeBy(160)
+            val active = frame("active")
             compose.runOnUiThread { playing.value = false }
-            compose.mainClock.advanceTimeBy(32)
-            val paused = frame(12)
             compose.mainClock.advanceTimeBy(320)
-            org.junit.Assert.assertTrue(paused.sameAs(mark.captureToImage().asAndroidBitmap()))
+            val paused = frame("paused")
+            org.junit.Assert.assertFalse(active.sameAs(paused))
+            compose.runOnUiThread { current.value = false }
+            compose.mainClock.advanceTimeBy(64)
+            val fading = frame("fading")
+            compose.mainClock.advanceTimeBy(160)
+            val gone = frame("gone")
+            org.junit.Assert.assertFalse(paused.sameAs(fading))
+            org.junit.Assert.assertFalse(fading.sameAs(gone))
         } finally { compose.mainClock.autoAdvance = true }
     }
 
