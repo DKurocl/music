@@ -927,10 +927,10 @@ class DesignGalleryTest {
         val waiting = androidx.compose.runtime.mutableStateOf(true)
         var closed = false
         val song = demoSongs.first()
-        compose.setContent { AppTheme {
+        compose.setContent { AppTheme { Images {
             PlayerOpening(ua.olex.music.playback.LastPlayedPreview(song.title, song.artist, song.artworkUri),
                 empty = !waiting.value, error = null, onClose = { closed = true }, onRetry = {})
-        } }
+        } } }
         compose.onNodeWithText(song.title).assertExists()
         compose.onNodeWithText("Opening player…").assertExists()
         shot("01i-player-from-widget")
