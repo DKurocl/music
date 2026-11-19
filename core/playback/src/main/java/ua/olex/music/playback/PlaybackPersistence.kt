@@ -23,6 +23,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     private var intentGeneration = 0L
     private var closed = false
     private var capturedTimeline: androidx.media3.common.Timeline? = null
+    private var playlistDirty = false
     private var pendingResumption: PlaybackCheckpoint? = null
     private val initial = serviceScope.async {
         try { journal.read()?.let { it.copy(items = resolveSources(it.items)) } }
@@ -47,10 +48,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     override fun onEvents(player: Player, events: Player.Events) {
         if (closed) return
         val timelineChanged = events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED, Player.EVENT_REPEAT_MODE_CHANGED)
-        if (timelineChanged) {
-            changed = true
-            captureQueue()
-        }
+        if (timelineChanged) changed = true
         if (timelineChanged || events.containsAny(Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) checkpoint()
         if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
             clock?.cancel()
@@ -60,6 +58,12 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
 
     override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
         changed = true
+        if (reason == Player.TIMELINE_CHANGE_REASON_SOURCE_UPDATE) {
+            // Preparing the next song can change window duration, but not the authored queue.
+            if (!playlistDirty && snapshot?.items?.size == timeline.windowCount) capturedTimeline = timeline
+            return
+        }
+        playlistDirty = true
         val modes = pendingResumption ?: return
         pendingResumption = null
         val items = (0 until player.mediaItemCount).map(player::getMediaItemAt)
@@ -107,12 +111,13 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
             index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, true)
         }
         capturedTimeline = timeline
+        playlistDirty = false
         snapshot = PlaybackCheckpoint(UUID.randomUUID().toString(), items, order, player.shuffleModeEnabled, player.repeatMode, 0, 0)
     }
 
     private fun checkpoint() {
         // onDestroy can precede the batched onEvents callback for the final queue edit.
-        if (changed && (capturedTimeline !== player.currentTimeline || snapshot?.shuffle != player.shuffleModeEnabled || snapshot?.repeat != player.repeatMode)) captureQueue()
+        if (changed && (playlistDirty || capturedTimeline !== player.currentTimeline || snapshot?.shuffle != player.shuffleModeEnabled || snapshot?.repeat != player.repeatMode)) captureQueue()
         val state = snapshot ?: return
         journal.write(state.copy(index = player.currentMediaItemIndex.coerceAtLeast(0),
             positionMs = if (player.playbackState == Player.STATE_ENDED) 0 else player.currentPosition.coerceAtLeast(0)))

@@ -38,7 +38,7 @@ import ua.olex.music.model.SongStats
 import ua.olex.music.model.Track
 
 /** Both sides of a filter transition retain the exact recommendations and queue that were drawn. */
-private data class HomeFeed(
+private class HomeFeed(
     val mood: YouTubeMusic.Mood?, val index: Int, val songs: List<Track>, val loading: Boolean,
     val mixes: List<YouTubeMusic.Card>, val albums: List<YouTubeMusic.Card>,
 ) {
@@ -68,17 +68,21 @@ internal fun HomePage(
     val revision = if (!online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
     val day = java.time.LocalDate.now().toEpochDay()
     val moodView = if (mood != null) key(cache, mood, online) { rememberMoodView(mood, online) } else null
+    // A visible shelf is a listening session. Re-rank on entry or filter changes, and allow
+    // initially empty history and stats to arrive after Room opens.
+    val seeds = remember(cache, day, mood, history.isEmpty()) { history }
+    val weights = remember(cache, day, mood, stats.isEmpty()) { stats }
     val queue = key(cache, online, mood?.label) {
         produceState(if (mood == null && cache.online == online) cache.last else null,
-            library, history, stats, favourites, youTubeHome, excluded, day, revision, moodView?.page) {
+            library, seeds, weights, favourites, youTubeHome, excluded, day, revision, moodView?.page) {
             val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-                val retained = (history + favourites).filter { YouTubeMusic.isOnline(it) }
+                val retained = (seeds + favourites).filter { YouTubeMusic.isOnline(it) }
                 val catalogue = library.songs + retained
                 val candidates = if (mood == null) catalogue else Mix.moodSongs(mood.label, catalogue)
                 val suggested = if (mood != null) moodView?.page?.songs.orEmpty() else youTubeHome.flatMap { shelf ->
                     shelf.songs + shelf.cards.filter { it.kind == YouTubeMusic.Card.Kind.SONG }.map { it.song() }
                 }
-                ua.olex.music.model.HomePicks.select(candidates, suggested, history, favourites, stats,
+                ua.olex.music.model.HomePicks.select(candidates, suggested, seeds, favourites, weights,
                     day + (mood?.label?.hashCode() ?: 0), { t ->
                         online || !t.uri.startsWith("ytm://") || ua.olex.music.playback.CacheBudget.isStreamCached(t.uri)
                     }, { t -> excluded.isNotEmpty() && (t.id.value in excluded || Mix.songKey(t) in excluded) })
@@ -88,12 +92,15 @@ internal fun HomePage(
         }.value
     }
     val cacheRevision = ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value
-    val shuffleTracks = rememberOffMain(library, history, favourites, youTubeHome, cacheRevision, initial = library.songs) {
+    val cachedExtras = rememberOffMain(history, favourites, youTubeHome, cacheRevision, initial = emptyList<Track>()) {
         val candidates = history + favourites + youTubeHome.flatMap { shelf ->
             shelf.songs + shelf.cards.filter { it.kind == YouTubeMusic.Card.Kind.SONG }.map { it.song() }
         }
-        (library.songs + candidates.filter { YouTubeMusic.isOnline(it) && ua.olex.music.playback.CacheBudget.isStreamCached(it.uri) })
+        candidates.filter { YouTubeMusic.isOnline(it) && ua.olex.music.playback.CacheBudget.isStreamCached(it.uri) }
             .distinctBy { it.recordingId ?: it.id.value }
+    }
+    val shuffleTracks = rememberOffMain(library, cachedExtras, initial = library.songs) {
+        (library.songs + cachedExtras).distinctBy { it.recordingId ?: it.id.value }
     }
     val stateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val songs = queue.orEmpty()
@@ -137,7 +144,11 @@ internal fun HomePage(
         }
         picks.distinctBy { it.title.lowercase() to it.artist.orEmpty().lowercase() }.take(6)
     }
-    val nextFeed = HomeFeed(mood, mood?.let { moods.indexOf(it) + 1 } ?: 0, songs, queue == null || moodView?.loading == true, mixes, albums)
+    val loading = queue == null || moodView?.loading == true
+    val moodIndex = mood?.let { moods.indexOf(it) + 1 } ?: 0
+    val nextFeed = remember(mood, moodIndex, songs, loading, mixes, albums) {
+        HomeFeed(mood, moodIndex, songs, loading, mixes, albums)
+    }
     var ready by remember(cache, online) { mutableStateOf<HomeFeed?>(null) }
     if (queue != null) SideEffect { ready = nextFeed }
     // Keep the last frame until the local ranking finishes. Network sections may arrive later.
@@ -183,7 +194,7 @@ internal fun HomePage(
                         }
                         val start = if (shownMood == null) 0 else minOf(3, shownSongs.size)
                         if (start < shownSongs.size) item(key = "picks") {
-                            QuickPicks(if (shownMood == null) contextName else "More picks", shownSongs.drop(start), currentId, { _, i -> onPlay(shownSongs, i + start, contextName) }, onTrackActions)
+                            QuickPicks(if (shownMood == null) contextName else "More picks", remember(shownSongs, start) { if (start == 0) shownSongs else shownSongs.drop(start) }, currentId, { _, i -> onPlay(shownSongs, i + start, contextName) }, onTrackActions)
                         }
                     } else if (frame.loading) {
                         item(key = "loading") { PlaceholderRow() }

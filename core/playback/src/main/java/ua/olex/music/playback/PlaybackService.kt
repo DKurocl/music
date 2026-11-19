@@ -285,9 +285,19 @@ class PlaybackService : MediaLibraryService() {
         val player = exoOrNull() ?: return
         if (player.mediaItemCount == 0) return
         val request = sourceRequest
-        val snapshot = (0 until player.mediaItemCount).map(player::getMediaItemAt)
-        val selected = selectSources(snapshot, allowDirect = true).associateBy(::occurrence)
-        if (request != sourceRequest || player.mediaItemCount == 0) return
+        // Timeline is immutable. Read its windows and diff source metadata off the player thread.
+        val timeline = player.currentTimeline
+        val selected = withContext(Dispatchers.Default) {
+            val window = androidx.media3.common.Timeline.Window()
+            val snapshot = List(timeline.windowCount) { timeline.getWindow(it, window).mediaItem }
+            val resolved = selectSources(snapshot, allowDirect = true)
+            buildMap {
+                for (i in snapshot.indices) {
+                    if (!PlaybackSourceItems.same(snapshot[i], resolved[i])) put(occurrence(snapshot[i]), resolved[i])
+                }
+            }
+        }
+        if (selected.isEmpty() || request != sourceRequest || player.mediaItemCount == 0) return
         SourceQueueUpdates.apply(player, selected)
     }
 

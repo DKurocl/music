@@ -921,6 +921,38 @@ class DesignGalleryTest {
         compose.onNodeWithText("Shuffle all").assertExists()
     }
 
+    @Test fun quickStartMotion() {
+        var shuffles = 0
+        var liked = 0
+        val songs = demoSongs.take(3)
+        compose.setContent { AppTheme {
+            Column(Modifier.fillMaxWidth().testTag("quick-starts")) {
+                HomeStarts(emptyList(), songs.size, songs, {}, { shuffles++ }, { liked++ }, {})
+            }
+        } }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        try {
+            fun frame(i: Int) {
+                val bitmap = compose.onNodeWithTag("quick-starts").captureToImage().asAndroidBitmap()
+                File("build/reports/ui-previews/gallery", "01h-starts-$i.png").apply { parentFile.mkdirs() }
+                    .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            frame(0)
+            compose.onNodeWithText("Shuffle all").performClick()
+            compose.onNodeWithText("Liked").performClick()
+            for (i in 1..8) {
+                compose.mainClock.advanceTimeBy(64)
+                frame(i)
+            }
+            compose.onNodeWithText("Liked").performTouchInput { down(center); cancel() }
+            org.junit.Assert.assertEquals(1, shuffles)
+            org.junit.Assert.assertEquals(1, liked)
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
     @Test fun playingTrackMark() {
         val playing = androidx.compose.runtime.mutableStateOf(true)
         compose.mainClock.autoAdvance = false
