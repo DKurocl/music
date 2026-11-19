@@ -21,6 +21,8 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-19: start radio at the seed, clip player cover swipes and load sharper online artwork.
+
 - [x] Codex, 2026-11-19: confirmed radio queues, direct output picker handoff and stable player startup/resume.
 
 - [x] Codex, 2026-11-19: simplify the playlist hub, clean up playback glyphs and recover song radio from linked files.

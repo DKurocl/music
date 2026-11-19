@@ -9,7 +9,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.spring
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import kotlinx.coroutines.flow.first
@@ -79,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -453,6 +456,14 @@ private fun rememberProgress(state: PlayerState, position: () -> Long, everyMs: 
 
 // ---- player page ----------------------------------------------------------------------------
 
+private data class CoverSwipe(
+    val from: String?,
+    val to: String,
+    val fromArtwork: String?,
+    val toArtwork: String?,
+    val direction: Int,
+)
+
 /** The player surface is independent of service/route bindings so its real layouts can be reviewed in tests. */
 @Composable
 internal fun PlayerPage(
@@ -522,155 +533,166 @@ internal fun PlayerPage(
             var heart by remember { androidx.compose.runtime.mutableStateOf(false) }
             val heartScale by animateFloatAsState(if (heart) 1f else 0f, motion.fastSpatialSpec(), label = "heart",
                 finishedListener = { if (heart) heart = false })
-            val spatial = motion.defaultSpatialSpec<Float>()
-            // The covers sit on a strip: the previous and next songs' covers wait beside this one and
-            // slide in with the finger, so a skip never shows an empty space.
-            val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 20.dp.toPx() }
-            val step = coverWidth + gap
-            // The cover Next really leads to: with shuffle on that is not the neighbour in the list.
+            val settle = remember { spring<Float>(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium) }
             val nextArt = state.queue.getOrNull(state.nextIndex)?.artworkUri
             val previousArt = state.queue.getOrNull(state.previousIndex)?.artworkUri
             val occurrence = state.queue.getOrNull(state.queueIndex)?.key ?: state.mediaId
-            val canGoPrevious = state.hasPrevious
             val latestOccurrence by rememberUpdatedState(occurrence)
+            val latestState by rememberUpdatedState(state)
             val acceptsSkip by rememberUpdatedState(state.connected && state.error == null)
+            val latestPosition by rememberUpdatedState(position)
             var gestureItem by remember { mutableStateOf(occurrence) }
-            var skipping by remember { mutableStateOf(false) }
-            var swipedTo by remember { mutableStateOf<String?>(null) }
-            var incomingSide by remember { mutableFloatStateOf(0f) }
+            var committed by remember { mutableStateOf<CoverSwipe?>(null) }
             var dragOffset by remember { mutableStateOf<Float?>(null) }
+            var revealPrevious by remember { mutableStateOf(false) }
             var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
             val visibleOffset = {
-                when {
-                    gestureItem == latestOccurrence -> dragOffset ?: swipe.value
-                    swipedTo == latestOccurrence -> swipe.value + incomingSide
-                    else -> 0f
-                }
+                val change = committed
+                val current = latestOccurrence
+                if (gestureItem == current || (change != null && change.to == current)) {
+                    (dragOffset ?: swipe.value).coerceIn(-coverWidth.toFloat(), coverWidth.toFloat())
+                } else 0f
             }
-            val direction by remember { derivedStateOf { visibleOffset().compareTo(0f) } }
+            val direction by remember {
+                derivedStateOf { committed?.direction?.takeIf { visibleOffset() != 0f } ?: visibleOffset().compareTo(0f) }
+            }
             val powerSave = LocalPowerSave.current
             LaunchedEffect(occurrence, lyricsShown) {
-                val offset = if (!powerSave && swipedTo == occurrence && gestureItem != occurrence) visibleOffset() else 0f
+                // The session can acknowledge the skip before the artwork reaches the centre.
+                val swap = committed
+                if (!lyricsShown && swap != null && swap.to == occurrence) return@LaunchedEffect
                 settleJob?.cancel()
-                skipping = false
+                committed = null
                 dragOffset = null
-                swipe.snapTo(offset)
+                swipe.snapTo(0f)
                 gestureItem = occurrence
-                swipedTo = null
-                if (offset != 0f) swipe.animateTo(0f, spatial)
             }
             androidx.compose.animation.Crossfade(lyricsShown && inlineLyrics != null,
                 animationSpec = androidx.compose.animation.core.tween(if (powerSave) 0 else 165), label = "Lyrics and artwork") { words ->
-            if (words && inlineLyrics != null) inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f).playerCoverEndpoint(false))
-            else Box(contentAlignment = Alignment.Center) {
-                // Keep the exact three requested images alive across index changes. The neighbour
-                // under the finger and the new centre read the same frame in the same composition.
-                val currentArt = state.artworkUri
-                val covers = listOfNotNull(currentArt, nextArt, previousArt).distinct().associateWith { uri ->
-                    androidx.compose.runtime.key(uri) {
-                        rememberCoverImage(uri, ArtworkPlan.LARGE, coverWidth.takeIf { it > 1 } ?: 0)
+                if (words && inlineLyrics != null) {
+                    inlineLyrics(Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f).playerCoverEndpoint(false))
+                } else {
+                    val currentArt = state.artworkUri
+                    val swap = committed?.takeIf { occurrence == it.from || occurrence == it.to }
+                    val covers = listOfNotNull(currentArt, nextArt, previousArt, swap?.fromArtwork, swap?.toArtwork)
+                        .distinct().associateWith { uri ->
+                            androidx.compose.runtime.key(uri) {
+                                rememberCoverImage(uri, ArtworkPlan.LARGE, coverWidth.takeIf { it > 1 } ?: 0)
+                            }
+                        }
+                    val tapFavourite by rememberUpdatedState(onFavourite)
+                    val tapMore by rememberUpdatedState(onMore)
+                    val isFavourite by rememberUpdatedState(favourite)
+                    val next by rememberUpdatedState(onNext)
+                    val previous by rememberUpdatedState(onPrevious)
+                    val showNext = swap?.direction == -1 || (swap == null && direction < 0 && state.hasNext)
+                    val showPrevious = swap?.direction == 1 || (swap == null && direction > 0 && revealPrevious)
+                    val shape = if (LocalPlayerTravel.current != null) playerCoverShape else RoundedCornerShape(32.dp)
+                    Box(
+                        Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
+                            .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
+                            .playerCoverEndpoint(false).clip(shape)
+                            .background(cs.surfaceContainerHighest)
+                            .semantics {
+                                contentDescription = "Album artwork"
+                                if (tapMore != null) onLongClick("Song actions") { tapMore?.invoke(); true }
+                            }
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onDoubleTap = { tapFavourite?.let { action ->
+                                        if (!isFavourite) heart = true
+                                        haptics.like(!isFavourite)
+                                        action()
+                                    } },
+                                    onLongPress = { tapMore?.let { haptics.longPress(); it() } },
+                                )
+                            }
+                            .pointerInput(occurrence, powerSave, restoring) {
+                                if (restoring) return@pointerInput
+                                fun finishDrag(release: Boolean) {
+                                    val x = dragOffset ?: return
+                                    val width = coverWidth.toFloat()
+                                    val playback = latestState
+                                    val goNext = release && x < -width * 0.2f
+                                    val goPrevious = release && x > width * 0.2f
+                                    val target = when {
+                                        goNext && playback.hasNext -> playback.queue.getOrNull(playback.nextIndex)
+                                        goPrevious && revealPrevious -> playback.queue.getOrNull(playback.previousIndex)
+                                        else -> null
+                                    }?.takeUnless { it.key == occurrence }
+                                    settleJob = scope.launch {
+                                        swipe.snapTo(x)
+                                        dragOffset = null
+                                        if (occurrence != latestOccurrence) return@launch
+                                        if (target != null) {
+                                            val side = if (goNext) -1 else 1
+                                            committed = CoverSwipe(occurrence, target.key, playback.artworkUri, target.artworkUri, side)
+                                            haptics.skip(goNext)
+                                            if (goNext) next() else previous()
+                                            if (powerSave) swipe.snapTo(side * width) else swipe.animateTo(side * width, settle)
+                                            kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                                                androidx.compose.runtime.snapshotFlow { latestOccurrence != occurrence || !acceptsSkip }.first { it }
+                                            }
+                                            if (latestOccurrence == target.key) {
+                                                committed = null
+                                                swipe.snapTo(0f)
+                                                gestureItem = target.key
+                                                return@launch
+                                            }
+                                        } else if (goNext && playback.hasNext) {
+                                            haptics.skip(true)
+                                            next()
+                                        } else if (goPrevious) {
+                                            haptics.skip(false)
+                                            previous()
+                                        }
+                                        if (powerSave) swipe.snapTo(0f) else swipe.animateTo(0f, settle)
+                                        committed = null
+                                    }
+                                }
+                                detectHorizontalDragGestures(
+                                    onDragStart = {
+                                        if (committed == null) {
+                                            settleJob?.cancel()
+                                            revealPrevious = latestState.hasPrevious && latestPosition() < 3_000
+                                            dragOffset = visibleOffset()
+                                        }
+                                    },
+                                    onDragEnd = { if (committed == null) finishDrag(release = true) },
+                                    onDragCancel = { if (committed == null) finishDrag(release = false) },
+                                ) { change, amount ->
+                                    change.consume()
+                                    val x = dragOffset
+                                    if (committed == null && x != null) {
+                                        dragOffset = (x + amount).coerceIn(-coverWidth.toFloat(), coverWidth.toFloat())
+                                    }
+                                }
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val emptyCover = CoverImage(null, false)
+                        if (showNext || showPrevious) {
+                            val incomingArt = if (swap != null) swap.toArtwork else if (showNext) nextArt else previousArt
+                            PlayerCoverFace(covers[incomingArt] ?: emptyCover,
+                                Modifier.matchParentSize().graphicsLayer {
+                                    translationX = kotlin.math.round(visibleOffset()) + if (showNext) coverWidth else -coverWidth
+                                }, 0.dp, retainWhileLoading = false, shape = RectangleShape)
+                        }
+                        val outgoingArt = if (swap != null) swap.fromArtwork else currentArt
+                        PlayerCoverFace(covers[outgoingArt] ?: emptyCover,
+                            Modifier.matchParentSize().graphicsLayer {
+                                val x = visibleOffset()
+                                translationX = if ((!showNext && x < 0) || (!showPrevious && x > 0)) rubber(x, 60.dp.toPx())
+                                    else kotlin.math.round(x)
+                            },
+                            corner = 0.dp, motion = motionCover.takeIf { swap == null },
+                            moving = state.isPlaying, showMotion = direction == 0,
+                            retainWhileLoading = false, shape = RectangleShape,
+                        )
+                        if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
+                            modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })
                     }
                 }
-                val emptyCover = CoverImage(null, false)
-                val side = if (direction < 0) 1 else -1
-                if (direction != 0 && (if (side > 0) state.hasNext else canGoPrevious)) {
-                    PlayerCoverFace(covers[if (side > 0) nextArt else previousArt] ?: emptyCover,
-                        Modifier.matchParentSize().graphicsLayer {
-                            val x = visibleOffset()
-                            val progress = (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
-                            translationX = x + side * step
-                            scaleX = 0.94f + 0.06f * progress
-                            scaleY = scaleX
-                        }, 32.dp, retainWhileLoading = false)
-                }
-                val tapFavourite by rememberUpdatedState(onFavourite)
-                val tapMore by rememberUpdatedState(onMore)
-                val isFavourite by rememberUpdatedState(favourite)
-                val next by rememberUpdatedState(onNext)
-                val previous by rememberUpdatedState(onPrevious)
-                PlayerCoverFace(
-                    covers[currentArt] ?: emptyCover,
-                    Modifier.widthIn(max = 380.dp).fillMaxWidth().aspectRatio(1f)
-                        .onSizeChanged { coverWidth = it.width.coerceAtLeast(1) }
-                        .semantics {
-                            contentDescription = "Album artwork"
-                            if (tapMore != null) onLongClick("Song actions") { tapMore?.invoke(); true }
-                        }
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onDoubleTap = { tapFavourite?.let { action ->
-                                    if (!isFavourite) heart = true
-                                    haptics.like(!isFavourite)
-                                    action()
-                                } },
-                                onLongPress = { tapMore?.let { haptics.longPress(); it() } },
-                            )
-                        }
-                        .pointerInput(occurrence, state.hasNext, canGoPrevious, step, powerSave, restoring) {
-                            if (restoring) return@pointerInput
-                            fun finishDrag(commit: Boolean) {
-                                if (skipping) return
-                                val x = dragOffset ?: return
-                                settleJob = scope.launch {
-                                    swipe.snapTo(x)
-                                    dragOffset = null
-                                    val goNext = commit && x < -coverWidth * 0.2f && state.hasNext
-                                    val goPrevious = commit && x > coverWidth * 0.2f && canGoPrevious && position() < 3_000
-                                    if (goNext || goPrevious) {
-                                        haptics.skip(goNext)
-                                        skipping = true
-                                        try {
-                                            if (occurrence != latestOccurrence) return@launch
-                                            val target = if (goNext) state.nextIndex else state.previousIndex
-                                            swipedTo = state.queue.getOrNull(target)?.key
-                                            incomingSide = if (goNext) step else -step
-                                            if (goNext) next() else previous()
-                                            if (!powerSave) swipe.animateTo(if (goNext) -step else step, spatial)
-                                            // Hold the incoming cover until the session acknowledges the command.
-                                            // An unresponsive controller must eventually give the gesture back.
-                                            if (target != state.queueIndex) kotlinx.coroutines.withTimeoutOrNull(3_000) {
-                                                androidx.compose.runtime.snapshotFlow { latestOccurrence != occurrence || !acceptsSkip }
-                                                    .first { it }
-                                            }
-                                        } finally {
-                                            if (latestOccurrence == occurrence) swipedTo = null
-                                            skipping = false
-                                        }
-                                    } else if (commit && x > coverWidth * 0.2f) {
-                                        haptics.skip(false)
-                                        previous()
-                                    }
-                                    swipe.animateTo(0f, spatial)
-                                }
-                            }
-                            detectHorizontalDragGestures(
-                                onDragStart = {
-                                    if (!skipping) {
-                                        settleJob?.cancel()
-                                        dragOffset = visibleOffset()
-                                    }
-                                },
-                                onDragEnd = { finishDrag(commit = true) },
-                                onDragCancel = { finishDrag(commit = false) },
-                            ) { change, amount ->
-                                change.consume()
-                                if (!skipping) dragOffset = ((dragOffset ?: 0f) + amount).coerceIn(-step, step)
-                            }
-                        }
-                        .graphicsLayer {
-                            val x = visibleOffset()
-                            translationX = if ((!state.hasNext && x < 0) || (!canGoPrevious && x > 0)) rubber(x, 60.dp.toPx()) else x
-                            val scale = 1f - 0.06f * (kotlin.math.abs(x) / step).coerceIn(0f, 1f)
-                            scaleX = scale
-                            scaleY = scale
-                        }.playerCoverEndpoint(false),
-                    corner = 32.dp, motion = motionCover,
-                    moving = state.isPlaying, showMotion = direction == 0 && !skipping,
-                    retainWhileLoading = swipedTo == null || swipedTo != occurrence,
-                )
-            if (heartScale > 0f) Symbol(Glyph.FAVOURITE, size = 120.dp, filled = true, color = androidx.compose.ui.graphics.Color.White,
-                modifier = Modifier.graphicsLayer { scaleX = heartScale; scaleY = heartScale; alpha = heartScale })
-            }
             }
             Spacer(Modifier.height(32.dp))
             Row(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

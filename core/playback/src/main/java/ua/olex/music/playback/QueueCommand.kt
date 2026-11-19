@@ -65,8 +65,8 @@ internal object QueueCommand {
         return true
     }
 
-    /** Keep the live source and position when a radio replaces what comes after the current song. */
-    fun replaceUpcomingForRadio(player: Player, seedKey: String, items: List<MediaItem>): Boolean {
+    /** Keep the live source and position while starting a new queue at the current song. */
+    fun startRadioFromCurrent(player: Player, seedKey: String, items: List<MediaItem>): Boolean {
         if (!player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
         val item = player.currentMediaItem ?: return false
         if (item.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) != seedKey || items.isEmpty()) return false
@@ -76,6 +76,7 @@ internal object QueueCommand {
         val seed = item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
         player.replaceMediaItem(index, seed)
         player.replaceMediaItems(index + 1, player.mediaItemCount, items)
+        if (index > 0) player.removeMediaItems(0, index)
         playRadio(player)
         return true
     }
