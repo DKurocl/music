@@ -14,6 +14,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+import kotlin.math.PI
+import kotlin.math.sin
 
 /** Quick-start feedback is drawn within the icon's fixed bounds. */
 @Composable
@@ -21,12 +23,15 @@ internal fun StartMark(shuffle: Boolean, ink: Color, badge: Color, release: () -
     if (shuffle) {
         ShuffleStartMark(ink, badge, release, pressure)
     } else {
-        Symbol(Glyph.FAVOURITE, size = 24.dp, filled = true, color = ink, modifier = Modifier.graphicsLayer {
-            val press = pressure()
-            val settle = release()
-            scaleX = 1f - 0.045f * press + 0.09f * settle
-            scaleY = 1f - 0.12f * press + 0.13f * settle
-        })
+        Symbol(Glyph.FAVOURITE, size = 24.dp, filled = true, color = ink,
+            fillFraction = { 1f - release() },
+            modifier = Modifier.graphicsLayer {
+                val press = pressure()
+                val open = release()
+                scaleX = 1f - 0.08f * press + 0.22f * open
+                scaleY = 1f - 0.13f * press + 0.25f * open
+            },
+        )
     }
 }
 
@@ -39,25 +44,25 @@ private fun ShuffleStartMark(ink: Color, badge: Color, release: () -> Float, pre
         val arrow = Path()
 
         onDrawBehind {
-            val settle = release()
+            val open = release()
             val press = pressure()
-            val expansion = 1.05f * settle - 0.85f * press
-            val left = 4f - expansion
-            val right = 20f + expansion
-            val spread = 5.3f + 0.6f * settle - 0.65f * press
-            val crossing = 12f + 2.1f * settle
+            val left = 3.8f + 1.2f * press
+            val spread = 5.3f - 0.8f * press
+            // Offset the tips while they pass each other so the two arrowheads stay distinct.
+            val stagger = 2.9f * sin(PI * open).toFloat()
             scale(size.minDimension / 24f, pivot = Offset.Zero) {
                 for (lane in 0..1) {
-                    val direction = if (lane == 0) 1f else -1f
-                    val entry = 12f - spread * direction
-                    val exit = 12f + spread * direction
+                    val side = if (lane == 0) 1f else -1f
+                    val entry = 12f - spread * side
+                    val exit = 12f + spread * side * (1f - 2f * open)
+                    val right = 20f + side * stagger - 0.8f * press
                     route.rewind()
                     route.moveTo(left, entry)
-                    route.cubicTo(crossing - 2.6f, entry, crossing - 1.8f, exit, right, exit)
+                    route.cubicTo(left + 6f, entry, right - 6f, exit, right, exit)
                     if (lane == 1) drawPath(route, badge, style = clearance)
                     drawPath(route, ink, style = pen)
 
-                    val wing = 2.8f + 0.2f * settle
+                    val wing = 2.8f
                     arrow.rewind()
                     arrow.moveTo(right - wing, exit - wing)
                     arrow.lineTo(right, exit)
