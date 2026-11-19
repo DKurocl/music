@@ -1,8 +1,13 @@
 package ua.olex.music.ui
 
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialShapes
@@ -12,10 +17,16 @@ import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -67,25 +78,32 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
-/** A centered playback mark with a short exit so the previous cover clears cleanly. */
+private val playbackBarHeights = floatArrayOf(3f, 7f, 11f, 14f, 8f)
+
+/** A playback status mark that stays legible over artwork without looking like a transport control. */
 @Composable
-internal fun NowPlayingOverlay(visible: Boolean, modifier: Modifier = Modifier) {
+internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
     val still = LocalPowerSave.current
-    val enter = if (still) androidx.compose.animation.EnterTransition.None else
-        androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(105))
-    val exit = if (still) androidx.compose.animation.ExitTransition.None else
-        androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(120))
+    val enter = if (still) EnterTransition.None else fadeIn(tween(105)) + scaleIn(tween(160), initialScale = 0.86f)
+    val exit = if (still) ExitTransition.None else fadeOut(tween(120))
     Box(modifier, contentAlignment = Alignment.Center) {
-        androidx.compose.animation.AnimatedVisibility(visible = visible, enter = enter, exit = exit) {
-            Box(Modifier.size(26.dp).clip(androidx.compose.foundation.shape.CircleShape)
-                .background(if (playing) cs.primaryContainer else cs.surfaceContainerHighest)
-                .semantics { stateDescription = if (playing) "Playing" else "Paused" },
-                contentAlignment = Alignment.Center) {
-                androidx.compose.runtime.CompositionLocalProvider(
-                    androidx.compose.material3.LocalContentColor provides if (playing) cs.onPrimaryContainer else cs.onSurface,
-                ) { PlayPauseSymbol(playing, size = 13.dp) }
+        AnimatedVisibility(visible = current && playing, enter = enter, exit = exit) {
+            val tint = if (cs.primary.luminance() > cs.primaryContainer.luminance()) cs.primary else cs.primaryContainer
+            Canvas(Modifier.size(32.dp).semantics { stateDescription = "Playing" }) {
+                drawCircle(Brush.radialGradient(
+                    0f to cs.scrim.copy(alpha = 0.82f),
+                    0.58f to cs.scrim.copy(alpha = 0.72f),
+                    1f to cs.scrim.copy(alpha = 0f),
+                    radius = size.minDimension / 2,
+                ))
+                playbackBarHeights.forEachIndexed { index, height ->
+                    val x = center.x + ((index - 2) * 3.8f).dp.toPx()
+                    val halfHeight = height.dp.toPx() / 2
+                    drawLine(tint, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
+                        strokeWidth = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                }
             }
         }
     }

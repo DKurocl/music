@@ -1,7 +1,8 @@
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.
-Current playback is shown at the center of the artwork with a short fade. Common symbols
+Current playback is shown with five rounded bars at the center of the artwork. The mark
+fades out in 120 ms on pause or when the current track changes. Common symbols
 have coordinated press and release motion. Track actions use distinct marks for radio,
 queue and playlist actions. Audio Path and Settings provide access to the equalizer.
 
