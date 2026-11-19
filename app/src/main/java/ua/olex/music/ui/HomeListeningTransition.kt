@@ -45,7 +45,7 @@ internal fun HomeListeningTransition(listening: Boolean, anchor: Float, gestureC
         when {
             still || (!targetState && gestureCommitted) -> EnterTransition.None togetherWith ExitTransition.None
             targetState -> scaleIn(move, initialScale = 0.93f, transformOrigin = pivot) togetherWith
-                scaleOut(move, targetScale = 0.985f, transformOrigin = pivot)
+                (scaleOut(move, targetScale = 0.985f, transformOrigin = pivot) + ExitTransition.KeepUntilTransitionsFinished)
             else -> scaleIn(move, initialScale = 0.985f, transformOrigin = pivot) togetherWith
                 scaleOut(move, targetScale = 0.93f, transformOrigin = pivot)
         }.apply { targetContentZIndex = if (targetState) 1f else -1f }
