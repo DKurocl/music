@@ -60,6 +60,16 @@ class MixTest {
         assertEquals(1, Mix.clean(batch, seed, emptySet()).size)
     }
 
+    @Test fun linkedFilesUseTheOriginalRadioAndUntaggedFilesStillMakeALocalMix() {
+        val seed = ua.olex.music.model.Track(ua.olex.music.model.TrackId("local:seed"), "content://seed",
+            "mr popular", "predayed", requestedId = "yt:matching")
+        assertEquals("matching", Mix.videoId(seed))
+        val first = t("Other song", "Unknown", id = "available")
+        val blocked = t("Do not recommend", "Unknown", id = "blocked")
+        assertEquals(listOf(first), Mix.local(seed, listOf(seed, blocked, first), emptyMap(),
+            setOf(Mix.songKey(first)), excluded = setOf(blocked.id.value)))
+    }
+
     @Test fun localMixUsesRecordingStatsAfterSourceChanges() {
         val seed = t("Seed", "Artist")
         val copy = t("Other song", "Other artist").copy(recordingId = "recording-1")

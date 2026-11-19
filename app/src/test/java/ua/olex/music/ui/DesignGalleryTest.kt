@@ -609,6 +609,11 @@ class DesignGalleryTest {
                         SkipSymbol(true, 40.dp, taps)
                     }
                 }
+                KickIconButton({}, enabled = false) { taps ->
+                    androidx.compose.foundation.layout.Box(Modifier.testTag("disabled skip shape").background(background)) {
+                        SkipSymbol(true, 24.dp, taps)
+                    }
+                }
             }
         } }
         fun image(tag: String, name: String): Bitmap {
@@ -619,6 +624,11 @@ class DesignGalleryTest {
         }
         val play = image("play shape", "play")
         val skip = image("skip shape", "skip")
+        val disabled = image("disabled skip shape", "skip-disabled")
+        val mid = disabled.height / 2
+        val nearEdge = disabled.getPixel(disabled.width * 42 / 240, mid)
+        val interior = disabled.getPixel(disabled.width * 85 / 240, mid)
+        org.junit.Assert.assertEquals(interior, nearEdge)
         compose.mainClock.autoAdvance = false
         try {
             compose.onNodeWithTag("toggle").performClick()
@@ -983,18 +993,22 @@ class DesignGalleryTest {
         val current = androidx.compose.runtime.mutableStateOf(true)
         compose.mainClock.autoAdvance = false
         compose.setContent { AppTheme { CompositionLocalProvider(LocalIsPlaying provides playing.value) {
-            NowPlayingOverlay(current.value, Modifier.size(46.dp).background(MaterialTheme.colorScheme.surface).testTag("track-mark"))
+            NowPlayingOverlay(current.value, Modifier.size(46.dp).background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(
+                androidx.compose.ui.graphics.Color(0xFF101C32), androidx.compose.ui.graphics.Color(0xFFFFE7BD),
+            ))).testTag("track-mark"))
         } } }
         val mark = compose.onNodeWithTag("track-mark")
         val badge = compose.onNode(
             SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "Playing"),
             useUnmergedTree = true,
         )
-        fun saveFrame(name: String) {
+        fun saveFrame(name: String): Bitmap {
             val bitmap = mark.captureToImage().asAndroidBitmap()
             File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile?.mkdirs() }
                 .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            return bitmap
         }
+        val visible: Bitmap
         try {
             compose.mainClock.advanceTimeBy(64)
             badge.assertExists()
@@ -1002,7 +1016,7 @@ class DesignGalleryTest {
             compose.mainClock.advanceTimeBy(416)
             saveFrame("phase-one")
             compose.mainClock.advanceTimeBy(416)
-            saveFrame("phase-two")
+            visible = saveFrame("phase-two")
             compose.runOnIdle { playing.value = false }
             repeat(5) {
                 compose.mainClock.advanceTimeByFrame()
@@ -1015,7 +1029,11 @@ class DesignGalleryTest {
             }
             badge.assertDoesNotExist()
         } finally { compose.mainClock.autoAdvance = true }
-        saveFrame("paused")
+        val paused = saveFrame("paused")
+        // This point fell inside the previous badge but stays outside every rounded bar.
+        val x = paused.width / 2
+        val y = paused.height * 13 / 46
+        org.junit.Assert.assertEquals(paused.getPixel(x, y), visible.getPixel(x, y))
         compose.runOnIdle { playing.value = true }
         badge.assertExists()
         compose.runOnIdle { current.value = false }

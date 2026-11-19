@@ -31,6 +31,7 @@ class PersonalLibraryTest {
     @Test fun playlistCreateRequiresANameAndTrimsIt() {
         var created: String? = null
         compose.setContent { MaterialTheme { Surface { PlaylistBrowser(emptyList(), actions(create = { name, _ -> created = name }), currentId = null, onPlay = { _, _ -> }, onTrackActions = {}) } } }
+        compose.onNodeWithContentDescription("Add a playlist").performClick()
         compose.onNodeWithText("New playlist").performClick()
         compose.onNodeWithText("Create").assertIsNotEnabled()
         compose.onNodeWithText("Playlist name").performTextInput("  Travel  ")

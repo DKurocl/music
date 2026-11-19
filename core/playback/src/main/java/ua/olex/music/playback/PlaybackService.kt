@@ -683,6 +683,8 @@ class PlaybackService : MediaLibraryService() {
             if (customCommand.customAction == QueueCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 persistence?.supersedeRestore()
+                val request = sourceRequest
+                val replaceAfter = args.getString(QueueCommand.REPLACE_AFTER)
                 val result = SettableFuture.create<SessionResult>()
                 val job = scope.launch {
                     try {
@@ -690,6 +692,11 @@ class PlaybackService : MediaLibraryService() {
                         val items = selectSources(decoded, allowDirect = true)
                         if (this@PlaybackService.session !== session) {
                             result.set(SessionResult(SessionError.ERROR_SESSION_DISCONNECTED))
+                        } else if (replaceAfter != null) {
+                            val usable = items.filter { PlaybackSourceItems.error(it) == null }
+                            val accepted = request == sourceRequest && session.player.currentMediaItem?.let(::occurrence) == replaceAfter &&
+                                QueueCommand.replaceUpcomingForRadio(exo, replaceAfter, usable)
+                            result.set(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
                         } else {
                             QueueCommand.enqueue(exo, items, args.getBoolean(QueueCommand.NEXT))
                             result.set(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -697,6 +704,7 @@ class PlaybackService : MediaLibraryService() {
                     } catch (cancelled: CancellationException) { result.cancel(false); throw cancelled }
                     catch (_: Exception) { result.set(SessionResult(SessionError.ERROR_BAD_VALUE)) }
                 }
+                result.addListener({ if (result.isCancelled) job.cancel() }, com.google.common.util.concurrent.MoreExecutors.directExecutor())
                 job.invokeOnCompletion { if (!result.isDone) result.cancel(false) }
                 return result
             }
