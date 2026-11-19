@@ -23,33 +23,81 @@ import java.io.File
 
 /**
  * What the session shows: the real player, except that while the owner wants it and the app is
- * not on screen, the line being sung replaces the artist on the lock screen and the media card.
- * The app's own screens, history and widget read the real player, never this line.
+ * not on screen, the sung line can replace the artist. The session can also omit artwork from
+ * system media surfaces while its queue keeps the original metadata for the app.
  */
 @OptIn(UnstableApi::class)
 internal class LyricLinePlayer(private val real: Player, private val explicitPlay: () -> Unit = {}) : ForwardingPlayer(real) {
-    private val listeners = ArrayList<Player.Listener>()
+    private val listeners = LinkedHashMap<Player.Listener, Player.Listener>()
     var line: String? = null
         set(value) {
             if (field == value) return
             field = value
-            val meta = mediaMetadata
-            val events = Player.Events(FlagSet.Builder().add(Player.EVENT_MEDIA_METADATA_CHANGED).build())
-            for (l in listeners.toList()) { l.onMediaMetadataChanged(meta); l.onEvents(this, events) }
+            publishMetadata()
         }
+    var showArtwork = true
+        set(value) {
+            if (field == value) return
+            field = value
+            publishMetadata()
+        }
+
+    private fun publishMetadata() {
+        val meta = mediaMetadata
+        val events = Player.Events(FlagSet.Builder().add(Player.EVENT_MEDIA_METADATA_CHANGED).build())
+        for (listener in listeners.keys.toList()) {
+            listener.onMediaMetadataChanged(meta)
+            listener.onEvents(this, events)
+        }
+    }
 
     override fun play() { explicitPlay(); if (real.playerError != null) super.prepare(); super.play() }
     override fun prepare() { explicitPlay(); super.prepare() }
 
-    override fun addListener(listener: Player.Listener) { listeners += listener; super.addListener(listener) }
-    override fun removeListener(listener: Player.Listener) { listeners -= listener; super.removeListener(listener) }
+    override fun addListener(listener: Player.Listener) {
+        if (listener in listeners) return
+        val forward = object : Player.Listener by listener {
+            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) =
+                listener.onMediaMetadataChanged(present(mediaMetadata))
+        }
+        listeners[listener] = forward
+        super.addListener(forward)
+    }
 
-    override fun getMediaMetadata(): MediaMetadata {
-        val base = super.getMediaMetadata()
+    override fun removeListener(listener: Player.Listener) {
+        listeners.remove(listener)?.let { super.removeListener(it) }
+    }
+
+    override fun getMediaMetadata(): MediaMetadata = present(super.getMediaMetadata())
+
+    private fun present(original: MediaMetadata): MediaMetadata {
+        val base = if (showArtwork) original else original.hideSongArtwork()
         val sung = line ?: return base
         return base.buildUpon().setArtist(sung).setSubtitle(base.artist).build()
     }
 }
+
+/** Android chooses the system media card's colours, so withhold artwork to avoid per-song tints. */
+object SystemMediaArtwork {
+    internal fun preferences(context: Context) = context.getSharedPreferences("system_media", Context.MODE_PRIVATE)
+
+    fun enabled(context: Context): Boolean = preferences(context).getBoolean("artwork", false)
+    fun setEnabled(context: Context, enabled: Boolean) {
+        preferences(context).edit().putBoolean("artwork", enabled).apply()
+    }
+}
+
+// A transparent pixel replaces an in-flight artwork request. Media3 only discards a pending
+// bitmap callback when the replacement metadata also supplies artwork.
+private val transparentArtwork by lazy {
+    android.util.Base64.decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGBgAAAABQABpfZFQAAAAABJRU5ErkJggg==",
+        android.util.Base64.DEFAULT,
+    )
+}
+
+internal fun MediaMetadata.hideSongArtwork(): MediaMetadata =
+    buildUpon().setArtworkUri(null).setArtworkData(transparentArtwork, MediaMetadata.PICTURE_TYPE_OTHER).build()
 
 /** Loads the current song's lyrics in the service and moves the lock-screen line along with playback. */
 class LockScreenLyrics internal constructor(private val context: Context, private val real: Player, private val shown: LyricLinePlayer, private val scope: CoroutineScope) {

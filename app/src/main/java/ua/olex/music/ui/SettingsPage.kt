@@ -32,6 +32,7 @@ import ua.olex.music.playback.FadingPlayer
 import ua.olex.music.playback.HeadsetRules
 import ua.olex.music.playback.LockScreenLyrics
 import ua.olex.music.playback.PlaybackService
+import ua.olex.music.playback.SystemMediaArtwork
 import ua.olex.music.playback.UsbBitPerfect
 
 /**
@@ -136,8 +137,15 @@ internal fun SettingsPage(
         if (terms.isEmpty()) item(key = "group-Appearance and artwork") { Group("Appearance and artwork") }
         setting("Colours from the cover artwork") {
             var tint by remember { mutableStateOf(CoverColours.on(context)) }
-            Toggle(Glyph.PHOTO, "Colours from the cover", "The player takes a soft tint of the song's cover", tint, first = true) {
+            Toggle(Glyph.PHOTO, "Colours from the cover", "Adds a soft tint to the player inside Music", tint, first = true) {
                 tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
+        }
+        setting("Artwork in Android media controls Quick Settings lock screen") {
+            var artwork by remember { mutableStateOf(SystemMediaArtwork.enabled(context)) }
+            Toggle(Glyph.PHOTO, "Artwork in Android media controls", "Show song covers in Quick Settings and on the lock screen", artwork) {
+                artwork = it
+                SystemMediaArtwork.setEnabled(context, it)
+            }
         }
         setting("Artist photos Deezer") { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
         // Moving covers from Apple Music, with the owner's own MusicKit key.
