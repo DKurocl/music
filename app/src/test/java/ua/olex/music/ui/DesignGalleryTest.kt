@@ -903,11 +903,12 @@ class DesignGalleryTest {
             }
             frame(0)
             compose.onNodeWithContentDescription("Listening stats").performClick()
-            for (i in 1..5) {
+            for (i in 1..7) {
                 compose.mainClock.advanceTimeBy(if (i == 1) 32 else 48)
                 frame(i)
             }
             compose.mainClock.advanceTimeBy(1_000)
+            frame(8)
             compose.onNodeWithTag("listening-cards").assertExists()
             compose.onNodeWithText("Shuffle all").assertDoesNotExist()
             compose.runOnUiThread { open.value = false }
