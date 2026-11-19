@@ -130,18 +130,20 @@ internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope
 }
 
 internal val LocalPlayerTravel = staticCompositionLocalOf<PlayerTravel?> { null }
+private val LocalDirectPlayerOpen = staticCompositionLocalOf { false }
 
 @Composable
-internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, content: @Composable () -> Unit) {
+internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, directOpen: Boolean = false, content: @Composable () -> Unit) {
     androidx.compose.runtime.CompositionLocalProvider(
         LocalPlayerTravel provides travel, LocalPlayerCovers provides remember { PlayerCoverMemory() },
+        LocalDirectPlayerOpen provides directOpen,
     ) {
         Box(Modifier.fillMaxSize().onGloballyPositioned { travel.host = it }) {
             content()
             val p = travel.fraction
             val small = travel.thumbnail
             val large = travel.sleeve
-            if (travel.coverInFlight) {
+            if (!directOpen && travel.coverInFlight) {
                 val density = LocalDensity.current
                 val x = small.left + (large.left - small.left) * p
                 val y = small.top + (large.top - small.top) * p
@@ -159,7 +161,8 @@ internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, co
 @Composable
 internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
     val travel = LocalPlayerTravel.current ?: return this
-    return graphicsLayer { if (travel.coverInFlight || (!mini && travel.fraction < 1f)) alpha = 0f }.onGloballyPositioned { coordinates ->
+    val directOpen = LocalDirectPlayerOpen.current
+    return graphicsLayer { if (!directOpen && (travel.coverInFlight || (!mini && travel.fraction < 1f))) alpha = 0f }.onGloballyPositioned { coordinates ->
         val parent = (if (mini) travel.host else travel.page) ?: return@onGloballyPositioned
         if (!parent.isAttached) return@onGloballyPositioned
         val bounds = parent.localBoundingBoxOf(coordinates, clipBounds = false)
@@ -168,9 +171,11 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
 }
 
 /** Keep the page at full size while its artwork travels separately. */
-internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier = graphicsLayer {
-    alpha = travel.fraction
-}.onGloballyPositioned { travel.page = it }
+internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
+    val directOpen = LocalDirectPlayerOpen.current
+    return graphicsLayer { alpha = if (directOpen) 1f else travel.fraction }
+        .onGloballyPositioned { travel.page = it }
+}
 
 internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean, val preview: CoverFrame? = null)
 
