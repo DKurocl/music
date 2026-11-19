@@ -100,8 +100,8 @@ internal class PlayerCoverMemory {
 
 internal val LocalPlayerCovers = staticCompositionLocalOf<PlayerCoverMemory?> { null }
 /** Endpoints are measured in the unscaled page and its host, even during an interrupted drag. */
-internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope) {
-    var fraction by androidx.compose.runtime.mutableFloatStateOf(0f)
+internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope, initiallyOpen: Boolean = false) {
+    var fraction by androidx.compose.runtime.mutableFloatStateOf(if (initiallyOpen) 1f else 0f)
         private set
     var thumbnail by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)
     var sleeve by mutableStateOf(androidx.compose.ui.geometry.Rect.Zero)

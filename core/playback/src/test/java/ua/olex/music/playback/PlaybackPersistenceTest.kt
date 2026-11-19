@@ -152,16 +152,21 @@ class PlaybackPersistenceTest {
 
     @Test fun sourceResolutionKeepsPositionAndShuffleEvenWhenPhysicalIdsChange() = runTest {
         journal.write(saved())
-        persistence = PlaybackPersistence(player, journal, backgroundScope) { items -> items.map { original ->
-            val replacement = PlayerConnection.track(original).copy(id = TrackId("yt:" + original.mediaId), uri = "ytm://" + original.mediaId)
-            PlaybackSourceItems.convert(original, ua.olex.music.model.PlaybackSourceChoice(replacement))
-        } }
+        val resolutionSizes = mutableListOf<Int>()
+        persistence = PlaybackPersistence(player, journal, backgroundScope) { items ->
+            resolutionSizes += items.size
+            items.map { original ->
+                val replacement = PlayerConnection.track(original).copy(id = TrackId("yt:" + original.mediaId), uri = "ytm://" + original.mediaId)
+                PlaybackSourceItems.convert(original, ua.olex.music.model.PlaybackSourceChoice(replacement))
+            }
+        }
         runCurrent(); journal.read(); runCurrent(); shadowOf(Looper.getMainLooper()).idle()
         assertEquals(1, player.currentMediaItemIndex)
         assertEquals(42_000L, player.currentPosition)
         assertTrue(player.shuffleModeEnabled)
         assertEquals(Player.REPEAT_MODE_ALL, player.repeatMode)
         assertEquals("yt:local:2", player.currentMediaItem!!.mediaId)
+        assertEquals(listOf(1), resolutionSizes)
         assertFalse(player.playWhenReady)
         val resumed = requireNotNull(persistence?.resumption())
         player.setMediaItems(resumed.items, resumed.index, resumed.positionMs)

@@ -46,7 +46,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     onClearNext: (() -> Unit)? = null) {
     val cs = MaterialTheme.colorScheme
     val haptics = LocalHapticFeedback.current
-    val list = rememberLazyListState(initialFirstVisibleItemIndex = (state.queueIndex - 1).coerceAtLeast(0))
+    val list = rememberLazyListState(initialFirstVisibleItemIndex = state.queueIndex.coerceAtLeast(0))
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     val filtering = searchOpen && query.isNotBlank()
@@ -76,6 +76,11 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
         if (jumpToCurrent) {
             if (state.queueIndex in state.queue.indices) list.scrollToItem(state.queueIndex)
             jumpToCurrent = false
+        }
+    }
+    LaunchedEffect(state.playbackContext) {
+        if (!searchOpen && PlaybackOrigin.decode(state.playbackContext)?.kind == "mix" && state.queueIndex in state.queue.indices) {
+            list.requestScrollToItem(state.queueIndex)
         }
     }
     var draggingKey by remember { mutableStateOf<String?>(null) }
@@ -168,8 +173,10 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
             } else {
                 Column(Modifier.weight(1f).padding(start = 4.dp)) {
                     Text("Up next", style = MaterialTheme.typography.headlineSmallEmphasized)
-                    Text(listOfNotNull(mixFrom, songCount(state.queue.size), if (state.shuffle) "shuffled" else null).joinToString(" · "),
-                        style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
+                    val total = if (!state.shuffle && state.queueIndex in state.queue.indices) "${state.queue.lastIndex - state.queueIndex} upcoming"
+                        else songCount(state.queue.size)
+                    Text(listOfNotNull(mixFrom, total, if (state.shuffle) "shuffled" else null).joinToString(" · "),
+                        style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 }
                 if (state.queue.size > 1) KickIconButton(onClick = { searchOpen = true }, enabled = draggingKey == null,
                     modifier = Modifier.semantics { contentDescription = "Find in queue" }) { Symbol(Glyph.SEARCH, kick = it) }

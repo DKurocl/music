@@ -1,15 +1,25 @@
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+
 package ua.olex.music.ui
 
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import ua.olex.music.model.Track
@@ -41,24 +51,68 @@ internal fun TempoAndPitch(state: PlayerState, onChange: (Float, Float) -> Unit)
     }
 }
 
+/** Shows the current route. Android owns switching and media volume for the selected device. */
 @Composable
 internal fun PlaybackDevices(route: OutputRoute?, onSwitch: () -> Boolean, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    var unavailable by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val name = route?.label()
+    var message by remember(route) { mutableStateOf<String?>(null) }
+    fun openSettings(action: String, failure: String) {
+        runCatching { context.startActivity(Intent(action)) }.onFailure { message = failure }
+    }
     AppSheet(onDismiss) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp),
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Playback device", style = MaterialTheme.typography.headlineSmall)
-            ListItem(headlineContent = { Text(route?.name?.takeIf(String::isNotBlank) ?: route?.label() ?: "Output unavailable") },
-                supportingContent = { Text("Current audio output") }, leadingContent = { Symbol(Glyph.HEADPHONES) })
-            Button(onClick = { unavailable = !onSwitch() }) { Text("Choose output") }
-            if (unavailable) Text("Android could not open the output picker.")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) }) { Text("Bluetooth settings") }
-                TextButton(onClick = {
-                    runCatching { context.startActivity(Intent(Settings.Panel.ACTION_VOLUME)) }
-                }) { Text("Volume controls") }
+            Text("Playback device", Modifier.padding(start = 8.dp), style = MaterialTheme.typography.headlineSmallEmphasized)
+            Surface(shape = RoundedCornerShape(28.dp), color = colors.primaryContainer, contentColor = colors.onPrimaryContainer) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Surface(shape = androidx.compose.foundation.shape.CircleShape, color = colors.primary, contentColor = colors.onPrimary) {
+                        Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) { Symbol(route.glyph(), size = 26.dp, filled = true) }
+                    }
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(name ?: "Output unavailable", style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis)
+                        val connection = when (route?.kind) {
+                            OutputRoute.Kind.BLUETOOTH -> "Bluetooth"
+                            OutputRoute.Kind.LE_AUDIO -> "Bluetooth LE Audio"
+                            OutputRoute.Kind.USB -> "USB audio"
+                            OutputRoute.Kind.WIRED -> "Wired audio"
+                            OutputRoute.Kind.REMOTE -> "Remote output"
+                            else -> null
+                        }
+                        if (connection != null && connection != name) Text(connection, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    if (route != null) Symbol(Glyph.CHECK, size = 22.dp)
+                }
             }
+            Button(onClick = {
+                haptics.tick()
+                if (runCatching(onSwitch).getOrDefault(false)) onDismiss()
+                else message = "The output picker is unavailable. You can change Bluetooth devices below."
+            }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
+                Symbol(Glyph.SPEAKER, size = 21.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("Switch device")
+            }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilledTonalButton(onClick = { openSettings(Settings.ACTION_BLUETOOTH_SETTINGS, "Bluetooth settings are unavailable.") },
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    Symbol(Glyph.BLUETOOTH, size = 18.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Bluetooth")
+                }
+                FilledTonalButton(onClick = { openSettings(Settings.Panel.ACTION_VOLUME, "Volume controls are unavailable.") },
+                    modifier = Modifier.heightIn(min = 48.dp)) {
+                    Symbol(Glyph.SPEAKER, size = 18.dp)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Volume")
+                }
+            }
+            message?.let { Text(it, Modifier.padding(horizontal = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant) }
         }
     }
 }

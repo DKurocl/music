@@ -1,3 +1,16 @@
+# Output sheet, radio acknowledgement and player resume
+
+Playback device shows a tonal card with the actual route and its connection type. Switching,
+Bluetooth and volume use Android's surfaces. A successful switch hands off to the system picker.
+Radio queues from both the current song and other songs are applied by the session. The preparing
+state ends when the controller observes the new tail occurrence, including equal-size replacements.
+Up next anchors to the seed and shows the number of upcoming tracks.
+Cold opening uses the live player layout with disabled controls and on-surface colors. Startup
+resolves the current item first and refreshes the saved queue's other sources after publication.
+The expanded state survives reconnects, and foreground return settles immediately to the saved
+screen. Local check: `git diff --check`. Actual Bluetooth routing and task switching on Pixel
+remain device checks.
+
 # Playback marks, playlist navigation and radio
 
 Skip glyphs are a single rounded fill, so their disabled opacity stays uniform. The five

@@ -43,6 +43,11 @@ class OutputRouteMonitor(context: Context) {
         override fun onControllerUpdated(controller: MediaRouter2.RoutingController) { refresh() }
     }
 
+    private val transfers = object : MediaRouter2.TransferCallback() {
+        override fun onTransfer(oldController: MediaRouter2.RoutingController, newController: MediaRouter2.RoutingController) { refresh() }
+        override fun onStop(controller: MediaRouter2.RoutingController) { refresh() }
+    }
+
     private fun refresh() { if (started) _route.value = current() }
 
     /** System-owned Bluetooth/speaker routing, with no codec guessing or forced communication route. */
@@ -54,6 +59,7 @@ class OutputRouteMonitor(context: Context) {
         audio.registerAudioDeviceCallback(callback, null)
         router.registerRouteCallback(app.mainExecutor, routes, RouteDiscoveryPreference.Builder(emptyList(), false).build())
         router.registerControllerCallback(app.mainExecutor, controller)
+        router.registerTransferCallback(app.mainExecutor, transfers)
         _route.value = current()
     }
     fun stop() {
@@ -62,9 +68,15 @@ class OutputRouteMonitor(context: Context) {
         audio.unregisterAudioDeviceCallback(callback)
         router.unregisterRouteCallback(routes)
         router.unregisterControllerCallback(controller)
+        router.unregisterTransferCallback(transfers)
     }
 
     private fun current(): OutputRoute? {
+        val remote = router.controllers.asSequence()
+            .filterNot { it == router.systemController || it.isReleased }
+            .flatMap { it.selectedRoutes.asSequence() }
+            .firstOrNull { !it.isSystemRoute }
+        if (remote != null) return OutputRoute(OutputRoute.Kind.REMOTE, remote.name.toString(), emptyList())
         val device = audio.getAudioDevicesForAttributes(music).firstOrNull() ?: return null
         val kind = when (device.type) {
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> OutputRoute.Kind.SPEAKER

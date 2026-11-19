@@ -933,7 +933,7 @@ class DesignGalleryTest {
         compose.onNodeWithText("Shuffle all").assertExists()
     }
 
-    @Test fun systemPlayerOpening() {
+    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi-night") fun systemPlayerOpening() {
         val waiting = androidx.compose.runtime.mutableStateOf(true)
         var closed = false
         val song = demoSongs.first()
@@ -942,11 +942,31 @@ class DesignGalleryTest {
                 empty = !waiting.value, error = null, onClose = { closed = true }, onRetry = {})
         } } }
         compose.onNodeWithText(song.title).assertExists()
-        compose.onNodeWithText("Opening player…").assertExists()
+        compose.onNodeWithText("Restoring playback…").assertExists()
+        compose.onNodeWithContentDescription("Play").assertIsNotEnabled()
         shot("01i-player-from-widget")
         compose.runOnIdle { waiting.value = false }
         compose.onNodeWithText(song.title).assertDoesNotExist()
         compose.onNodeWithText("Browse music").performClick()
+        compose.runOnIdle { org.junit.Assert.assertTrue(closed) }
+    }
+
+    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi-night") fun playbackDevicePanel() {
+        var canOpen = false
+        var closed = false
+        val route = androidx.compose.runtime.mutableStateOf(ua.olex.music.playback.OutputRoute(
+            ua.olex.music.playback.OutputRoute.Kind.BLUETOOTH, "WF-1000XM5", emptyList()))
+        compose.setContent { Over { PlaybackDevices(route.value, { canOpen }) { closed = true } } }
+        compose.onNodeWithText("WF-1000XM5").assertIsDisplayed()
+        shot("01j-playback-device")
+        compose.onNodeWithText("Switch device").performClick()
+        compose.onNodeWithText("The output picker is unavailable.", substring = true).assertIsDisplayed()
+        compose.runOnIdle {
+            route.value = ua.olex.music.playback.OutputRoute(ua.olex.music.playback.OutputRoute.Kind.SPEAKER, "Pixel", emptyList())
+            canOpen = true
+        }
+        compose.onNodeWithText("Phone speaker").assertIsDisplayed()
+        compose.onNodeWithText("Switch device").performClick()
         compose.runOnIdle { org.junit.Assert.assertTrue(closed) }
     }
 

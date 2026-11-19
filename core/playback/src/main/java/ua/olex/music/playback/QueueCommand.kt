@@ -21,14 +21,17 @@ internal object QueueCommand {
     const val ITEM_LIST = "item_list"
     const val NEXT = "next"
     const val REPLACE_AFTER = "replace_after"
+    const val RADIO = "radio"
+    const val RADIO_TAIL = "radio_tail"
     val command = SessionCommand(ACTION, Bundle.EMPTY)
 
     /** Uses Media3 pagination instead of putting a large playlist in one Binder transaction. */
-    fun arguments(items: List<MediaItem>, next: Boolean, replaceAfter: String? = null): Bundle {
+    fun arguments(items: List<MediaItem>, next: Boolean, replaceAfter: String? = null, radio: Boolean = false): Bundle {
         require(items.isNotEmpty() && items.size <= TrackSelection.MAX_ITEMS)
         return Bundle().apply {
             putBinder(ITEM_LIST, BundleListRetriever(items.map(MediaItem::toBundle)))
             putBoolean(NEXT, next)
+            putBoolean(RADIO, radio)
             replaceAfter?.let { putString(REPLACE_AFTER, it) }
         }
     }
@@ -54,8 +57,17 @@ internal object QueueCommand {
         if (empty) { player.prepare(); player.play() }
     }
 
+    /** Start at the requested song, or at the first playable recommendation if it is unavailable. */
+    fun startRadio(player: Player, items: List<MediaItem>): Boolean {
+        if (items.isEmpty() || !player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
+        player.setMediaItems(items, 0, C.TIME_UNSET)
+        playRadio(player)
+        return true
+    }
+
     /** Keep the live source and position when a radio replaces what comes after the current song. */
-    fun replaceUpcomingForRadio(player: ExoPlayer, seedKey: String, items: List<MediaItem>): Boolean {
+    fun replaceUpcomingForRadio(player: Player, seedKey: String, items: List<MediaItem>): Boolean {
+        if (!player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
         val item = player.currentMediaItem ?: return false
         if (item.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) != seedKey || items.isEmpty()) return false
         val index = player.currentMediaItemIndex
@@ -64,11 +76,15 @@ internal object QueueCommand {
         val seed = item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
         player.replaceMediaItem(index, seed)
         player.replaceMediaItems(index + 1, player.mediaItemCount, items)
+        playRadio(player)
+        return true
+    }
+
+    private fun playRadio(player: Player) {
         player.shuffleModeEnabled = false
         if (player.repeatMode == Player.REPEAT_MODE_ONE) player.repeatMode = Player.REPEAT_MODE_OFF
         if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) player.prepare()
         player.play()
-        return true
     }
 
     internal fun shuffleTraversal(player: Player): List<Int> {
