@@ -14,7 +14,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.preferredFrameRate
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.style.TextAlign
@@ -68,18 +67,36 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
-/** A compact playback badge keeps the cover visible and distinguishes pause from playback. */
+/** A status mark for the active recording, drawn from one phase without observing audio samples. */
 @Composable
-internal fun NowPlayingOverlay(modifier: Modifier = Modifier) {
+internal fun NowPlayingOverlay(modifier: Modifier = Modifier, alignment: Alignment = Alignment.BottomEnd) {
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
+    val phase = if (playing && !LocalPowerSave.current) {
+        androidx.compose.animation.core.rememberInfiniteTransition(label = "Playing track").animateFloat(
+            initialValue = 0f, targetValue = 1f,
+            animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+                androidx.compose.animation.core.tween(1200, easing = androidx.compose.animation.core.LinearEasing)),
+            label = "Five bars")
+    } else null
+    val ink = if (playing) cs.primary else cs.onSurfaceVariant
     Box(modifier) {
-        val shape = androidx.compose.foundation.shape.CircleShape
-        Box(Modifier.align(Alignment.BottomEnd).padding(2.dp).size(20.dp)
-            .clip(shape).background(if (playing) cs.primaryContainer else cs.surfaceContainerHighest)
-            .then(Modifier.semantics { stateDescription = if (playing) "Playing" else "Paused" }),
-            contentAlignment = Alignment.Center) {
-            Symbol(if (playing) Glyph.PLAY else Glyph.PAUSE, size = 12.dp, color = if (playing) cs.onPrimaryContainer else cs.onSurface, filled = true)
+        Box(Modifier.align(alignment).padding(2.dp).size(width = 23.dp, height = 18.dp)
+            .clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).background(cs.surfaceContainerHighest)
+            .semantics { stateDescription = if (playing) "Playing" else "Paused" }, contentAlignment = Alignment.Center) {
+            androidx.compose.foundation.Canvas(Modifier.size(width = 16.dp, height = 11.dp)) {
+                val step = size.width / 5
+                val stroke = step * 0.64f
+                val cycle = (phase?.value ?: 0f) * 2.0 * Math.PI
+                for (i in 0 until 5) {
+                    val crest = (1.0 + kotlin.math.sin(cycle * (1 + i % 2) + i * 1.9)) / 2
+                    val envelope = 1f - kotlin.math.abs(i - 2) * 0.14f
+                    val half = if (playing) ((size.height - stroke) * envelope * (0.18 + 0.82 * crest) / 2).toFloat() else stroke * 0.15f
+                    val x = (i + 0.5f) * step
+                    drawLine(ink, androidx.compose.ui.geometry.Offset(x, center.y - half),
+                        androidx.compose.ui.geometry.Offset(x, center.y + half), stroke, androidx.compose.ui.graphics.StrokeCap.Round)
+                }
+            }
         }
     }
 }

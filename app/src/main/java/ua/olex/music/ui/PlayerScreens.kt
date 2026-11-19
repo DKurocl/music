@@ -236,7 +236,7 @@ private fun TrackRowContent(
             if (selecting) Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
                 modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
             else if (number != null) Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                if (current) NowPlayingOverlay(Modifier.matchParentSize().background(cs.primary))
+                if (current) NowPlayingOverlay(Modifier.matchParentSize(), Alignment.Center)
                 else Text(number.toString(), style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
             }
             else Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) {

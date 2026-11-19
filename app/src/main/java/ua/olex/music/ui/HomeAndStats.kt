@@ -54,7 +54,7 @@ internal fun HomePage(
     youTubeHome: List<YouTubeMusic.Shelf> = emptyList(), excluded: Set<String> = emptySet(), onlineEnabled: Boolean = true,
     playlists: List<PlaylistUi> = emptyList(), accountPlaylists: List<YouTubeMusic.Card> = emptyList(),
     onOpenPlaylist: (Long) -> Unit = {}, onAllPlaylists: () -> Unit = {},
-    transportPlaying: Boolean = false, onToggle: () -> Unit = {}, homeActive: Boolean = true,
+    homeActive: Boolean = true,
     onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onShuffle: (List<Track>) -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember(library) { HomeCache() },
@@ -109,12 +109,33 @@ internal fun HomePage(
     val albums = remember(youTubeHome, mood) {
         if (mood != null) emptyList() else youTubeHome.flatMap { it.cards }.filter { it.kind == YouTubeMusic.Card.Kind.ALBUM }.distinctBy { it.id }
     }
-    val feature = key(cache) {
-        rememberOffMain<ua.olex.music.model.MusicCollection?>(library, initial = cache.feature) {
-            val recent = history.mapIndexed { i, track -> track.id to i }.toMap()
-            val named = library.albums.filter { album -> album.tracks.any { !it.album.isNullOrBlank() } }
-            (named.firstOrNull { it.id == cache.feature?.id } ?: named.minByOrNull { album -> album.tracks.minOfOrNull { recent[it.id] ?: Int.MAX_VALUE } ?: Int.MAX_VALUE }).also { cache.feature = it }
+    // Freeze the local selection for this catalogue. Skipping songs must not rebuild the album shelf.
+    val localAlbums = key(cache) {
+        produceState(cache.albums.orEmpty(), library) {
+            if (cache.albums == null) {
+                val initialTrack = currentId
+                val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                    val recent = history.take(40).mapTo(HashSet()) { it.artist }
+                    library.albums.asSequence().filter { it.tracks.any { t -> !t.album.isNullOrBlank() } }
+                        .map { album ->
+                            val score = (if (album.tracks.any { it.id.value == initialTrack }) 0 else 4) +
+                                (if (album.tracks.size > 1) 2 else 0) + (if (album.subtitle in recent) 1 else 0)
+                            album to score
+                        }.sortedByDescending { it.second }.take(6).map { it.first }.toList()
+                }
+                cache.albums = picks
+                value = picks
+            }
+        }.value
+    }
+    val albumPicks = remember(localAlbums, albums, online) {
+        val picks = buildList<HomeAlbumPick> {
+            for (i in 0 until 6) {
+                localAlbums.getOrNull(i)?.let { add(HomeAlbumPick(it.id, it.name, it.subtitle, it.artworkUri, it)) }
+                if (online) albums.getOrNull(i)?.let { add(HomeAlbumPick(it.id, it.title, it.subtitle, it.cover)) }
+            }
         }
+        picks.distinctBy { it.title.lowercase() to it.artist.orEmpty().lowercase() }.take(6)
     }
     val nextFeed = HomeFeed(mood, mood?.let { moods.indexOf(it) + 1 } ?: 0, songs, queue == null || moodView?.loading == true, mixes, albums)
     var ready by remember(cache, online) { mutableStateOf<HomeFeed?>(null) }
@@ -150,15 +171,9 @@ internal fun HomePage(
                 LazyColumn(Modifier.fillMaxSize().then(actionable).background(MaterialTheme.colorScheme.surface),
                     contentPadding = PaddingValues(bottom = 12.dp + LocalPlayerInset.current)) {
                     val contextName = shownMood?.label ?: "Quick picks"
-                    if (shownMood == null && (feature != null || shownSongs.isNotEmpty())) item(key = "starts") {
-                        val shuffleSongs = shuffleTracks
-                        fun startFeature() {
-                            if (feature != null) onPlay(feature.tracks, 0, feature.name)
-                            else if (shownSongs.isNotEmpty()) onPlay(shownSongs, 0, contextName)
-                        }
-                        HomeStarts(feature, shownSongs.firstOrNull(), shuffleSongs, favourites, currentId, transportPlaying, onToggle,
-                            onAlbum = { if (feature != null) onOpenAlbum(feature) else shownSongs.firstOrNull()?.let(onTrackActions) },
-                            onPlayAlbum = ::startFeature, onShuffle = { onShuffle(shuffleSongs) }, onLiked = { onPlay(favourites, 0, "Liked") },
+                    if (shownMood == null && (albumPicks.isNotEmpty() || shuffleTracks.isNotEmpty() || favourites.isNotEmpty() || shownSongs.isNotEmpty())) item(key = "starts") {
+                        HomeStarts(albumPicks, shuffleTracks.size, favourites, onOpenAlbum,
+                            onShuffle = { onShuffle(shuffleTracks) }, onLiked = { onPlay(favourites, 0, "Liked") },
                             onChooseLiked = { choosingLiked = true })
                     }
                     if (shownSongs.isNotEmpty()) {
@@ -218,7 +233,7 @@ internal fun HomePage(
 internal class HomeCache {
     var online = false
     var last: List<Track>? = null
-    var feature: ua.olex.music.model.MusicCollection? = null
+    var albums: List<ua.olex.music.model.MusicCollection>? = null
 }
 
 /**

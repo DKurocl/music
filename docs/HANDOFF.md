@@ -1,12 +1,13 @@
 # Home start controls and listening navigation (2026-11-19)
 
-Home and listening now share one reversible page transition below the measured toolbar button.
-An opaque rounded reveal keeps the two pages readable at intermediate frames.
-The mini player and navigation stay in place. Home keeps its saved scroll position and mood.
-The album face and transport receive independent presses. Tap Liked to play or hold it to pick
-a song. Shuffle skips the current recording when another unique recording is available.
-The gallery exercises these targets and renders the page handoff. Local check: `git diff --check`.
-Physical gesture timing on the Pixel remains unverified.
+Home and listening use a short horizontal shared-axis transition. The mini player and navigation
+stay in place. The top Home tile is an album browser. Swiping or tapping its arrow changes the
+pick, tapping the sleeve opens the local or YouTube Music album. The picks stay stable across
+track skips. The card uses medium covers and does not observe playback. Liked supports
+press-and-hold to choose a song, and Shuffle can start on a different recording.
+The current recording has a five-bar status mark on its cover. Pausing stops the animation.
+The gallery checks album navigation, quick starts, listening entry, and playing/paused frames.
+Local check: `git diff --check`. Physical gesture timing on the Pixel remains unverified.
 
 # Listening screen and floating player (2026-11-18)
 
