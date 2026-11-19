@@ -143,7 +143,7 @@ class DesignGalleryTest {
                 card("VLcity", "City lights", "23 songs", 4, YouTubeMusic.Card.Kind.PLAYLIST))
         }
         val playing = demoSongs.first().takeUnless { small }
-        CompositionLocalProvider(LocalPlayingTrack provides playing) {
+        CompositionLocalProvider(LocalPlayingTrack provides playing, LocalIsPlaying provides (playing != null)) {
             HomePage(index, local, emptyMap(), playing?.id?.value, modifier, onPlay, {}, youTubeHome = remote,
                 playlists = own, accountPlaylists = account, favourites = local.take(2), onOpenPlaylist = onOpenPlaylist,
                 onOpenAlbum = onOpenAlbum, onShuffle = onShuffle)
@@ -960,35 +960,36 @@ class DesignGalleryTest {
             NowPlayingOverlay(current.value, Modifier.size(46.dp).background(MaterialTheme.colorScheme.surface).testTag("track-mark"))
         } } }
         val mark = compose.onNodeWithTag("track-mark")
-        fun badge(state: String) = compose.onNode(
-            SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, state),
+        val badge = compose.onNode(
+            SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "Playing"),
             useUnmergedTree = true,
         )
         fun saveFrame(name: String) {
             val bitmap = mark.captureToImage().asAndroidBitmap()
-            File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile.mkdirs() }
+            File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile?.mkdirs() }
                 .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
-        badge("Playing").assertExists()
+        badge.assertExists()
         saveFrame("active")
-        compose.runOnIdle { playing.value = false }
-        badge("Paused").assertExists()
-        badge("Playing").assertDoesNotExist()
-        saveFrame("paused")
         compose.mainClock.autoAdvance = false
         try {
-            compose.runOnIdle { current.value = false }
+            compose.runOnIdle { playing.value = false }
             repeat(5) {
                 compose.mainClock.advanceTimeByFrame()
-                badge("Paused").assertExists()
+                badge.assertExists()
             }
             saveFrame("fading")
             repeat(12) {
                 compose.mainClock.advanceTimeByFrame()
                 compose.waitForIdle()
             }
-            badge("Paused").assertDoesNotExist()
+            badge.assertDoesNotExist()
         } finally { compose.mainClock.autoAdvance = true }
+        saveFrame("paused")
+        compose.runOnIdle { playing.value = true }
+        badge.assertExists()
+        compose.runOnIdle { current.value = false }
+        badge.assertDoesNotExist()
     }
 
     @Test fun libraryAlbums() {

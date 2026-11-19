@@ -236,7 +236,12 @@ private fun TrackRowContent(
             if (selecting) Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
                 modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
             else if (number != null) Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-                Text(number.toString(), modifier = Modifier.graphicsLayer { alpha = if (current) 0f else 1f }, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                val numberAlpha by animateFloatAsState(
+                    if (current && LocalIsPlaying.current) 0f else 1f,
+                    androidx.compose.animation.core.tween(if (LocalPowerSave.current) 0 else 120),
+                    label = "Track number",
+                )
+                Text(number.toString(), modifier = Modifier.graphicsLayer { alpha = numberAlpha }, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
                 NowPlayingOverlay(current, Modifier.matchParentSize())
             }
             else Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) {
