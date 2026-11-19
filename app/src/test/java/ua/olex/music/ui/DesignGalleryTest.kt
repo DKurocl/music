@@ -288,12 +288,12 @@ class DesignGalleryTest {
     }
 
     @Test fun sleepTimer() {
-        compose.setContent { Over { SleepTimerDialog(false, {}, {}) } }
+        compose.setContent { Over { SleepTimerDialog(false, {}, { _, _ -> }) } }
         shot("20-sleep")
     }
 
     @Test fun sleepTimerRunning() {
-        compose.setContent { Over { SleepTimerDialog(true, {}, {}, deadline = android.os.SystemClock.elapsedRealtime() + 23 * 60_000L) } }
+        compose.setContent { Over { SleepTimerDialog(true, {}, { _, _ -> }, deadline = android.os.SystemClock.elapsedRealtime() + 23 * 60_000L) } }
         shot("21-sleep-running")
     }
 
@@ -496,15 +496,21 @@ class DesignGalleryTest {
             CompositionLocalProvider(androidx.compose.ui.platform.LocalInspectionMode provides true,
                 coil3.compose.LocalAsyncImagePreviewHandler provides images) {
                 val i = current.intValue
-                val state = PlayerState(connected = true, mediaId = queue[i].mediaId, title = queue[i].title,
+                val title = listOf("ghost 12", "血腥暴力 アддіçţê", "คืนที่ดาวเต็มฟ้า 💤")[i]
+                val state = PlayerState(connected = true, mediaId = queue[i].mediaId, title = title,
                     artworkUri = queue[i].artworkUri, queue = queue, queueIndex = i, hasNext = i < queue.lastIndex,
-                    hasPrevious = i > 0, nextIndex = if (i < queue.lastIndex) i + 1 else -1, previousIndex = i - 1)
+                    hasPrevious = i > 0, nextIndex = if (i < queue.lastIndex) i + 1 else -1, previousIndex = i - 1,
+                    sleepDeadlineMs = ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE.takeIf { i == 2 })
                 PlayerPage(state, null, null, false, { 0L }, {}, {}, { skips++ }, {}, {}, {}, {}, null,
-                    null, {}, {}, {}, {}, {})
+                    null, {}, {}, {}, {}, {}, from = if (i == 0) "Mix" else "Mix from ${title.repeat(4)}")
             }
         } }
         val cover = compose.onNodeWithContentDescription("Album artwork")
         val bounds = cover.fetchSemanticsNode().boundsInRoot
+        val seekBar = compose.onNodeWithContentDescription("Position")
+        val seekTop = seekBar.fetchSemanticsNode().boundsInRoot.top
+        val playButton = compose.onNodeWithContentDescription("Play")
+        val playTop = playButton.fetchSemanticsNode().boundsInRoot.top
         val centre = bounds.center
         fun pixel() = compose.onRoot().captureToImage().asAndroidBitmap().getPixel(centre.x.toInt(), centre.y.toInt())
         fun edges(): List<Int> {
@@ -548,6 +554,9 @@ class DesignGalleryTest {
             compose.mainClock.advanceTimeBy(100)
             compose.waitForIdle()
             org.junit.Assert.assertEquals(android.graphics.Color.GREEN, pixel())
+            org.junit.Assert.assertEquals(bounds, cover.fetchSemanticsNode().boundsInRoot)
+            org.junit.Assert.assertEquals(seekTop, seekBar.fetchSemanticsNode().boundsInRoot.top)
+            org.junit.Assert.assertEquals(playTop, playButton.fetchSemanticsNode().boundsInRoot.top)
         } finally { compose.mainClock.autoAdvance = true }
     }
 

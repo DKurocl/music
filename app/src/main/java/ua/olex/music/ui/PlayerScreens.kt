@@ -4,6 +4,7 @@ package ua.olex.music.ui
 
 import coil3.toBitmap
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 import androidx.compose.foundation.selection.toggleable
@@ -34,7 +35,6 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -221,7 +221,7 @@ private fun TrackRowContent(
     }, label = "row")
     ListItem(
         headlineContent = {
-            Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, color = if (current) cs.primary else cs.onSurface,
+            TrackLabel(track.title, color = if (current) cs.primary else cs.onSurface,
                 style = MaterialTheme.typography.titleMedium)
         },
         supportingContent = {
@@ -231,7 +231,8 @@ private fun TrackRowContent(
             Row(Modifier.height(line), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 // The tag shares the text's baseline: ListItem reads two different baselines as a
                 // second line and grows the row, which is what made rows with a tag taller.
-                if (number == null || track.artist != albumArtist) Text(track.artist, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false).alignByBaseline())
+                if (number == null || track.artist != albumArtist) TrackLabel(track.artist, MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f, fill = false).alignByBaseline())
                 else Text(clock(track.durationMs), maxLines = 1, modifier = Modifier.alignByBaseline())
                 // On the text's baseline: two different baselines make ListItem a three-line (taller) row.
                 if (showQuality) SourceMark(owned ?: track, Modifier.alignByBaseline(), kept = kept && owned == null, unavailable = unavailable)
@@ -399,14 +400,14 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
             ) {
                 PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL, miniEndpoint = true)
                 Column(Modifier.weight(1f)) {
-                    Text(state.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TrackLabel(state.title, style = MaterialTheme.typography.titleSmall)
                     val subtitle = when {
                         state.error != null -> state.error.orEmpty()
                         state.playWhenReady && state.buffering -> "Getting ready…"
                         else -> state.artist
                     }
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                        color = if (state.error != null) cs.error else cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    TrackLabel(subtitle, style = MaterialTheme.typography.bodySmall,
+                        color = if (state.error != null) cs.error else cs.onSurfaceVariant)
                 }
                 // Asked to play but still getting ready (a stream opening, a slow file): a ring around the
                 // button says so, instead of a pause button that seems to do nothing.
@@ -513,11 +514,15 @@ internal fun PlayerPage(
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity { pulled = 0f; return androidx.compose.ui.unit.Velocity.Zero }
         }
     }
+    val coverTint = rememberCoverTint(state.artworkUri, cs.surfaceContainerHigh)
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides cs.onSurface) {
     Box(
         // Material's calm tonal surface, a little lighter at the top; with "Colours from the cover" on,
         // that top takes a soft tint of the cover (as Pixel's own player does), easing between songs.
-        Modifier.fillMaxSize().nestedScroll(upToQueue).background(Brush.verticalGradient(0f to rememberCoverTint(state.artworkUri, cs.surfaceContainerHigh), 0.55f to cs.surface, 1f to cs.surface)),
+        Modifier.fillMaxSize().nestedScroll(upToQueue).drawWithCache {
+            val background = Brush.verticalGradient(0f to coverTint.value, 0.55f to cs.surface, 1f to cs.surface)
+            onDrawBehind { drawRect(background) }
+        },
     ) {
         Column(
             Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
@@ -692,24 +697,29 @@ internal fun PlayerPage(
             Spacer(Modifier.height(32.dp))
             Row(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(state.title.ifBlank { " " }, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 1,
-                        modifier = Modifier.basicMarquee(iterations = 1, initialDelayMillis = 1_500))
-                    Text(state.artist.ifBlank { " " }, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    TrackLabel(state.title, style = MaterialTheme.typography.headlineSmallEmphasized, marquee = true)
+                    TrackLabel(state.artist, style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant,
                         modifier = if (onOpenArtist != null) Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClickLabel = "Open artist", onClick = onOpenArtist) else Modifier)
                 }
                 KickIconButton(enabled = onFavourite != null, onClick = { haptics.like(!favourite); onFavourite?.invoke() }, modifier = Modifier.semantics {
                     contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
                 }) { kick -> Symbol(Glyph.FAVOURITE, size = 28.dp, filled = favourite, color = if (favourite) cs.primary else cs.onSurfaceVariant, kick = kick) }
             }
-            state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(20.dp))
             PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp), restoring)
             if (restoring) {
                 Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
                     Text("Restoring playback…", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
                 }
-            } else SignalPath(format, state.buffering && state.error == null, onAudioPath)
-            state.sleepDeadlineMs?.let { deadline -> SleepCountdown(deadline, onTimer) }
+            } else Row(
+                Modifier.widthIn(max = 420.dp).fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val deadline = state.sleepDeadlineMs
+                SignalPath(format, state.buffering && state.error == null, onAudioPath,
+                    if (deadline == null) Modifier else Modifier.weight(1f, fill = false))
+                if (deadline != null) SleepCountdown(deadline, onTimer, Modifier.weight(1f, fill = false))
+            }
             Spacer(Modifier.height(12.dp))
             Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
             Spacer(Modifier.height(28.dp))
@@ -725,6 +735,7 @@ internal fun PlayerPage(
                 }
             }
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
+            state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -847,13 +858,14 @@ private fun ToggleAction(glyph: Glyph, label: String, on: Boolean, enabled: Bool
 
 /** The file's format and bitrate, quiet under the seek bar; a tap opens the full audio path. */
 @Composable
-private fun SignalPath(format: String?, loading: Boolean, onClick: () -> Unit) {
+private fun SignalPath(format: String?, loading: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
-    Row(Modifier.clip(CircleShape).clickable(onClickLabel = "Open audio path", onClick = onClick)
+    Row(modifier.clip(CircleShape).clickable(onClickLabel = "Open audio path", onClick = onClick)
         .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(format ?: if (loading) "Reading audio format…" else "Format unavailable",
-            style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false))
         Symbol(Glyph.CHEVRON, size = 16.dp, color = cs.onSurfaceVariant)
     }
 }
@@ -907,33 +919,41 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
     // survive screen-off, so the poller also follows lifecycle rather than only visibility.
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifecycleState by lifecycle.currentStateFlow.collectAsState()
-    // Two clocks: [at] moves every frame but is read only by the handle's layout and the line's
-    // drawing; [seconds] changes once a second for the time label. A frame recomposes nothing.
+    // The slider and the spoken time use separate clocks so drawing the handle does not rewrite the label.
     val occurrence = state.queue.getOrNull(state.queueIndex)?.key
-    val at = remember(state.mediaId, occurrence) { mutableLongStateOf(state.positionMs) }
     var seconds by remember(state.mediaId, occurrence) { mutableLongStateOf(state.positionMs / 1_000) }
     val readPosition by rememberUpdatedState(position)
     var dragged by remember(state.mediaId, occurrence) { mutableStateOf<Float?>(null) }
     val duration = state.durationMs.coerceAtLeast(1)
     val slider = remember(state.mediaId, occurrence) {
-        androidx.compose.material3.SliderState((at.longValue.toFloat() / duration).coerceIn(0f, 1f), 0, 0f..1f)
+        androidx.compose.material3.SliderState((state.positionMs.toFloat() / duration).coerceIn(0f, 1f), 0, 0f..1f)
     }
     val canSeek = state.connected && state.seekable && state.durationMs > 0
-    fun show(ms: Long) { at.longValue = ms; if (dragged == null) slider.value = (ms.toFloat() / duration).coerceIn(0f, 1f); (ms / 1_000).let { if (it != seconds) seconds = it } }
-    // Every display frame (120 a second on a 120 Hz screen) the position moves on from the last
-    // reading by the time passed; the player itself is asked once a second to stay exact.
-    LaunchedEffect(lifecycle, state.connected, state.isPlaying, state.mediaId, occurrence, state.positionMs, state.durationMs, canSeek) {
+    fun show(ms: Long) {
+        if (dragged == null) slider.value = (ms.toFloat() / duration).coerceIn(0f, 1f)
+        seconds = ms / 1_000
+    }
+    LaunchedEffect(lifecycle, state.connected, state.isPlaying, state.mediaId, occurrence, state.positionMs, state.durationMs, state.speed, canSeek) {
         if (!canSeek) dragged = null
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             if (!state.connected || !state.isPlaying) {
                 show(state.positionMs)
                 return@repeatOnLifecycle
             }
-            show(readPosition())
-            var base = at.longValue; var baseAt = 0L; var lastRead = 0L
+            var base = readPosition()
+            show(base)
+            var baseAt = Long.MIN_VALUE
+            var lastFrame = Long.MIN_VALUE
             while (true) androidx.compose.animation.core.withInfiniteAnimationFrameMillis { now ->
-                if (baseAt == 0L || now - lastRead >= 1_000) { base = readPosition(); baseAt = now; lastRead = now }
-                show((base + (now - baseAt)).coerceAtMost(state.durationMs.coerceAtLeast(base)))
+                if (baseAt == Long.MIN_VALUE || now - baseAt >= 1_000) {
+                    base = readPosition()
+                    baseAt = now
+                }
+                // The wave can draw independently. A 120 Hz display needs only one slider update per two frames.
+                if (lastFrame == Long.MIN_VALUE || now - lastFrame >= 16) {
+                    lastFrame = now
+                    show((base + ((now - baseAt) * state.speed).toLong()).coerceAtMost(state.durationMs.coerceAtLeast(base)))
+                }
             }
         }
     }
@@ -1053,18 +1073,29 @@ internal fun TrackActionsSheet(
     }
 }
 
-/** "Stops in 23 min" under the signal path while a sleep timer runs; a tap changes it. Read once a minute. */
+/** The remaining minutes or the finishing-song state fits next to the audio format. */
 @Composable
-private fun SleepCountdown(deadline: Long, onClick: () -> Unit) {
+private fun SleepCountdown(deadline: Long, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val cs = MaterialTheme.colorScheme
-    var now by remember { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(deadline) { while (true) { now = android.os.SystemClock.elapsedRealtime(); delay(30_000) } }
-    val text = if (deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE) "Stops after this song"
-        else "Stops in ${((deadline - now).coerceAtLeast(0) + 59_999) / 60_000} min"
-    Row(Modifier.clip(CircleShape).clickable(onClickLabel = "Sleep timer", onClick = onClick).padding(horizontal = 12.dp, vertical = 4.dp),
+    val waitingForEnd = deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var now by remember(deadline) { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
+    LaunchedEffect(lifecycle, deadline) {
+        if (waitingForEnd) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            now = android.os.SystemClock.elapsedRealtime()
+            while (now < deadline) {
+                delay((deadline - now - 1) % 60_000L + 1)
+                now = android.os.SystemClock.elapsedRealtime()
+            }
+        }
+    }
+    val text = if (waitingForEnd) "Finishing song" else "${((deadline - now).coerceAtLeast(0) + 59_999) / 60_000} min"
+    Row(modifier.clip(CircleShape).clickable(onClickLabel = "Sleep timer", onClick = onClick)
+        .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Symbol(Glyph.SLEEP, size = 16.dp, color = cs.tertiary, filled = true)
-        Text(text, style = MaterialTheme.typography.labelLarge, color = cs.tertiary)
+        TrackLabel(text, style = MaterialTheme.typography.labelLarge, color = cs.tertiary)
     }
 }
 
@@ -1080,13 +1111,14 @@ internal object CoverColours {
  * and eased between songs. The plain surface when the setting is off or the cover can't be read.
  */
 @Composable
-private fun rememberCoverTint(artwork: String?, surface: androidx.compose.ui.graphics.Color): androidx.compose.ui.graphics.Color {
+private fun rememberCoverTint(artwork: String?, surface: androidx.compose.ui.graphics.Color): androidx.compose.runtime.State<androidx.compose.ui.graphics.Color> {
     val context = androidx.compose.ui.platform.LocalContext.current
     val dark = androidx.compose.foundation.isSystemInDarkTheme()
     val target by androidx.compose.runtime.produceState(surface, artwork, surface, dark) {
         value = if (artwork == null || !CoverColours.on(context)) surface else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
-                val request = coil3.request.ImageRequest.Builder(context).data(artwork).size(24).build()
+                val thumbnail = ua.olex.music.library.ArtworkUris.variant(artwork, context.packageName, ArtworkPlan.SMALL)
+                val request = coil3.request.ImageRequest.Builder(context).data(thumbnail).size(24).build()
                 val image = (coil3.SingletonImageLoader.get(context).execute(request) as? coil3.request.SuccessResult)?.image ?: return@runCatching surface
                 val bitmap = image.toBitmap(24, 24)
                 var r = 0L; var g = 0L; var b = 0L; var n = 0
@@ -1099,5 +1131,5 @@ private fun rememberCoverTint(artwork: String?, surface: androidx.compose.ui.gra
             }.getOrDefault(surface)
         }
     }
-    return androidx.compose.animation.animateColorAsState(target, MaterialTheme.motionScheme.slowEffectsSpec(), label = "cover-tint").value
+    return androidx.compose.animation.animateColorAsState(target, MaterialTheme.motionScheme.slowEffectsSpec(), label = "cover-tint")
 }

@@ -6,11 +6,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,13 +21,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.dp
 import ua.olex.music.playback.PlayerState
 
@@ -53,9 +60,9 @@ internal fun PlayerHeader(
         ) {
             Text("PLAYING FROM", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
+            TrackLabel(
                 from ?: state.album ?: if (state.mediaId?.startsWith("yt:") == true) "Your queue" else "Your library",
-                style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.titleSmall, textAlign = TextAlign.Center, lines = 2,
             )
         }
         if (onLyricsTools != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
@@ -76,5 +83,30 @@ internal fun PlayerHeader(
         KickIconButton(onClick = { onMore?.invoke() }, enabled = onMore != null, modifier = Modifier.semantics { contentDescription = "Song actions" }) { kick ->
             Symbol(Glyph.MORE, kick = kick)
         }
+    }
+}
+
+private val trackLineBreaks = Regex("[\\r\\n\\u0085\\u2028\\u2029]+")
+
+/** Reserve the same scaled text space across Latin, CJK, emoji and other fallback fonts. */
+@Composable
+internal fun TrackLabel(
+    text: String,
+    style: TextStyle,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    textAlign: TextAlign? = null,
+    lines: Int = 1,
+    marquee: Boolean = false,
+) {
+    val label = remember(text) { text.replace(trackLineBreaks, " ").ifBlank { "\u00a0" } }
+    val height = with(LocalDensity.current) { (style.lineHeight * lines.toFloat()).toDp() }
+    val lineStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
+    Box(modifier.height(height), contentAlignment = if (textAlign == TextAlign.Center) Alignment.Center else Alignment.CenterStart) {
+        Text(
+            label, style = style.copy(lineHeightStyle = lineStyle), color = color, textAlign = textAlign,
+            maxLines = lines, softWrap = lines > 1, overflow = TextOverflow.Ellipsis,
+            modifier = if (marquee && !LocalPowerSave.current) Modifier.basicMarquee(iterations = 1, initialDelayMillis = 1_500) else Modifier,
+        )
     }
 }
