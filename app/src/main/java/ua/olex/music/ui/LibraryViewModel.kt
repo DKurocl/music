@@ -709,7 +709,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun next() = player.next()
     fun previous() = player.previous()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
-    fun setSleepTimer(minutes: Int) = player.setSleepTimer(minutes)
+    fun setSleepTimer(minutes: Int, finishTrack: Boolean) = player.setSleepTimer(minutes, finishTrack)
     fun extendSleepTimer(ms: Long) = player.extendSleepTimer(ms)
     fun toggleShuffle() = player.toggleShuffle()
     fun cycleRepeat() = player.cycleRepeat()

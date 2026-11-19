@@ -1,3 +1,15 @@
+# Stable player layout and sleep countdowns
+
+Song metadata uses font-scaled slots in the player, mini player and shared track rows.
+The format and sleep status share a row so the transport stays in place. The seek bar
+limits interpolation updates to about 60 Hz and follows playback speed. Cover tint
+reads the small artwork variant and animates in drawing without recomposing the page.
+Timed sleep can finish the current song, which is the default and is remembered.
+The service arms Media3 at the deadline and publishes the finishing state. Immediate
+timers keep their fade. Cast reacts to the receiver's boundary notification.
+Local check: `git diff --check`. CI checks mixed-script layout and both deadline actions.
+Physical Pixel smoothness, overnight playback and Cast timing remain device checks.
+
 # Mix queues and cover swipes
 
 Starting radio from the active track keeps its source, occurrence and progress while making

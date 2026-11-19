@@ -11,7 +11,7 @@ internal suspend fun awaitSleepDeadline(
 ) {
     delay((deadline - fadeMs - now()).coerceAtLeast(0))
     val remaining = deadline - now()
-    if (remaining > 0) beginFade(remaining)
+    if (fadeMs > 0 && remaining > 0) beginFade(remaining)
     while (true) {
         val left = deadline - now()
         if (left <= 0) return
