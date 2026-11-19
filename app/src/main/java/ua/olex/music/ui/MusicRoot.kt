@@ -76,6 +76,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.toShape
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -167,6 +170,8 @@ fun MusicRoot(model: LibraryViewModel) {
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
     // Three places (Home, Library, Search) and pages over Home (Stats, Duplicates): docs/DESIGN_SYSTEM.md.
     var place by rememberSaveable { mutableStateOf(Place.HOME) }
+    var statsAnchor by remember { androidx.compose.runtime.mutableFloatStateOf(0.84f) }
+    var statsBackCommitted by remember { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
     var openPlaylist by rememberSaveable { mutableStateOf<Long?>(null) }
     var openInLibrary by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -300,7 +305,10 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             when {
                 onlineStack.isNotEmpty() -> popOnline()
-                page != null -> page = if (page == Page.DUPLICATES || page == Page.LIBRARY_OVERVIEW) Page.SETTINGS else null
+                page != null -> {
+                    statsBackCommitted = page == Page.STATS && destinationBackProgress > 0f
+                    page = if (page == Page.DUPLICATES || page == Page.LIBRARY_OVERVIEW) Page.SETTINGS else null
+                }
                 else -> go(Place.HOME)
             }
         } finally {
@@ -367,7 +375,13 @@ fun MusicRoot(model: LibraryViewModel) {
                             style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     else if (inCollection) Text(collectionTitle.orEmpty(), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    else Text(page?.title ?: place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
+                    else if (place == Place.HOME && (page == null || page == Page.STATS)) {
+                        androidx.compose.animation.Crossfade(page == Page.STATS,
+                            animationSpec = if (powerSave) androidx.compose.animation.core.snap() else MaterialTheme.motionScheme.fastEffectsSpec(),
+                            label = "Listening title") { listening ->
+                            Text(if (listening) Page.STATS.title else Place.HOME.title, style = MaterialTheme.typography.headlineMediumEmphasized)
+                        }
+                    } else Text(page?.title ?: place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
                 }, scrollBehavior = scroll,
                 colors = if (onlineTop == null && place == Place.HOME && page == null) {
                     TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface,
@@ -382,7 +396,8 @@ fun MusicRoot(model: LibraryViewModel) {
                     if (onlineTop == null && place == Place.LIBRARY && page == null && !inCollection) KickIconButton(onClick = { go(Place.SEARCH) }, modifier = Modifier.semantics { contentDescription = "Search" }) { k -> Symbol(Glyph.SEARCH, kick = k) }
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
-                        HomeActions(onStats = { page = Page.STATS }, onSettings = { settingsQuery = ""; page = Page.SETTINGS })
+                        HomeActions(onStats = { statsBackCommitted = false; page = Page.STATS },
+                            onSettings = { settingsQuery = ""; page = Page.SETTINGS }, onStatsAnchor = { statsAnchor = it })
                     }
                 },
             )
@@ -432,6 +447,7 @@ fun MusicRoot(model: LibraryViewModel) {
         // Where the owner is: a new place fades through, a page opened from it slides in from the side.
         val route = when {
             onlineStack.isNotEmpty() -> "online:${onlineStack.size}:${onlineStack.last()}"
+            page == Page.STATS -> "place:${Place.HOME.name}"
             page != null -> "page:${page!!.name}"
             else -> "place:${place.name}"
         }
@@ -450,25 +466,27 @@ fun MusicRoot(model: LibraryViewModel) {
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
                 onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = duplicates.size, onDuplicates = { page = Page.DUPLICATES },
                 onLibraryOverview = { page = Page.LIBRARY_OVERVIEW }, initialQuery = settingsQuery)
-            page == Page.STATS -> StatsPage(requireNotNull(library), Modifier.padding(insets), model::play, context.graph.userLibrary::historySince)
             page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
                 onDuplicates = { page = Page.DUPLICATES }, onStorage = { settingsQuery = "cache"; page = Page.SETTINGS }, onTrash = moveToTrash)
             page == Page.DUPLICATES -> DuplicatesPage(duplicates, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
-            place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
-                personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier.padding(insets),
-                onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
-                playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
-                transportPlaying = playing.playWhenReady, onToggle = model::toggle,
-                onOpenAlbum = { album ->
-                    clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME
-                    openInLibrary = "ALBUMS" to album.id; place = Place.SEARCH
-                },
-                onOpenPlaylist = { id -> clearOnline(Place.LIBRARY); go(Place.LIBRARY); returnTo = Place.HOME; openPlaylist = id },
-                onAllPlaylists = { clearOnline(Place.LIBRARY); go(Place.LIBRARY) },
-                moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
-                youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
+            place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsAnchor, statsBackCommitted, Modifier.padding(insets)) { listening ->
+                if (listening) StatsPage(requireNotNull(library), Modifier, model::play, context.graph.userLibrary::historySince)
+                else baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
+                    personal.history.mapNotNull { it.track }, songStats, playing.mediaId, Modifier,
+                    onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = personal.favourites.mapNotNull { it.track },
+                    playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
+                    homeActive = page == null, transportPlaying = playing.playWhenReady, onToggle = model::toggle,
+                    onOpenAlbum = { album ->
+                        clearOnline(Place.SEARCH); model.setQuery(""); returnTo = Place.HOME
+                        openInLibrary = "ALBUMS" to album.id; place = Place.SEARCH
+                    },
+                    onOpenPlaylist = { id -> clearOnline(Place.LIBRARY); go(Place.LIBRARY); returnTo = Place.HOME; openPlaylist = id },
+                    onAllPlaylists = { clearOnline(Place.LIBRARY); go(Place.LIBRARY) },
+                    moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
+                    youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
+            }
             else -> baseStates.SaveableStateProvider("place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (place == Place.SEARCH) query else "", search = search, onQueryChange = model::setQuery,
@@ -949,8 +967,12 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
 
 /** Shared toolbar for Home and its rendered design previews. */
 @Composable
-internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit) {
-    KickIconButton(onClick = onStats, modifier = Modifier.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
+internal fun HomeActions(onStats: () -> Unit, onSettings: () -> Unit, onStatsAnchor: (Float) -> Unit = {}) {
+    val haptics = rememberHaptics()
+    KickIconButton(onClick = { haptics.tick(); onStats() }, modifier = Modifier.onGloballyPositioned { button ->
+        val width = button.findRootCoordinates().size.width
+        if (width > 0) onStatsAnchor((button.boundsInRoot().center.x / width).coerceIn(0f, 1f))
+    }.semantics { contentDescription = "Listening stats" }) { k -> Symbol(Glyph.STATS, kick = k) }
     // The gear turns as it opens Settings.
     var gear by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     androidx.compose.material3.FilledTonalIconButton(onClick = { gear++; onSettings() },
@@ -968,23 +990,12 @@ internal fun Arrival(key: Any, place: Place, deeper: Boolean, content: @Composab
     androidx.compose.runtime.SideEffect { lastRoute = key; lastPlace = place }
     val spec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
     LaunchedEffect(key, still) {
-        if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f,
-            if (key == "page:STATS") androidx.compose.animation.core.tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing) else spec)
+        if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f, spec)
     }
     val sign = if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) -1 else 1
     Box(Modifier.fillMaxSize().graphicsLayer {
         val remaining = if (still) 0f else 1f - progress.value
-        if (key == "page:STATS") {
-            val amount = remaining.coerceIn(0f, 1f)
-            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(if (sign > 0) 0.9f else 0.1f, 0f)
-            scaleX = 1f - 0.055f * amount
-            scaleY = scaleX
-            alpha = (1f - amount) * (1f + amount)
-            translationX = 12.dp.toPx() * amount * sign
-            translationY = -16.dp.toPx() * amount
-        } else {
-            alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
-            translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()
-        }
+        alpha = 1f - 0.12f * remaining.coerceIn(0f, 1f)
+        translationX = remaining * sign * (if (deeper) 32.dp else (18 * direction).dp).toPx()
     }) { content() }
 }

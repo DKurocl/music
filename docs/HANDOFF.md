@@ -1,3 +1,12 @@
+# Home start controls and listening navigation (2026-11-19)
+
+Home and listening now share one reversible page transition below the measured toolbar button.
+The mini player and navigation stay in place. Home keeps its saved scroll position and mood.
+The album face and transport receive independent presses. Tap Liked to play or hold it to pick
+a song. Shuffle skips the current recording when another unique recording is available.
+The gallery exercises these targets and renders the page handoff. Local check: `git diff --check`.
+Physical gesture timing on the Pixel remains unverified.
+
 # Listening screen and floating player (2026-11-18)
 
 The listening list now extends behind the shared mini player. Its trailing scroll padding

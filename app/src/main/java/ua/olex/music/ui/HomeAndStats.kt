@@ -54,14 +54,15 @@ internal fun HomePage(
     youTubeHome: List<YouTubeMusic.Shelf> = emptyList(), excluded: Set<String> = emptySet(), onlineEnabled: Boolean = true,
     playlists: List<PlaylistUi> = emptyList(), accountPlaylists: List<YouTubeMusic.Card> = emptyList(),
     onOpenPlaylist: (Long) -> Unit = {}, onAllPlaylists: () -> Unit = {},
-    transportPlaying: Boolean = false, onToggle: () -> Unit = {},
+    transportPlaying: Boolean = false, onToggle: () -> Unit = {}, homeActive: Boolean = true,
     onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onShuffle: (List<Track>) -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember(library) { HomeCache() },
 ) {
     var label by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     val mood = moods.firstOrNull { it.label == label }
-    androidx.activity.compose.BackHandler(mood != null) { label = null }
+    androidx.activity.compose.BackHandler(homeActive && mood != null) { label = null }
+    var choosingLiked by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     val network = LocalNetwork.current
     val online = onlineEnabled && network
     val revision = if (!online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
@@ -156,8 +157,9 @@ internal fun HomePage(
                             else if (shownSongs.isNotEmpty()) onPlay(shownSongs, 0, contextName)
                         }
                         HomeStarts(feature, shownSongs.firstOrNull(), shuffleSongs, favourites, currentId, transportPlaying, onToggle,
-                            onAlbum = { if (feature != null) onOpenAlbum(feature) else startFeature() },
-                            onPlayAlbum = ::startFeature, onShuffle = { onShuffle(shuffleSongs) }, onLiked = { onPlay(favourites, 0, "Liked") })
+                            onAlbum = { if (feature != null) onOpenAlbum(feature) else shownSongs.firstOrNull()?.let(onTrackActions) },
+                            onPlayAlbum = ::startFeature, onShuffle = { onShuffle(shuffleSongs) }, onLiked = { onPlay(favourites, 0, "Liked") },
+                            onChooseLiked = { choosingLiked = true })
                     }
                     if (shownSongs.isNotEmpty()) {
                         if (shownMood != null) item(key = "title") { SectionTitle(contextName) }
@@ -196,6 +198,19 @@ internal fun HomePage(
             }
         }
 
+    }
+    if (choosingLiked && homeActive) AppSheet(onDismiss = { choosingLiked = false }) {
+        SectionTitle("Liked")
+        if (favourites.isEmpty()) Text("No liked songs yet", Modifier.padding(16.dp))
+        else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp).testTag("liked-picker"), contentPadding = PaddingValues(bottom = 16.dp)) {
+            items(favourites.size) { index ->
+                val song = favourites[index]
+                TrackRow(song, song.id.value == currentId, showQuality = false) {
+                    choosingLiked = false
+                    onPlay(favourites, index, "Liked")
+                }
+            }
+        }
     }
 }
 
