@@ -21,6 +21,8 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-19: simplify the playlist hub, clean up playback glyphs and recover song radio from linked files.
+
 - [x] Codex, 2026-11-19: direct full player entry from system surfaces and continuity for listening and sleep timer interactions.
 
 - [x] Codex, 2026-11-19: Home quick start motion and repeated track skip performance.

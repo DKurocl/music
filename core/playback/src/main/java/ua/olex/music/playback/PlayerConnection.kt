@@ -351,6 +351,25 @@ class PlayerConnection(context: Context) {
         }
     }
 
+    /** The service verifies the occurrence again after resolving the new sources. */
+    suspend fun replaceUpcomingForRadio(key: String, tracks: List<Track>, origin: String): Boolean {
+        val player = controller ?: return false
+        return queueMutex.withLock {
+            val items = withContext(Dispatchers.Default) {
+                tracks.map { currentCoroutineContext().ensureActive(); mediaItem(it, playbackContext = origin) }
+            }
+            if (controller !== player || items.isEmpty()) return@withLock false
+            try {
+                player.sendCustomCommand(QueueCommand.command, QueueCommand.arguments(items, next = false, replaceAfter = key))
+                    .await().resultCode == SessionResult.RESULT_SUCCESS
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+        }
+    }
+
     fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) {
         val player = controller ?: return
         _state.value = _state.value.copy(equalizerError = null)

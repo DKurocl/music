@@ -21,11 +21,13 @@ internal class PlaybackMix(
 
     private val prefs get() = graph.mixPreferences
 
+    fun origin(mix: Run?, title: String): String = PlaybackOrigin("mix", mix?.id ?: "local", title).encode()
+
     fun begin(mix: Run?, title: String): String {
         run = mix
         label = title
         if (mix != null) checkpoint(mix) else prefs.edit().remove("cursor").apply()
-        return PlaybackOrigin("mix", mix?.id ?: "local", title).encode()
+        return origin(mix, title)
     }
 
     /** A manual selection supersedes both the old context and any page still loading for it. */
@@ -69,27 +71,34 @@ internal class PlaybackMix(
         val expected = active
         if (remaining > if (active == null) 0 else 3) return null
         val source = graph.youTube
-        val page = if (active != null) {
+        val start = active?.startFrom ?: active?.seed?.let(Mix::videoId)
+        var page = if (active != null) {
             val token = active.token
-            val start = active.startFrom
-            when {
-                token != null -> nextPage(token) ?: active.seed.id.value.takeIf { it.startsWith("yt:") }?.removePrefix("yt:")?.let { firstPage(it) }
-                start != null -> firstPage(start)
-                else -> null
-            }
+            val continuation = token?.let { nextPage(it) }
+            continuation ?: (start ?: Mix.videoId(seed))?.let { firstPage(it) }
         } else {
-            val video = if (YouTubeMusic.isOnline(seed)) seed.id.value.removePrefix("yt:") else source.find(seed)?.id?.value?.removePrefix("yt:")
+            val video = Mix.videoId(seed) ?: source.find(seed)?.let(Mix::videoId)
             video?.let { firstPage(it) }
         } ?: return null
         if (run !== expected) return null
         val hidden = graph.excludedRecommendations()
         val seen = (active?.seen.orEmpty() + queue.map(Mix::songKey) + hidden).toMutableSet()
-        val more = withContext(Dispatchers.Default) { Mix.clean(page.tracks, active?.seed ?: seed, seen) }
+        val base = active?.seed ?: seed
+        var more = withContext(Dispatchers.Default) { Mix.clean(page.tracks, base, seen) }
+        val visited = mutableSetOf(active?.token)
+        // An empty cleaned page can still have a usable continuation.
+        repeat(2) {
+            val token = page.continuation
+            if (more.isEmpty() && token != null && visited.add(token)) {
+                page = nextPage(token) ?: return@repeat
+                more = withContext(Dispatchers.Default) { Mix.clean(page.tracks, base, seen) }
+            }
+        }
+        if (run !== expected || more.isEmpty()) return null
         return QueueExtension(more) {
             if (run !== expected) false else {
                 val updated = active ?: Run(seed, null, seen, queue.flatMap { listOfNotNull(it.id.value, it.requestedId) }.toMutableSet())
                 updated.token = page.continuation
-                updated.startFrom = null
                 updated.seen += more.map(Mix::songKey)
                 updated.ids += more.map { it.id.value }
                 run = updated

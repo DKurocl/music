@@ -1,3 +1,17 @@
+# Playback marks, playlist navigation and radio
+
+Skip glyphs are a single rounded fill, so their disabled opacity stays uniform. The five
+playing bars are drawn directly over art with an edge on each bar for contrast.
+Playlists use one list for local and YouTube Music rows, with creation and import in the
+add menu and Search in the bottom bar. Child pages have directional motion, and peer
+tabs stay anchored. Podcast watch-later entries are left out of the music collection.
+Radio uses a linked YouTube ID before searching. It reads both watch-panel continuation
+forms and keeps usable provider picks even when the first page is short. The local mix can
+start with sparse metadata and keeps permanent exclusions. The service replaces upcoming
+songs after source resolution, while preserving the seed's position and occurrence.
+Local check: `git diff --check`. CI checks source matching, radio continuation, queue
+replacement and rendered glyphs. Live YouTube radio and on-device motion remain unmeasured.
+
 # System player entry and motion follow-up
 
 A widget or notification opens the full player surface before Media3 connects. Last shown

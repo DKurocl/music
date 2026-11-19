@@ -201,15 +201,20 @@ internal fun SkipSymbol(forward: Boolean, size: Dp, kick: Int) {
         val unit = this.size.minDimension / 24f
         val t = pulse.value
         withTransform({ scale(unit, unit, androidx.compose.ui.geometry.Offset.Zero) }) {
-            val left = 4f + 5.5f * t
+            val left = 3.5f + 5.5f * t
+            val top = 4.5f + t
+            val bottom = 24f - top
+            val tip = 15.2f + 3.3f * t
+            // A single rounded fill keeps translucent disabled icons at one opacity.
             path.reset()
-            path.moveTo(left, 5f + t)
-            path.lineTo(14.4f + 3.4f * t, 12f)
-            path.lineTo(left, 19f - t)
+            path.moveTo(left, top + 1f)
+            path.quadraticTo(left, top - 0.4f, left + 1.2f, top + 0.4f)
+            path.lineTo(tip - 0.6f, 11.3f)
+            path.quadraticTo(tip + 0.4f, 12f, tip - 0.6f, 12.7f)
+            path.lineTo(left + 1.2f, bottom - 0.4f)
+            path.quadraticTo(left, bottom + 0.4f, left, bottom - 1f)
             path.close()
             drawPath(path, color)
-            drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(1.3f,
-                join = androidx.compose.ui.graphics.StrokeJoin.Round))
             drawRoundRect(color, androidx.compose.ui.geometry.Offset(16.5f + t * 2f, 4.5f),
                 androidx.compose.ui.geometry.Size(3.5f, 15f), androidx.compose.ui.geometry.CornerRadius(1.6f))
         }
