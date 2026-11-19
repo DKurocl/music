@@ -1,8 +1,8 @@
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.
-Current playback is shown with five rounded bars at the center of the artwork. They pulse in
-sequence during playback without laying out the row again. The mark fades out in 120 ms on
+Current playback is shown with five rounded bars at the center of the artwork. The bars settle
+into a compact shape and rise together during playback. The mark fades out in 120 ms on
 pause or track change. Battery Saver leaves the bars still. Common symbols
 have coordinated press and release motion. Track actions use distinct marks for radio,
 queue and playlist actions. Audio Path and Settings provide access to the equalizer.
