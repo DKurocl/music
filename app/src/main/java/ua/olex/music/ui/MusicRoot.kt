@@ -118,7 +118,7 @@ import ua.olex.music.playback.PlayerState
 fun MusicRoot(model: LibraryViewModel) {
     val library by model.catalogue.collectAsStateWithLifecycle()
     val tracks = library?.songs
-    val query by model.query.collectAsStateWithLifecycle()
+    val query = model.searchText
     val personal by model.personal.collectAsStateWithLifecycle()
     val stats by model.stats.collectAsStateWithLifecycle()
     val musicFolders by model.musicFolders.collectAsStateWithLifecycle()
@@ -522,7 +522,7 @@ fun MusicRoot(model: LibraryViewModel) {
             }
             else -> baseStates.SaveableStateProvider(if (place == Place.SEARCH) "place-SEARCH-$searchVisit" else "place-${place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
-                query = query.takeIf { place == Place.SEARCH && it == model.query.value }.orEmpty(),
+                query = if (place == Place.SEARCH) query else "",
                 search = model.search.collectAsStateWithLifecycle().value, onQueryChange = model::setQuery,
                 mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
