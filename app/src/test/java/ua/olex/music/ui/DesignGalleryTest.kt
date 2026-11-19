@@ -945,8 +945,8 @@ class DesignGalleryTest {
             frame(0)
             shuffle.performClick()
             like.performClick()
-            for (i in 1..8) {
-                compose.mainClock.advanceTimeBy(64)
+            for (i in 1..15) {
+                compose.mainClock.advanceTimeBy(32)
                 frame(i)
                 org.junit.Assert.assertEquals(shuffleBounds, shuffle.fetchSemanticsNode().boundsInRoot)
                 org.junit.Assert.assertEquals(likeBounds, like.fetchSemanticsNode().boundsInRoot)
