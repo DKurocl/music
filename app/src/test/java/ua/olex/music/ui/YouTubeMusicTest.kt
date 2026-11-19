@@ -99,9 +99,38 @@ class YouTubeMusicTest {
         val fallback = source.albumPage(summary, null, false)!!
         assertTrue(fallback.first.partial)
         assertEquals(listOf("yt:song", "yt:song"), fallback.second.map { it.id.value })
-        assertTrue(YouTubeMusic.confirmedPlaylistQueue("PLdifferent", queue).isEmpty())
+        assertNull(YouTubeMusic.confirmedPlaylistQueue("PLdifferent", queue))
         missing = false
         assertFalse(source.albumPage(summary, null, false)!!.first.partial)
+    }
+
+    @Test fun likedQueueFollowsNextTokensAndPreservesOrderAcrossPages() = kotlinx.coroutines.runBlocking {
+        fun row(id: String) = """{"playlistPanelVideoRenderer":{"videoId":"$id","title":{"simpleText":"$id"},
+            "longBylineText":{"simpleText":"Artist"},"navigationEndpoint":{"watchEndpoint":{"playlistId":"LM"}}}}"""
+        val first = """{"playlistPanelRenderer":{"contents":[${row("first")}],
+            "continuations":[{"nextRadioContinuationData":{"continuation":"second"}}]}}"""
+        val second = """{"continuationContents":{"playlistPanelContinuation":{"contents":[${row("first")},${row("last")}]}}}"""
+        var retryLegacy = false
+        val source = YouTubeMusic(transport = { endpoint, fields, query ->
+            when {
+                endpoint != "next" -> null
+                "continuation" in fields -> """{"error":{"code":400}}"""
+                "ctoken=second" in query -> {
+                    retryLegacy = true
+                    second.takeIf { "\"playlistId\":\"LM\"" in fields }
+                }
+                else -> first.takeIf { "\"enablePersistentPlaylistPanel\":true" in fields }
+            }
+        }, account = { mapOf("Cookie" to "fixture") })
+        val summary = YouTubeMusic.OnlineAlbum("VLLM", "Liked Music", null, null)
+        val partial = source.albumPage(summary, null, false)!!
+        assertTrue(partial.first.partial)
+        assertTrue(source.hasAlbumContinuation(summary.id))
+        val completed = source.albumMore(summary.id)!!
+        assertTrue(retryLegacy)
+        assertEquals(listOf("yt:first", "yt:first", "yt:last"), completed.second.map { it.id.value })
+        assertFalse(completed.first.partial)
+        assertFalse(source.hasAlbumContinuation(summary.id))
     }
 
     @Test fun artistLookupUsesExactCreditWhenFilteredSearchReturnsADifferentArtist() = kotlinx.coroutines.runBlocking {

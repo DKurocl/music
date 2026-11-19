@@ -25,7 +25,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -83,7 +82,7 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
-private val playbackBarHeights = listOf(2f to 3f, 4f to 7f, 6f to 11f, 7f to 14f, 5f to 8f)
+private val playbackBarHeights = listOf(2.6f to 4f, 4.4f to 7.5f, 6.8f to 12.5f, 4.3f to 7f, 2.4f to 3.6f)
 
 /** A playback status mark that stays legible over artwork without looking like a transport control. */
 @Composable
@@ -109,22 +108,19 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
                 label = "Playback bars",
             )
             Box(Modifier.size(32.dp).semantics { stateDescription = "Playing" }.drawWithCache {
-                val scrim = Brush.radialGradient(
-                    0f to cs.scrim.copy(alpha = 0.82f),
-                    0.58f to cs.scrim.copy(alpha = 0.72f),
-                    1f to cs.scrim.copy(alpha = 0f),
-                    radius = size.minDimension / 2,
-                )
-                val spacing = 3.8.dp.toPx()
-                val width = 2.2.dp.toPx()
+                val contrast = cs.scrim.copy(alpha = 0.82f)
+                val spacing = 4.dp.toPx()
+                val width = 2.1.dp.toPx()
+                val outlineWidth = 3.8.dp.toPx()
                 onDrawBehind {
-                    drawCircle(scrim)
                     val fraction = expansion?.value ?: 1f
                     playbackBarHeights.forEachIndexed { index, (compact, expanded) ->
                         val x = center.x + (index - 2) * spacing
-                        val halfHeight = (compact + (expanded - compact) * fraction).dp.toPx() / 2
-                        drawLine(tint, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
-                            strokeWidth = width, cap = StrokeCap.Round)
+                        val halfHeight = ((compact + (expanded - compact) * fraction).dp.toPx() - width) / 2
+                        val start = Offset(x, center.y - halfHeight)
+                        val end = Offset(x, center.y + halfHeight)
+                        drawLine(contrast, start, end, strokeWidth = outlineWidth, cap = StrokeCap.Round)
+                        drawLine(tint, start, end, strokeWidth = width, cap = StrokeCap.Round)
                     }
                 }
             })

@@ -7,14 +7,19 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.NewPipe
+import org.schabi.newpipe.extractor.Page
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request
 import org.schabi.newpipe.extractor.downloader.Response
+import org.schabi.newpipe.extractor.exceptions.ExtractionException
+import org.schabi.newpipe.extractor.playlist.PlaylistInfo
 import org.schabi.newpipe.extractor.stream.StreamInfo
+import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.TextFold
 import ua.olex.music.model.Track
@@ -158,7 +163,9 @@ internal class YouTubeMusic(
     suspend fun album(id: String, offline: Boolean = false, summary: OnlineAlbum? = null): Pair<OnlineAlbum, List<Track>>? = withContext(ioDispatcher) {
         val scope = pageScope()
         val key = "album:$id"
-        cached(if (offline) "$scope/offline/$key" else "$scope/$key", keepResult = { value: Pair<OnlineAlbum, List<Track>> -> !value.first.partial }) {
+        val cursorKey = "$scope/$id"
+        cached(if (offline) "$scope/offline/$key" else "$scope/$key",
+            keepResult = { value: Pair<OnlineAlbum, List<Track>> -> !value.first.partial || more.containsKey(cursorKey) }) {
             val saved = pageStore?.read(scope, key)?.let {
                 runCatching { OnlinePageJson.album(it.getJSONObject("album")) to OnlinePageJson.tracks(it, "songs") }.getOrNull()
             }
@@ -166,16 +173,24 @@ internal class YouTubeMusic(
             val fresh = networkFallback(saved) {
                 suspend fun browse(headers: Map<String, String>?): Pair<OnlineAlbum, List<Track>>? {
                     return cataloguePage(browseId(id), headers) { json ->
-                        val token = continuationOf(json)
+                        val token = playlistBrowseToken(json)
                         parseAlbum(id, json, summary)?.takeUnless { id.startsWith("MPRE") && it.second.isEmpty() && token == null }?.also {
-                            if (pageScope() == scope) rememberContinuation("$scope/$id", token, signedIn = headers != null)
+                            if (pageScope() == scope) rememberContinuation(cursorKey, token?.let { MusicPage(it, headers != null) })
                         }
                     }
                 }
                 val headers = account()
                 val publicFallback = headers != null && id.removePrefix("VL") !in setOf("LM", "SE")
                 browse(headers) ?: (if (publicFallback) browse(null) else null) ?: saved
-                    ?: summary?.let { playlistFromQueue(it, headers) ?: if (publicFallback) playlistFromQueue(it, null) else null }
+                    ?: summary?.let {
+                        val fallback = playlistFromQueue(it, headers) ?: if (publicFallback) playlistFromQueue(it, null) else null
+                        val result = if (fallback?.next == null && fallback?.album?.partial != false)
+                            publicPlaylist(it) ?: fallback else fallback
+                        result?.let { page ->
+                            if (pageScope() == scope) rememberContinuation(cursorKey, page.next)
+                            page.album to page.tracks
+                        }
+                    }
             }
             if (pageScope() != scope) return@cached null
             if (fresh != null && fresh !== saved && !fresh.first.partial) saveAlbum(scope, id, fresh)
@@ -238,12 +253,44 @@ internal class YouTubeMusic(
         return html?.let(::initialCatalogueData)?.let(parse)
     }
 
-    private suspend fun playlistFromQueue(summary: OnlineAlbum, headers: Map<String, String>?): Pair<OnlineAlbum, List<Track>>? {
+    private data class OpenedPlaylist(val album: OnlineAlbum, val tracks: List<Track>, val next: PlaylistPage?)
+
+    private suspend fun playlistFromQueue(summary: OnlineAlbum, headers: Map<String, String>?): OpenedPlaylist? {
         val id = browseId(summary.id).takeIf { it.startsWith("VL") }?.removePrefix("VL") ?: return null
-        val fields = """"playlistId":${quote(id)},"isAudioOnly":true"""
-        val json = catalogueRequest { post("next", fields, headers = headers) } ?: return null
-        val songs = confirmedPlaylistQueue(id, json)
-        return songs.takeIf { it.isNotEmpty() }?.let { summary.copy(partial = true) to it }
+        val json = catalogueRequest { post("next", queueFields(id), headers = headers) } ?: return null
+        val page = confirmedPlaylistQueue(id, json) ?: return null
+        if (page.tracks.isEmpty()) return null
+        val next = page.continuation?.let { MusicPage(it, headers != null, watchPlaylist = id) }
+        return OpenedPlaylist(summary.copy(partial = !page.complete), page.tracks, next)
+    }
+
+    /** Public YouTube can serve the actual playlist when Music only exposes a preview queue. */
+    private suspend fun publicPlaylist(summary: OnlineAlbum): OpenedPlaylist? {
+        val id = browseId(summary.id).removePrefix("VL")
+        if (transport != null || !catalogueId.matches(id) || !(id.startsWith("PL") || id.startsWith("OLAK"))) return null
+        val url = "https://www.youtube.com/playlist?list=$id"
+        val info = extractPlaylist { PlaylistInfo.getInfo(ServiceList.YouTube, url) } ?: return null
+        val songs = publicPlaylistTracks(info.relatedItems)
+        if (songs.isEmpty() || info.id != id) return null
+        val next = info.nextPage?.takeIf(Page::isValid)?.let { PublicPage(url, it) }
+        return OpenedPlaylist(summary.copy(partial = next != null), songs, next)
+    }
+
+    private suspend fun <T> extractPlaylist(fetch: () -> T): T? = try {
+        kotlinx.coroutines.runInterruptible {
+            init()
+            fetch()
+        }
+    } catch (_: java.io.IOException) {
+        null
+    } catch (_: ExtractionException) {
+        null
+    }
+
+    private fun publicPlaylistTracks(items: List<StreamInfoItem>): List<Track> = items.mapNotNull { item ->
+        val id = item.url.toHttpUrlOrNull()?.queryParameter("v")?.takeIf { youtubeVideoId.matches(it) } ?: return@mapNotNull null
+        Track(TrackId("yt:$id"), "ytm://$id", item.name, item.uploaderName.orEmpty(),
+            durationMs = item.duration.coerceAtLeast(0) * 1000, artworkUri = item.thumbnails.lastOrNull()?.url)
     }
 
     private suspend fun <T> catalogueRequest(call: suspend () -> T?): T? = try {
@@ -316,39 +363,62 @@ internal class YouTubeMusic(
         val scope = pageScope()
         shared("album-more:$scope/$id") {
             val cursor = more["$scope/$id"] ?: return@shared null
-            val token = cursor.token
-            val headers = if (cursor.signedIn) account() ?: return@shared null else null
             val have = peek<Pair<OnlineAlbum, List<Track>>>("$scope/album:$id") ?: return@shared null
-            // The current form (continuation in the body), then the older one (in the address).
-            val json = post("browse", """"continuation":${quote(token)}"""", headers = headers)
-                ?: post("browse", "", "&ctoken=${Uri.encode(token)}&continuation=${Uri.encode(token)}&type=next", headers = headers)
-                // No answer (offline, a hiccup): the token is kept, so opening the page again goes on from here.
-                ?: return@shared null
-            if (ua.olex.music.lyrics.Json.parse(json) !is Map<*, *>) return@shared null
-            val page = parseSearch(json, fallbackArtist = have.second.firstOrNull()?.artist, keepOrder = true)
-            val added = page.map {
+            val (tracks, next) = when (val source = cursor.page) {
+                is MusicPage -> musicPlaylistMore(source, have.second.firstOrNull()?.artist)
+                is PublicPage -> extractPlaylist { PlaylistInfo.getMoreItems(ServiceList.YouTube, source.url, source.page) }?.let {
+                    val items = publicPlaylistTracks(it.items)
+                    if (items.isEmpty() && it.errors.isNotEmpty()) null
+                    else items to it.nextPage?.takeIf(Page::isValid)?.let { page -> PublicPage(source.url, page) }
+                }
+            } ?: return@shared null
+            val added = tracks.map {
                 it.copy(album = it.album ?: have.first.title.takeIf { id.startsWith("MPRE") }, artworkUri = it.artworkUri ?: have.first.cover)
             }
-            val next = continuationOf(json)
-            val visited = cursor.visited + token
-            check(next !in visited) { "YouTube Music repeated a playlist page" }
+            val visited = cursor.visited + cursor.page.key
+            if (next != null && next.key in visited) return@shared null
             if (pageScope() != scope) return@shared null
-            rememberContinuation("$scope/$id", next, visited, cursor.signedIn)
+            rememberContinuation("$scope/$id", next, visited)
             // Repeated video ids are distinct playlist occurrences, including across page boundaries.
-            (have.first to have.second + added).also {
+            (have.first.copy(partial = next != null) to have.second + added).also {
                 keep("$scope/album:$id", it)
                 saveAlbum(scope, id, it)
             }
         }
     }
-    private data class PlaylistCursor(val token: String, val visited: Set<String>, val signedIn: Boolean)
+
+    private suspend fun musicPlaylistMore(source: MusicPage, fallbackArtist: String?): Pair<List<Track>, PlaylistPage?>? {
+        val headers = if (source.signedIn) account() ?: return null else null
+        val watch = source.watchPlaylist
+        val endpoint = if (watch == null) "browse" else "next"
+        val fields = if (watch == null) "" else queueFields(watch)
+        fun parse(json: String): RadioPage? = if (watch == null) parseBrowseContinuation(json, fallbackArtist) else parseQueueContinuation(watch, json)
+        val body = listOf(fields, """"continuation":${quote(source.token)}"""").filter(String::isNotEmpty).joinToString(",")
+        val page = catalogueRequest {
+            post(endpoint, body, headers = headers)?.let(::parse)
+        } ?: catalogueRequest {
+            val token = java.net.URLEncoder.encode(source.token, Charsets.UTF_8.name())
+            val legacy = "&ctoken=$token&continuation=$token" + if (watch == null) "&type=next" else ""
+            post(endpoint, fields, legacy, headers = headers)?.let(::parse)
+        } ?: return null
+        return page.tracks to page.continuation?.let { source.copy(token = it) }
+    }
+
+    private sealed interface PlaylistPage { val key: String }
+    private data class MusicPage(val token: String, val signedIn: Boolean, val watchPlaylist: String? = null) : PlaylistPage {
+        override val key: String get() = token
+    }
+    private data class PublicPage(val url: String, val page: Page) : PlaylistPage {
+        override val key: String get() = "${page.url}/${page.id}/${page.body?.contentHashCode()}"
+    }
+    private data class PlaylistCursor(val page: PlaylistPage, val visited: Set<String>)
     private val more = java.util.Collections.synchronizedMap(object : LinkedHashMap<String, PlaylistCursor>(32, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, PlaylistCursor>?) = size > 48
     })
     internal fun hasAlbumContinuation(id: String): Boolean = more.containsKey("${pageScope()}/$id")
 
-    private fun rememberContinuation(id: String, token: String?, visited: Set<String> = emptySet(), signedIn: Boolean = false) {
-        if (token == null) more.remove(id) else more[id] = PlaylistCursor(token, visited, signedIn)
+    private fun rememberContinuation(id: String, page: PlaylistPage?, visited: Set<String> = emptySet()) {
+        if (page == null) more.remove(id) else more[id] = PlaylistCursor(page, visited)
     }
 
     /** A page already loaded this session, for drawing it in the first frame when it opens again. */
@@ -763,7 +833,11 @@ internal class YouTubeMusic(
         const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
 
         private val catalogueId = Regex("[A-Za-z0-9_-]{2,128}")
+        private val youtubeVideoId = Regex("[A-Za-z0-9_-]{11}")
         private val initialDataAssignment = Regex("""(?:\bytInitialData|window\[["']ytInitialData["']\])\s*=\s*(\{)""")
+
+        private fun queueFields(id: String) =
+            """"playlistId":${quote(id)},"isAudioOnly":true,"enablePersistentPlaylistPanel":true,"tunerSettingValue":"AUTOMIX_SETTING_NORMAL""""
 
         private fun browseId(id: String): String = when {
             id.startsWith("PL") || id.startsWith("OLAK") || id.startsWith("RD") || id in setOf("LM", "SE") -> "VL$id"
@@ -874,6 +948,29 @@ internal class YouTubeMusic(
         fun continuationOf(json: String): String? =
             Regex(""""continuationCommand"\s*:\s*\{[^{}]*?"token"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
                 ?: Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+
+        private fun pageToken(contents: Any?, continuation: Any? = null): String? =
+            collect(contents, "continuationItemRenderer").firstNotNullOfOrNull { item ->
+                collect(item["continuationEndpoint"], "continuationCommand").firstNotNullOfOrNull { it["token"] as? String }
+            } ?: listOf("nextContinuationData", "nextRadioContinuationData").firstNotNullOfOrNull { kind ->
+                collect(continuation, kind).firstNotNullOfOrNull { it["continuation"] as? String }
+            }
+
+        private fun playlistBrowseToken(json: String): String? {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val shelves = collect(root, "musicPlaylistShelfRenderer").ifEmpty { collect(root, "musicShelfRenderer") }
+            return shelves.firstNotNullOfOrNull { pageToken(it["contents"], it["continuations"]) }
+        }
+
+        private fun parseBrowseContinuation(json: String, fallbackArtist: String?): RadioPage? {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val shelf = collect(root, "musicPlaylistShelfContinuation").firstOrNull()
+                ?: collect(root, "musicShelfContinuation").firstOrNull()
+            val contents = (shelf?.get("contents") ?: collect(root, "appendContinuationItemsAction")
+                .firstNotNullOfOrNull { it["continuationItems"] as? List<*> }) as? List<*> ?: return null
+            val tracks = songRows(collect(contents, "musicResponsiveListItemRenderer"), fallbackArtist, keepOrder = true)
+            return RadioPage(tracks, pageToken(contents, shelf?.get("continuations")))
+        }
 
         /** The search filter YouTube Music's web app sends for "Artists". */
         private const val ARTISTS_ONLY = "EgWKAQIgAWoKEAoQAxAEEAkQBQ%3D%3D"
@@ -1017,8 +1114,10 @@ internal class YouTubeMusic(
             val header = listOf("musicResponsiveHeaderRenderer", "musicDetailHeaderRenderer", "musicVisualHeaderRenderer",
                 "musicEditablePlaylistDetailHeaderRenderer", "playlistHeaderRenderer", "pageHeaderViewModel")
                 .asSequence().flatMap { collect(root, it).asSequence() }.firstOrNull { text(it["title"]).isNotBlank() }
-            val rows = collect(root, "musicResponsiveListItemRenderer")
-            val hasPlaylist = rows.isNotEmpty() || collect(root, "musicPlaylistShelfRenderer").isNotEmpty()
+            val shelves = collect(root, "musicPlaylistShelfRenderer")
+            val rows = if (shelves.isEmpty()) collect(root, "musicResponsiveListItemRenderer")
+                else collect(shelves.map { it["contents"] }, "musicResponsiveListItemRenderer")
+            val hasPlaylist = rows.isNotEmpty() || shelves.isNotEmpty()
             val title = text(header?.get("title")).ifEmpty { summary?.title?.takeIf { hasPlaylist } ?: return null }
             val subtitle = text(header?.get("subtitle")).ifEmpty { summary?.subtitle.orEmpty() }
             val playlist = id.startsWith("VL") || id.startsWith("PL") || id == "LM" || id == "SE"
@@ -1088,11 +1187,33 @@ internal class YouTubeMusic(
             return RadioPage(tracks, token)
         }
 
-        internal fun confirmedPlaylistQueue(playlistId: String, json: String): List<Track> {
-            val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
-            val panel = collect(root, "playlistPanelRenderer").firstOrNull { it["playlistId"] == playlistId }
-                ?: return emptyList()
-            return queueTracks(panel["contents"])
+        internal data class PlaylistQueue(val tracks: List<Track>, val continuation: String?, val complete: Boolean)
+
+        internal fun confirmedPlaylistQueue(playlistId: String, json: String): PlaylistQueue? {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val panel = collect(root, "playlistPanelRenderer").firstOrNull { pane ->
+                val id = pane["playlistId"] ?: collect(pane["contents"], "playlistPanelVideoRenderer")
+                    .firstNotNullOfOrNull { row ->
+                        collect(row["navigationEndpoint"], "watchEndpoint").firstNotNullOfOrNull { it["playlistId"] as? String }
+                    }
+                id == playlistId
+            } ?: return null
+            val contents = panel["contents"] as? List<*> ?: return null
+            val tracks = queueTracks(contents)
+            val token = pageToken(contents, panel["continuations"])
+            val count = panel["totalVideos"]?.toString()?.toIntOrNull()
+            return PlaylistQueue(tracks, token, token == null && count == tracks.size)
+        }
+
+        private fun parseQueueContinuation(playlistId: String, json: String): RadioPage? {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            val panel = collect(root, "playlistPanelContinuation").firstOrNull()
+            if (panel?.get("playlistId")?.let { it != playlistId } == true) return null
+            val contents = (panel?.get("contents") ?: collect(root, "appendContinuationItemsAction")
+                .firstNotNullOfOrNull { action ->
+                    (action["continuationItems"] as? List<*>)?.takeIf { collect(it, "playlistPanelVideoRenderer").isNotEmpty() }
+                }) as? List<*> ?: return null
+            return RadioPage(queueTracks(contents), pageToken(contents, panel?.get("continuations")))
         }
 
         private fun queueTracks(root: Any?): List<Track> =
