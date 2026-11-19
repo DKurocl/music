@@ -20,7 +20,6 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import ua.olex.music.user.UserDatabase
 import ua.olex.music.user.UserRepository
 
@@ -106,7 +105,7 @@ class AppGraph(context: Context) {
 
 @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.LocalArtworkOwner, ua.olex.music.playback.MediaCatalogOwner, ua.olex.music.playback.OnlineStreams, ua.olex.music.playback.PlaybackLyricsOwner, ua.olex.music.playback.PlaybackQueueOwner,
-    coil3.SingletonImageLoader.Factory, ua.olex.music.playback.PlaybackFavouriteOwner {
+    coil3.SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         // The library starts loading with the process, while the splash shows, not when Home asks.
@@ -138,14 +137,6 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             }
         },
     ).debounce(300).flowOn(Dispatchers.Default)
-    override val favouriteChanges get() = graph.userLibrary.favourites.map { Unit }
-    override suspend fun isPlaybackFavourite(track: Track) = graph.userLibrary.isFavourite(track)
-    private val accountWork = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
-    override suspend fun togglePlaybackFavourite(track: Track) {
-        graph.youtubeFavourites.toggle(track)
-        accountWork.launch { graph.youtubeFavourites.refresh() }
-    }
-
     override suspend fun recordPlayback(track: Track, observedAt: Long) = graph.userLibrary.recordPlay(track, observedAt)
     override suspend fun updateListening(eventId: Long, millis: Long) = graph.userLibrary.updateListening(eventId, millis)
     override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {

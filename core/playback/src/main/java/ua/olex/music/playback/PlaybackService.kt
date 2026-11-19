@@ -12,6 +12,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
@@ -104,6 +105,9 @@ class PlaybackService : MediaLibraryService() {
     private val lanServer by lazy { LanMediaServer(this) }
     private var fading: FadingPlayer? = null
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
+    private val mediaArtworkPreferences = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        (session?.player as? LyricLinePlayer)?.showArtwork = SystemMediaArtwork.enabled(this)
+    }
     private val lyricPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> lockLyrics?.update() }
 
     override fun onCreate() {
@@ -127,7 +131,9 @@ class PlaybackService : MediaLibraryService() {
                 .setRemotePlayer(androidx.media3.cast.RemoteCastPlayer.Builder(this).setMediaItemConverter(LanMediaItemConverter(lanServer)).build())
                 .build()
         }.getOrElse { faded }
-        val shown = LyricLinePlayer(castable) { sourceAttempts.reset(); recovery?.cancel() }
+        val shown = LyricLinePlayer(castable) { sourceAttempts.reset(); recovery?.cancel() }.apply {
+            showArtwork = SystemMediaArtwork.enabled(this@PlaybackService)
+        }
         shown.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
@@ -146,10 +152,11 @@ class PlaybackService : MediaLibraryService() {
         packageManager.getLaunchIntentForPackage(packageName)?.apply { putExtra(OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         }
+        setMediaNotificationProvider(DefaultMediaNotificationProvider.Builder(this).build().apply {
+            setSmallIcon(R.drawable.music_notification_icon)
+        })
         session = builder.build()
-        (application as? PlaybackFavouriteOwner)?.let { owner ->
-            scope.launch { owner.favouriteChanges.collect { updateFavouriteButton() } }
-        }
+        SystemMediaArtwork.preferences(this).registerOnSharedPreferenceChangeListener(mediaArtworkPreferences)
         getSystemService(android.media.AudioManager::class.java).registerAudioDeviceCallback(routeCallback, null)
         scope.launch { devicesSeen = true }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(outputPrefs)
@@ -204,7 +211,6 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 lockLyrics?.update()
-                updateFavouriteButton()
                 val key = mediaItem?.mediaMetadata?.extras?.getString(PlayerConnection.QUEUE_KEY) ?: mediaItem?.mediaId
                 val replay = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
                 if (replay || listeningOccurrence != key) listening?.finish()
@@ -228,35 +234,6 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         })
-    }
-
-    private val favouriteCommand = SessionCommand("ua.olex.music.favourite", Bundle.EMPTY)
-    private var favouriteButtonJob: Job? = null
-
-    private fun updateFavouriteButton() {
-        val current = session ?: return
-        val owner = application as? PlaybackFavouriteOwner ?: return
-        favouriteButtonJob?.cancel()
-        val item = current.player.currentMediaItem
-        if (item == null) {
-            current.setMediaButtonPreferences(emptyList())
-            return
-        }
-        favouriteButtonJob = scope.launch {
-            try {
-                val liked = withContext(Dispatchers.Default) { owner.isPlaybackFavourite(PlayerConnection.track(item)) }
-                if (current.player.currentMediaItem?.let(::occurrence) != occurrence(item)) return@launch
-                val icon = if (liked) androidx.media3.session.CommandButton.ICON_HEART_FILLED
-                    else androidx.media3.session.CommandButton.ICON_HEART_UNFILLED
-                val button = androidx.media3.session.CommandButton.Builder(icon)
-                    .setSessionCommand(favouriteCommand)
-                    .setDisplayName(if (liked) "Remove from favourites" else "Add to favourites")
-                    .setSlots(androidx.media3.session.CommandButton.SLOT_OVERFLOW)
-                    .build()
-                current.setMediaButtonPreferences(listOf(button))
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { current.setMediaButtonPreferences(emptyList()) }
-        }
     }
 
     private fun refillQueue() {
@@ -419,6 +396,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         AudioLoadPriority.update(false)
         lockLyrics?.release()
+        SystemMediaArtwork.preferences(this).unregisterOnSharedPreferenceChangeListener(mediaArtworkPreferences)
         runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
         usb.clear()
@@ -620,7 +598,13 @@ class PlaybackService : MediaLibraryService() {
          */
         override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, isForPlayback: Boolean) = future {
             val saved = persistence?.resumption() ?: throw UnsupportedOperationException("Nothing to resume")
-            MediaSession.MediaItemsWithStartPosition(saved.items, saved.index, saved.positionMs)
+            val items = if (isForPlayback || SystemMediaArtwork.enabled(this@PlaybackService)) saved.items else {
+                saved.items.toMutableList().apply {
+                    val item = this[saved.index]
+                    this[saved.index] = item.buildUpon().setMediaMetadata(item.mediaMetadata.hideSongArtwork()).build()
+                }
+            }
+            MediaSession.MediaItemsWithStartPosition(items, saved.index, saved.positionMs)
         }
 
         override fun onSetMediaItems(
@@ -671,12 +655,7 @@ class PlaybackService : MediaLibraryService() {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                         .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command)
-                        .add(favouriteCommand).build(),
-                )
-            }
-            if (controller.uid != Process.myUid() && session.isMediaNotificationController(controller)) {
-                result.setAvailableSessionCommands(
-                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon().add(favouriteCommand).build(),
+                        .build(),
                 )
             }
             return Futures.immediateFuture(result.build())
@@ -685,22 +664,6 @@ class PlaybackService : MediaLibraryService() {
         override fun onCustomCommand(
             session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
         ): ListenableFuture<SessionResult> {
-            if (customCommand.customAction == favouriteCommand.customAction) {
-                if (controller.uid != Process.myUid() && !session.isMediaNotificationController(controller)) {
-                    return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
-                }
-                val item = session.player.currentMediaItem
-                    ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
-                val owner = application as? PlaybackFavouriteOwner
-                    ?: return Futures.immediateFuture(SessionResult(SessionError.ERROR_BAD_VALUE))
-                return future {
-                    try {
-                        withContext(Dispatchers.Default) { owner.togglePlaybackFavourite(PlayerConnection.track(item)) }
-                        SessionResult(SessionResult.RESULT_SUCCESS)
-                    } catch (cancelled: CancellationException) { throw cancelled }
-                    catch (_: Exception) { SessionResult(SessionError.ERROR_BAD_VALUE) }
-                }
-            }
             if (customCommand.customAction == ReplayGainCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 val accepted = runCatching {

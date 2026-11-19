@@ -21,6 +21,8 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-19: use Music branding and a stable action set on Android media surfaces.
+
 - [x] Codex, 2026-11-19: stable mixed-script player layout, cheaper tint updates and a finish-song sleep timer.
 
 - [x] Codex, 2026-11-19: start radio at the seed, clip player cover swipes and load sharper online artwork.

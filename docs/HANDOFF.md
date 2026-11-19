@@ -1,3 +1,14 @@
+# Android media controls
+
+Quick Settings and lock-screen notifications use the Music play-and-note glyph in the
+monochrome slot. The session no longer publishes a favourite action or queries favourites
+during skips. Song artwork is off by default for system controls and can be enabled under
+Appearance and artwork. The current item retains its original image, and a transparent
+system placeholder also supersedes artwork requests that were already in flight.
+The sleep sheet keeps the primary buttons visible beneath a scrollable body.
+Local check: `git diff --check`. CI covers the timer actions and session artwork.
+The exact system card tint and layout remain device checks.
+
 # Stable player layout and sleep countdowns
 
 Song metadata uses font-scaled slots in the player, mini player and shared track rows.
