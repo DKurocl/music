@@ -933,7 +933,7 @@ class DesignGalleryTest {
         compose.onNodeWithText("Shuffle all").assertExists()
     }
 
-    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi-night") fun systemPlayerOpening() {
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi") fun systemPlayerOpening() {
         val waiting = androidx.compose.runtime.mutableStateOf(true)
         var closed = false
         val song = demoSongs.first()
@@ -951,7 +951,7 @@ class DesignGalleryTest {
         compose.runOnIdle { org.junit.Assert.assertTrue(closed) }
     }
 
-    @Test @Config(qualifiers = "w412dp-h915dp-xhdpi-night") fun playbackDevicePanel() {
+    @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi") fun playbackDevicePanel() {
         var canOpen = false
         var closed = false
         val route = androidx.compose.runtime.mutableStateOf(ua.olex.music.playback.OutputRoute(
