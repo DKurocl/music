@@ -1,15 +1,19 @@
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.
-Current playback is shown with five rounded bars at the center of the artwork. The mark
-fades out in 120 ms on pause or when the current track changes. Common symbols
+Current playback is shown with five rounded bars at the center of the artwork. They pulse in
+sequence during playback without laying out the row again. The mark fades out in 120 ms on
+pause or track change. Battery Saver leaves the bars still. Common symbols
 have coordinated press and release motion. Track actions use distinct marks for radio,
 queue and playlist actions. Audio Path and Settings provide access to the equalizer.
 
-YouTube Music reads public web client configuration at runtime. Continuation requests use
-the same signed-in or public mode as the first page. The parser accepts alternate browse
-headers and video IDs linked by a song's play button. The execution network blocks direct
-access to music.youtube.com, so Pixel sessions remain necessary to verify live responses.
+YouTube Music reads public web client configuration at runtime. A failed catalogue browse
+falls back to the initial data on the service page. If a playlist has only a confirmed
+queue, its loaded tracks can play while the full list can be retried. Session credentials
+stay on the Music origin. A page that still fails offers a direct link to YouTube Music.
+Fixtures cover a denied browse followed by a successful playlist page and continuation.
+The execution network blocks direct access to music.youtube.com, so Pixel sessions remain
+necessary to verify live responses.
 
 # Shuffle, Liked and track switching (2026-11-19)
 
