@@ -9,6 +9,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.spring
@@ -462,6 +464,7 @@ private data class CoverSwipe(
     val fromArtwork: String?,
     val toArtwork: String?,
     val direction: Int,
+    val offset: Animatable<Float, AnimationVector1D>,
 )
 
 /** The player surface is independent of service/route bindings so its real layouts can be reviewed in tests. */
@@ -528,7 +531,6 @@ internal fun PlayerPage(
             // Swipe the cover for the next or previous song; double tap for favourites; long press for actions.
             val haptics = rememberHaptics()
             val scope = androidx.compose.runtime.rememberCoroutineScope()
-            val swipe = remember { androidx.compose.animation.core.Animatable(0f) }
             var coverWidth by remember { mutableIntStateOf(1) }
             var heart by remember { androidx.compose.runtime.mutableStateOf(false) }
             val heartScale by animateFloatAsState(if (heart) 1f else 0f, motion.fastSpatialSpec(), label = "heart",
@@ -537,24 +539,17 @@ internal fun PlayerPage(
             val nextArt = state.queue.getOrNull(state.nextIndex)?.artworkUri
             val previousArt = state.queue.getOrNull(state.previousIndex)?.artworkUri
             val occurrence = state.queue.getOrNull(state.queueIndex)?.key ?: state.mediaId
+            val swipe = remember(occurrence, lyricsShown) { Animatable(0f) }
             val latestOccurrence by rememberUpdatedState(occurrence)
             val latestState by rememberUpdatedState(state)
             val acceptsSkip by rememberUpdatedState(state.connected && state.error == null)
             val latestPosition by rememberUpdatedState(position)
-            var gestureItem by remember { mutableStateOf(occurrence) }
             var committed by remember { mutableStateOf<CoverSwipe?>(null) }
-            var dragOffset by remember { mutableStateOf<Float?>(null) }
+            var dragOffset by remember(swipe) { mutableStateOf<Float?>(null) }
             var revealPrevious by remember { mutableStateOf(false) }
             var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-            val visibleOffset = {
-                val change = committed
-                val current = latestOccurrence
-                if (gestureItem == current || (change != null && change.to == current)) {
-                    (dragOffset ?: swipe.value).coerceIn(-coverWidth.toFloat(), coverWidth.toFloat())
-                } else 0f
-            }
-            val direction by remember {
-                derivedStateOf { committed?.direction?.takeIf { visibleOffset() != 0f } ?: visibleOffset().compareTo(0f) }
+            val direction by remember(swipe) {
+                derivedStateOf { (dragOffset ?: swipe.value).compareTo(0f) }
             }
             val powerSave = LocalPowerSave.current
             LaunchedEffect(occurrence, lyricsShown) {
@@ -563,9 +558,6 @@ internal fun PlayerPage(
                 if (!lyricsShown && swap != null && swap.to == occurrence) return@LaunchedEffect
                 settleJob?.cancel()
                 committed = null
-                dragOffset = null
-                swipe.snapTo(0f)
-                gestureItem = occurrence
             }
             androidx.compose.animation.Crossfade(lyricsShown && inlineLyrics != null,
                 animationSpec = androidx.compose.animation.core.tween(if (powerSave) 0 else 165), label = "Lyrics and artwork") { words ->
@@ -574,6 +566,11 @@ internal fun PlayerPage(
                 } else {
                     val currentArt = state.artworkUri
                     val swap = committed?.takeIf { occurrence == it.from || occurrence == it.to }
+                    // A painted slide owns its offset until Compose replaces both faces together.
+                    val visibleOffset = {
+                        (swap?.offset?.value ?: dragOffset ?: swipe.value)
+                            .coerceIn(-coverWidth.toFloat(), coverWidth.toFloat())
+                    }
                     val covers = listOfNotNull(currentArt, nextArt, previousArt, swap?.fromArtwork, swap?.toArtwork)
                         .distinct().associateWith { uri ->
                             androidx.compose.runtime.key(uri) {
@@ -607,7 +604,7 @@ internal fun PlayerPage(
                                     onLongPress = { tapMore?.let { haptics.longPress(); it() } },
                                 )
                             }
-                            .pointerInput(occurrence, powerSave, restoring) {
+                            .pointerInput(swipe, powerSave, restoring) {
                                 if (restoring) return@pointerInput
                                 fun finishDrag(release: Boolean) {
                                     val x = dragOffset ?: return
@@ -626,7 +623,7 @@ internal fun PlayerPage(
                                         if (occurrence != latestOccurrence) return@launch
                                         if (target != null) {
                                             val side = if (goNext) -1 else 1
-                                            committed = CoverSwipe(occurrence, target.key, playback.artworkUri, target.artworkUri, side)
+                                            committed = CoverSwipe(occurrence, target.key, playback.artworkUri, target.artworkUri, side, swipe)
                                             haptics.skip(goNext)
                                             if (goNext) next() else previous()
                                             if (powerSave) swipe.snapTo(side * width) else swipe.animateTo(side * width, settle)
@@ -635,8 +632,6 @@ internal fun PlayerPage(
                                             }
                                             if (latestOccurrence == target.key) {
                                                 committed = null
-                                                swipe.snapTo(0f)
-                                                gestureItem = target.key
                                                 return@launch
                                             }
                                         } else if (goNext && playback.hasNext) {
