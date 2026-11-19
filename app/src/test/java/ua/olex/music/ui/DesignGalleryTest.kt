@@ -956,32 +956,38 @@ class DesignGalleryTest {
     @Test fun playingTrackMark() {
         val playing = androidx.compose.runtime.mutableStateOf(true)
         val current = androidx.compose.runtime.mutableStateOf(true)
-        compose.mainClock.autoAdvance = false
         compose.setContent { AppTheme { CompositionLocalProvider(LocalIsPlaying provides playing.value) {
             NowPlayingOverlay(current.value, Modifier.size(46.dp).background(MaterialTheme.colorScheme.surface).testTag("track-mark"))
         } } }
+        val mark = compose.onNodeWithTag("track-mark")
+        fun badge(state: String) = compose.onNode(
+            SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, state),
+            useUnmergedTree = true,
+        )
+        fun saveFrame(name: String) {
+            val bitmap = mark.captureToImage().asAndroidBitmap()
+            File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile.mkdirs() }
+                .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        badge("Playing").assertExists()
+        saveFrame("active")
+        compose.runOnIdle { playing.value = false }
+        badge("Paused").assertExists()
+        badge("Playing").assertDoesNotExist()
+        saveFrame("paused")
+        compose.mainClock.autoAdvance = false
         try {
-            val mark = compose.onNodeWithTag("track-mark")
-            fun frame(name: String): Bitmap {
-                compose.waitForIdle()
-                val bitmap = mark.captureToImage().asAndroidBitmap().copy(Bitmap.Config.ARGB_8888, false)
-                File("build/reports/ui-previews/gallery", "01g-playing-$name.png").apply { parentFile.mkdirs() }
-                    .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-                return bitmap
+            compose.runOnIdle { current.value = false }
+            repeat(5) {
+                compose.mainClock.advanceTimeByFrame()
+                badge("Paused").assertExists()
             }
-            compose.mainClock.advanceTimeBy(160)
-            val active = frame("active")
-            compose.runOnUiThread { playing.value = false }
-            compose.mainClock.advanceTimeBy(320)
-            val paused = frame("paused")
-            org.junit.Assert.assertFalse(active.sameAs(paused))
-            compose.runOnUiThread { current.value = false }
-            compose.mainClock.advanceTimeBy(64)
-            val fading = frame("fading")
-            compose.mainClock.advanceTimeBy(160)
-            val gone = frame("gone")
-            org.junit.Assert.assertFalse(paused.sameAs(fading))
-            org.junit.Assert.assertFalse(fading.sameAs(gone))
+            saveFrame("fading")
+            repeat(12) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+            }
+            badge("Paused").assertDoesNotExist()
         } finally { compose.mainClock.autoAdvance = true }
     }
 
