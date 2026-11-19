@@ -98,11 +98,15 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier, 
     val cs = MaterialTheme.colorScheme
     val playing = LocalIsPlaying.current
     val still = LocalPowerSave.current
-    val enter = if (still) EnterTransition.None else fadeIn(tween(105)) + scaleIn(tween(160), initialScale = 0.86f)
+    val enter = when {
+        still -> EnterTransition.None
+        onArtwork -> fadeIn(tween(105))
+        else -> fadeIn(tween(105)) + scaleIn(tween(160), initialScale = 0.86f)
+    }
     val exit = if (still) ExitTransition.None else fadeOut(tween(120))
     Box(modifier, contentAlignment = Alignment.Center) {
         AnimatedVisibility(visible = current && playing, enter = enter, exit = exit) {
-            val tint = if (onArtwork) cs.primaryFixed else cs.primary
+            val tint = cs.primary
             val heights = if (still) emptyList() else {
                 val transition = rememberInfiniteTransition(label = "Playback mark")
                 playbackBars.mapIndexed { index, bar ->
@@ -115,20 +119,20 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier, 
                     transition.animateFloat(bar.heights.first(), bar.heights.last(), motion, label = "Playback bar ${index + 1}")
                 }
             }
-            Box(Modifier.size(28.dp, 23.dp).semantics { stateDescription = "Playing" }.drawWithCache {
-                val outline = cs.onPrimaryFixed
-                val edge = 1.3.dp.toPx()
+            val bounds = if (onArtwork) Modifier.fillMaxSize() else Modifier.size(28.dp, 23.dp)
+            Box(bounds.semantics { stateDescription = "Playing" }.drawWithCache {
                 val unit = playbackBarScale.dp.toPx()
                 val spacing = 12f * unit
                 val width = 6f * unit
+                val matte = cs.surfaceContainerHighest.copy(alpha = 0.78f)
                 onDrawBehind {
+                    if (onArtwork) drawRect(matte)
                     playbackBars.forEachIndexed { index, bar ->
                         val x = center.x + (index - 2) * spacing
                         val height = heights.getOrNull(index)?.value ?: bar.heights.first()
                         val halfHeight = (height * unit - width) / 2
                         val start = Offset(x, center.y - halfHeight)
                         val end = Offset(x, center.y + halfHeight)
-                        if (onArtwork) drawLine(outline, start, end, strokeWidth = width + edge, cap = StrokeCap.Round)
                         drawLine(tint, start, end, strokeWidth = width, cap = StrokeCap.Round)
                     }
                 }

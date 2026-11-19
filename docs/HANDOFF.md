@@ -1,3 +1,13 @@
+# Skip preparation and first-frame polish
+
+Media3 can preload up to 2.5 seconds of the next item. Widget and tile state is
+published from a conflated IO worker so Android service calls stay off the skip path.
+Playing bars are solid over a matte tint on the existing thumbnail. The Shuffle all
+paths share their arrow tips and only clear the centre crossover. Search shows the
+basic browse grid immediately and commits optional tiles and genre artwork together.
+Local check: `git diff --check`. The gallery checks the matte and playback semantics.
+First-skip frame timing and network buffering remain physical Pixel checks.
+
 # Playback recovery, Search and Settings
 
 After the v1236 report, restore standard Media3 notifications and unmodified session

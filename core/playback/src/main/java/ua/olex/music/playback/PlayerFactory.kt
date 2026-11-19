@@ -52,6 +52,9 @@ internal object PlayerFactory {
             // whole (the load control above), so no Wi-Fi lock is needed; a NETWORK wake mode would hold
             // Wi-Fi at full performance for the whole song and drain the battery for nothing.
             .setWakeMode(C.WAKE_MODE_LOCAL)
-            .build()
+            .build().apply {
+                // Let Media3 prepare the next source once current playback is buffered.
+                preloadConfiguration = ExoPlayer.PreloadConfiguration(2_500_000L)
+            }
     }
 }

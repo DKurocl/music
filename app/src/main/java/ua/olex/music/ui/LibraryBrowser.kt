@@ -1011,16 +1011,22 @@ private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: Libr
 private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Unit, onTile: (BrowseTile) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val available = rememberOffMain(library, initial = emptySet<BrowseTile>()) {
-        BrowseTile.entries.filterTo(HashSet()) { tile ->
-            when (tile) {
-                BrowseTile.COMPOSERS -> library.composers.isNotEmpty()
-                BrowseTile.YEARS -> library.years.size > 1
-                BrowseTile.GENRES -> library.genres.size > 1
-                BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }
-                BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }
-                else -> true
+    // The basic grid is present on the first frame. Optional tiles and genre art arrive together,
+    // so a fast genre calculation cannot put artwork at the top while the grid is still empty.
+    val membership = LibraryMembership(library.byId)
+    val (available, genres) = androidx.compose.runtime.key(membership) {
+        rememberOffMain(membership, initial = (basicBrowseTiles to emptyList<MusicCollection>())) {
+            val tiles = BrowseTile.entries.filterTo(HashSet()) { tile ->
+                when (tile) {
+                    BrowseTile.COMPOSERS -> library.composers.isNotEmpty()
+                    BrowseTile.YEARS -> library.years.size > 1
+                    BrowseTile.GENRES -> library.genres.size > 1
+                    BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }
+                    BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }
+                    else -> true
+                }
             }
+            tiles.toSet() to library.genres.sortedByDescending { it.tracks.size }.take(6)
         }
     }
     val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.secondaryContainer to cs.onSecondaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer)
@@ -1028,9 +1034,6 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
     val groups = listOf("Browse" to listOf(BrowseTile.SONGS, BrowseTile.ALBUMS, BrowseTile.ARTISTS, BrowseTile.GENRES, BrowseTile.COMPOSERS, BrowseTile.YEARS, BrowseTile.FOLDERS),
         "Listening" to listOf(BrowseTile.HISTORY, BrowseTile.UNPLAYED),
         "Audio quality" to listOf(BrowseTile.LOSSLESS, BrowseTile.HI_RES))
-    val genres = rememberOffMain(LibraryMembership(library.byId), initial = emptyList()) {
-        library.genres.sortedByDescending { it.tracks.size }.take(6)
-    }
     val genreRows = genres.chunked(columns)
     androidx.compose.foundation.lazy.LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         groups.forEachIndexed { group, (heading, tiles) ->
@@ -1077,6 +1080,11 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
         }
     }
 }
+
+private val basicBrowseTiles = setOf(
+    BrowseTile.SONGS, BrowseTile.ALBUMS, BrowseTile.ARTISTS, BrowseTile.FOLDERS,
+    BrowseTile.HISTORY, BrowseTile.UNPLAYED,
+)
 
 /** A genre as a card: up to three covers fanned on the right, the name and size on the left. */
 @Composable
