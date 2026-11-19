@@ -171,6 +171,7 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
 }
 
 /** Keep the page at full size while its artwork travels separately. */
+@Composable
 internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
     val directOpen = LocalDirectPlayerOpen.current
     return graphicsLayer { alpha = if (directOpen) 1f else travel.fraction }
