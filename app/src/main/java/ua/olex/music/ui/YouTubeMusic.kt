@@ -181,7 +181,7 @@ internal class YouTubeMusic(
                 }
                 val headers = account()
                 val publicFallback = headers != null && id.removePrefix("VL") !in setOf("LM", "SE")
-                browse(headers) ?: (if (publicFallback) browse(null) else null) ?: saved
+                browse(headers) ?: (if (publicFallback) browse(null) else null) ?: saved?.takeUnless { it.first.partial }
                     ?: summary?.let {
                         val fallback = playlistFromQueue(it, headers) ?: if (publicFallback) playlistFromQueue(it, null) else null
                         val result = if (fallback?.next == null && fallback?.album?.partial != false)
@@ -260,8 +260,9 @@ internal class YouTubeMusic(
         val json = catalogueRequest { post("next", queueFields(id), headers = headers) } ?: return null
         val page = confirmedPlaylistQueue(id, json) ?: return null
         if (page.tracks.isEmpty()) return null
-        val next = page.continuation?.let { MusicPage(it, headers != null, watchPlaylist = id) }
-        return OpenedPlaylist(summary.copy(partial = !page.complete), page.tracks, next)
+        val next = page.continuation?.let { MusicPage(it, headers != null, watchPlaylist = id, expectedTracks = page.total) }
+        val complete = next == null && page.total == page.tracks.size
+        return OpenedPlaylist(summary.copy(partial = !complete), page.tracks, next)
     }
 
     /** Public YouTube can serve the actual playlist when Music only exposes a preview queue. */
@@ -364,7 +365,8 @@ internal class YouTubeMusic(
         shared("album-more:$scope/$id") {
             val cursor = more["$scope/$id"] ?: return@shared null
             val have = peek<Pair<OnlineAlbum, List<Track>>>("$scope/album:$id") ?: return@shared null
-            val (tracks, next) = when (val source = cursor.page) {
+            val source = cursor.page
+            val (tracks, next) = when (source) {
                 is MusicPage -> musicPlaylistMore(source, have.second.firstOrNull()?.artist)
                 is PublicPage -> extractPlaylist { PlaylistInfo.getMoreItems(ServiceList.YouTube, source.url, source.page) }?.let {
                     val items = publicPlaylistTracks(it.items)
@@ -380,8 +382,10 @@ internal class YouTubeMusic(
             if (pageScope() != scope) return@shared null
             rememberContinuation("$scope/$id", next, visited)
             // Repeated video ids are distinct playlist occurrences, including across page boundaries.
-            (have.first.copy(partial = next != null) to have.second + added).also {
-                keep("$scope/album:$id", it)
+            val all = have.second + added
+            val short = (source as? MusicPage)?.expectedTracks?.let { all.size < it } == true
+            (have.first.copy(partial = next != null || short) to all).also {
+                if (next != null || !short) keep("$scope/album:$id", it) else synchronized(pages) { pages.remove("$scope/album:$id") }
                 saveAlbum(scope, id, it)
             }
         }
@@ -405,7 +409,9 @@ internal class YouTubeMusic(
     }
 
     private sealed interface PlaylistPage { val key: String }
-    private data class MusicPage(val token: String, val signedIn: Boolean, val watchPlaylist: String? = null) : PlaylistPage {
+    private data class MusicPage(
+        val token: String, val signedIn: Boolean, val watchPlaylist: String? = null, val expectedTracks: Int? = null,
+    ) : PlaylistPage {
         override val key: String get() = token
     }
     private data class PublicPage(val url: String, val page: Page) : PlaylistPage {
@@ -1187,7 +1193,7 @@ internal class YouTubeMusic(
             return RadioPage(tracks, token)
         }
 
-        internal data class PlaylistQueue(val tracks: List<Track>, val continuation: String?, val complete: Boolean)
+        internal data class PlaylistQueue(val tracks: List<Track>, val continuation: String?, val total: Int?)
 
         internal fun confirmedPlaylistQueue(playlistId: String, json: String): PlaylistQueue? {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
@@ -1202,7 +1208,7 @@ internal class YouTubeMusic(
             val tracks = queueTracks(contents)
             val token = pageToken(contents, panel["continuations"])
             val count = panel["totalVideos"]?.toString()?.toIntOrNull()
-            return PlaylistQueue(tracks, token, token == null && count == tracks.size)
+            return PlaylistQueue(tracks, token, count)
         }
 
         private fun parseQueueContinuation(playlistId: String, json: String): RadioPage? {
