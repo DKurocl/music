@@ -84,6 +84,9 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.text.style.TextAlign
@@ -285,7 +288,13 @@ fun MusicRoot(model: LibraryViewModel) {
     // YouTube Music pages (an artist, an album) open over the current place, one on another; Back closes the top one.
     var destinationBackProgress by remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     var destinationBackDirection by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
-    PredictiveBackHandler(!expanded && (page != null || onlineStack.isNotEmpty() || place != Place.HOME)) { events ->
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val backMotion = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+    var restoreBack by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    val systemOpening = model.systemPlayerRequested
+    androidx.activity.compose.BackHandler(systemOpening) { model.dismissSystemPlayerRequest() }
+    PredictiveBackHandler(!expanded && !systemOpening && (page != null || onlineStack.isNotEmpty() || place != Place.HOME)) { events ->
+        restoreBack?.cancel()
         try {
             events.collect { event ->
                 destinationBackDirection = if (event.swipeEdge == androidx.activity.BackEventCompat.EDGE_LEFT) 1f else -1f
@@ -299,8 +308,14 @@ fun MusicRoot(model: LibraryViewModel) {
                 }
                 else -> go(Place.HOME)
             }
-        } finally {
             destinationBackProgress = 0f
+        } catch (cancelled: kotlin.coroutines.cancellation.CancellationException) {
+            restoreBack = scope.launch {
+                androidx.compose.animation.core.animate(destinationBackProgress, 0f, animationSpec = backMotion) { value, _ ->
+                    destinationBackProgress = value.coerceIn(0f, 1f)
+                }
+            }
+            throw cancelled
         }
     }
     val onlineNav = remember(model, tabHistory) {
@@ -330,7 +345,6 @@ fun MusicRoot(model: LibraryViewModel) {
     androidx.compose.runtime.LaunchedEffect(model.offlineNotice) {
         if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")
     }
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
         LocalPlayingTrack provides playing.track,
         LocalOwnedSources provides if (model.allowed) personal.localCopies else emptyMap(),
@@ -344,12 +358,20 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     val travel = remember(scope) { PlayerTravel(scope) }
+    LaunchedEffect(systemOpening, playing.hasTrack, playing.connected) {
+        if (systemOpening && playing.hasTrack && playing.connected) {
+            travel.settle(open = true, instant = true)
+            expanded = true
+            model.dismissSystemPlayerRequest()
+        }
+    }
     val openPlayer = expanded && playing.hasTrack
     LaunchedEffect(openPlayer, powerSave) { travel.settle(openPlayer, powerSave || !playing.hasTrack) }
     PlayerCoverLayout(travel, playing.artworkUri) {
     Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
-            .then(if (expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
+            .graphicsLayer { alpha = if (systemOpening) 0f else 1f }
+            .then(if (systemOpening || expanded && playing.hasTrack) Modifier.clearAndSetSemantics {} else Modifier),
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbar) },
         topBar = {
             if (onlineTop != null || place != Place.SEARCH || page != null) TopAppBar(
@@ -410,7 +432,7 @@ fun MusicRoot(model: LibraryViewModel) {
         // soft fade (not a solid band) so it reads as floating, as Google's own players do.
         val playerInset = if (playing.hasTrack) 84.dp else 0.dp
         Box(Modifier.fillMaxSize().graphicsLayer {
-            val back = destinationBackProgress
+            val back = if (page == Page.STATS) 0f else destinationBackProgress
             translationX = destinationBackDirection * 24.dp.toPx() * back
             scaleX = 1f - 0.04f * back
             scaleY = scaleX
@@ -459,7 +481,8 @@ fun MusicRoot(model: LibraryViewModel) {
             page == Page.DUPLICATES -> DuplicatesPage(model.duplicates.collectAsStateWithLifecycle().value, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
-            place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsBackCommitted, Modifier.padding(insets)) { listening ->
+            place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsBackCommitted, Modifier.padding(insets),
+                backProgress = { if (powerSave) 0f else destinationBackProgress * destinationBackDirection }) { listening ->
                 if (listening) StatsPage(requireNotNull(library), Modifier, model::play, context.graph.userLibrary::historySince)
                 else baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
                     remember(personal.history) { personal.history.mapNotNull { it.track } }, stats, playing.mediaId, Modifier,
@@ -507,7 +530,7 @@ fun MusicRoot(model: LibraryViewModel) {
     // screen or on a quick flick; predictive back shrinks it toward the mini player.
     var pageHeight by remember { androidx.compose.runtime.mutableIntStateOf(1) }
     val latestPowerSave by androidx.compose.runtime.rememberUpdatedState(powerSave)
-    androidx.activity.compose.PredictiveBackHandler(openPlayer) { events ->
+    androidx.activity.compose.PredictiveBackHandler(openPlayer && !systemOpening) { events ->
         val start = travel.fraction
         try {
             events.collect { travel.drag(start * (1f - it.progress) - travel.fraction) }
@@ -615,6 +638,14 @@ fun MusicRoot(model: LibraryViewModel) {
         )
         }
 
+    }
+    if (systemOpening) {
+        val preview by androidx.compose.runtime.produceState<ua.olex.music.playback.LastPlayedPreview?>(null) {
+            value = model.lastPlayedPreview()
+        }
+        PlayerOpening(preview, empty = playing.connected && playing.queueRestored && !playing.hasTrack,
+            error = playing.error.takeIf { !playing.connected && !playing.connecting },
+            onClose = model::dismissSystemPlayerRequest, onRetry = model::connectPlayer)
     }
     } // PlayerCoverLayout
     } // App composition locals
@@ -781,6 +812,7 @@ private fun NowPlaying(
     if (timerDialog) {
         SleepTimerDialog(
             deadline = state.sleepDeadlineMs,
+            durationMs = state.sleepDurationMs,
             active = state.sleepDeadlineMs != null,
             onDismiss = { timerDialog = false },
             onSet = { minutes -> onSleepTimer(minutes); timerDialog = false },
@@ -811,7 +843,7 @@ private fun NowPlaying(
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit, deadline: Long? = null, onExtend: ((Long) -> Unit)? = null) {
+internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (Int) -> Unit, deadline: Long? = null, onExtend: ((Long) -> Unit)? = null, durationMs: Long? = null) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val end = ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK
@@ -824,20 +856,27 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
     val runningEnd = active && deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
     val leftMs = if (active && deadline != null && !runningEnd) (deadline - now).coerceAtLeast(0) else null
     val showingRun = active && !changed
+    val runningSpan = durationMs ?: remember(deadline) { leftMs?.coerceAtLeast(1) ?: 1 }
+    fun selectMinutes(value: Int) {
+        val bounded = value.coerceIn(5, 120)
+        if (bounded != minutes || endOfSong) haptics.tick()
+        minutes = bounded
+        endOfSong = false
+        changed = true
+    }
     AppSheet(onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("Sleep timer", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.fillMaxWidth())
             // The dial: drag around it in 5 minute steps (up to 2 hours), as Google's Clock sets a timer.
             SleepDial(
-                fraction = when { showingRun && leftMs != null -> (leftMs / 60_000f / 120f).coerceIn(0f, 1f); showingRun && runningEnd -> 1f
-                    endOfSong -> 1f; else -> minutes / 120f },
-                enabled = true,
-                onDrag = { f ->
-                    val m = ((f * 120f) / 5f).toInt().coerceIn(1, 24) * 5
-                    if (m != minutes || endOfSong) haptics.tick()
-                    minutes = m; endOfSong = false; changed = true
+                fraction = when {
+                    showingRun && leftMs != null -> (leftMs.toFloat() / runningSpan).coerceIn(0f, 1f)
+                    showingRun && runningEnd || endOfSong -> 1f
+                    else -> minutes / 120f
                 },
+                enabled = !showingRun,
+                onDrag = { fraction -> selectMinutes(kotlin.math.round(fraction * 24).toInt() * 5) },
             ) {
                 when {
                     showingRun && leftMs != null -> {
@@ -854,6 +893,18 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
                         Text("min · until ${"%02d:%02d".format(at.hour, at.minute)}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
                     }
                 }
+            }
+            if (showingRun) TextButton(onClick = {
+                minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
+                endOfSong = runningEnd
+                changed = true
+                haptics.tick()
+            }) { Text("Edit timer") }
+            else if (!endOfSong) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { selectMinutes(minutes - 5) }, enabled = minutes > 5,
+                    modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
+                TextButton(onClick = { selectMinutes(minutes + 5) }, enabled = minutes < 120,
+                    modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
             }
             // Quick lengths as one connected group; End of song last.
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
@@ -891,10 +942,20 @@ internal fun SleepTimerDialog(active: Boolean, onDismiss: () -> Unit, onSet: (In
 @Composable
 private fun SleepDial(fraction: Float, enabled: Boolean, onDrag: (Float) -> Unit, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
     val cs = MaterialTheme.colorScheme
-    val shown by androidx.compose.animation.core.animateFloatAsState(fraction, MaterialTheme.motionScheme.fastSpatialSpec(), label = "dial")
+    val latestFraction by androidx.compose.runtime.rememberUpdatedState(fraction)
+    val update by androidx.compose.runtime.rememberUpdatedState(onDrag)
+    var dragging by remember { mutableStateOf(false) }
+    val shown by androidx.compose.animation.core.animateFloatAsState(fraction,
+        if (dragging || LocalPowerSave.current) androidx.compose.animation.core.snap() else MaterialTheme.motionScheme.fastEffectsSpec(),
+        label = "dial")
     Box(Modifier.size(248.dp), contentAlignment = Alignment.Center) {
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics { contentDescription = "Timer length" }
-            .pointerInput(enabled) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics {
+            if (enabled) {
+                contentDescription = "Timer length in minutes"
+                progressBarRangeInfo = ProgressBarRangeInfo((fraction * 120f).coerceIn(5f, 120f), 5f..120f, 22)
+                setProgress { value -> onDrag(value / 120f); true }
+            }
+        }.pointerInput(enabled) {
                 if (!enabled) return@pointerInput
                 fun angle(o: androidx.compose.ui.geometry.Offset): Float {
                     val dx = o.x - size.width / 2f; val dy = o.y - size.height / 2f
@@ -903,11 +964,36 @@ private fun SleepDial(fraction: Float, enabled: Boolean, onDrag: (Float) -> Unit
                 }
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    onDrag(angle(down.position))
-                    do {
-                        val event = awaitPointerEvent()
-                        event.changes.forEach { if (it.pressed) { onDrag(angle(it.position)); it.consume() } }
-                    } while (event.changes.any { it.pressed })
+                    val centre = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f)
+                    val radius = size.width / 2f - 17.dp.toPx()
+                    if (kotlin.math.abs((down.position - centre).getDistance() - radius) > 24.dp.toPx()) return@awaitEachGesture
+                    var previousAngle = angle(down.position)
+                    var value = when {
+                        previousAngle < 0.06f && latestFraction > 0.75f -> 1f
+                        previousAngle > 0.94f && latestFraction < 0.25f -> 0f
+                        else -> previousAngle
+                    }
+                    dragging = true
+                    down.consume()
+                    try {
+                        update(value)
+                        while (true) {
+                            val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed || change.isConsumed) break
+                            val angle = angle(change.position)
+                            val delta = angle - previousAngle
+                            value = (value + when {
+                                delta > 0.5f -> delta - 1f
+                                delta < -0.5f -> delta + 1f
+                                else -> delta
+                            }).coerceIn(0f, 1f)
+                            previousAngle = angle
+                            update(value)
+                            change.consume()
+                        }
+                    } finally {
+                        dragging = false
+                    }
                 }
             }) {
             val stroke = 22.dp.toPx()

@@ -1,3 +1,18 @@
+# System player entry and motion follow-up
+
+A widget or notification opens the full player surface before Media3 connects. Last shown
+metadata is a temporary preview while the service restores its paused queue. A loaded track
+takes over without playing the Home-to-player animation. An empty restored queue and a failed
+connection have distinct actions. In-app opening still uses the shared cover.
+Listening now enters over Home and exposes Home during predictive Back. Cancelled root
+Back gestures settle from the last frame. The full and mini player share transition progress,
+with a separate fade for lyrics. A confirmed cover swipe tells the player immediately.
+The sleep dial grabs only its ring, has accessible minute steps and measures a running timer
+against its actual duration. Mood reselection stays selected. Partial YouTube lists announce
+their status near playback. EQ drags start near a band, and filtered Settings rows stand alone.
+Local check: `git diff --check`. CI checks compilation, gallery and regressions. Cold and warm
+widget entry, touch and frame pacing on a real Pixel remain to be measured.
+
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.

@@ -75,6 +75,8 @@ data class PlayerState(
     val speed: Float = 1f,
     val pitch: Float = 1f,
     val canSetPlaybackParameters: Boolean = false,
+    val queueRestored: Boolean = false,
+    val sleepDurationMs: Long? = null,
 ) {
     val hasTrack get() = mediaId != null
 }
@@ -98,6 +100,7 @@ class PlayerConnection(context: Context) {
     private val app = context.applicationContext
     private val _state = MutableStateFlow(PlayerState())
     val state: StateFlow<PlayerState> = _state.asStateFlow()
+    fun lastPlayedPreview(): LastPlayedPreview? = NowPlaying.preview(app)
     private var controller: MediaController? = null
     private var connection: ListenableFuture<MediaController>? = null
     private var pendingShuffle: Boolean? = null
@@ -132,7 +135,14 @@ class PlayerConnection(context: Context) {
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
                     if (this@PlayerConnection.controller === controller) {
-                        _state.value = _state.value.copy(sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 }, audio = AudioDiagnostics.fromExtras(extras), equalizer = EqualizerCommand.fromExtras(extras), replayGain = ReplayGainCommand.fromExtras(extras))
+                        _state.value = _state.value.copy(
+                            queueRestored = extras.getBoolean(PlaybackService.QUEUE_RESTORED),
+                            sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 },
+                            sleepDurationMs = extras.getLong(SleepTimerCommand.DURATION).takeIf { it > 0 },
+                            audio = AudioDiagnostics.fromExtras(extras),
+                            equalizer = EqualizerCommand.fromExtras(extras),
+                            replayGain = ReplayGainCommand.fromExtras(extras),
+                        )
                     }
                 }
 
@@ -446,6 +456,8 @@ class PlayerConnection(context: Context) {
             replayGain = (player as? MediaController)?.sessionExtras?.let(ReplayGainCommand::fromExtras) ?: ua.olex.music.dsp.ReplayGainSettings(),
             inputFormat = lastInputFormat.takeIf { item != null },
             seekable = player.isCurrentMediaItemSeekable,
+            queueRestored = (player as? MediaController)?.sessionExtras?.getBoolean(PlaybackService.QUEUE_RESTORED) == true,
+            sleepDurationMs = (player as? MediaController)?.sessionExtras?.getLong(SleepTimerCommand.DURATION)?.takeIf { it > 0 },
         )
     }
 

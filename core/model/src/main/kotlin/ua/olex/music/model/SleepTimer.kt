@@ -5,11 +5,15 @@ class SleepTimer {
     var deadlineMs: Long? = null
         private set
 
+    var startedAtMs: Long? = null
+        private set
+
     /** Zero cancels. Invalid input leaves the existing timer intact. */
     fun set(minutes: Int, nowMs: Long) {
         require(minutes in 0..MAX_MINUTES)
         require(nowMs >= 0)
         deadlineMs = if (minutes == 0) null else Math.addExact(nowMs, minutes * 60_000L)
+        startedAtMs = nowMs.takeUnless { minutes == 0 }
     }
 
     /** Moves a running deadline later by [ms] exactly (no rounding to minutes), up to the longest timer. */
@@ -24,6 +28,7 @@ class SleepTimer {
         val deadline = deadlineMs ?: return false
         if (nowMs < deadline) return false
         deadlineMs = null
+        startedAtMs = null
         return true
     }
 

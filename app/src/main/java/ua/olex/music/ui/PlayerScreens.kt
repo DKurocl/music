@@ -354,7 +354,7 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
             .graphicsLayer {
                 translationX = rubber(dragX, 48.dp.toPx())
                 // Up opens the player; down has nowhere to go, so it stretches a little and springs back.
-                alpha = 1f - ((travel?.fraction ?: 0f) * 4f).coerceIn(0f, 1f)
+                alpha = 1f - (travel?.fraction ?: 0f)
                 translationY = if (dragUp < 0f) -rubber(dragUp, 16.dp.toPx()) else 0f
             }
             .pointerInput(state.hasNext) {
@@ -471,6 +471,11 @@ internal fun PlayerPage(
     from: String? = null,
 ) {
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
+    val travel = LocalPlayerTravel.current
+    androidx.compose.runtime.DisposableEffect(travel, lyricsShown, inlineLyrics != null) {
+        travel?.lyricsVisible = lyricsShown && inlineLyrics != null
+        onDispose { travel?.lyricsVisible = false }
+    }
     val cs = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     // Text colours follow the theme (a page drawn outside a Surface would otherwise inherit black).
@@ -531,17 +536,27 @@ internal fun PlayerPage(
             var gestureItem by remember { mutableStateOf(occurrence) }
             var skipping by remember { mutableStateOf(false) }
             var swipedTo by remember { mutableStateOf<String?>(null) }
+            var incomingSide by remember { mutableFloatStateOf(0f) }
             var dragOffset by remember { mutableStateOf<Float?>(null) }
             var settleJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-            val visibleOffset = { if (gestureItem == latestOccurrence) dragOffset ?: swipe.value else 0f }
+            val visibleOffset = {
+                when {
+                    gestureItem == latestOccurrence -> dragOffset ?: swipe.value
+                    swipedTo == latestOccurrence -> swipe.value + incomingSide
+                    else -> 0f
+                }
+            }
             val direction by remember { derivedStateOf { visibleOffset().compareTo(0f) } }
             val powerSave = LocalPowerSave.current
             LaunchedEffect(occurrence, lyricsShown) {
+                val offset = if (!powerSave && swipedTo == occurrence && gestureItem != occurrence) visibleOffset() else 0f
                 settleJob?.cancel()
                 skipping = false
                 dragOffset = null
-                swipe.snapTo(0f)
+                swipe.snapTo(offset)
                 gestureItem = occurrence
+                swipedTo = null
+                if (offset != 0f) swipe.animateTo(0f, spatial)
             }
             androidx.compose.animation.Crossfade(lyricsShown && inlineLyrics != null,
                 animationSpec = androidx.compose.animation.core.tween(if (powerSave) 0 else 165), label = "Lyrics and artwork") { words ->
@@ -603,11 +618,12 @@ internal fun PlayerPage(
                                         haptics.skip(goNext)
                                         skipping = true
                                         try {
-                                            if (!powerSave) swipe.animateTo(if (goNext) -step else step, motion.fastEffectsSpec())
                                             if (occurrence != latestOccurrence) return@launch
                                             val target = if (goNext) state.nextIndex else state.previousIndex
                                             swipedTo = state.queue.getOrNull(target)?.key
+                                            incomingSide = if (goNext) step else -step
                                             if (goNext) next() else previous()
+                                            if (!powerSave) swipe.animateTo(if (goNext) -step else step, spatial)
                                             // Hold the incoming cover until the session acknowledges the command.
                                             // An unresponsive controller must eventually give the gesture back.
                                             if (target != state.queueIndex) kotlinx.coroutines.withTimeoutOrNull(3_000) {

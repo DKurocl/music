@@ -14,6 +14,7 @@ import java.util.UUID
 /** Restores paused, checkpoints active playback every 60 seconds, and does no periodic work while paused. */
 @OptIn(UnstableApi::class)
 internal class PlaybackPersistence(private val player: ExoPlayer, private val journal: PlaybackJournal, private val serviceScope: CoroutineScope,
+    private val onRestoreComplete: () -> Unit = {},
     private val resolveSources: suspend (List<MediaItem>) -> List<MediaItem> = { it },
 ) : Player.Listener {
     private var snapshot: PlaybackCheckpoint? = null
@@ -36,12 +37,17 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         serviceScope.launch {
             val saved = initial.await()
             // An explicit selection always wins over the asynchronous disk read.
-            if (closed || restoreSuperseded || changed || player.mediaItemCount > 0 || saved == null || saved.items.isEmpty()) return@launch
-            player.setMediaItems(saved.items, saved.index, saved.positionMs)
-            player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
-            player.shuffleModeEnabled = saved.shuffle
-            player.repeatMode = saved.repeat
-            // No prepare/play here: reopening the library must not start audio or hold a wake lock.
+            if (closed) return@launch
+            if (!restoreSuperseded && !changed && player.mediaItemCount == 0 && saved != null && saved.items.isNotEmpty()) {
+                player.setMediaItems(saved.items, saved.index, saved.positionMs)
+                player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(saved.shuffleOrder.toIntArray(), System.nanoTime()))
+                player.shuffleModeEnabled = saved.shuffle
+                player.repeatMode = saved.repeat
+                // Leave the restored queue paused until the user explicitly presses Play.
+            }
+            // Let the player publish the restored timeline before the controller sees the ready flag.
+            yield()
+            if (!closed) onRestoreComplete()
         }
     }
 

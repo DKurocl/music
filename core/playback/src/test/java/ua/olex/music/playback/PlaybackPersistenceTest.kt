@@ -43,13 +43,17 @@ class PlaybackPersistenceTest {
 
     @Test fun restoreKeepsPositionAndModesButDoesNotPrepareOrPlay() = runTest {
         journal.write(saved())
-        persistence = PlaybackPersistence(player, journal, backgroundScope)
+        var restoredIndex: Int? = null
+        persistence = PlaybackPersistence(player, journal, backgroundScope, onRestoreComplete = {
+            restoredIndex = player.currentMediaItemIndex
+        })
         runCurrent()
         journal.read()
         runCurrent()
         shadowOf(Looper.getMainLooper()).idle()
         assertEquals(2, player.mediaItemCount)
         assertEquals(1, player.currentMediaItemIndex)
+        assertEquals(1, restoredIndex)
         assertEquals(42_000L, player.currentPosition)
         assertTrue(player.shuffleModeEnabled)
         assertEquals(Player.REPEAT_MODE_ALL, player.repeatMode)
