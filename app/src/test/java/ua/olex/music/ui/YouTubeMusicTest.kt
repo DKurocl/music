@@ -133,6 +133,31 @@ class YouTubeMusicTest {
         assertFalse(source.hasAlbumContinuation(summary.id))
     }
 
+    @Test fun aShortQueueRemainsRetryableAfterItsLastPage() = kotlinx.coroutines.runBlocking {
+        fun row(id: String) = """{"playlistPanelVideoRenderer":{"videoId":"$id","title":{"simpleText":"$id"},
+            "longBylineText":{"simpleText":"Artist"}}}"""
+        val first = """{"playlistPanelRenderer":{"playlistId":"LM","totalVideos":3,"contents":[${row("first")}],
+            "continuations":[{"nextContinuationData":{"continuation":"last-page"}}]}}"""
+        val last = """{"continuationContents":{"playlistPanelContinuation":{"contents":[${row("second")}]}}}"""
+        var firstRequests = 0
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            when {
+                endpoint != "next" -> null
+                "last-page" in fields -> last
+                else -> first.also { firstRequests++ }
+            }
+        }, account = { mapOf("Cookie" to "fixture") })
+        val summary = YouTubeMusic.OnlineAlbum("VLLM", "Liked Music", null, null)
+        source.albumPage(summary, null, false)!!
+        val available = source.albumMore(summary.id)!!
+        assertEquals(2, available.second.size)
+        assertTrue(available.first.partial)
+        assertFalse(source.hasAlbumContinuation(summary.id))
+        assertNull(source.peekAlbum(summary.id))
+        source.albumPage(summary, null, false)!!
+        assertEquals(2, firstRequests)
+    }
+
     @Test fun artistLookupUsesExactCreditWhenFilteredSearchReturnsADifferentArtist() = kotlinx.coroutines.runBlocking {
         val filtered = """{"musicCardShelfRenderer":{"title":{"runs":[{"text":"Someone else"}]},"onTap":{"browseEndpoint":{"browseId":"UCwrong","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}"""
         val credit = """{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"melancholicjoana","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_USER_CHANNEL"}}}]}}}"""
