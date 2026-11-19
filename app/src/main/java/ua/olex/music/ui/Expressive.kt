@@ -60,7 +60,7 @@ internal fun PlaylistCover(tracks: List<Track>, size: Dp, corner: Dp = 16.dp) {
     }
 }
 
-/** Whether music is playing now: the playing row's bars move only then. Provided by the app's root. */
+/** Whether the current track is playing. Provided by the app's root. */
 internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { false }
 
 /** Actual playback identity and confirmed files; rows retain the original request for every action. */
