@@ -3,9 +3,10 @@ package ua.olex.music.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -82,13 +83,7 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
-private val playbackBarHeights = floatArrayOf(3f, 7f, 11f, 14f, 8f)
-private const val FULL_TURN = 2 * Math.PI
-
-internal fun playbackBarHeight(index: Int, phase: Float): Float {
-    val oscillation = kotlin.math.sin(FULL_TURN * phase - index * 0.93).toFloat()
-    return playbackBarHeights[index] * (1f + 0.29f * oscillation)
-}
+private val playbackBarHeights = listOf(2f to 3f, 4f to 7f, 6f to 11f, 7f to 14f, 5f to 8f)
 
 /** A playback status mark that stays legible over artwork without looking like a transport control. */
 @Composable
@@ -101,8 +96,17 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
     Box(modifier, contentAlignment = Alignment.Center) {
         AnimatedVisibility(visible = current && playing, enter = enter, exit = exit) {
             val tint = if (cs.primary.luminance() > cs.primaryContainer.luminance()) cs.primary else cs.primaryContainer
-            val phase = if (still) null else rememberInfiniteTransition(label = "Playback mark").animateFloat(
-                0f, 1f, infiniteRepeatable(tween(960, easing = LinearEasing)), label = "Playback bars",
+            val expansion = if (still) null else rememberInfiniteTransition(label = "Playback mark").animateFloat(
+                initialValue = 1f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(keyframes {
+                    durationMillis = 980
+                    1f at 0 using FastOutSlowInEasing
+                    0f at 220
+                    0f at 370 using FastOutSlowInEasing
+                    1f at 680
+                }),
+                label = "Playback bars",
             )
             Box(Modifier.size(32.dp).semantics { stateDescription = "Playing" }.drawWithCache {
                 val scrim = Brush.radialGradient(
@@ -115,10 +119,10 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
                 val width = 2.2.dp.toPx()
                 onDrawBehind {
                     drawCircle(scrim)
-                    val position = phase?.value
-                    playbackBarHeights.forEachIndexed { index, height ->
+                    val fraction = expansion?.value ?: 1f
+                    playbackBarHeights.forEachIndexed { index, (compact, expanded) ->
                         val x = center.x + (index - 2) * spacing
-                        val halfHeight = (position?.let { playbackBarHeight(index, it) } ?: height).dp.toPx() / 2
+                        val halfHeight = (compact + (expanded - compact) * fraction).dp.toPx() / 2
                         drawLine(tint, Offset(x, center.y - halfHeight), Offset(x, center.y + halfHeight),
                             strokeWidth = width, cap = StrokeCap.Round)
                     }
