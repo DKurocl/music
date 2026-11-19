@@ -32,9 +32,11 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         catch (failure: Exception) { Log.w("MusicPlayback", "Could not restore playback: ${failure.javaClass.simpleName}"); null }
     }
 
+    private val startup: Job
+
     init {
         player.addListener(this)
-        serviceScope.launch {
+        startup = serviceScope.launch {
             val saved = initial.await()
             // Resolve the current item before showing the player. The service refreshes the other
             // saved sources after the paused timeline is visible.
@@ -97,7 +99,8 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
     suspend fun resumption(): PlaybackCheckpoint? {
         val generation = intentGeneration
         val disk = initial.await()
-        if (closed) return null
+        if (player.mediaItemCount == 0) startup.join()
+        if (closed || generation != intentGeneration) return null
         val timeline = player.currentTimeline
         val saved = if (player.mediaItemCount > 0) {
             captureQueue()
