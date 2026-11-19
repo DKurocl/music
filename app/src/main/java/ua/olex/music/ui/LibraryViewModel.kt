@@ -70,6 +70,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     val playing: StateFlow<PlayerState> get() = player.state
     val query: StateFlow<String> = savedState.getStateFlow("search", "")
+    var searchText by mutableStateOf(query.value)
+        private set
     private val searchRetry = MutableStateFlow(0)
     val search: StateFlow<LibrarySearchResult?> = query
         .debounce { if (it.isBlank()) 0 else 180 }
@@ -86,7 +88,10 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    fun setQuery(text: String) { savedState["search"] = text }
+    fun setQuery(text: String) {
+        searchText = text
+        savedState["search"] = text
+    }
 
     /**
      * YouTube Music's songs for the same query, a moment after typing stops. Songs the owner already
@@ -450,7 +455,6 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     override fun onCleared() {
         player.disconnect()
-        super.onCleared()
     }
 
     /** Plays a list; any online song the owner also has as a file plays from the file. */
