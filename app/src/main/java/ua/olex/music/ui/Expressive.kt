@@ -3,7 +3,6 @@ package ua.olex.music.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
@@ -19,6 +18,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -82,7 +82,16 @@ internal val LocalIsPlaying = androidx.compose.runtime.compositionLocalOf { fals
 internal val LocalPlayingTrack = androidx.compose.runtime.compositionLocalOf<ua.olex.music.model.Track?> { null }
 internal val LocalOwnedSources = androidx.compose.runtime.compositionLocalOf<Map<String, ua.olex.music.model.Track>> { emptyMap() }
 
-private val playbackBarHeights = listOf(2.6f to 4f, 4.4f to 7.5f, 6.8f to 12.5f, 4.3f to 7f, 2.4f to 3.6f)
+private data class PlaybackBar(val durationMillis: Int, val heights: List<Float>)
+
+private val playbackBars = listOf(
+    PlaybackBar(1920, listOf(12f, 20f, 8f, 16f, 12f)),
+    PlaybackBar(1680, listOf(24f, 10f, 32f, 16f, 24f)),
+    PlaybackBar(2160, listOf(40f, 22f, 34f, 14f, 40f)),
+    PlaybackBar(1840, listOf(22f, 34f, 12f, 28f, 22f)),
+    PlaybackBar(1760, listOf(10f, 16f, 8f, 20f, 10f)),
+)
+private const val playbackBarScale = 0.35f
 
 /** A playback status mark that stays legible over artwork without looking like a transport control. */
 @Composable
@@ -95,28 +104,29 @@ internal fun NowPlayingOverlay(current: Boolean, modifier: Modifier = Modifier) 
     Box(modifier, contentAlignment = Alignment.Center) {
         AnimatedVisibility(visible = current && playing, enter = enter, exit = exit) {
             val tint = if (cs.primary.luminance() > cs.primaryContainer.luminance()) cs.primary else cs.primaryContainer
-            val expansion = if (still) null else rememberInfiniteTransition(label = "Playback mark").animateFloat(
-                initialValue = 1f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(keyframes {
-                    durationMillis = 980
-                    1f at 0 using FastOutSlowInEasing
-                    0f at 220
-                    0f at 370 using FastOutSlowInEasing
-                    1f at 680
-                }),
-                label = "Playback bars",
-            )
+            val heights = if (still) emptyList() else {
+                val transition = rememberInfiniteTransition(label = "Playback mark")
+                playbackBars.mapIndexed { index, bar ->
+                    val motion = remember(bar) { infiniteRepeatable(keyframes {
+                        durationMillis = bar.durationMillis
+                        bar.heights.forEachIndexed { frame, height ->
+                            height at frame * bar.durationMillis / bar.heights.lastIndex
+                        }
+                    }) }
+                    transition.animateFloat(bar.heights.first(), bar.heights.last(), motion, label = "Playback bar ${index + 1}")
+                }
+            }
             Box(Modifier.size(32.dp).semantics { stateDescription = "Playing" }.drawWithCache {
                 val contrast = cs.scrim.copy(alpha = 0.82f)
-                val spacing = 4.dp.toPx()
-                val width = 2.1.dp.toPx()
+                val unit = playbackBarScale.dp.toPx()
+                val spacing = 12f * unit
+                val width = 6f * unit
                 val outlineWidth = 3.8.dp.toPx()
                 onDrawBehind {
-                    val fraction = expansion?.value ?: 1f
-                    playbackBarHeights.forEachIndexed { index, (compact, expanded) ->
+                    playbackBars.forEachIndexed { index, bar ->
                         val x = center.x + (index - 2) * spacing
-                        val halfHeight = ((compact + (expanded - compact) * fraction).dp.toPx() - width) / 2
+                        val height = heights.getOrNull(index)?.value ?: bar.heights.first()
+                        val halfHeight = (height * unit - width) / 2
                         val start = Offset(x, center.y - halfHeight)
                         val end = Offset(x, center.y + halfHeight)
                         drawLine(contrast, start, end, strokeWidth = outlineWidth, cap = StrokeCap.Round)

@@ -1,9 +1,9 @@
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.
-Current playback is shown with five rounded bars at the center of the artwork. The tallest bar
-sits in the middle. A narrow dark outline keeps the mark legible without shading the cover. The bars settle
-into a compact shape and rise together during playback. The mark fades out in 120 ms on
+Current playback is shown with five rounded bars at the center of the artwork. A narrow dark
+outline keeps the mark legible without shading the cover. The geometry, five height keyframes per
+bar and separate 1.68 to 2.16 second loops follow the owner's animated SVG. The mark fades out in 120 ms on
 pause or track change. Battery Saver leaves the bars still. Common symbols
 have coordinated press and release motion. Track actions use distinct marks for radio,
 queue and playlist actions. Audio Path and Settings provide access to the equalizer.
