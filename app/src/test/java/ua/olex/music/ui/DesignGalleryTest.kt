@@ -819,7 +819,7 @@ class DesignGalleryTest {
         strip.performScrollToNode(hasText("Focus"))
         compose.onNodeWithText("Focus").performClick()
         strip.performScrollToNode(hasText("Relax"))
-        compose.onNodeWithText("Relax").performClick()
+        compose.onNodeWithText("Relax").performClick().assertIsSelected()
         val expected = demoSongs.first()
         compose.waitUntil(5_000) {
             compose.onAllNodes(hasText(expected.title) and hasAnyAncestor(hasTestTag("home-feed"))).fetchSemanticsNodes().size == 1
@@ -919,6 +919,23 @@ class DesignGalleryTest {
             compose.mainClock.autoAdvance = true
         }
         compose.onNodeWithText("Shuffle all").assertExists()
+    }
+
+    @Test fun systemPlayerOpening() {
+        val waiting = androidx.compose.runtime.mutableStateOf(true)
+        var closed = false
+        val song = demoSongs.first()
+        compose.setContent { AppTheme {
+            PlayerOpening(ua.olex.music.playback.LastPlayedPreview(song.title, song.artist, song.artworkUri),
+                empty = !waiting.value, error = null, onClose = { closed = true }, onRetry = {})
+        } }
+        compose.onNodeWithText(song.title).assertExists()
+        compose.onNodeWithText("Opening player…").assertExists()
+        shot("01i-player-from-widget")
+        compose.runOnIdle { waiting.value = false }
+        compose.onNodeWithText(song.title).assertDoesNotExist()
+        compose.onNodeWithText("Browse music").performClick()
+        compose.runOnIdle { org.junit.Assert.assertTrue(closed) }
     }
 
     @Test fun quickStartMotion() {

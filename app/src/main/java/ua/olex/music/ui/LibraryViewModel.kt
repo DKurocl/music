@@ -484,6 +484,19 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     /** Bumped when the player should open (a tap on the media notification). */
+    var systemPlayerRequested by mutableStateOf(savedState.get<Boolean>("system_player_requested") == true)
+        private set
+    internal suspend fun lastPlayedPreview() = withContext(Dispatchers.IO) { player.lastPlayedPreview() }
+
+    fun openPlayerFromSystem() {
+        systemPlayerRequested = true
+        savedState["system_player_requested"] = true
+    }
+    fun dismissSystemPlayerRequest() {
+        systemPlayerRequested = false
+        savedState["system_player_requested"] = false
+    }
+
     var playerRequest by mutableStateOf(0); private set
     fun requestPlayer() { playerRequest++ }
     fun consumePlayerRequest() { playerRequest = 0 }

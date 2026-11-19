@@ -83,7 +83,7 @@ internal fun SettingsPage(
         fun setting(title: String, content: @Composable () -> Unit) {
             if (terms.all { it in title.lowercase() }) {
                 matches++
-                item(key = title) { content() }
+                item(key = title) { androidx.compose.runtime.CompositionLocalProvider(LocalSettingsResults provides terms.isNotEmpty(), content = content) }
             }
         }
         if (terms.isEmpty()) item(key = "group-Playback") { Group("Playback") }
@@ -281,6 +281,8 @@ internal fun SettingsPage(
 private fun Group(title: String) = Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
     modifier = Modifier.semantics { heading() }.padding(start = 12.dp, top = 22.dp, bottom = 6.dp))
 
+private val LocalSettingsResults = androidx.compose.runtime.compositionLocalOf { false }
+
 /** A row in a group: the first and last rows round the group's outer corners. */
 @Composable
 private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = false, last: Boolean = false, trailing: (@Composable () -> Unit)? = null,
@@ -290,7 +292,10 @@ private fun Row(glyph: Glyph, title: String, subtitle: String, first: Boolean = 
     val inset by animateDpAsState(if (pressed && !LocalPowerSave.current) 4.dp else 0.dp, label = "Setting press")
     val big = 24.dp - inset
     val small = 4.dp + inset
-    val shape = RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small)
+    val standalone = LocalSettingsResults.current
+    val top = if (first || standalone) big else small
+    val bottom = if (last || standalone) big else small
+    val shape = RoundedCornerShape(top, top, bottom, bottom)
     val (circle, onCircle) = tint(glyph)
     val action = when {
         onClick == null -> Modifier

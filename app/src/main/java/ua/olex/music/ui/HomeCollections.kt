@@ -29,7 +29,7 @@ internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect
         item(key = "all") { MoodChip("For you", Glyph.MIX, selected == null) { onSelect(null) } }
         items(moods, key = { "mood-" + it.label }) { mood ->
             MoodChip(mood.label, moodGlyph(mood.label), selected == mood.label) {
-                onSelect(mood.label.takeUnless { it == selected })
+                onSelect(mood.label)
             }
         }
     }
@@ -49,11 +49,11 @@ private fun MoodChip(label: String, glyph: Glyph, active: Boolean, onClick: () -
     var taps by remember { mutableIntStateOf(0) }
     LaunchedEffect(taps, still) {
         if (still || taps == 0) phase.snapTo(1f) else {
-            phase.snapTo(0f)
+            if (!phase.isRunning && phase.value == 1f) phase.snapTo(0f)
             phase.animateTo(1f, tween(moodDuration(glyph), easing = androidx.compose.animation.core.LinearEasing))
         }
     }
-    Surface(selected = active, onClick = { taps++; haptics.tick(); onClick() }, shape = CircleShape,
+    Surface(selected = active, onClick = { if (!active) { taps++; haptics.tick(); onClick() } }, shape = CircleShape,
         color = paper, contentColor = ink, modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 3.dp).squish(0.025f)) {
         Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
