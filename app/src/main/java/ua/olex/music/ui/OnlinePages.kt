@@ -183,22 +183,17 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Artwork(artist?.photo ?: target.photo ?: local?.artworkUri, Modifier.size(120.dp), 60.dp,
-                        pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
-                    Column(Modifier.padding(start = 16.dp).weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        val subtitle = artist?.listeners ?: if (artist != null || state is Load.Wait) "YouTube Music" else if (playable.isNotEmpty()) "From your library" else "Artist"
-                        Text(subtitle, style = MaterialTheme.typography.labelLarge, color = cs.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
+                // As YouTube Music opens an artist: the photo across the page, the name on it, then the actions.
+                val subtitle = artist?.listeners ?: if (artist != null || state is Load.Wait) "YouTube Music" else if (playable.isNotEmpty()) "From your library" else null
+                ArtistHero(artist?.photo ?: target.photo ?: local?.artworkUri, name, subtitle)
                 Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, origin) }, modifier = Modifier.height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, origin) }, modifier = Modifier.weight(1f).height(52.dp)) {
+                        Symbol(Glyph.SHUFFLE, size = 20.dp); Spacer(Modifier.size(8.dp)); Text("Shuffle", maxLines = 1)
                     }
-                    FilledTonalIconButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, origin) },
-                        modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { Symbol(Glyph.SHUFFLE) }
+                    FilledTonalButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, origin) }, modifier = Modifier.weight(1f).height(52.dp)) {
+                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play", maxLines = 1)
+                    }
                 }
             }
         }
@@ -489,8 +484,10 @@ private fun OnlineCard(cover: String?, title: String, subtitle: String?, onClick
     Column(Modifier.width(156.dp).padding(horizontal = 4.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(4.dp).padding(bottom = 8.dp)) {
         Artwork(cover, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
         Spacer(Modifier.height(8.dp))
-        Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
-        subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
+        Column(Modifier.height(rememberCardTextHeight() - 8.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
+        }
     }
 }
 
@@ -629,6 +626,7 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
+    val textBlock = rememberCardTextHeight()
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(cards, key = { it.id }) { card ->
             val round = card.kind == YouTubeMusic.Card.Kind.ARTIST
@@ -646,13 +644,40 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
             }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
                 if (round) Artwork(card.cover, Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape), size / 2)
                 else Artwork(card.cover, Modifier.size(size), if (size < 140.dp) 16.dp else 20.dp)
-                Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
-                card.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 4.dp)) }
+                // Every card in a row keeps one height (room for two title lines and a subtitle); the
+                // subtitle sits right under the title and the spare room stays below.
+                Column(Modifier.height(textBlock), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
+                    Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        textAlign = if (round) androidx.compose.ui.text.style.TextAlign.Center else null,
+                        modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
+                    card.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 4.dp)) }
+                }
             }
         }
     }
+}
+
+/** The artist's photo across the page, the name on a soft shade at its foot, as YouTube Music draws it. */
+@Composable
+private fun ArtistHero(photo: String?, name: String, line: String?) {
+    Box(Modifier.fillMaxWidth().aspectRatio(1.2f).clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Artwork(photo, Modifier.fillMaxSize(), 0.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
+        Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
+            0.45f to androidx.compose.ui.graphics.Color.Transparent, 1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f))))
+        Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
+            Text(name, style = MaterialTheme.typography.displaySmallEmphasized, color = androidx.compose.ui.graphics.Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            line?.let { Text(it, style = MaterialTheme.typography.titleSmall, color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        }
+    }
+}
+
+/** The height under a card's picture: two title lines and a subtitle line, at the current font size. */
+@Composable
+internal fun rememberCardTextHeight(): androidx.compose.ui.unit.Dp {
+    val type = MaterialTheme.typography
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    return remember(type, density) { with(density) { type.titleSmall.lineHeight.toDp() * 2 + type.bodySmall.lineHeight.toDp() + 8.dp } }
 }
 
 /**
