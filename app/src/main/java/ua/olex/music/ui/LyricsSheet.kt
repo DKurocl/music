@@ -239,8 +239,6 @@ internal fun LyricLine(line: ua.olex.music.lyrics.Line, index: Int, current: Int
     }
 }
 
-private fun Modifier.graphicsLayerAlpha(alpha: Float) = this.then(androidx.compose.ui.Modifier.graphicsLayer { this.alpha = alpha })
-
 /** Scrolling the lyrics past their end stays with the lyrics: it must not open the queue or close the player. */
 private val KeepScroll = object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
     override fun onPostScroll(consumed: androidx.compose.ui.geometry.Offset, available: androidx.compose.ui.geometry.Offset,

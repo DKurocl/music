@@ -38,7 +38,6 @@ internal class Reader(private val source: ByteSource) {
     fun u32be(p: Long) = bytes(p, 4).u32be(0)
     fun u32le(p: Long) = bytes(p, 4).u32le(0)
     fun u64be(p: Long) = bytes(p, 8).let { (it.u32be(0) shl 32) or it.u32be(4) }
-    fun u64le(p: Long) = bytes(p, 8).let { (it.u32le(4) shl 32) or it.u32le(0) }
     fun ascii(p: Long, length: Int) = String(bytes(p, length), Charsets.ISO_8859_1)
 
     private companion object { const val WINDOW = 8 * 1024 }
