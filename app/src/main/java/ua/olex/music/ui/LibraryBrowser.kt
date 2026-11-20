@@ -542,10 +542,8 @@ internal fun LibraryBrowser(
                     if (albums.isNotEmpty()) {
                         item(key = "artist-albums-title") { PageHeading(if (albums.size == 1) "Album" else "Albums") }
                         item(key = "artist-albums") {
-                            androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 12.dp)) {
-                                items(albums, key = { it.id }) { album ->
-                                    AlbumCard(album, Modifier.width(156.dp)) { backToArtist = selected.id; tabName = LibraryTab.ALBUMS.name; selectedId = album.id }
-                                }
+                            CardRail(albums, key = { it.id }) { album ->
+                                AlbumCard(album, Modifier) { backToArtist = selected.id; tabName = LibraryTab.ALBUMS.name; selectedId = album.id }
                             }
                         }
                     }
@@ -553,11 +551,9 @@ internal fun LibraryBrowser(
                     else {
                         val shown = topArtistSongs
                         item(key = "artist-songs-title") {
-                            Row(Modifier.fillMaxWidth().padding(top = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played", style = MaterialTheme.typography.titleLarge,
-                                    modifier = Modifier.weight(1f).padding(start = 16.dp, top = 8.dp, bottom = 8.dp))
-                                if (visible.size > 5) TextButton(onClick = { allArtistSongs = !allArtistSongs }) { Text(if (allArtistSongs) "Show less" else "All ${visible.size}") }
-                            }
+                            SectionHeader(if (allArtistSongs || visible.size <= 5) "Songs" else "Most played", trailing = if (visible.size > 5) ({
+                                TextButton(onClick = { allArtistSongs = !allArtistSongs }) { Text(if (allArtistSongs) "Show less" else "All ${visible.size}", maxLines = 1) }
+                            }) else null)
                         }
                         shown.forEachIndexed { index, track ->
                             item(key = "artist-" + track.id.value) {
@@ -691,7 +687,7 @@ internal fun LibraryBrowser(
 }
 
 @Composable
-private fun PageHeading(text: String) = Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp))
+private fun PageHeading(text: String) = SectionHeader(text)
 
 /** The artist's photo beside the name and counts, smaller than an album cover: the page is about the music below. */
 @Composable
@@ -806,19 +802,8 @@ private fun MotionCoverButton(track: Track) {
 }
 
 @Composable
-private fun AlbumCard(album: MusicCollection, modifier: Modifier, onOpen: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Column(
-        modifier.squish(0.03f).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp))
-            .clickable(onClickLabel = "Open ${album.name}", onClick = onOpen).padding(4.dp).padding(bottom = 12.dp),
-    ) {
-        Artwork(album.artworkUri, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
-        androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp))
-        Text(album.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
-        Text(album.subtitle ?: songCount(album.tracks.size), style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant,
-            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
-    }
-}
+private fun AlbumCard(album: MusicCollection, modifier: Modifier, onOpen: () -> Unit) =
+    MediaCard(album.artworkUri, album.name, album.subtitle ?: songCount(album.tracks.size), size = if (modifier == Modifier) 148.dp else null, modifier = modifier, onClick = onOpen)
 
 @Composable
 private fun BrowserMessage(text: String) {
@@ -1035,8 +1020,7 @@ private fun RecentSearches(recent: List<String>, onPick: (String) -> Unit, onCle
 private enum class CollectionSort(val title: String) { NAME("A\u2013Z"), NEWEST("Newest"), YEAR("Year"), PLAYED("Most played") }
 
 @Composable
-private fun SearchHeading(text: String) = Text(text, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
-    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp))
+private fun SearchHeading(text: String) = SectionHeader(text)
 
 /** Search's browse tiles: kinds of the library that are not in Library's four, and quick filters. */
 private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: LibraryTab, val filter: ua.olex.music.model.TrackFilter = ua.olex.music.model.TrackFilter()) {

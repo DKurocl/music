@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.SongStats
 import ua.olex.music.model.Track
@@ -321,12 +322,22 @@ internal fun DuplicatesPage(groups: List<List<Track>>, currentId: String?, modif
 }
 
 @Composable
-internal fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 12.dp).clip(RoundedCornerShape(16.dp))
-        .then(if (onSeeAll != null) Modifier.clickable(onClickLabel = "See all $text", onClick = onSeeAll) else Modifier)
-        .padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.weight(1f))
-        if (onSeeAll != null) Symbol(Glyph.CHEVRON, color = MaterialTheme.colorScheme.onSurfaceVariant)
+internal fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) = SectionHeader(text, onSeeAll)
+
+/**
+ * The one section header of the app, on every page: the title on the 16dp edge in the emphasized
+ * title style, 20dp above and 8dp below; a chevron at the end when the section opens a full list.
+ * One line; a long title ends in an ellipsis rather than growing the row.
+ */
+@Composable
+internal fun SectionHeader(text: String, onMore: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
+    Row(Modifier.fillMaxWidth().padding(top = 20.dp).heightIn(min = 48.dp)
+        .then(if (onMore != null) Modifier.clickable(onClickLabel = "See all $text", onClick = onMore) else Modifier)
+        .padding(start = 16.dp, end = if (onMore != null || trailing != null) 8.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).semantics { heading() })
+        trailing?.invoke()
+        if (onMore != null) Box(Modifier.size(40.dp), contentAlignment = Alignment.Center) { Symbol(Glyph.CHEVRON, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }
 

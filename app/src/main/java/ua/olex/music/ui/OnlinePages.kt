@@ -463,7 +463,7 @@ private fun OnlineFailed(name: String, glyph: Glyph, id: String?, retry: () -> U
 }
 
 @Composable
-private fun OnlineHeading(text: String) = Text(text, style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp))
+private fun OnlineHeading(text: String) = SectionHeader(text)
 
 @Composable
 private fun AboutCard(text: String) {
@@ -480,16 +480,7 @@ private fun AboutCard(text: String) {
 
 
 @Composable
-private fun OnlineCard(cover: String?, title: String, subtitle: String?, onClick: () -> Unit) {
-    Column(Modifier.width(156.dp).padding(horizontal = 4.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick).padding(4.dp).padding(bottom = 8.dp)) {
-        Artwork(cover, Modifier.fillMaxWidth().aspectRatio(1f), 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
-        Spacer(Modifier.height(8.dp))
-        Column(Modifier.height(rememberCardTextHeight() - 8.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
-            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp)) }
-        }
-    }
-}
+private fun OnlineCard(cover: String?, title: String, subtitle: String?, onClick: () -> Unit) = MediaCard(cover, title, subtitle, onClick = onClick)
 
 /**
  * A download button that shows where its download is, in place, as Play Store's install button
@@ -626,11 +617,9 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val textBlock = rememberCardTextHeight()
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(cards, key = { it.id }) { card ->
-            val round = card.kind == YouTubeMusic.Card.Kind.ARTIST
-            Column(Modifier.width(size).clip(RoundedCornerShape(20.dp)).clickable {
+            MediaCard(card.cover, card.title, card.subtitle, size, round = card.kind == YouTubeMusic.Card.Kind.ARTIST) {
                 when (card.kind) {
                     YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
                     YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
@@ -641,19 +630,41 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
                         nav.playTrackMix?.invoke(song) ?: nav.play(listOf(song), 0, null)
                     }
                 }
-            }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-                if (round) Artwork(card.cover, Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape), size / 2)
-                else Artwork(card.cover, Modifier.size(size), if (size < 140.dp) 16.dp else 20.dp)
-                // Every card in a row keeps one height (room for two title lines and a subtitle); the
-                // subtitle sits right under the title and the spare room stays below.
-                Column(Modifier.height(textBlock), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
-                    Text(card.title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                        textAlign = if (round) androidx.compose.ui.text.style.TextAlign.Center else null,
-                        modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
-                    card.subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 4.dp)) }
-                }
             }
+        }
+    }
+}
+
+/** The one rail of the app: cards 16dp from the edge, 12dp apart, as YouTube Music lays its shelves. */
+@Composable
+internal fun <T> CardRail(items: List<T>, key: (T) -> Any, card: @Composable (T) -> Unit) {
+    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        items(items, key = key) { card(it) }
+    }
+}
+
+/**
+ * The one card of the app (albums, playlists, artists, mixes; local or online): a square cover
+ * (round for an artist) and room for a two-line title and a subtitle, so every card in a row has
+ * one height whatever its text.
+ */
+@Composable
+internal fun MediaCard(cover: String?, title: String, subtitle: String?, size: androidx.compose.ui.unit.Dp? = 148.dp, round: Boolean = false,
+    modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val cs = MaterialTheme.colorScheme
+    val textBlock = rememberCardTextHeight()
+    // A fixed width in a rail; the cell's width in a grid (size null).
+    val frame = if (size != null) Modifier.size(size) else Modifier.fillMaxWidth().aspectRatio(1f)
+    Column(modifier.then(if (size != null) Modifier.width(size) else Modifier).squish(0.03f).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel = "Open $title", onClick = onClick),
+        horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
+        if (round) Artwork(cover, frame.clip(androidx.compose.foundation.shape.CircleShape), (size ?: 148.dp) / 2, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
+        else Artwork(cover, frame, 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
+        Column(Modifier.height(textBlock), horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                textAlign = if (round) androidx.compose.ui.text.style.TextAlign.Center else null,
+                modifier = Modifier.padding(top = 8.dp, start = 4.dp, end = 4.dp))
+            subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = if (round) androidx.compose.ui.text.style.TextAlign.Center else null, modifier = Modifier.padding(horizontal = 4.dp)) }
         }
     }
 }
