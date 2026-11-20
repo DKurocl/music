@@ -333,12 +333,8 @@ internal fun LibraryBrowser(
                 .onFocusChanged { fieldFocused = it.isFocused },
         )
         if (searching && showSources) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                androidx.compose.material3.FilterChip(selected = !searchLibrary, onClick = { searchLibrary = false },
-                    label = { Text("YouTube Music") })
-                androidx.compose.material3.FilterChip(selected = searchLibrary, onClick = { searchLibrary = true },
-                    label = { Text("Your library") })
-            }
+            ConnectedChoice(listOf("YouTube Music", "Your library"), if (searchLibrary) 1 else 0, { searchLibrary = it == 1 },
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             // As YouTube Music completes a query while it is typed: one tap fills it in.
             androidx.compose.animation.AnimatedVisibility(!searchLibrary && suggestions.isNotEmpty()) {
                 androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -380,7 +376,7 @@ internal fun LibraryBrowser(
             ) {
                 items(LibraryTab.entries.size) { i ->
                     val item = LibraryTab.entries[i]
-                    androidx.compose.material3.FilterChip(
+                    AppChip(
                         selected = item == tab, onClick = { tabName = item.name; selectedId = null },
                         label = { Text(item.title) },
                         leadingIcon = if (item == tab) ({ Symbol(Glyph.CHECK, size = 18.dp) }) else null,
@@ -406,7 +402,7 @@ internal fun LibraryBrowser(
             androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(CollectionSort.entries.filter { it != CollectionSort.YEAR || tab == LibraryTab.ALBUMS }.size) { i ->
                     val option = CollectionSort.entries.filter { it != CollectionSort.YEAR || tab == LibraryTab.ALBUMS }[i]
-                    androidx.compose.material3.FilterChip(selected = collectionSort == option, onClick = { collectionSort = option },
+                    AppChip(selected = collectionSort == option, onClick = { collectionSort = option },
                         label = { Text(option.title) }, leadingIcon = if (collectionSort == option) ({ Symbol(Glyph.CHECK, size = 18.dp) }) else null)
                 }
             }
@@ -475,7 +471,7 @@ internal fun LibraryBrowser(
                         androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.padding(top = 4.dp)) {
                             items(listOf(SearchKind.ALL) + kinds, key = { it.name }) { k ->
-                                androidx.compose.material3.FilterChip(selected = k == kind, onClick = { searchKind = k.name },
+                                AppChip(selected = k == kind, onClick = { searchKind = k.name },
                                     label = { Text(k.title, maxLines = 1) }, leadingIcon = if (k == kind) ({ Symbol(Glyph.CHECK, size = 18.dp) }) else null)
                             }
                         }
@@ -589,12 +585,17 @@ internal fun LibraryBrowser(
                         val uniformQuality = visible.mapNotNull { it.format?.label }.distinct().size <= 1
                         visible.forEachIndexed { index, track ->
                             discs[index]?.let { disc -> item(key = "disc-$disc") {
-                                Text("Disc $disc", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp))
+                                Text("Disc $disc", style = MaterialTheme.typography.titleSmallEmphasized, color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 24.dp, top = 20.dp, bottom = 8.dp).semantics { heading() })
                             } }
                             item(key = track.id.value) {
                                 val inAlbum = tab == LibraryTab.ALBUMS && order == TrackSortOrder()
-                                TrackRow(track, modifier = Modifier.animateItem(), current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
+                                // One connected group per disc (M3 Expressive lists): the outer corners
+                                // round fully, the joins between songs stay tight, a 2 dp gap between them.
+                                val first = index == 0 || discs.containsKey(index)
+                                val last = index == visible.lastIndex || discs.containsKey(index + 1)
+                                TrackRow(track, modifier = Modifier.animateItem().padding(horizontal = 12.dp).padding(bottom = if (last) 0.dp else 2.dp)
+                                    .clip(segmentShape(first, last)).background(MaterialTheme.colorScheme.surfaceContainerLow), current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
                                     checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) },
                                     number = if (inAlbum) track.trackNumber ?: (index + 1) else null, albumArtist = selected.subtitle,
                                     showQuality = !(inAlbum && uniformQuality)) { onPlay(visible, index) }
@@ -851,7 +852,7 @@ private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onC
         TrackSortMode.RATING -> "Rating"
     }
     // A chip like the filters beside it, so sort and filter read as one row of list options.
-    androidx.compose.material3.FilterChip(selected = order != TrackSortOrder(), onClick = { expanded = true },
+    AppChip(selected = order != TrackSortOrder(), onClick = { expanded = true },
         leadingIcon = { Symbol(Glyph.SORT, size = 18.dp) },
         trailingIcon = { Symbol(Glyph.DOWN, size = 18.dp) },
         label = { Text("Sort: ${label(order.mode)}" + if (order.descending) " ↓" else "") })
@@ -913,13 +914,13 @@ private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List
     androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         leading?.let { item { it() } }
-        item { androidx.compose.material3.FilterChip(filter.lossless, { onChange(filter.copy(lossless = !filter.lossless)) }, { Text("Lossless") }) }
-        item { androidx.compose.material3.FilterChip(filter.hiRes, { onChange(filter.copy(hiRes = !filter.hiRes)) }, { Text("Hi-res") }) }
-        item { androidx.compose.material3.FilterChip(filter.unplayed, { onChange(filter.copy(unplayed = !filter.unplayed)) }, { Text("Unplayed") }) }
-        item { androidx.compose.material3.FilterChip(filter.minRating > 0, { onChange(filter.copy(minRating = if (filter.minRating > 0) 0 else 4)) }, { Text("4+ stars") }) }
+        item { AppChip(filter.lossless, { onChange(filter.copy(lossless = !filter.lossless)) }, { Text("Lossless") }) }
+        item { AppChip(filter.hiRes, { onChange(filter.copy(hiRes = !filter.hiRes)) }, { Text("Hi-res") }) }
+        item { AppChip(filter.unplayed, { onChange(filter.copy(unplayed = !filter.unplayed)) }, { Text("Unplayed") }) }
+        item { AppChip(filter.minRating > 0, { onChange(filter.copy(minRating = if (filter.minRating > 0) 0 else 4)) }, { Text("4+ stars") }) }
         if (decades.size > 1 || filter.decade != null) item {
             Box {
-                androidx.compose.material3.FilterChip(filter.decade != null, { decadeMenu = true }, { Text(filter.decade?.let { "${it}s" } ?: "Decade") })
+                AppChip(filter.decade != null, { decadeMenu = true }, { Text(filter.decade?.let { "${it}s" } ?: "Decade") })
                 DropdownMenu(decadeMenu, { decadeMenu = false }) {
                     DropdownMenuItem({ Text("Any decade") }, { onChange(filter.copy(decade = null)); decadeMenu = false })
                     decades.forEach { d -> DropdownMenuItem({ Text("${d}s") }, { onChange(filter.copy(decade = d)); decadeMenu = false }) }
@@ -928,7 +929,7 @@ private fun TrackFilterRow(filter: ua.olex.music.model.TrackFilter, tracks: List
         }
         if (genres.size > 1 || filter.genre != null) item {
             Box {
-                androidx.compose.material3.FilterChip(filter.genre != null, { genreMenu = true }, { Text(filter.genre ?: "Genre") })
+                AppChip(filter.genre != null, { genreMenu = true }, { Text(filter.genre ?: "Genre") })
                 DropdownMenu(genreMenu, { genreMenu = false }) {
                     DropdownMenuItem({ Text("Any genre") }, { onChange(filter.copy(genre = null)); genreMenu = false })
                     genres.forEach { g -> DropdownMenuItem({ Text(g) }, { onChange(filter.copy(genre = g)); genreMenu = false }) }
@@ -1044,6 +1045,11 @@ private enum class CollectionSort(val title: String) { NAME("A\u2013Z"), NEWEST(
 
 @Composable
 private fun SearchHeading(text: String) = SectionHeader(text)
+
+/** A segment of a connected list: 24 dp at the group's outer corners, 6 dp where segments meet. */
+internal fun segmentShape(first: Boolean, last: Boolean) = RoundedCornerShape(
+    topStart = if (first) 24.dp else 6.dp, topEnd = if (first) 24.dp else 6.dp,
+    bottomStart = if (last) 24.dp else 6.dp, bottomEnd = if (last) 24.dp else 6.dp)
 
 /** Search's browse tiles: kinds of the library that are not in Library's four, and quick filters. */
 private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: LibraryTab, val filter: ua.olex.music.model.TrackFilter = ua.olex.music.model.TrackFilter()) {

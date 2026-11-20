@@ -251,10 +251,7 @@ private fun ListeningTimeline(s: ListeningSummary, range: ListeningRange, today:
     Surface(shape = RoundedCornerShape(28.dp), color = cs.surfaceContainer) {
         Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Text("Listening rhythm", style = MaterialTheme.typography.titleLargeEmphasized)
-            if (s.measuredPlays > 0) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(time, { if (!time) haptics.tick(); preferTime = true }, { Text("Time") }, shape = CircleShape)
-                FilterChip(!time, { if (time) haptics.tick(); preferTime = false }, { Text("Plays") }, shape = CircleShape)
-            }
+            if (s.measuredPlays > 0) ConnectedChoice(listOf("Time", "Plays"), if (time) 0 else 1, { preferTime = it == 0 }, Modifier.width(220.dp))
             val largeText = LocalDensity.current.fontScale > 1.3f
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val plotWidth = maxOf(maxWidth, (if (largeText) 58.dp else 30.dp) * numbers.size)

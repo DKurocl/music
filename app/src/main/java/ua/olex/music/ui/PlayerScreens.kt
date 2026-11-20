@@ -7,6 +7,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
+import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -245,8 +246,15 @@ private fun TrackRowContent(
             }
         },
         leadingContent = {
-            if (selecting) Checkbox(checked = checked, onCheckedChange = { onSelect?.invoke() },
-                modifier = Modifier.semantics { contentDescription = "Select ${track.title}" })
+            // Choosing keeps the row's own picture (as Google Photos and Files do): a ring sits on
+            // it, and a tap fills the ring with a tick that pops in; numbered rows show the ring alone.
+            if (selecting) Box(Modifier.size(if (number != null) 40.dp else 52.dp)
+                .toggleable(checked, onValueChange = { onSelect?.invoke() }, role = androidx.compose.ui.semantics.Role.Checkbox)
+                .semantics { contentDescription = "Select ${track.title}" }, contentAlignment = Alignment.Center) {
+                if (number == null) Artwork(track.artworkUri, Modifier.fillMaxSize().graphicsLayer {
+                    val s = if (checked) 0.86f else 1f; scaleX = s; scaleY = s }, 12.dp)
+                SelectMark(checked, onArtwork = number == null)
+            }
             else if (number != null) Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
                 val numberAlpha by animateFloatAsState(
                     if (current && LocalIsPlaying.current) 0f else 1f,
@@ -834,26 +842,37 @@ private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp =
 }
 
 /**
- * Shuffle and repeat, as Google's media controls show them: a bare icon, muted when off; when on,
- * it takes the accent and a small dot appears under it. The change fades, nothing jumps.
+ * Shuffle and repeat as M3 Expressive toggle buttons: a bare icon when off; when on, a tonal
+ * container grows in behind it and settles as a rounded square (the shape says "on"), and a press
+ * squeezes the corners further. Both spring with the motion scheme.
  */
 @Composable
 private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, switch: Boolean = false, size: Dp = 52.dp, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val tint by animateColorAsState(if (on) cs.primary else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
+    val tint by animateColorAsState(if (on) cs.onSecondaryContainer else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
     val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val corner by animateFloatAsState(if (pressed) 0.22f else if (on) 0.32f else 0.5f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-shape")
+    val container = cs.secondaryContainer
     var kick by remember { mutableIntStateOf(0) }
-    Box(Modifier.size(size).clip(CircleShape)
+    Box(Modifier.size(size)
         // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
         .then(if (switch) Modifier.toggleable(on, interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { kick++; haptics.toggle(it); onClick() }
             else Modifier.clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { kick++; haptics.toggle(!on); onClick() })
         .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
+        // Drawn, not laid out: the container's growth and corner spring cost no relayout.
+        Box(Modifier.matchParentSize().padding(2.dp).drawBehind {
+            if (dot > 0.01f) {
+                val inset = (1f - dot) * this.size.minDimension * 0.3f
+                val w = this.size.width - inset * 2; val h = this.size.height - inset * 2
+                drawRoundRect(container.copy(alpha = dot.coerceIn(0f, 1f)), topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
+                    size = androidx.compose.ui.geometry.Size(w, h),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(minOf(w, h) * corner))
+            }
+        })
         Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick, pressed = pressed)
-        Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 7.dp).size(5.dp).graphicsLayer { scaleX = dot; scaleY = dot; alpha = dot }
-            .clip(CircleShape).background(cs.primary))
     }
 }
 
@@ -1071,23 +1090,50 @@ internal fun TrackActionsSheet(
                 Text("Save ratings in the music files", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
                 AppSwitch(ratingsToFiles, onRatingsToFiles)
             }
-            androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = cs.outlineVariant)
-            actions.forEach { action ->
-                val interaction = remember(action.label) { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                ListItem(
-                    headlineContent = { Text(action.label) },
-                    leadingContent = { Symbol(action.glyph, filled = action.filled, color = cs.onSurfaceVariant, pressed = pressed) },
-                    colors = ListItemDefaults.colors(containerColor = cs.surfaceContainerLow),
-                    modifier = Modifier.clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple()) {
-                        action.run()
-                        onDismiss()
-                    },
-                )
+            // The everyday four as big tonal tiles on top (as YouTube Music and Google Photos lay out
+            // their share sheets), everything else as one rounded group of rows below them.
+            val quick = actions.filter { it.glyph in quickGlyphs }.sortedBy { quickGlyphs.indexOf(it.glyph) }
+            val rest = actions - quick.toSet()
+            if (quick.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                quick.forEach { action ->
+                    val interaction = remember(action.label) { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    androidx.compose.material3.Surface(onClick = { action.run(); onDismiss() }, interactionSource = interaction,
+                        shape = RoundedCornerShape(20.dp), color = if (action.filled) cs.primaryContainer else cs.surfaceContainerHigh,
+                        contentColor = if (action.filled) cs.onPrimaryContainer else cs.onSurface,
+                        modifier = Modifier.weight(1f).heightIn(min = 76.dp).squish(0.05f).semantics { contentDescription = action.label }) {
+                        Column(Modifier.padding(horizontal = 4.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically)) {
+                            Symbol(action.glyph, filled = action.filled, pressed = pressed)
+                            Text(when (action.glyph) { Glyph.ADD_TO_QUEUE -> "Queue"; Glyph.FAVOURITE -> if (action.filled) "Liked" else "Like"
+                                Glyph.PLAYLIST_ADD -> "Playlist"; else -> action.label },
+                                style = MaterialTheme.typography.labelMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 2)
+                        }
+                    }
+                }
+            }
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp).clip(RoundedCornerShape(24.dp)),
+                verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                rest.forEach { action ->
+                    val interaction = remember(action.label) { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    ListItem(
+                        headlineContent = { Text(action.label) },
+                        leadingContent = { Symbol(action.glyph, filled = action.filled, color = if (action.glyph == Glyph.DELETE) cs.error else cs.onSurfaceVariant, pressed = pressed) },
+                        colors = ListItemDefaults.colors(containerColor = cs.surfaceContainer,
+                            headlineColor = if (action.glyph == Glyph.DELETE) cs.error else cs.onSurface),
+                        modifier = Modifier.clip(RoundedCornerShape(4.dp)).clickable(interactionSource = interaction, indication = androidx.compose.material3.ripple()) {
+                            action.run()
+                            onDismiss()
+                        },
+                    )
+                }
             }
         }
     }
 }
+
+private val quickGlyphs = listOf(Glyph.PLAY_NEXT, Glyph.ADD_TO_QUEUE, Glyph.FAVOURITE, Glyph.PLAYLIST_ADD)
 
 /** The remaining minutes or the finishing-song state fits next to the audio format. */
 @Composable
@@ -1148,4 +1194,19 @@ private fun rememberCoverTint(artwork: String?, surface: androidx.compose.ui.gra
         }
     }
     return androidx.compose.animation.animateColorAsState(target, MaterialTheme.motionScheme.slowEffectsSpec(), label = "cover-tint")
+}
+
+/** The selection mark: an empty ring, or a filled circle with a tick that springs in. */
+@Composable
+internal fun SelectMark(checked: Boolean, onArtwork: Boolean, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val fill by animateFloatAsState(if (checked) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "select")
+    Box(modifier.size(26.dp).clip(CircleShape)
+        .background(if (onArtwork) cs.surface.copy(alpha = 0.55f * (1f - fill)) else androidx.compose.ui.graphics.Color.Transparent)
+        .border(2.dp, if (onArtwork) cs.surface else cs.outline, CircleShape), contentAlignment = Alignment.Center) {
+        Box(Modifier.matchParentSize().graphicsLayer { scaleX = fill; scaleY = fill; alpha = fill.coerceIn(0f, 1f) }
+            .clip(CircleShape).background(cs.primary), contentAlignment = Alignment.Center) {
+            Symbol(Glyph.CHECK, color = cs.onPrimary, size = 18.dp, bold = true)
+        }
+    }
 }
