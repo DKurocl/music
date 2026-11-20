@@ -49,9 +49,11 @@ internal fun RemotePlaylistSheet(card: YouTubeMusic.Card, source: YouTubeMusic, 
                 if (change?.kind == YouTubeMusic.PlaylistChange.Kind.ADD) input = ""
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (failure: Exception) {
+            } catch (failure: Throwable) {
+                // Anything at all (a malformed or unexpectedly deep answer included) becomes a message
+                // here, never a crash of the app.
                 if (change != null) page = null
-                error = failure.message ?: "YouTube Music couldn't update this playlist."
+                error = failure.message?.takeIf { it.length < 200 } ?: "YouTube Music couldn't update this playlist."
             } finally {
                 busy = false
             }
