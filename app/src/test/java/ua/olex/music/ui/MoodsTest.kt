@@ -29,6 +29,17 @@ class MoodsTest {
         assertTrue(page.playlists.single().cover!!.contains("w1080-h1080"))
     }
 
+    @Test fun keepsTheMoodMixSeparateFromCommunityPlaylists() {
+        fun shelf(title: String, card: String, endpoint: String) =
+            """{"musicCarouselShelfRenderer":{"header":{"musicCarouselShelfBasicHeaderRenderer":{"title":{"simpleText":"$title"}}},"contents":[{"musicTwoRowItemRenderer":{"title":{"simpleText":"$card"},"navigationEndpoint":$endpoint}}]}}"""
+        val mix = shelf("Mixed for you", "Energy Supermix", """{"watchPlaylistEndpoint":{"playlistId":"RDEMenergy"}}""")
+        val community = shelf("From the community", "Night Drive", """{"browseEndpoint":{"browseId":"VLPLcommunity","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_PLAYLIST"}}}}""")
+        val page = YouTubeMusic.parseMoodPage("""{"contents":[$mix,$community]}""")
+        assertEquals(listOf("Mixed for you", "From the community"), page.shelves.map { it.title })
+        assertEquals(listOf("RDEMenergy", "VLPLcommunity"), page.shelves.flatMap { it.cards }.map { it.id })
+        assertEquals(YouTubeMusic.Card.Kind.MIX, page.shelves.first().cards.single().kind)
+    }
+
     @Test fun moodSongsByGenre() {
         fun t(g: String) = Track(TrackId(g), "", g, "A", genre = g)
         val songs = listOf(t("Ambient"), t("Drum and Bass"), t("Modern Classical"), t("Thrash Metal"))
