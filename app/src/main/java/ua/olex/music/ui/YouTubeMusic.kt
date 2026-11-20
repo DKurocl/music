@@ -248,18 +248,24 @@ internal class YouTubeMusic(
         val scope = pageScope()
         val id = channelId ?: seed?.let { artistOfTrack(it)?.first } ?: artistId(name, offline)
         if (pageScope() != scope) return@withContext null
-        if (id != null) artist(id, offline, full = full && !offline, knownName = name, onPage = onPage)
-            ?.takeIf { it.songs.isNotEmpty() || it.albums.isNotEmpty() || it.singles.isNotEmpty() || it.videos.isNotEmpty() }
-            ?.let { return@withContext it }
-        if (offline) return@withContext null
         val folded = TextFold.fold(name)
         fun matchesName(track: Track) = TextFold.fold(track.artist) == folded ||
             artistCredits(track).any { TextFold.fold(it) == folded }
+        if (id != null) artist(id, offline, full = full && !offline, knownName = name, onPage = onPage)
+            ?.takeIf { it.songs.isNotEmpty() || it.albums.isNotEmpty() || it.singles.isNotEmpty() || it.videos.isNotEmpty() }
+            ?.let { page ->
+                // Signed out, YouTube Music can send an artist page with videos only: the songs the
+                // search finds by this artist stand in as top songs, so the page still has music.
+                if (page.songs.isNotEmpty() || offline) return@withContext page
+                val found = runCatching { catalogueSearch(name) }.getOrDefault(emptyList()).filter(::matchesName)
+                return@withContext if (found.isEmpty()) page else page.copy(songs = found)
+            }
+        if (offline) return@withContext null
         val anchor = seed?.takeIf { isOnline(it) && matchesName(it) }
         fun credits(track: Track) = artistIdsByVideo[track.id.value.removePrefix("yt:")].orEmpty()
         fun matchesArtist(track: Track, artistId: String?) =
             if (artistId == null || credits(track).isEmpty()) matchesName(track) else credits(track).any { it.first == artistId }
-        val fields = """"query":${quote(name)}","params":${quote(SONGS_ONLY)}"""
+        val fields = """"query":${quote(name)},"params":${quote(SONGS_ONLY)}"""
         val filtered = searchResponse(fields)?.let { parseSearch(it, keepOrder = true) }.orEmpty()
         val candidates = filtered.ifEmpty { catalogueSearch(name) }
         if (pageScope() != scope) return@withContext null
@@ -283,7 +289,7 @@ internal class YouTubeMusic(
     }
 
     private suspend fun catalogueSearch(query: String): List<Track> {
-        val args = """"query":${quote(query)}""""
+        val args = """"query":${quote(query)}"""
         val response = searchResponse(args) ?: return emptyList()
         return parseSearch(response)
     }
@@ -291,7 +297,7 @@ internal class YouTubeMusic(
     /** A normal page navigation can carry the first shelf even when its JSON browse endpoint fails. */
     private suspend fun <T : Any> cataloguePage(id: String, headers: Map<String, String>?, parse: (String) -> T?): T? {
         val json = kotlinx.coroutines.withTimeoutOrNull(7_000) {
-            catalogueRequest { post("browse", """"browseId":${quote(id)}"""", headers = headers) }
+            catalogueRequest { post("browse", """"browseId":${quote(id)}""", headers = headers) }
         }
         json?.let { runCatching { parse(it) }.getOrNull() }?.let { return it }
         if (transport != null) return null
@@ -447,7 +453,7 @@ internal class YouTubeMusic(
         val endpoint = if (watch == null) "browse" else "next"
         val fields = if (watch == null) "" else queueFields(watch)
         fun parse(json: String): RadioPage? = if (watch == null) parseBrowseContinuation(json, fallbackArtist) else parseQueueContinuation(watch, json)
-        val body = listOf(fields, """"continuation":${quote(source.token)}"""").filter(String::isNotEmpty).joinToString(",")
+        val body = listOf(fields, """"continuation":${quote(source.token)}""").filter(String::isNotEmpty).joinToString(",")
         val page = post(endpoint, body, headers = headers)?.let(::parse) ?: run {
             val token = java.net.URLEncoder.encode(source.token, Charsets.UTF_8.name())
             val legacy = "&ctoken=$token&continuation=$token" + if (watch == null) "&type=next" else ""
@@ -521,7 +527,7 @@ internal class YouTubeMusic(
         val headers = account() ?: return@withContext false
         if (pageScope() != scope) return@withContext false
         try {
-            post(if (liked) "like/like" else "like/removelike", """"target":{"videoId":${quote(videoId)}}"""", headers = headers) != null
+            post(if (liked) "like/like" else "like/removelike", """"target":{"videoId":${quote(videoId)}}""", headers = headers) != null
         } catch (_: java.io.IOException) {
             false
         }
@@ -549,7 +555,7 @@ internal class YouTubeMusic(
                     playlistCards(json).forEach { cards.putIfAbsent(it.id, it) }
                     val token = continuationOf(json) ?: break
                     check(visited.add(token)) { "YouTube Music repeated an account playlist page" }
-                    json = post("browse", """"continuation":${quote(token)}"""", headers = headers)
+                    json = post("browse", """"continuation":${quote(token)}""", headers = headers)
                         ?: throw java.io.IOException("Couldn't load the rest of your YouTube Music playlists")
                     check(ua.olex.music.lyrics.Json.parse(json) is Map<*, *>) { "Invalid YouTube Music playlist page" }
                 }
@@ -569,7 +575,7 @@ internal class YouTubeMusic(
 
     /** Fetch all pages with one captured session. Mutations never operate on cached order. */
     private suspend fun playlistSnapshot(id: String, headers: Map<String, String>): PlaylistSnapshot {
-        val first = post("browse", """"browseId":${quote(id)}"""", headers = headers)
+        val first = post("browse", """"browseId":${quote(id)}""", headers = headers)
             ?: throw java.io.IOException("Couldn't open the YouTube Music playlist.")
         val album = parseAlbum(id, first)?.first ?: throw java.io.IOException("Couldn't read the YouTube Music playlist.")
         val tracks = ArrayList<Track>()
@@ -589,7 +595,7 @@ internal class YouTubeMusic(
             }
             val token = continuationOf(json) ?: break
             check(cursors.size < 100 && cursors.add(token)) { "YouTube Music returned an incomplete or repeated playlist." }
-            json = post("browse", """"continuation":${quote(token)}"""", headers = headers)
+            json = post("browse", """"continuation":${quote(token)}""", headers = headers)
                 ?: throw java.io.IOException("Couldn't open the rest of the playlist.")
         }
         val names = tracks.associateBy { it.id.value.removePrefix("yt:") }
