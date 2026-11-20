@@ -275,7 +275,7 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
 
 private fun localOnlyTracks(provider: List<Track>, local: List<Track>): List<Track> {
     if (provider.isEmpty() || local.isEmpty()) return local
-    val index = YouTubeMusic.Index(local)
+    val index = YouTubeMusic.Companion.Index(local)
     val represented = provider.mapNotNullTo(HashSet()) { index.copyOf(it)?.id }
     val providerUris = provider.mapTo(HashSet()) { it.uri }
     return local.filterNot { it.id in represented || it.uri in providerUris || it.sources.any { source -> source.uri in providerUris } }

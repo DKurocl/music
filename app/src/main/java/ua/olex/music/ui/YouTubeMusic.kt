@@ -89,7 +89,7 @@ internal class YouTubeMusic(
             cards.filter { it.kind == Card.Kind.ALBUM }.take(10),
             cards.filter { it.kind == Card.Kind.PLAYLIST }.take(12))
         if (pageScope() == scope) rememberAlbumLinks(scope, primary.songs)
-        if (plain != null) onPrimary(primary)
+        if (primary.songs.isNotEmpty() || cards.isNotEmpty()) onPrimary(primary)
         suspend fun filtered(params: String) = kotlinx.coroutines.withTimeoutOrNull(if (plain == null) 9_000L else 4_000L) {
             searchResponse(fields + ",\"params\":" + quote(params))
         }
@@ -1079,7 +1079,15 @@ internal class YouTubeMusic(
             return Card(id, title, sub, cover, kind)
         }
 
-        private fun quote(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\""
+        private fun quote(s: String) = buildString {
+            append('"')
+            for (char in s) when {
+                char == '\\' || char == '"' -> append('\\').append(char)
+                char.code < 32 -> append("\\u").append(char.code.toString(16).padStart(4, '0'))
+                else -> append(char)
+            }
+            append('"')
+        }
 
         /** Every object under [key] anywhere in a parsed answer, in document order. */
         private fun collect(root: Any?, key: String): List<Map<*, *>> {
@@ -1433,9 +1441,9 @@ internal class YouTubeMusic(
         }
 
         private fun dump(o: Any?): String = when (o) {
-            is Map<*, *> -> o.entries.joinToString(",", "{", "}") { "\"${it.key}\":${dump(it.value)}" }
+            is Map<*, *> -> o.entries.joinToString(",", "{", "}") { "${quote(it.key.toString())}:${dump(it.value)}" }
             is List<*> -> o.joinToString(",", "[", "]") { dump(it) }
-            is String -> "\"" + o.replace("\"", "\\\"") + "\""
+            is String -> quote(o)
             else -> o.toString()
         }
 
