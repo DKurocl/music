@@ -799,14 +799,14 @@ internal fun Transport(
                 ModeToggle(shuffle = state.shuffle, enabled = state.connected, size = side, modifier = width, interactionSource = input, onClick = onShuffle)
             }
             item("Previous", state.connected, onPrevious) { width, input ->
-                SkipButton(false, state.connected, side, onHold = if (state.seekable) ({ onSkipHeld(false) }) else null,
+                SkipButton(false, state.connected, size = side, onHold = if (state.seekable) ({ onSkipHeld(false) }) else null,
                     modifier = width, interactionSource = input) { haptics.skip(false); onPrevious() }
             }
             item(if (playing) "Pause" else "Play", state.connected, onToggle) { width, input ->
-                PlayerPlayToggle(playing, state.connected, waiting, playSlot, modifier = width, interactionSource = input, onClick = onToggle)
+                PlayerPlayToggle(playing, state.connected, waiting, size = playSlot, modifier = width, interactionSource = input, onClick = onToggle)
             }
             item("Next", state.hasNext, onNext) { width, input ->
-                SkipButton(true, state.hasNext, side, onHold = if (state.seekable) ({ onSkipHeld(true) }) else null,
+                SkipButton(true, state.hasNext, size = side, onHold = if (state.seekable) ({ onSkipHeld(true) }) else null,
                     modifier = width, interactionSource = input) { haptics.skip(true); onNext() }
             }
             item("Repeat", state.connected, onRepeat) { width, input ->
@@ -818,8 +818,8 @@ internal fun Transport(
 
 @Composable
 internal fun PlayerPlayToggle(
-    playing: Boolean, enabled: Boolean, waiting: Boolean, size: Dp = 112.dp,
-    modifier: Modifier = Modifier, interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
+    playing: Boolean, enabled: Boolean, waiting: Boolean, modifier: Modifier = Modifier, size: Dp = 112.dp,
+    interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -856,8 +856,8 @@ internal fun PlayerPlayToggle(
 
 @Composable
 internal fun SkipButton(
-    forward: Boolean, enabled: Boolean, size: Dp = 52.dp, onHold: (() -> Unit)? = null,
-    modifier: Modifier = Modifier, interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
+    forward: Boolean, enabled: Boolean, modifier: Modifier = Modifier, size: Dp = 52.dp, onHold: (() -> Unit)? = null,
+    interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
 ) {
     val interaction = interactionSource ?: remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -874,8 +874,8 @@ internal fun SkipButton(
 /** Two shuffle states and three repeat states share the same fixed transport slots. */
 @Composable
 internal fun ModeToggle(
-    shuffle: Boolean = false, repeat: RepeatMode? = null, enabled: Boolean, size: Dp = 52.dp,
-    modifier: Modifier = Modifier, interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
+    enabled: Boolean, modifier: Modifier = Modifier, shuffle: Boolean = false, repeat: RepeatMode? = null, size: Dp = 52.dp,
+    interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
 ) {
     val on = repeat?.let { it != RepeatMode.OFF } ?: shuffle
     val label = if (repeat == null) "Shuffle" else "Repeat"
