@@ -93,7 +93,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         savedState["search"] = text
     }
 
-    /** Keep YouTube's result positions and use a matching local copy in each corresponding row. */
+    /** Keep YouTube's result positions and use a matching local copy at each corresponding row. */
     internal val online: StateFlow<OnlineSearch?> = query
         .debounce { if (it.isBlank()) 0 else 450 }
         .combine(graph.youTubeOn) { text, on -> text to on }
@@ -631,3 +631,123 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         if (!applyRadio(run, label, tracks)) {
             mixFailure = MixFailure("The player couldn't open $label.") { startPlaylistRadio(playlistId, label) }
         }
+    }
+
+
+    // Deferred source changes are observed by PlaybackService even with no UI bound.
+
+    /**
+     * Plays a mood: its first YouTube Music playlist, cleaned like a mix, flowing into the radio of
+     * its first song when it ends; without one, a mix grown from a library song of that mood.
+     */
+    internal fun startMood(mood: YouTubeMusic.Mood, page: YouTubeMusic.MoodPage?): Unit = prepareMix {
+        val yt = graph.youTube
+        val listed = page?.playlists?.firstOrNull()?.let { runCatching { yt.album(it.id)?.second }.getOrNull() }.orEmpty().ifEmpty { page?.songs.orEmpty() }
+        coroutineContext.ensureActive()
+        if (listed.size >= 5) {
+            val first = listed.first()
+            val (queue, seen) = withContext(Dispatchers.Default) {
+                val seen = (recentKeys() + Mix.songKey(first)).toMutableSet()
+                (listOf(first) + Mix.clean(listed.drop(1), first, seen)) to seen
+            }
+            seen += queue.map(Mix::songKey)
+            val run = PlaybackMix.Run(first, null, seen, queue.map { it.id.value }.toMutableSet(), startFrom = first.id.value.removePrefix("yt:"))
+            if (!applyRadio(run, mood.label, queue)) {
+                mixFailure = MixFailure("The player couldn't open ${mood.label}.") { startMood(mood, page) }
+            }
+            return@prepareMix
+        }
+        val songs = library.value?.songs.orEmpty()
+        val matches = withContext(Dispatchers.Default) { Mix.moodSongs(mood.label, songs) }
+        if (matches.isEmpty()) { userError = "Nothing for \"${mood.label}\" yet: YouTube Music isn't reachable and no song in the library has a genre that fits."; return@prepareMix }
+        playMix(matches.random(), mood.label)
+    }
+
+    /** Plays what a spoken or typed search finds; an empty query plays the library shuffled. */
+    fun playSearch(query: String) {
+        cancelPendingPlay()
+        playJob = viewModelScope.launch {
+            val tree = (getApplication<Application>() as ua.olex.music.MusicApp).browseTree()
+            val found = withContext(Dispatchers.Default) { if (query.isBlank()) emptyList() else tree.search(query) }
+            if (found.isNotEmpty()) play(found, 0) else library.value?.songs?.takeIf { it.isNotEmpty() }?.let(::playShuffled)
+        }
+    }
+
+    /** Plays [list] with shuffle on, from a random song; the queue keeps its order for "shuffle off". */
+    fun playShuffled(list: List<Track>) {
+        if (list.isEmpty()) return
+        cancelPendingPlay()
+        graph.mix.stop()
+        playingFrom = null
+        val pick = list.indices.random()
+        val now = playing.value
+        val sameSong = list[pick].id.value == now.mediaId || list[pick].matchesPlayback(now.track)
+        // Keep a second shuffle from starting the current recording again on a deduplicated queue.
+        val start = if (sameSong && list.size > 1) {
+            val other = (0 until list.lastIndex).random()
+            if (other < pick) other else other + 1
+        } else pick
+        player.play(list, start, shuffle = true)
+    }
+    fun setPlaybackParameters(speed: Float, pitch: Float) = player.setPlaybackParameters(speed, pitch)
+    fun toggle() = player.toggle()
+    fun next() = player.next()
+    fun previous() = player.previous()
+    fun seekTo(positionMs: Long) = player.seekTo(positionMs)
+    fun setSleepTimer(minutes: Int, finishTrack: Boolean) = player.setSleepTimer(minutes, finishTrack)
+    fun extendSleepTimer(ms: Long) = player.extendSleepTimer(ms)
+    fun toggleShuffle() = player.toggleShuffle()
+    fun cycleRepeat() = player.cycleRepeat()
+    fun playQueueItem(key: String) {
+        cancelPendingPlay()
+        player.playQueueItem(key)
+    }
+    fun moveQueueItem(key: String, delta: Int) = player.moveQueueItem(key, delta)
+    fun removeQueueItem(key: String) = player.removeQueueItem(key)
+
+    // Launcher shortcuts: each waits for what it needs (the player, the library), then acts once.
+    /** Bumped when Search should open with the keyboard (the Search shortcut). */
+    var searchRequest by mutableStateOf(0); private set
+    fun requestSearch() { searchRequest++ }
+    fun consumeSearchRequest() { searchRequest = 0 }
+    fun resumeFromShortcut() = viewModelScope.launch {
+        val state = kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
+        if (!state.playWhenReady && state.hasTrack) player.toggle()
+        requestPlayer()
+    }
+    fun shuffleAllFromShortcut() = viewModelScope.launch {
+        val songs = kotlinx.coroutines.withTimeoutOrNull(10_000) { library.first { it != null } }?.songs.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
+        if (songs.isNotEmpty()) { playShuffled(songs); requestPlayer() }
+    }
+    fun likedFromShortcut() = viewModelScope.launch {
+        val liked = kotlinx.coroutines.withTimeoutOrNull(10_000) { personal.first { it.favourites.isNotEmpty() } }?.favourites?.mapNotNull { it.track }.orEmpty()
+        kotlinx.coroutines.withTimeoutOrNull(5_000) { player.state.first { it.connected } } ?: return@launch
+        if (liked.isNotEmpty()) { playFrom(liked, 0, null); requestPlayer() }
+    }
+
+    /** Clears every song after the one playing, last first so the keys stay valid. */
+    fun clearUpNext() {
+        val state = playing.value
+        state.queue.drop(state.queueIndex + 1).asReversed().forEach { player.removeQueueItem(it.key) }
+    }
+    fun enqueue(tracks: List<Track>, next: Boolean) {
+        player.enqueue(tracks, next)
+    }
+    fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) = player.setEqualizer(routeKey, settings)
+    fun setReplayGain(settings: ua.olex.music.dsp.ReplayGainSettings) = player.setReplayGain(settings)
+    fun dismissQueueError() = player.dismissQueueError()
+
+    private fun hasAccess(): Boolean {
+        val permitted = getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
+        graph.audioAccess.value = permitted
+        return permitted
+    }
+}
+
+/** Results carry their query so the screen never labels old matches as a newer search. */
+data class LibrarySearchResult(val query: String, val tracks: List<Track>, val failed: Boolean = false)
+
+/** YouTube Music's answer to a search: songs not in the library. */
+internal data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false,
+    val artists: List<YouTubeMusic.Card> = emptyList(), val albums: List<YouTubeMusic.Card> = emptyList(), val playlists: List<YouTubeMusic.Card> = emptyList())
