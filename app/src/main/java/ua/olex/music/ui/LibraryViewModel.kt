@@ -506,7 +506,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         savedState["system_player_requested"] = false
     }
 
-    var playerRequest by mutableStateOf(0); private set
+    var playerRequest by androidx.compose.runtime.mutableIntStateOf(0); private set
     fun requestPlayer() { playerRequest++ }
     fun consumePlayerRequest() { playerRequest = 0 }
 
@@ -515,7 +515,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun dismissDownloads() { downloadRequest = null }
 
     /** Bumped when Play had to leave songs out (or play nothing) because the phone is offline. */
-    var offlineNotice by mutableStateOf(0); private set
+    var offlineNotice by androidx.compose.runtime.mutableIntStateOf(0); private set
 
     /** What the queue was started from, when the screen that started it said; null for the owner's own album lists. */
     var playingFrom by mutableStateOf<String?>(null); private set
@@ -730,7 +730,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     // Launcher shortcuts: each waits for what it needs (the player, the library), then acts once.
     /** Bumped when Search should open with the keyboard (the Search shortcut). */
-    var searchRequest by mutableStateOf(0); private set
+    var searchRequest by androidx.compose.runtime.mutableIntStateOf(0); private set
     fun requestSearch() { searchRequest++ }
     fun consumeSearchRequest() { searchRequest = 0 }
     fun resumeFromShortcut() = viewModelScope.launch {

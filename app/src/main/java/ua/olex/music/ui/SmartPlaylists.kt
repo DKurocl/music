@@ -196,7 +196,7 @@ private fun RuleRow(rule: SmartRule, onChange: (SmartRule) -> Unit, onRemove: ((
 private fun Choice(label: String?, value: String, options: List<String>, onPick: (Int) -> Unit) {
     var open by remember { mutableStateOf(false) }
     Box {
-        AssistChip(onClick = { open = true }, label = { Text(if (label != null) "$label: $value" else value) },
+        AppActionChip(onClick = { open = true }, label = { Text(if (label != null) "$label: $value" else value) },
             trailingIcon = { Symbol(Glyph.COLLAPSE, size = 18.dp) })
         DropdownMenu(open, { open = false }) {
             options.forEachIndexed { i, option -> DropdownMenuItem(text = { Text(option) }, onClick = { onPick(i); open = false }) }

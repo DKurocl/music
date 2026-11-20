@@ -108,7 +108,7 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                         onClick = { apply(SonyCorrection.settings.copy(channels = draft.channels)) }, label = { Text("Sony correction") })
                     AppChip(selected = draft.bands.all { it.gainDb == 0.0 }, enabled = editable,
                         onClick = { apply(EqualizerSettings(enabled = draft.enabled, channels = draft.channels)) }, label = { Text("Flat") })
-                    AssistChip(enabled = editable && !importing, onClick = {
+                    AppActionChip(enabled = editable && !importing, onClick = {
                         importRoute = state.routeKey; importProfile.launch(arrayOf("text/plain", "application/octet-stream"))
                     }, label = { Text(if (importing) "Importing..." else "Import AutoEq") }, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) })
                 }

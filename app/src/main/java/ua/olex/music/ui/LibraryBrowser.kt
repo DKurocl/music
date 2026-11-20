@@ -956,7 +956,7 @@ private fun LetterRail(tracks: List<Track>, firstItem: Int, state: androidx.comp
     if (starts.size < 3) return
     val scope = rememberCoroutineScope()
     var active by remember { mutableStateOf<Char?>(null) }
-    var height by remember { mutableStateOf(1) }
+    var height by remember { androidx.compose.runtime.mutableIntStateOf(1) }
     fun jump(y: Float) {
         val i = (y / height * starts.size).toInt().coerceIn(0, starts.lastIndex)
         val (letter, index) = starts[i]
@@ -1178,7 +1178,9 @@ internal fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: andro
     androidx.compose.material3.Surface(onClick = { haptics.tick(); onClick() }, shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
         color = container, contentColor = content, modifier = modifier.heightIn(min = 108.dp).squish()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(38.dp).clip(shape).background(content.copy(alpha = 0.14f)), contentAlignment = Alignment.Center) { Symbol(glyph, filled = true) }
+            // A solid shape in the card's ink with the icon cut in the card's colour: a 14% tint
+            // vanished on the dark theme's containers.
+            Box(Modifier.size(40.dp).clip(shape).background(content), contentAlignment = Alignment.Center) { Symbol(glyph, filled = true, color = container, size = 22.dp) }
             Column {
                 Text(title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall)
