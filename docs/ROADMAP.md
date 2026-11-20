@@ -19,7 +19,7 @@ separate commits to keep merges trivial.
 
 - [x] Codex, 2026-11-20: retain provider shelves and mix order, keep system artwork across restarts, and polish Play while restoring (d983c5a).
 
-- [~] Codex, 2026-11-20: start a mix from one song tapped on Home or in Search.
+- [x] Codex, 2026-11-20: start a mix from one song tapped on Home or in Search (f5cc509).
 
 ## Listening dashboard
 
