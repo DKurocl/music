@@ -861,8 +861,9 @@ private fun TrackSelectionToolbar(count: Int, total: Int, ready: Boolean, onAll:
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             KickIconButton(onClick = onClose, modifier = Modifier.semantics { contentDescription = "Close selection" }) { k -> Symbol(Glyph.CLOSE, kick = k) }
             Text("$count selected", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            if (count > 0) TextButton(onClick = onClear) { Text("Clear selection") }
-            TextButton(enabled = ready && total <= TrackSelection.MAX_ITEMS, onClick = onAll) { Text("Select all") }
+            // One toggle, as Google Files has it: Select all, or Deselect all once everything is chosen.
+            val all = total > 0 && count >= total
+            TextButton(enabled = all || ready && total <= TrackSelection.MAX_ITEMS, onClick = if (all) onClear else onAll) { Text(if (all) "Deselect all" else "Select all", maxLines = 1) }
         }
         if (total > TrackSelection.MAX_ITEMS || count >= TrackSelection.MAX_ITEMS)
             Text("Select up to ${TrackSelection.MAX_ITEMS} songs per batch.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp))

@@ -81,7 +81,7 @@ internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDi
             OptionRow("Bit-perfect USB output", "Each song at its own rate to a USB DAC", bitPerfect, first = deviceName == null) { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }
             val prefs = androidx.compose.runtime.remember { context.getSharedPreferences(ua.olex.music.playback.UsbBitPerfect.PREFS, android.content.Context.MODE_PRIVATE) }
             var offload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, false)) }
-            OptionRow("Battery saver", "Audio chip decodes with the screen off, only when nothing processes", offload, last = true) {
+            OptionRow("Battery saver", "Audio chip plays while the screen is off", offload, last = true) {
                 offload = it; prefs.edit().putBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, it).apply() }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -147,7 +147,7 @@ private fun OptionRow(title: String, subtitle: String, on: Boolean, first: Boole
     Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(if (first) big else small, if (first) big else small, if (last) big else small, if (last) big else small),
         color = MaterialTheme.colorScheme.surfaceContainer) {
         ListItem(headlineContent = { Text(title) }, supportingContent = { Text(subtitle) },
-            trailingContent = { Switch(on, onCheckedChange = null) },
+            trailingContent = { AppSwitch(on, onCheckedChange = null) },
             modifier = Modifier.fillMaxWidth().toggleable(value = on, role = Role.Switch, onValueChange = onChange),
             colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent))
     }

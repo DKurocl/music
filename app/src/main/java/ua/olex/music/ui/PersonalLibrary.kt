@@ -372,7 +372,7 @@ internal fun PlaylistPicker(playlists: List<PlaylistUi>, tracks: List<Track>, ac
             }
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 16.dp, top = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Add again if already there", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                androidx.compose.material3.Switch(again, { again = it })
+                AppSwitch(again, { again = it })
             }
         }
     }
