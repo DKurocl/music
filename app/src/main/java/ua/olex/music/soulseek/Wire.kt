@@ -41,9 +41,7 @@ internal class In(private val buffer: ByteBuffer) {
     val remaining get() = buffer.remaining()
     fun u8(): Int = buffer.get().toInt() and 0xFF
     fun bool(): Boolean = u8() != 0
-    fun u16(): Int = buffer.short.toInt() and 0xFFFF
     fun u32(): Long = buffer.int.toLong() and 0xFFFFFFFFL
-    fun i32(): Int = buffer.int
     fun u64(): Long = buffer.long
     fun str(): String {
         val n = u32().toInt()

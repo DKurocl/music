@@ -186,20 +186,6 @@ fun Modifier.squish(amount: Float = 0.04f): Modifier = composed {
     }.graphicsLayer { scaleX = scale; scaleY = scale }
 }
 
-/**
- * The icon that was just switched on gives a little hop (as Gboard animates only the tab you chose):
- * one icon at a time, only at the moment it becomes active.
- */
-fun Modifier.hopWhen(active: Boolean): Modifier = composed {
-    val hop = remember { androidx.compose.animation.core.Animatable(1f) }
-    var first by remember { androidx.compose.runtime.mutableStateOf(true) }
-    androidx.compose.runtime.LaunchedEffect(active) {
-        if (first) { first = false; return@LaunchedEffect }
-        if (active) { hop.snapTo(0.8f); hop.animateTo(1f, androidx.compose.animation.core.spring(0.4f, 600f)) }
-    }
-    graphicsLayer { scaleX = hop.value; scaleY = hop.value }
-}
-
 /** Resistance for a drag that has nowhere to go: the element follows a little, never far. */
 fun rubber(offset: Float, limit: Float): Float = limit * (1f - 1f / (kotlin.math.abs(offset) / limit + 1f)) * kotlin.math.sign(offset)
 

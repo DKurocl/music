@@ -667,9 +667,18 @@ fun MusicRoot(model: LibraryViewModel) {
         val preview by androidx.compose.runtime.produceState(lastPlayerPreview) {
             if (value == null) value = model.lastPlayedPreview()
         }
+        // The restore screen never waits on a lost connection: it asks the service again every
+        // 1.5 s (a few times), so a player that is already playing shows its real controls.
+        LaunchedEffect(Unit) {
+            repeat(4) {
+                kotlinx.coroutines.delay(1_500)
+                if (!playing.connected || !playing.hasTrack) model.connectPlayer()
+            }
+        }
         PlayerOpening(preview, empty = playing.connected && playing.queueRestored && !playing.hasTrack,
             error = playing.error.takeIf { !playing.connected && !playing.connecting },
-            onClose = { expanded = false; model.dismissSystemPlayerRequest() }, onRetry = model::connectPlayer)
+            onClose = { expanded = false; model.dismissSystemPlayerRequest() }, onRetry = model::connectPlayer,
+            onPlay = { model.connectPlayer(); model.toggle() })
     }
     if (model.mixLoading && !systemOpening) Box(Modifier.fillMaxSize().safeDrawingPadding(),
         contentAlignment = Alignment.TopCenter) {

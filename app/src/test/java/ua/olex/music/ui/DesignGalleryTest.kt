@@ -967,14 +967,17 @@ class DesignGalleryTest {
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi") fun systemPlayerOpening() {
         val waiting = androidx.compose.runtime.mutableStateOf(true)
         var closed = false
+        var played = 0
         val song = demoSongs.first()
         compose.setContent { AppTheme { Images {
             PlayerOpening(ua.olex.music.playback.LastPlayedPreview(song.title, song.artist, song.artworkUri),
-                empty = !waiting.value, error = null, onClose = { closed = true }, onRetry = {})
+                empty = !waiting.value, error = null, onClose = { closed = true }, onRetry = {}, onPlay = { played++ })
         } } }
         compose.onNodeWithText(song.title).assertExists()
         compose.onNodeWithText("Restoring playback…").assertExists()
-        compose.onNodeWithContentDescription("Play").assertIsNotEnabled()
+        // Play is live while restoring: it reconnects and starts the restored queue.
+        compose.onNodeWithContentDescription("Play").performClick()
+        compose.runOnIdle { org.junit.Assert.assertEquals(1, played) }
         shot("01i-player-from-widget")
         compose.runOnIdle { waiting.value = false }
         compose.onNodeWithText(song.title).assertDoesNotExist()
