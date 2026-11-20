@@ -20,6 +20,9 @@ a failed artist profile and a wrong playlist panel. The workspace proxy denied a
 live request to `music.youtube.com` with HTTP 403. A signed-in request on the Pixel
 remains unverified.
 
+[код] Branch CI passed tests, debug and release lint, R8 and owner certificate verification.
+https://github.com/DKurocl/music/actions/runs/44685535021
+
 # Start a mix by tapping a track
 
 [код] Individual picks in Home, moods and Search now call the same song radio path as

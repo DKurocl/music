@@ -21,7 +21,7 @@ separate commits to keep merges trivial.
 
 - [x] Codex, 2026-11-20: start a mix from one song tapped on Home or in Search (f5cc509).
 
-- [~] Codex, 2026-11-20: separate YouTube Music and library search and recover online results.
+- [x] Codex, 2026-11-20: separate YouTube Music and library search and recover online results (c4461c1).
 
 ## Listening dashboard
 
