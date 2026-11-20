@@ -86,7 +86,9 @@ internal fun RemotePlaylistSheet(card: YouTubeMusic.Card, source: YouTubeMusic, 
             }
             TextButton(enabled = !busy, onClick = { perform() }) { Text("Refresh") }
             if (entries != null) LazyColumn(Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
-                itemsIndexed(entries, key = { index, entry -> entry.entryId ?: "unavailable-$index" }) { index, entry ->
+                // The position is part of the key: a playlist answer can repeat an entry id (or leave several
+                // without one), and a repeated key closes the app.
+                itemsIndexed(entries, key = { index, entry -> "$index:${entry.entryId ?: entry.videoId}" }) { index, entry ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(entry.title, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                         if (entry.entryId != null) {

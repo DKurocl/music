@@ -32,7 +32,12 @@ class AppGraph(context: Context) {
     private val app = context.applicationContext
     val audioAccess = kotlinx.coroutines.flow.MutableStateFlow(app.checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
     val musicFiles by lazy { ua.olex.music.library.LocalMusicFiles(app) }
-    val downloadedLyrics by lazy { ua.olex.music.ui.DownloadedLyrics(app) }
+    val downloadedLyrics by lazy {
+        ua.olex.music.ui.DownloadedLyrics(app, lastResort = { track ->
+            val video = if (ua.olex.music.ui.YouTubeMusic.isOnline(track)) track.id.value else youTube.find(track)?.id?.value
+            video?.removePrefix("yt:")?.substringBefore('#')?.let { youTube.lyrics(it) }
+        })
+    }
     val artistImages by lazy { ua.olex.music.ui.ArtistImages(app) }
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }

@@ -157,12 +157,18 @@ internal fun TrackRow(
             val next = x > 0
             val color by animateColorAsState(when { armed && next -> cs.primary; armed -> cs.tertiary; next -> cs.secondaryContainer; else -> cs.tertiaryContainer }, label = "swipe")
             val ink = when { armed && next -> cs.onPrimary; armed -> cs.onTertiary; next -> cs.onSecondaryContainer; else -> cs.onTertiaryContainer }
-            val iconScale by androidx.compose.animation.core.animateFloatAsState(if (armed) 1.15f else 0.85f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "swipe-icon")
+            val iconScale by androidx.compose.animation.core.animateFloatAsState(if (armed) 1.1f else 0.9f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "swipe-icon")
             Row(Modifier.matchParentSize().padding(horizontal = 8.dp, vertical = 2.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
                 horizontalArrangement = if (next) Arrangement.Start else Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                Symbol(if (next) Glyph.NEXT else Glyph.QUEUE, filled = true, color = ink, modifier = Modifier.graphicsLayer { scaleX = iconScale; scaleY = iconScale })
-                Spacer(Modifier.width(10.dp))
-                Text(if (next) "Play next" else "Add to queue", style = MaterialTheme.typography.labelLarge, color = ink)
+                // The icon sits in a solid circle of the label's ink, so it reads at a glance even
+                // before the row has moved far; it grows when the release would act.
+                Box(Modifier.size(36.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale }.clip(CircleShape).background(ink),
+                    contentAlignment = Alignment.Center) {
+                    Symbol(if (next) Glyph.PLAY_NEXT else Glyph.ADD_TO_QUEUE, filled = true, color = color, size = 20.dp)
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(if (next) "Play next" else "Add to queue",
+                    style = MaterialTheme.typography.titleSmall, color = ink, maxLines = 1)
             }
         }
         Box(Modifier.graphicsLayer { translationX = offset.value }
@@ -185,8 +191,8 @@ internal fun TrackRow(
                     change.consume()
                     raw += amount
                     if (raw > 0 && onPlayNext == null || raw < 0 && onQueue == null) raw = 0f
-                    val shown = rubber(raw, width * 0.45f)
-                    val past = kotlin.math.abs(shown) > width * 0.22f
+                    val shown = rubber(raw, width * 0.6f)
+                    val past = kotlin.math.abs(shown) > width * 0.3f
                     if (past != armed) { if (past) haptics.threshold(); armed = past }
                     scope.launch { offset.snapTo(shown) }
                 }
@@ -737,7 +743,7 @@ internal fun PlayerPage(
                     // Feel the music: the phone taps with the beat. One tap here, no trip to Settings.
                     val context = androidx.compose.ui.platform.LocalContext.current
                     var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
-                    ToggleAction(Glyph.WAVE, "Feel the music", feel, !restoring, if (feel) "On" else "Off") {
+                    ToggleAction(Glyph.VIBRATION, "Feel the music", feel, !restoring, if (feel) "On" else "Off") {
                         feel = !feel
                         ua.olex.music.playback.MusicHaptics.set(context, feel, ua.olex.music.playback.MusicHaptics.strength(context))
                     }

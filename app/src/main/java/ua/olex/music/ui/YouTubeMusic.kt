@@ -545,6 +545,18 @@ internal class YouTubeMusic(
         catalogueRequest { execute(request, reportStatus = false) } != null
     }
 
+    /**
+     * The song's lyrics as YouTube Music shows them in its Lyrics tab (plain text, licensed from
+     * LyricFind or Musixmatch): the last source, for songs the timed services don't know.
+     */
+    suspend fun lyrics(videoId: String): String? = withContext(ioDispatcher) {
+        val next = catalogueRequest { post("next", """"videoId":${quote(videoId)},"isAudioOnly":true""") } ?: return@withContext null
+        val browse = Regex(""""browseId"\s*:\s*"(MPLY[^"]+)"""").find(next)?.groupValues?.get(1) ?: return@withContext null
+        val json = catalogueRequest { post("browse", """"browseId":${quote(browse)}""") } ?: return@withContext null
+        val root = ua.olex.music.lyrics.Json.parse(json) ?: return@withContext null
+        collect(root, "musicDescriptionShelfRenderer").map { text(it["description"]) }.firstOrNull { it.isNotBlank() }?.trim()
+    }
+
     /** What YouTube Music suggests while a query is typed ("mac de" → "mac demarco", ...). */
     suspend fun suggestions(input: String): List<String> = withContext(ioDispatcher) {
         val json = catalogueRequest { post("music/get_search_suggestions", """"input":${quote(input)}""") } ?: return@withContext emptyList()
