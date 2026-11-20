@@ -141,7 +141,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                             val context = androidx.compose.ui.platform.LocalContext.current
                             var lock by remember { mutableStateOf(ua.olex.music.playback.LockScreenLyrics.get(context)) }
                             ToolRow(Glyph.LOCK, "Line on the lock screen", "While the app is closed", first, last, onClick = { lock = !lock; ua.olex.music.playback.LockScreenLyrics.set(context, lock) }) {
-                                Switch(lock, { lock = it; ua.olex.music.playback.LockScreenLyrics.set(context, it) })
+                                AppSwitch(lock, { lock = it; ua.olex.music.playback.LockScreenLyrics.set(context, it) })
                             }
                         }
                         onFindOnline?.let { find -> add { first, last -> ToolRow(Glyph.SEARCH, "Find online", "Replaces these lyrics and saves them in the file", first, last, onClick = find) } }

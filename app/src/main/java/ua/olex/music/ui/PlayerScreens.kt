@@ -1053,7 +1053,7 @@ internal fun TrackActionsSheet(
             }
             if (onRate != null && onRatingsToFiles != null) Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Save ratings in the music files", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                androidx.compose.material3.Switch(ratingsToFiles, onRatingsToFiles)
+                AppSwitch(ratingsToFiles, onRatingsToFiles)
             }
             androidx.compose.material3.HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = cs.outlineVariant)
             actions.forEach { action ->

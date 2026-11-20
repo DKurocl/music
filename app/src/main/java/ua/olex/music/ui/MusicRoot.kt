@@ -1025,7 +1025,7 @@ internal fun SleepTimerDialog(
                             Text(if (finishTrack) "When the countdown ends" else "Fade out when the countdown ends",
                                 style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                         }
-                        androidx.compose.material3.Switch(checked = finishTrack, onCheckedChange = null)
+                        AppSwitch(checked = finishTrack, onCheckedChange = null)
                     }
                 }
             }

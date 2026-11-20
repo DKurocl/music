@@ -100,7 +100,7 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                         Text("Equalizer", style = MaterialTheme.typography.titleMediumEmphasized)
                         Text(if (draft.enabled) draft.profile else "Off · saved for this output", style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                     }
-                    Switch(checked = draft.enabled, enabled = editable, onCheckedChange = { apply(draft.copy(enabled = it)) },
+                    AppSwitch(checked = draft.enabled, enabled = editable, onCheckedChange = { apply(draft.copy(enabled = it)) },
                         modifier = Modifier.semantics { contentDescription = "Enable equalizer" })
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -158,11 +158,11 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                     style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Text("Mono", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    Switch(checked = mix.mono, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(mono = it))) }, modifier = Modifier.semantics { contentDescription = "Mono" })
+                    AppSwitch(checked = mix.mono, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(mono = it))) }, modifier = Modifier.semantics { contentDescription = "Mono" })
                 }
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                     Text("Swap left and right", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    Switch(checked = mix.swap, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(swap = it))) }, modifier = Modifier.semantics { contentDescription = "Swap left and right" })
+                    AppSwitch(checked = mix.swap, enabled = editable, onCheckedChange = { apply(draft.copy(channels = mix.copy(swap = it))) }, modifier = Modifier.semantics { contentDescription = "Swap left and right" })
                 }
             }
         }
@@ -264,8 +264,9 @@ private fun EqCurve(settings: EqualizerSettings, enabled: Boolean, held: Int?, o
         drawPath(curve, tone, style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round))
         settings.bands.forEachIndexed { i, band ->
             val c = androidx.compose.ui.geometry.Offset(xOf(band.frequencyHz, w), yOf(band.gainDb.coerceIn(-range, range)))
-            val r = if (held == i) 11.dp.toPx() else 7.dp.toPx()
-            drawCircle(cs.surfaceContainer, r + 3.dp.toPx(), c)
+            // Small at rest so close bands (the treble shelf) don't pile up; large under the finger.
+            val r = if (held == i) 11.dp.toPx() else 5.dp.toPx()
+            drawCircle(cs.surfaceContainer, r + 2.dp.toPx(), c)
             drawCircle(tone, r, c)
             if (held == i) {
                 val text = "${String.format(Locale.ROOT, "%+.1f", band.gainDb)} dB · ${bandLabel(band.frequencyHz)}"
@@ -330,7 +331,7 @@ private fun ReplayGainControls(settings: ReplayGainSettings, enabled: Boolean, o
                 Text("Prevent clipping", style = MaterialTheme.typography.bodyLarge)
                 Text("Never boosts past a song's peak", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(checked = draft.preventClipping, enabled = enabled, onCheckedChange = { apply(draft.copy(preventClipping = it)) },
+            AppSwitch(checked = draft.preventClipping, enabled = enabled, onCheckedChange = { apply(draft.copy(preventClipping = it)) },
                 modifier = Modifier.semantics { contentDescription = "Prevent ReplayGain clipping" })
         }
     }
