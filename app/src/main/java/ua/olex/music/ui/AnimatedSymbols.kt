@@ -61,18 +61,20 @@ internal fun playerPressRelease(pressed: Boolean): State<Float> {
     )
 }
 
-private fun plate(center: Offset, full: Float, selected: Float, pressed: Float): RoundRect {
+// Transport plates square up when on; [round] ones (the dock, a pill itself) stay circles.
+private fun plate(center: Offset, full: Float, selected: Float, pressed: Float, round: Boolean = false): RoundRect {
     val expansion = maxOf(selected, pressed * 0.72f).coerceIn(0f, 1f).takeIf { it >= 0.012f } ?: 0f
     val side = full * expansion * (1f - 0.1f * pressed)
     val half = side / 2f
-    val corner = (0.5f - 0.18f * selected) * (1f - pressed * 0.45f)
+    val corner = if (round) 0.5f else (0.5f - 0.18f * selected) * (1f - pressed * 0.45f)
     return RoundRect(Rect(center.x - half, center.y - half, center.x + half, center.y + half), CornerRadius(side * corner))
 }
 
 /** A single bounded tonal shape supplies visual press feedback inside the fixed hit target. */
-internal fun Modifier.playerControlContainer(active: State<Float>, push: State<Float>, focused: Boolean, fill: Color, focus: Color): Modifier =
+internal fun Modifier.playerControlContainer(active: State<Float>, push: State<Float>, focused: Boolean, fill: Color, focus: Color,
+    round: Boolean = false): Modifier =
     drawBehind {
-        val shape = plate(center, 44.dp.toPx(), active.value.coerceIn(0f, 1f), push.value.coerceIn(0f, 1f))
+        val shape = plate(center, 44.dp.toPx(), active.value.coerceIn(0f, 1f), push.value.coerceIn(0f, 1f), round)
         if (shape.width > 0f) drawRoundRect(fill, topLeft = Offset(shape.left, shape.top),
             size = Size(shape.width, shape.height), cornerRadius = shape.topLeftCornerRadius)
         if (focused) {
@@ -84,9 +86,10 @@ internal fun Modifier.playerControlContainer(active: State<Float>, push: State<F
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.controlInk(
     mask: Path, selection: Float, press: Float, glyphScale: Float, off: Color, on: Color,
+    round: Boolean = false,
     drawIcon: androidx.compose.ui.graphics.drawscope.DrawScope.(Color) -> Unit,
 ) {
-    val shape = plate(center, 44.dp.toPx() / glyphScale, selection.coerceIn(0f, 1f), press.coerceIn(0f, 1f))
+    val shape = plate(center, 44.dp.toPx() / glyphScale, selection.coerceIn(0f, 1f), press.coerceIn(0f, 1f), round)
     if (shape.width <= 0f) drawIcon(off) else {
         mask.reset()
         mask.addRoundRect(shape)
@@ -279,7 +282,7 @@ internal fun PlayerDockSymbol(
         val lead = pulse(0f, 0.82f)
         val follow = pulse(0.17f, 1f)
         val pressure = pushState.value.coerceIn(0f, 1f)
-        controlInk(mask, selection.value, pressure, 1f - pressure * 0.12f, offInk, onInk) { ink ->
+        controlInk(mask, selection.value, pressure, 1f - pressure * 0.12f, offInk, onInk, round = true) { ink ->
             scale(unit, unit, pivot = Offset.Zero) {
                 translate(top = 960f) {
                     when (mark) {

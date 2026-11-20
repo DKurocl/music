@@ -987,7 +987,7 @@ internal fun ToggleAction(
     val spatial = MaterialTheme.motionScheme.fastSpatialSpec<androidx.compose.ui.unit.IntSize>()
     // The pill grows out of the round button and folds back into it when the timer ends.
     Box(Modifier.height(48.dp).then(modifier).animateContentSize(spatial), contentAlignment = Alignment.Center) {
-        if (badge == null) Box(Modifier.size(48.dp).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
+        if (badge == null) Box(Modifier.size(48.dp).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary, round = true)
             .then(action).semantics { contentDescription = label; if (state != null) stateDescription = state },
             contentAlignment = Alignment.Center) {
             PlayerDockSymbol(mark, on, push, active, kick,
