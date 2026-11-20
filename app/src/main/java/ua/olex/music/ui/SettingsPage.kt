@@ -286,13 +286,14 @@ internal fun SettingsPage(
             Spacer(Modifier.height(4.dp))
             Row(Glyph.DELETE, "Clear cache", "Streams and downloaded covers. Your files stay", last = true) {
                 scope.launch {
-                    (context.applicationContext as ua.olex.music.MusicApp).resizeCaches(clear = true)
+                    // A file in use or already gone must not take the app down; the sizes refresh either way.
+                    runCatching { (context.applicationContext as ua.olex.music.MusicApp).resizeCaches(clear = true) }
                     cleared++
                 }
             }
             if (editing) CacheLimitDialog(limit, onDismiss = { editing = false }) { mb ->
                 ua.olex.music.playback.CacheBudget.setLimitMb(context, mb); limit = mb; editing = false
-                scope.launch { (context.applicationContext as ua.olex.music.MusicApp).resizeCaches() }
+                scope.launch { runCatching { (context.applicationContext as ua.olex.music.MusicApp).resizeCaches() } }
             }
         }
 

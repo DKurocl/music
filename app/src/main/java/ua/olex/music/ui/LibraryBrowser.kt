@@ -786,7 +786,8 @@ private fun MotionCoverButton(track: Track) {
     var asking by remember { mutableStateOf(false) }
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) scope.launch {
-            val ok = covers.attach(track, uri)
+            // A file that can't be read (moved, too large, not a video) is a message, never a crash.
+            val ok = try { covers.attach(track, uri) } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { false }
             snackbar?.showSnackbar(if (ok) "Moving cover set for this album" else "Choose a video up to 40 MB")
         }
     }
