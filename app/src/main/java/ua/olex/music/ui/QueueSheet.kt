@@ -30,6 +30,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.draw.clip
 import ua.olex.music.playback.PlayerState
 
@@ -44,8 +45,11 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
     /** Keeps the whole queue as a playlist (opens the playlist picker). */
     onSave: (() -> Unit)? = null,
     /** Removes every song after the one playing. */
-    onClearNext: (() -> Unit)? = null) {
+    onClearNext: (() -> Unit)? = null,
+    /** Starts a mix grown from the queue item with this key. */
+    onMix: ((String) -> Unit)? = null) {
     val cs = MaterialTheme.colorScheme
+    var rowMenu by remember { mutableStateOf<String?>(null) }
     val haptics = LocalHapticFeedback.current
     val list = rememberLazyListState(initialFirstVisibleItemIndex = state.queueIndex.coerceAtLeast(0))
     var searchOpen by rememberSaveable { mutableStateOf(false) }
@@ -188,12 +192,15 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
             }, enabled = draggingKey == null, modifier = Modifier.semantics { contentDescription = "Show current song" }) {
                 Symbol(Glyph.FOCUS, kick = it)
             }
-            if (!searchOpen && (onSave != null || onClearNext != null) && state.queue.isNotEmpty()) Box {
+            if (!searchOpen && (onSave != null || onClearNext != null || onMix != null) && state.queue.isNotEmpty()) Box {
                 var menu by remember { mutableStateOf(false) }
                 KickIconButton(onClick = { menu = true }, modifier = Modifier.semantics { contentDescription = "Queue actions" }) {
                     Symbol(Glyph.MORE, kick = it)
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    val playingKey = state.queue.getOrNull(state.queueIndex)?.key
+                    if (onMix != null && playingKey != null) DropdownMenuItem(text = { Text("Start mix from this song") },
+                        leadingIcon = { Symbol(Glyph.RADIO) }, onClick = { menu = false; onMix(playingKey) })
                     if (onSave != null) DropdownMenuItem(text = { Text("Save queue as a playlist") },
                         leadingIcon = { Symbol(Glyph.PLAYLIST_ADD) }, onClick = { menu = false; onSave() })
                     if (onClearNext != null) DropdownMenuItem(text = { Text("Clear songs after this one") },
@@ -227,9 +234,18 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                         }
                     },
                     leadingContent = {
-                        Box(Modifier.size(48.dp).androidxClip()) {
-                            Artwork(item.artworkUri, Modifier.fillMaxSize(), 12.dp)
-                            NowPlayingOverlay(current, Modifier.matchParentSize())
+                        Box(Modifier.size(48.dp)) {
+                            Box(Modifier.matchParentSize().androidxClip()) {
+                                Artwork(item.artworkUri, Modifier.fillMaxSize(), 12.dp)
+                                NowPlayingOverlay(current, Modifier.matchParentSize())
+                            }
+                            // A long press on a song opens its own small menu.
+                            DropdownMenu(expanded = rowMenu == item.key, onDismissRequest = { rowMenu = null }) {
+                                DropdownMenuItem(text = { Text("Start mix from this song") }, leadingIcon = { Symbol(Glyph.RADIO) },
+                                    onClick = { rowMenu = null; onMix?.invoke(item.key) })
+                                if (!current) DropdownMenuItem(text = { Text("Remove from queue") }, leadingIcon = { Symbol(Glyph.CLOSE) },
+                                    onClick = { rowMenu = null; onRemove(item.key) })
+                            }
                         }
                     },
                     trailingContent = {
@@ -283,7 +299,7 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                         .graphicsLayer { if (dragging) { translationY = dragOffset; shadowElevation = 12f; shape = RoundedCornerShape(24.dp); clip = true } }
                         .padding(horizontal = 12.dp).padding(bottom = 2.dp)
                         .clip(if (dragging) RoundedCornerShape(24.dp) else segmentShape(index == 0, index == (if (filtering) (matches?.size ?: 0) else order.size) - 1))
-                        .clickable { onPlay(item.key) }
+                        .combinedClickable(onLongClick = if (onMix != null) ({ rowMenu = item.key }) else null) { onPlay(item.key) }
                         .semantics {
                             contentDescription = "${item.title}, ${item.artist}, queue item ${position + 1}" + item.sourceError?.let { ", $it" }.orEmpty()
                             selected = current
