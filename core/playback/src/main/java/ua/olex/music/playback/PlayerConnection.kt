@@ -278,44 +278,6 @@ class PlayerConnection(context: Context) {
         player.replaceMediaItem(player.currentMediaItemIndex, item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build())
     }
 
-    /**
-     * Swaps a queued song for another source of the same song (an online song for the file just
-     * downloaded), keeping its place in the queue and, when it is the one playing, its position.
-     */
-    fun replaceQueueItem(key: String, track: Track) {
-        val player = controller ?: return
-        if (!player.isCommandAvailable(androidx.media3.common.Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
-        val index = player.indexOfQueueKey(key).takeIf { it >= 0 } ?: return
-        val current = index == player.currentMediaItemIndex
-        val position = player.currentPosition
-        val playing = player.playWhenReady
-        player.replaceMediaItem(index, mediaItem(track, key, player.getMediaItemAt(index).mediaMetadata.extras?.getString(CONTEXT_KEY)))
-        if (current) { player.seekTo(index, position); player.playWhenReady = playing }
-    }
-
-    /**
-     * Swaps several queued songs for other sources of the same song (online songs for files just
-     * downloaded) in one change of the queue, each keeping its place and its queue key. The song
-     * playing now is left as it is: re-preparing it would cause a gap; the file plays next time.
-     */
-    fun replaceQueueItems(byKey: Map<String, Track>) {
-        val player = controller ?: return
-        if (byKey.isEmpty() || !player.isCommandAvailable(androidx.media3.common.Player.COMMAND_CHANGE_MEDIA_ITEMS)) return
-        val current = player.currentMediaItemIndex
-        val indices = byKey.keys.mapNotNull { key -> player.indexOfQueueKey(key).takeIf { it >= 0 && it != current }?.let { it to key } }.sortedBy { it.first }
-        if (indices.isEmpty()) return
-        val from = indices.first().first; val to = indices.last().first + 1
-        val swap = indices.associate { (i, key) -> i to (key to byKey.getValue(key)) }
-        val items = (from until to).map { i -> swap[i]?.let { (key, track) -> mediaItem(track, key, player.getMediaItemAt(i).mediaMetadata.extras?.getString(CONTEXT_KEY)) } ?: player.getMediaItemAt(i) }
-        // The current song may sit inside the range; replacing it with itself keeps it playing.
-        if (current in from until to) {
-            // Two ranges around the current song, so it is never replaced.
-            val before = items.subList(0, current - from); val after = items.subList(current - from + 1, items.size)
-            if (after.isNotEmpty()) player.replaceMediaItems(current + 1, to, after)
-            if (before.isNotEmpty()) player.replaceMediaItems(from, current, before)
-        } else player.replaceMediaItems(from, to, items)
-    }
-
     fun toggleShuffle() { controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled } }
     fun cycleRepeat() {
         controller?.let { it.repeatMode = when (it.repeatMode) {
@@ -339,10 +301,6 @@ class PlayerConnection(context: Context) {
             val to = from.toLong() + delta
             if (from >= 0 && to in 0 until it.mediaItemCount.toLong()) it.moveMediaItem(from, to.toInt())
         }
-    }
-    /** Drops everything after the current song in one call (a mix replacing the rest of the queue). */
-    fun clearUpcoming() {
-        controller?.let { val from = it.currentMediaItemIndex + 1; if (from in 1 until it.mediaItemCount) it.removeMediaItems(from, it.mediaItemCount) }
     }
     fun removeQueueItem(key: String) {
         controller?.let { val index = it.indexOfQueueKey(key); if (index >= 0) it.removeMediaItem(index) }

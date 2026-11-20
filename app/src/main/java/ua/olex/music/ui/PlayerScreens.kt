@@ -928,6 +928,7 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
         androidx.compose.material3.SliderState((state.positionMs.toFloat() / duration).coerceIn(0f, 1f), 0, 0f..1f)
     }
     val canSeek = state.connected && state.seekable && state.durationMs > 0
+    val trackPx = androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toFloat()
     fun show(ms: Long) {
         if (dragged == null) slider.value = (ms.toFloat() / duration).coerceIn(0f, 1f)
         seconds = ms / 1_000
@@ -939,20 +940,12 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
                 show(state.positionMs)
                 return@repeatOnLifecycle
             }
-            var base = readPosition()
-            show(base)
-            var baseAt = Long.MIN_VALUE
-            var lastFrame = Long.MIN_VALUE
-            while (true) androidx.compose.animation.core.withInfiniteAnimationFrameMillis { now ->
-                if (baseAt == Long.MIN_VALUE || now - baseAt >= 1_000) {
-                    base = readPosition()
-                    baseAt = now
-                }
-                // The wave can draw independently. A 120 Hz display needs only one slider update per two frames.
-                if (lastFrame == Long.MIN_VALUE || now - lastFrame >= 16) {
-                    lastFrame = now
-                    show((base + ((now - baseAt) * state.speed).toLong()).coerceAtMost(state.durationMs.coerceAtLeast(base)))
-                }
+            // One update each time the handle would move a pixel (about 6 a second for a 3-minute
+            // song), not one per display frame: the screen stays idle between them.
+            val step = (state.durationMs / (trackPx.coerceAtLeast(1f) * state.speed.coerceAtLeast(0.25f))).toLong().coerceIn(40L, 1_000L)
+            while (true) {
+                show(readPosition())
+                kotlinx.coroutines.delay(step)
             }
         }
     }
