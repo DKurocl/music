@@ -1,5 +1,7 @@
 package ua.olex.music.ui
 
+import androidx.compose.ui.Alignment
+import androidx.compose.animation.togetherWith
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.animation.core.Animatable
@@ -45,7 +47,7 @@ enum class Glyph(val codepoint: Int) {
     CALENDAR(0xEBCC), PIANO(0xE521), HI_RES(0xE024), MIC(0xE31D), UNPLAYED(0xE440),
     // Where a song plays from (docs/specs/M10_ONLINE.md, D2), and an artist's radio.
     CLOUD(0xE2BD), CLOUD_DONE(0xE2BF), CLOUD_OFF(0xE2C1), DOWNLOADING(0xF001), RADIO(0xE03E),
-    SHARE(0xE80D);
+    SHARE(0xE80D), HOME(0xE88A), PAUSE(0xE034);
 
     val text: String = String(Character.toChars(codepoint))
 
@@ -149,77 +151,25 @@ fun Symbol(
 /** The triangle unfolds into two stems. Playback changes from any controller retarget the same paths. */
 @Composable
 internal fun PlayPauseSymbol(playing: Boolean, size: Dp, pressed: Boolean = LocalIconPressed.current) {
+    // Google's own play_arrow and pause (Material Symbols, filled), trading places on a short
+    // spring of scale and fade, as Google's media controls do.
     val still = LocalPowerSave.current
-    val target = if (playing) 1f else 0f
-    val progress by animateFloatAsState(target, if (still) androidx.compose.animation.core.snap() else tween(240),
-        label = "play pause shape")
-    val scale by animateFloatAsState(if (pressed && !still) 0.86f else 1f,
-        MaterialTheme.motionScheme.fastSpatialSpec(), label = "transport press")
-    val color = LocalContentColor.current
-    val path = remember { Path() }
-    Canvas(Modifier.size(size).graphicsLayer { scaleX = scale; scaleY = scale }) {
-        val px = this.size.minDimension / 24f
-        val t = progress
-        fun between(a: Float, b: Float) = a + (b - a) * t
-        withTransform({ scale(px, px, androidx.compose.ui.geometry.Offset.Zero) }) {
-            fun stem(left: Float, right: Float, outerTop: Float, innerTop: Float) {
-                // A rounded stroke around the fill rounds the corners and seals the centre seam.
-                path.reset()
-                path.moveTo(left, outerTop)
-                path.lineTo(right, innerTop)
-                path.lineTo(right, 24f - innerTop)
-                path.lineTo(left, 24f - outerTop)
-                path.close()
-                drawPath(path, color)
-                drawPath(path, color, style = androidx.compose.ui.graphics.drawscope.Stroke(1.4f,
-                    join = androidx.compose.ui.graphics.StrokeJoin.Round))
-            }
-            stem(between(6.5f, 5.5f), between(11.5f, 9.4f), between(4f, 4.5f), between(7f, 4.5f))
-            stem(between(11.5f, 14.6f), between(19.7f, 18.5f), between(7f, 4.5f), between(11.95f, 4.5f))
-        }
+    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    androidx.compose.animation.AnimatedContent(playing, transitionSpec = {
+        if (still) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+        else (androidx.compose.animation.fadeIn(effects) + androidx.compose.animation.scaleIn(spatial, 0.7f)) togetherWith
+            (androidx.compose.animation.fadeOut(effects) + androidx.compose.animation.scaleOut(spatial, 0.7f))
+    }, contentAlignment = Alignment.Center, label = "play pause") { on ->
+        Symbol(if (on) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true, pressed = pressed)
     }
 }
 
 /** The arrow travels towards its stop, compresses, then rebounds. Previous mirrors the whole gesture. */
 @Composable
 internal fun SkipSymbol(forward: Boolean, size: Dp, kick: Int) {
-    val pulse = remember { Animatable(0f) }
-    val still = LocalPowerSave.current
-    val spring = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
-    LaunchedEffect(kick, still) {
-        if (kick == 0 || still) pulse.snapTo(0f) else {
-            pulse.snapTo(0f)
-            pulse.animateTo(1f, tween(120))
-            pulse.animateTo(0f, spring)
-        }
-    }
-    val color = LocalContentColor.current
-    val pressed = LocalIconPressed.current
-    val scale by animateFloatAsState(if (pressed && !still) 0.86f else 1f,
-        MaterialTheme.motionScheme.fastSpatialSpec(), label = "skip press")
-    val path = remember { Path() }
-    Canvas(Modifier.size(size).graphicsLayer { scaleX = if (forward) scale else -scale; scaleY = scale }) {
-        val unit = this.size.minDimension / 24f
-        val t = pulse.value
-        withTransform({ scale(unit, unit, androidx.compose.ui.geometry.Offset.Zero) }) {
-            val left = 3.5f + 5.5f * t
-            val top = 4.5f + t
-            val bottom = 24f - top
-            val tip = 15.2f + 3.3f * t
-            // A single rounded fill keeps translucent disabled icons at one opacity.
-            path.reset()
-            path.moveTo(left, top + 1f)
-            path.quadraticTo(left, top - 0.4f, left + 1.2f, top + 0.4f)
-            path.lineTo(tip - 0.6f, 11.3f)
-            path.quadraticTo(tip + 0.4f, 12f, tip - 0.6f, 12.7f)
-            path.lineTo(left + 1.2f, bottom - 0.4f)
-            path.quadraticTo(left, bottom + 0.4f, left, bottom - 1f)
-            path.close()
-            drawPath(path, color)
-            drawRoundRect(color, androidx.compose.ui.geometry.Offset(16.5f + t * 2f, 4.5f),
-                androidx.compose.ui.geometry.Size(3.5f, 15f), androidx.compose.ui.geometry.CornerRadius(1.6f))
-        }
-    }
+    // Google's skip_next / skip_previous; the tap nudges them the way they point (Glyph.motion).
+    Symbol(if (forward) Glyph.NEXT else Glyph.PREVIOUS, size = size, filled = true, kick = kick)
 }
 
 internal val LocalIconPressed = androidx.compose.runtime.compositionLocalOf { false }
