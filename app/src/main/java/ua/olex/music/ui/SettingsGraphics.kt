@@ -55,7 +55,7 @@ internal fun PlaybackFadeSetting(enabled: Boolean, onChange: (Boolean) -> Unit) 
             }.padding(horizontal = 20.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Smooth pause and play", style = MaterialTheme.typography.titleMedium)
-                    Text("Fade audio when playback starts or pauses", style = MaterialTheme.typography.bodyMedium)
+                    Text("Fade in and out on play and pause", style = MaterialTheme.typography.bodyMedium)
                 }
                 Spacer(Modifier.width(12.dp))
                 StateSwitch(enabled)
