@@ -82,7 +82,7 @@ private val trackFilterSaver = androidx.compose.runtime.saveable.listSaver<ua.ol
 )
 
 private enum class LibraryTab(val title: String) {
-    ALBUMS("Albums"), ARTISTS("Artists"), SONGS("Songs"), PLAYLISTS("Playlists"), SMART("Smart"), FAVOURITES("Favourites"), GENRES("Genres"), FOLDERS("Folders"), YEARS("Years"), COMPOSERS("Composers"), HISTORY("History")
+    ALBUMS("Albums"), ARTISTS("Artists"), SONGS("Songs"), PLAYLISTS("Playlists"), SMART("Smart"), FAVOURITES("Favourites"), GENRES("Genres"), FOLDERS("Folders"), YEARS("Years"), HISTORY("History")
 }
 
 /** Where the browser is shown: the Library place (no search field), the Search place (field, no chips), or both (tests). */
@@ -143,7 +143,8 @@ internal fun LibraryBrowser(
     var returnQuery by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedId by rememberSaveable { mutableStateOf<String?>(null) }
     var missingFavourite by rememberSaveable { mutableStateOf<String?>(null) }
-    val tab = LibraryTab.valueOf(tabName)
+    // A tab saved by an older version (Composers) falls back to Songs instead of closing the app.
+    val tab = LibraryTab.entries.firstOrNull { it.name == tabName } ?: LibraryTab.SONGS
     var browsing by rememberSaveable { mutableStateOf<String?>(null) }
     val showCollection = mode != BrowserMode.SEARCH || browsing != null || selectedId != null
     val groups = when (tab.takeIf { showCollection }) {
@@ -152,7 +153,6 @@ internal fun LibraryBrowser(
         LibraryTab.GENRES -> library.genres
         LibraryTab.FOLDERS -> library.folders
         LibraryTab.YEARS -> library.years
-        LibraryTab.COMPOSERS -> library.composers
         else -> emptyList()
     }
     val selected = selectedId?.let { id -> groups.firstOrNull { it.id == id } }
@@ -1057,7 +1057,6 @@ private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: Libr
     SONGS("Songs", Glyph.NOTE, LibraryTab.SONGS), GENRES("Genres", Glyph.GENRE, LibraryTab.GENRES),
     YEARS("Years", Glyph.CALENDAR, LibraryTab.YEARS), FOLDERS("Folders", Glyph.FOLDER, LibraryTab.FOLDERS),
     HISTORY("History", Glyph.HISTORY, LibraryTab.HISTORY),
-    COMPOSERS("Composers", Glyph.PIANO, LibraryTab.COMPOSERS),
     LOSSLESS("Lossless", Glyph.WAVE, LibraryTab.SONGS, ua.olex.music.model.TrackFilter(lossless = true)),
     HI_RES("Hi-res", Glyph.HI_RES, LibraryTab.SONGS, ua.olex.music.model.TrackFilter(hiRes = true)),
     UNPLAYED("Never played", Glyph.UNPLAYED, LibraryTab.SONGS, ua.olex.music.model.TrackFilter(unplayed = true)),
@@ -1078,7 +1077,6 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
     val (available, genres) = remember(library) {
         val tiles = BrowseTile.entries.filterTo(HashSet()) { tile ->
             when (tile) {
-                BrowseTile.COMPOSERS -> library.composers.isNotEmpty()
                 BrowseTile.YEARS -> library.years.size > 1
                 BrowseTile.GENRES -> library.genres.size > 1
                 BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }
@@ -1088,9 +1086,11 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
         }
         tiles.toSet() to library.genres.sortedByDescending { it.tracks.size }.take(6)
     }
-    val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.secondaryContainer to cs.onSecondaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer)
+    // The Fixed accent roles keep one brightness in light and dark, so no group's icons sink into
+    // the tiles at night (secondaryContainer did) or glare beside the others (tertiaryContainer did).
+    val accents = listOf(cs.primaryFixedDim to cs.onPrimaryFixed, cs.secondaryFixedDim to cs.onSecondaryFixed, cs.tertiaryFixedDim to cs.onTertiaryFixed)
     val columns = if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) 1 else 2
-    val groups = listOf("Browse" to listOf(BrowseTile.SONGS, BrowseTile.ALBUMS, BrowseTile.ARTISTS, BrowseTile.GENRES, BrowseTile.COMPOSERS, BrowseTile.YEARS, BrowseTile.FOLDERS),
+    val groups = listOf("Browse" to listOf(BrowseTile.SONGS, BrowseTile.ALBUMS, BrowseTile.ARTISTS, BrowseTile.GENRES, BrowseTile.YEARS, BrowseTile.FOLDERS),
         "Listening" to listOf(BrowseTile.HISTORY, BrowseTile.UNPLAYED),
         "Audio quality" to listOf(BrowseTile.LOSSLESS, BrowseTile.HI_RES))
     val genreRows = genres.chunked(columns)
