@@ -399,23 +399,22 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 PlayerArtwork(state.artworkUri, Modifier.size(48.dp), 14.dp, ArtworkPlan.SMALL, miniEndpoint = true)
+                // Asked to play but still getting ready (a stream opening, a slow file): shown only
+                // when it takes a moment, so a quick start never flashes.
+                val waiting = rememberPatient(state.playWhenReady && state.buffering && state.error == null)
                 Column(Modifier.weight(1f)) {
                     TrackLabel(state.title, style = MaterialTheme.typography.titleSmall)
                     val subtitle = when {
                         state.error != null -> state.error.orEmpty()
-                        state.playWhenReady && state.buffering -> "Getting ready…"
+                        waiting -> "Getting ready…"
                         else -> state.artist
                     }
                     TrackLabel(subtitle, style = MaterialTheme.typography.bodySmall,
                         color = if (state.error != null) cs.error else cs.onSurfaceVariant)
                 }
-                // Asked to play but still getting ready (a stream opening, a slow file): a ring around the
-                // button says so, instead of a pause button that seems to do nothing.
-                val preparing = state.playWhenReady && state.buffering
                 KickIconButton(enabled = state.connected, onClick = { if (state.playWhenReady) haptics.pause() else haptics.play(); onToggle() },
-                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (preparing) stateDescription = "Getting ready" }) { _ ->
-                    if (preparing) CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 2.dp, color = cs.primary)
-                    PlayPauseSymbol(state.playWhenReady, 28.dp)
+                    modifier = Modifier.semantics { contentDescription = if (state.playWhenReady) "Pause" else "Play"; if (waiting) stateDescription = "Getting ready" }) { _ ->
+                    PlayOrWait(waiting, state.playWhenReady, 28.dp, 30.dp, cs.primary)
                 }
                 KickIconButton(enabled = state.hasNext, onClick = { haptics.skip(true); onNext() },
                     modifier = Modifier.semantics { contentDescription = "Next" }) { kick ->
@@ -796,10 +795,9 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
                     ) {
                         // While the player connects (an open from the widget), M3E's loading shape
                         // breathes in the button; it becomes Play or Pause once the service answers.
-                        androidx.compose.animation.Crossfade(state.connecting && !state.isPlaying, label = "Play button") { connecting ->
-                            if (connecting) androidx.compose.material3.LoadingIndicator(Modifier.size(if (compact) 40.dp else 48.dp), color = cs.onPrimary)
-                            else PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, pressed)
-                        }
+                        // Also while a song opens (a stream resolving): one button that waits, then plays.
+                        val waiting = rememberPatient(state.connecting && !state.isPlaying || state.playWhenReady && state.buffering && state.error == null)
+                        PlayOrWait(waiting, playing, if (compact) 36.dp else 44.dp, if (compact) 40.dp else 48.dp, cs.onPrimary, pressed)
                     }
                 }
                 SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
@@ -870,10 +868,14 @@ private fun SignalPath(format: String?, loading: Boolean, onClick: () -> Unit, m
     Row(modifier.clip(CircleShape).clickable(onClickLabel = "Open audio path", onClick = onClick)
         .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(format ?: if (loading) "Reading audio format…" else "Format unavailable",
-            style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false))
-        Symbol(Glyph.CHEVRON, size = 16.dp, color = cs.onSurfaceVariant)
+        // A new song's format usually arrives at once: the line stays empty (its height kept) rather
+        // than flashing "Reading", and the text fades from one to the next.
+        val waiting = rememberPatient(format == null && loading, delayMs = 600)
+        val text = format ?: when { waiting -> "Reading audio format…"; loading -> ""; else -> "Format unavailable" }
+        androidx.compose.animation.Crossfade(text, Modifier.weight(1f, fill = false), MaterialTheme.motionScheme.fastEffectsSpec(), label = "format") { line ->
+            Text(line, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (text.isNotEmpty()) Symbol(Glyph.CHEVRON, size = 16.dp, color = cs.onSurfaceVariant)
     }
 }
 

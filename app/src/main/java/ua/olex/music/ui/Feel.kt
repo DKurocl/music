@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import androidx.compose.animation.togetherWith
 import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.animation.core.animateFloatAsState
@@ -210,5 +211,46 @@ internal fun AppDialog(
                 dismissButton?.invoke(); confirmButton()
             }
         }
+    }
+}
+
+/**
+ * Patient loading, as Google's apps show it: nothing for a wait under [delayMs] (most waits), so a
+ * fast answer never flashes a spinner; once shown, it stays at least [holdMs] so it never blinks.
+ */
+@Composable
+internal fun rememberPatient(loading: Boolean, delayMs: Long = 250, holdMs: Long = 400): Boolean {
+    var shown by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var since by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    androidx.compose.runtime.LaunchedEffect(loading) {
+        if (loading) {
+            if (!shown) { kotlinx.coroutines.delay(delayMs); shown = true; since = android.os.SystemClock.uptimeMillis() }
+        } else if (shown) {
+            val left = holdMs - (android.os.SystemClock.uptimeMillis() - since)
+            if (left > 0) kotlinx.coroutines.delay(left)
+            shown = false
+        }
+    }
+    return shown
+}
+
+/**
+ * Play/Pause that can wait: M3E's loading shape while [waiting], then the icon. The two trade
+ * places with a short spring of scale and fade (the motion scheme's), never a cut.
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+internal fun PlayOrWait(waiting: Boolean, playing: Boolean, iconSize: androidx.compose.ui.unit.Dp, indicatorSize: androidx.compose.ui.unit.Dp,
+    color: androidx.compose.ui.graphics.Color, pressed: Boolean = false) {
+    val still = LocalPowerSave.current
+    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    androidx.compose.animation.AnimatedContent(waiting, transitionSpec = {
+        if (still) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+        else (androidx.compose.animation.fadeIn(effects) + androidx.compose.animation.scaleIn(spatial, 0.6f)) togetherWith
+            (androidx.compose.animation.fadeOut(effects) + androidx.compose.animation.scaleOut(spatial, 0.6f))
+    }, contentAlignment = Alignment.Center, label = "Play or wait") { wait ->
+        if (wait) androidx.compose.material3.LoadingIndicator(Modifier.size(indicatorSize), color = color)
+        else PlayPauseSymbol(playing, iconSize, pressed)
     }
 }

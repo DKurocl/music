@@ -121,7 +121,12 @@ private fun WarmFirst(songs: List<Track>) {
 internal fun PlaceholderRow(cover: Boolean = true) {
     val loadingPulse = rememberLoadingPulse()
     val tone = MaterialTheme.colorScheme.surfaceContainerHigh
-    Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 24.dp).graphicsLayer { alpha = loadingPulse() }, verticalAlignment = Alignment.CenterVertically) {
+    // The row keeps its place at once (nothing moves when content lands) but only shows after a
+    // moment, so a page that answers quickly never flashes grey bars.
+    val shown = rememberPatient(true, delayMs = 200)
+    val appear by androidx.compose.animation.core.animateFloatAsState(if (shown) 1f else 0f,
+        MaterialTheme.motionScheme.slowEffectsSpec(), label = "placeholder")
+    Row(Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 24.dp).graphicsLayer { alpha = loadingPulse() * appear }, verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(if (cover) 52.dp else 28.dp).clip(RoundedCornerShape(if (cover) 12.dp else 8.dp)).background(tone))
         Spacer(Modifier.width(16.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

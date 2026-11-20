@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -102,11 +103,23 @@ internal fun TrackLabel(
     val label = remember(text) { text.replace(trackLineBreaks, " ").ifBlank { "\u00a0" } }
     val height = with(LocalDensity.current) { (style.lineHeight * lines.toFloat()).toDp() }
     val lineStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
-    Box(modifier.height(height), contentAlignment = if (textAlign == TextAlign.Center) Alignment.Center else Alignment.CenterStart) {
-        Text(
-            label, style = style.copy(lineHeightStyle = lineStyle), color = color, textAlign = textAlign,
-            maxLines = lines, softWrap = lines > 1, overflow = TextOverflow.Ellipsis,
-            modifier = if (marquee && !LocalPowerSave.current) Modifier.basicMarquee(iterations = 1, initialDelayMillis = 1_500) else Modifier,
-        )
+    val still = LocalPowerSave.current
+    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    val rise = MaterialTheme.motionScheme.fastSpatialSpec<androidx.compose.ui.unit.IntOffset>()
+    val nudge = with(LocalDensity.current) { 4.dp.roundToPx() }
+    // A new song's name fades through (out quickly, in with a 4dp rise), as M3 swaps a label; the
+    // box keeps one height, so nothing around it moves.
+    androidx.compose.animation.AnimatedContent(label, modifier.height(height), transitionSpec = {
+        if (still) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+        else (androidx.compose.animation.fadeIn(effects) + androidx.compose.animation.slideInVertically(rise) { nudge }) togetherWith
+            androidx.compose.animation.fadeOut(effects)
+    }, contentAlignment = if (textAlign == TextAlign.Center) Alignment.Center else Alignment.CenterStart, label = "Track label") { shown ->
+        Box(Modifier.height(height), contentAlignment = if (textAlign == TextAlign.Center) Alignment.Center else Alignment.CenterStart) {
+            Text(
+                shown, style = style.copy(lineHeightStyle = lineStyle), color = color, textAlign = textAlign,
+                maxLines = lines, softWrap = lines > 1, overflow = TextOverflow.Ellipsis,
+                modifier = if (marquee && !still) Modifier.basicMarquee(iterations = 1, initialDelayMillis = 1_500) else Modifier,
+            )
+        }
     }
 }
