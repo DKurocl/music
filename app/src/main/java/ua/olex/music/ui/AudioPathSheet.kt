@@ -78,7 +78,7 @@ internal fun AudioPathSheet(format: String?, route: OutputRoute?, audio: AudioDi
                 OptionRow("Play when $deviceName connects", "Disconnecting always pauses", resume, first = true) { resume = it; ua.olex.music.playback.HeadsetRules.setResume(context, deviceName, it) }
             }
             var bitPerfect by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ua.olex.music.playback.UsbBitPerfect.get(context)) }
-            OptionRow("Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, first = deviceName == null) { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }
+            OptionRow("Bit-perfect USB output", "Each song at its own rate to a USB DAC", bitPerfect, first = deviceName == null) { bitPerfect = it; ua.olex.music.playback.UsbBitPerfect.set(context, it) }
             val prefs = androidx.compose.runtime.remember { context.getSharedPreferences(ua.olex.music.playback.UsbBitPerfect.PREFS, android.content.Context.MODE_PRIVATE) }
             var offload by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(prefs.getBoolean(ua.olex.music.playback.PlaybackService.OFFLOAD_KEY, false)) }
             OptionRow("Battery saver", "Audio chip decodes with the screen off, only when nothing processes", offload, last = true) {

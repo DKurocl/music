@@ -123,9 +123,9 @@ internal fun SettingsPage(
 
         if (terms.isEmpty()) item(key = "group-Sound") { Group("Sound") }
         if (terms.isNotEmpty()) setting("Equalizer and ReplayGain") { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", onClick = onEqualizer) }
-        setting("Battery saver audio offload") { Toggle(Glyph.BATTERY, "Battery saver", "Use the audio chip when the screen is off and effects are off", offload, first = true) {
+        setting("Battery saver audio offload") { Toggle(Glyph.BATTERY, "Battery saver", "Audio chip plays while the screen is off", offload, first = true) {
             offload = it; prefs(UsbBitPerfect.PREFS).edit().putBoolean(PlaybackService.OFFLOAD_KEY, it).apply() } }
-        setting("Bit-perfect USB output DAC") { Toggle(Glyph.USB, "Bit-perfect USB output", "For a USB DAC: the song's own rate, unmixed", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
+        setting("Bit-perfect USB output DAC") { Toggle(Glyph.USB, "Bit-perfect USB output", "Each song at its own rate to a USB DAC", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
 
         // The phone taps with the kick drum and the bass, timed to what is heard (MusicHaptics).
         if (terms.isEmpty()) item(key = "group-Music haptics") { Group("Music haptics") }
@@ -199,7 +199,7 @@ internal fun SettingsPage(
             runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_MANAGE_MEDIA, Uri.parse("package:" + context.packageName))) } } }
 
         if (terms.isEmpty()) item(key = "group-Lyrics") { Group("Lyrics") }
-        setting("Line on the lock screen lyrics") { Toggle(Glyph.LOCK, "Line on the lock screen", "While the app is closed, the sung line takes the artist's place", lockLyrics, first = true, last = true) {
+        setting("Line on the lock screen lyrics") { Toggle(Glyph.LOCK, "Line on the lock screen", "The sung line in place of the artist", lockLyrics, first = true, last = true) {
             lockLyrics = it; LockScreenLyrics.set(context, it) } }
 
         // YouTube Music as a second source, the owner's files always first.
@@ -207,14 +207,14 @@ internal fun SettingsPage(
         setting("Search and play YouTube Music account sign in") {
             val graph = remember { (context.applicationContext as ua.olex.music.MusicApp).graph }
             val on by graph.youTubeOn.collectAsStateWithLifecycle()
-            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Songs you don't have show under yours. Yours always play from the file",
+            Toggle(Glyph.SEARCH, "Search and play YouTube Music", "Your own files always play first",
                 on, first = true, last = !on) { graph.setYouTube(it) }
             androidx.compose.animation.AnimatedVisibility(on) { Column {
                 val signedIn by graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
                 var confirm by remember { mutableStateOf(false) }
                 Spacer(Modifier.height(4.dp))
                 Row(Glyph.PERSON, "YouTube Music account", if (signedIn) "Signed in: your own home, mixes and radio. Tap to sign out"
-                    else "Sign in on Google's page for your own home, mixes and radio. The app never sees your password", last = !signedIn) {
+                    else "Your own home, mixes and radio", last = !signedIn) {
                     if (signedIn) confirm = true else context.startActivity(android.content.Intent(context, YouTubeLogin::class.java))
                 }
                 if (confirm) AppDialog(onDismissRequest = { confirm = false }, title = { Text("Sign out of YouTube Music?") },
@@ -245,7 +245,7 @@ internal fun SettingsPage(
                 "$user · " + when (val st = state) { is ua.olex.music.soulseek.SoulseekClient.State.Online -> "online"
                     is ua.olex.music.soulseek.SoulseekClient.State.Failed -> st.reason; ua.olex.music.soulseek.SoulseekClient.State.Connecting -> "signing in…"
                     else -> "signs in when you download" }
-            } ?: "Sign in to download songs and albums, lossless first. A new name is created on first sign-in", first = true, last = false) { editing = true }
+            } ?: "Sign in to download, lossless first", first = true, last = false) { editing = true }
             if (editing) SoulseekDialog(account, onDismiss = { editing = false }) { new -> downloads.account = new; account = new; editing = false }
         }
         setting("Downloads transfers") {
@@ -254,7 +254,7 @@ internal fun SettingsPage(
             Row(Glyph.DOWNLOAD, "Downloads", when {
                 active > 0 || failed > 0 -> listOfNotNull("$active active".takeIf { active > 0 },
                     "$failed need attention".takeIf { failed > 0 }).joinToString(" · ")
-                soulseekJobs.isEmpty() -> "Songs and albums you save for offline listening"
+                soulseekJobs.isEmpty() -> "Saved for offline listening"
                 else -> "View recent transfers"
             }, last = true, onClick = onDownloads)
         }
@@ -283,7 +283,7 @@ internal fun SettingsPage(
             }
             Row(Glyph.HISTORY, "Cache limit", ua.olex.music.playback.CacheBudget.label(limit), first = true) { editing = true }
             Spacer(Modifier.height(4.dp))
-            Row(Glyph.DELETE, "Clear cache", "Streamed songs, covers, photos and fetched moving covers. Your music, lyrics and own moving covers stay", last = true) {
+            Row(Glyph.DELETE, "Clear cache", "Streams and downloaded covers. Your files stay", last = true) {
                 scope.launch {
                     (context.applicationContext as ua.olex.music.MusicApp).resizeCaches(clear = true)
                     cleared++
