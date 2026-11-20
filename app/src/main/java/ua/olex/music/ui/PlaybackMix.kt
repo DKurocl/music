@@ -15,7 +15,7 @@ internal class PlaybackMix(
     private val nextPage: suspend (String) -> YouTubeMusic.RadioPage? = { graph.youTube.radioMore(it) },
     private val firstPage: suspend (String) -> YouTubeMusic.RadioPage? = { graph.youTube.radio(it) },
 ) {
-    class Run(val seed: Track, var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>, var startFrom: String? = null, val id: String = java.util.UUID.randomUUID().toString())
+    class Run(val seed: Track, var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>, var startFrom: String? = null, val id: String = java.util.UUID.randomUUID().toString(), val providerOrder: Boolean = false)
     var run: Run? = null
     var label by mutableStateOf<String?>(null)
 
@@ -41,7 +41,7 @@ internal class PlaybackMix(
         val seed = value.seed
         val json = org.json.JSONObject().put("mix", value.id).put("token", value.token).put("start", value.startFrom)
             .put("id", seed.id.value).put("uri", seed.uri).put("title", seed.title).put("artist", seed.artist)
-            .put("album", seed.album).put("duration", seed.durationMs)
+            .put("providerOrder", value.providerOrder).put("album", seed.album).put("duration", seed.durationMs)
             .put("seen", org.json.JSONArray(value.seen.toList().takeLast(500)))
             .put("ids", org.json.JSONArray(value.ids.toList().takeLast(500)))
         prefs.edit().putString("cursor", json.toString()).apply()
@@ -57,7 +57,7 @@ internal class PlaybackMix(
             fun set(name: String) = json.getJSONArray(name).let { list -> (0 until list.length()).mapTo(HashSet()) { list.getString(it) } }
             val seed = Track(ua.olex.music.model.TrackId(json.getString("id")), json.getString("uri"), json.getString("title"),
                 json.getString("artist"), album = field("album"), durationMs = json.optLong("duration"))
-            Run(seed, field("token"), set("seen"), set("ids"), field("start"), origin.id)
+            Run(seed, field("token"), set("seen"), set("ids"), field("start"), origin.id, json.optBoolean("providerOrder"))
         }.getOrNull()
     }
 
@@ -75,37 +75,4 @@ internal class PlaybackMix(
         var page = if (active != null) {
             val token = active.token
             val continuation = token?.let { nextPage(it) }
-            continuation ?: (start ?: Mix.videoId(seed))?.let { firstPage(it) }
-        } else {
-            val video = Mix.videoId(seed) ?: source.find(seed)?.let(Mix::videoId)
-            video?.let { firstPage(it) }
-        } ?: return null
-        if (run !== expected) return null
-        val hidden = graph.excludedRecommendations()
-        val seen = (active?.seen.orEmpty() + queue.map(Mix::songKey) + hidden).toMutableSet()
-        val base = active?.seed ?: seed
-        var more = withContext(Dispatchers.Default) { Mix.clean(page.tracks, base, seen) }
-        val visited = mutableSetOf(active?.token)
-        // An empty cleaned page can still have a usable continuation.
-        repeat(2) {
-            val token = page.continuation
-            if (more.isEmpty() && token != null && visited.add(token)) {
-                page = nextPage(token) ?: return@repeat
-                more = withContext(Dispatchers.Default) { Mix.clean(page.tracks, base, seen) }
-            }
-        }
-        if (run !== expected || more.isEmpty()) return null
-        return QueueExtension(more) {
-            if (run !== expected) false else {
-                val updated = active ?: Run(seed, null, seen, queue.flatMap { listOfNotNull(it.id.value, it.requestedId) }.toMutableSet())
-                updated.token = page.continuation
-                updated.seen += more.map(Mix::songKey)
-                updated.ids += more.map { it.id.value }
-                run = updated
-                if (origin?.kind == "mix" && updated.id == origin.id) checkpoint(updated)
-                if (label == null) label = "Mix from ${seed.title}"
-                true
-            }
-        }
-    }
-}
+            continuation ?: (start ?: Mix.videoId(seed))?.takeUnless { active.providerOrder }?.let { firstPage(it) }

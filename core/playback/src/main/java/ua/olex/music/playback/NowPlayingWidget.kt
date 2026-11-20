@@ -70,7 +70,7 @@ internal object NowPlaying {
                 if (generation == rendered) manager.updateAppWidget(targets, content)
             }
         }
-        val known = lastArt?.takeIf { it.first == art }?.second
+        val known = lastArt?.takeIf { it.first == art }?.second ?: art?.let { ArtworkSnapshots.read(context, it) }
         submit(known)
         if (known != null || art == null) return
         artwork(context, art)?.let(::submit)
@@ -136,6 +136,7 @@ internal object NowPlaying {
      */
     private fun artwork(context: Context, uri: String?): Bitmap? = uri?.let {
         lastArt?.takeIf { (key, _) -> key == it }?.let { (_, bitmap) -> return bitmap }
+        ArtworkSnapshots.read(context, it)?.let { bitmap -> lastArt = it to bitmap; return bitmap }
         runCatching {
             if (it.startsWith("http")) {
                 val small = it.replace(Regex("""=w\d+-h\d+"""), "=w256-h256")
@@ -150,7 +151,10 @@ internal object NowPlaying {
                 if (scale < 1f) decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             }
-        }.getOrNull()?.also { bitmap -> lastArt = it to bitmap }
+        }.getOrNull()?.also { bitmap ->
+            lastArt = it to bitmap
+            ArtworkSnapshots.write(context, it, bitmap)
+        }
     }
 
     fun button(context: Context, keyCode: Int): PendingIntent {

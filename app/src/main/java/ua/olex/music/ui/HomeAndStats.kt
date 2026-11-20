@@ -40,7 +40,7 @@ import ua.olex.music.model.Track
 /** Both sides of a filter transition retain the exact recommendations and queue that were drawn. */
 private class HomeFeed(
     val mood: YouTubeMusic.Mood?, val index: Int, val songs: List<Track>, val loading: Boolean,
-    val mixes: List<YouTubeMusic.Card>, val albums: List<YouTubeMusic.Card>,
+    val mixes: List<YouTubeMusic.Card>, val albums: List<YouTubeMusic.Card>, val provider: List<YouTubeMusic.Shelf>,
 ) {
     val key: String get() = mood?.let { "mood-${it.label}" } ?: "picks"
 }
@@ -109,6 +109,9 @@ internal fun HomePage(
     }
     val stateHolder = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
     val songs = queue.orEmpty()
+    val provider = remember(youTubeHome, mood, moodView?.page, online) {
+        if (!online) emptyList() else if (mood == null) youTubeHome else moodView?.page?.shelves.orEmpty()
+    }
     val mixes = remember(youTubeHome, accountPlaylists, mood, moodView?.page, online) {
         if (mood != null) moodView?.page?.playlists.orEmpty().map { YouTubeMusic.Card(it.id, it.title, it.subtitle, it.cover, YouTubeMusic.Card.Kind.PLAYLIST) }
         else {
@@ -154,8 +157,8 @@ internal fun HomePage(
     }
     val loading = queue == null || moodView?.loading == true
     val moodIndex = mood?.let { moods.indexOf(it) + 1 } ?: 0
-    val nextFeed = remember(mood, moodIndex, songs, loading, mixes, albums) {
-        HomeFeed(mood, moodIndex, songs, loading, mixes, albums)
+    val nextFeed = remember(mood, moodIndex, songs, loading, mixes, albums, provider) {
+        HomeFeed(mood, moodIndex, songs, loading, mixes, albums, provider)
     }
     var ready by remember(cache, online) { mutableStateOf<HomeFeed?>(null) }
     if (queue != null) SideEffect { ready = nextFeed }
@@ -195,7 +198,26 @@ internal fun HomePage(
                             onShuffle = { onShuffle(shuffleTracks) }, onLiked = { onPlay(favourites, 0, "Liked") },
                             onChooseLiked = { choosingLiked = true })
                     }
-                    if (shownSongs.isNotEmpty()) {
+                    if (frame.provider.isNotEmpty()) {
+                        frame.provider.forEachIndexed { index, shelf ->
+                            val serverSongs = (shelf.songs + if (shelf.cards.all { it.kind == YouTubeMusic.Card.Kind.SONG })
+                                shelf.cards.map { it.song() } else emptyList())
+                                .distinctBy { it.id }.filter { it.id.value !in excluded && Mix.songKey(it) !in excluded }
+                            val cards = shelf.cards.filter { it.kind != YouTubeMusic.Card.Kind.SONG || it.song().let { song ->
+                                song.id.value !in excluded && Mix.songKey(song) !in excluded
+                            } }
+                            if (serverSongs.isNotEmpty()) item(key = "provider-songs-$index") {
+                                QuickPicks(shelf.title, serverSongs, currentId,
+                                    { _, i -> onPlay(serverSongs, i, shelf.title) }, onTrackActions)
+                            }
+                            if (shelf.cards.any { it.kind != YouTubeMusic.Card.Kind.SONG } && cards.isNotEmpty()) {
+                                item(key = "provider-cards-$index") {
+                                    if (serverSongs.isEmpty()) SectionTitle(shelf.title)
+                                    YouTubeCards(cards)
+                                }
+                            }
+                        }
+                    } else if (shownSongs.isNotEmpty() && (shownMood == null || !frame.loading)) {
                         if (shownMood != null) item(key = "title") { SectionTitle(contextName) }
                         if (shownMood != null) item(key = "spread") {
                             CoverSpread(shownSongs, currentId, { onPlay(shownSongs, it, contextName) }, onTrackActions)
@@ -212,7 +234,7 @@ internal fun HomePage(
                             else if (onAllowFiles == null) EmptyState(Glyph.NOTE, "No quick picks yet", "Add music to your library to start listening.")
                         }
                     }
-                    if (frame.mixes.isNotEmpty()) {
+                    if (frame.provider.isEmpty() && frame.mixes.isNotEmpty()) {
                         item(key = "mixes-title") { SectionTitle(if (shownMood != null) "Mood mixes" else "Made for you") }
                         item(key = "mixes") { MixRail(frame.mixes) }
                     }
@@ -220,7 +242,7 @@ internal fun HomePage(
                         item(key = "my-title") { SectionTitle("Your playlists", onAllPlaylists) }
                         item(key = "my-playlists") { PersonalPlaylistRail(playlists, accountPlaylists, onOpenPlaylist) }
                     }
-                    if (frame.albums.isNotEmpty()) {
+                    if (frame.provider.isEmpty() && frame.albums.isNotEmpty()) {
                         item(key = "album-title") { SectionTitle("Albums for you") }
                         item(key = "albums") { YouTubeCards(frame.albums, size = 132.dp) }
                     }

@@ -783,15 +783,14 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
                         interactionSource = playInteraction,
                         shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
                         colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
-                            checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary),
+                            checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary,
+                            disabledContainerColor = if (state.connecting || state.mediaId != null && state.error == null) cs.primary else cs.onSurface.copy(alpha = 0.12f),
+                            disabledContentColor = if (state.connecting || state.mediaId != null && state.error == null) cs.onPrimary else cs.onSurface.copy(alpha = 0.38f)),
                         modifier = Modifier.width(width).height(if (compact) 72.dp else 88.dp).semantics {
                             contentDescription = if (playing) "Pause" else "Play"
                             if (state.playWhenReady && state.buffering) stateDescription = "Getting ready"
                         },
                     ) {
-                        if (state.playWhenReady && state.buffering) {
-                            CircularProgressIndicator(Modifier.size(minOf(64.dp, width - 8.dp)), strokeWidth = 3.dp, color = cs.onPrimary.copy(alpha = 0.7f))
-                        }
                         PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, pressed)
                     }
                 }

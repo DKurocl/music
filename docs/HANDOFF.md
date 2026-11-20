@@ -1,3 +1,14 @@
+# YouTube Music shelves, search and playback restoration
+
+[код] Home and moods retain the returned shelves and their titles. Provider mixes use the
+confirmed playlist queue and its continuation. Search includes playlist results and substitutes
+matching local files at the online result position. When an artist browse fails, matching song
+credits can populate a retryable partial page.
+
+[код] The widget and the Android media session share a bounded on-disk cover cache. The full
+player keeps the Play button's normal colors during queue restoration. No overnight run on the
+Pixel or signed-in comparison with YouTube Music has been performed.
+
 # Skip preparation and first-frame polish
 
 Media3 can preload up to 2.5 seconds of the next item. Widget and tile state is

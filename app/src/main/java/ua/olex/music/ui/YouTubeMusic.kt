@@ -75,23 +75,26 @@ internal class YouTubeMusic(
     data class OnlineArtist(val id: String, val name: String, val photo: String?, val about: String?, val songs: List<Track>, val albums: List<OnlineAlbum>, val videos: List<Track>,
         val singles: List<OnlineAlbum> = emptyList(), val related: List<Card> = emptyList(), val listeners: String? = null, val partial: Boolean = false)
 
-    /** Artists and albums YouTube Music finds for a query, beside its songs (Search). */
-    data class Found(val songs: List<Track>, val artists: List<Card>, val albums: List<Card>)
+    /** YouTube Music search results grouped by media type. */
+    data class Found(val songs: List<Track>, val artists: List<Card>, val albums: List<Card>, val playlists: List<Card> = emptyList())
 
-    /**
-     * Songs, artists and albums for a query: the plain search (songs, its top result and any albums
-     * it lists) and the artists-only search, asked at the same time.
-     */
+    /** Load the main search and fill artist and playlist sections from their dedicated filters. */
     suspend fun searchAll(query: String): Found = kotlinx.coroutines.coroutineScope {
         val scope = pageScope()
-        val artists = async(ioDispatcher) { post("search", """"query":${quote(query)},"params":"$ARTISTS_ONLY"""")?.let(::searchCards).orEmpty() }
-        val plain = withContext(ioDispatcher) { post("search", """"query":${quote(query)}""") }
+        val fields = """"query":${quote(query)}"""
+        suspend fun filtered(params: String) = catalogueRequest {
+            post("search", fields + ",\"params\":" + quote(params))
+        }?.let(::searchCards).orEmpty()
+        val artists = async(ioDispatcher) { filtered(ARTISTS_ONLY) }
+        val playlists = async(ioDispatcher) { filtered(PLAYLISTS_ONLY) }
+        val plain = withContext(ioDispatcher) { post("search", fields) }
             // No answer (refused, limited, signed out) is an error the screen says, not "nothing found".
             ?: throw java.io.IOException(when (lastStatus) { 429 -> "YouTube Music is limiting requests; try again in a minute"; 401, 403 -> "YouTube Music refused the request"; else -> "YouTube Music didn't answer" })
         val cards = searchCards(plain)
-        Found(parseSearch(plain),
-            (cards.filter { it.kind == Card.Kind.ARTIST } + artists.await()).distinctBy { it.id }.take(8),
-            cards.filter { it.kind == Card.Kind.ALBUM }.take(10)).also { found ->
+        Found(parseSearch(plain, keepOrder = true),
+            (cards.filter { it.kind == Card.Kind.ARTIST } + artists.await().filter { it.kind == Card.Kind.ARTIST }).distinctBy { it.id }.take(8),
+            cards.filter { it.kind == Card.Kind.ALBUM }.take(10),
+            (cards + playlists.await()).filter { it.kind == Card.Kind.PLAYLIST }.distinctBy { it.id }.take(12)).also { found ->
             if (pageScope() == scope) withContext(ioDispatcher) { rememberAlbumLinks(scope, found.songs) }
         }
     }
@@ -133,7 +136,7 @@ internal class YouTubeMusic(
     ): OnlineArtist? = withContext(ioDispatcher) {
         val scope = pageScope()
         val key = if (full) "artist-full:$id" else "artist:$id"
-        cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
+        cached(if (offline) "$scope/offline/$key" else "$scope/$key", keepResult = { value: OnlineArtist -> !value.partial }) {
             fun read(name: String) = pageStore?.read(scope, name)?.let { runCatching { OnlinePageJson.artist(it) }.getOrNull() }
             val saved = read(key) ?: read(if (full) "artist:$id" else "artist-full:$id")
             if (offline) return@cached saved
@@ -144,14 +147,21 @@ internal class YouTubeMusic(
                 }
                 val public = browse(null)
                 val headers = if (public == null) account() else null
-                val (json, initial) = public ?: headers?.let { browse(it) } ?: return@networkFallback null
+                val (json, initial) = public ?: headers?.let { browse(it) } ?: run {
+                    val name = knownName?.takeIf { it.isNotBlank() } ?: return@networkFallback null
+                    val songs = catalogueSearch(name).filter { track ->
+                        track.artists.any { TextFold.fold(it) == TextFold.fold(name) }
+                    }
+                    if (songs.isEmpty()) return@networkFallback null
+                    return@networkFallback OnlineArtist(id, name, null, null, songs, emptyList(), emptyList(), partial = true)
+                }
                 if (full) {
                     if (saved == null) onPage(initial)
                     expandArtist(initial, json, scope, headers, onPage)
                 } else initial
             }
             if (pageScope() != scope) return@cached null
-            if (fresh != null && fresh !== saved) {
+            if (fresh != null && fresh !== saved && !fresh.partial) {
                 pageStore?.write(scope, key, OnlinePageJson.artist(fresh))
                 rememberAlbumLinks(scope, fresh.songs + fresh.videos)
             }
@@ -677,7 +687,7 @@ internal class YouTubeMusic(
     /** A mood of YouTube Music's home ("Energize", "Sad", "Sleep"): its label and the filter that opens it. */
     data class Mood(val label: String, val params: String?)
     /** What a mood offers: curated playlists, and songs when the page lists any. */
-    data class MoodPage(val playlists: List<OnlineAlbum>, val songs: List<Track>)
+    data class MoodPage(val playlists: List<OnlineAlbum>, val songs: List<Track>, val shelves: List<Shelf> = emptyList())
 
     @Volatile private var moodsCache: Pair<String, List<Mood>>? = null
 
@@ -734,11 +744,7 @@ internal class YouTubeMusic(
         val scope = pageScope()
         return cached("$scope/mood:$params") {
             val page = post("browse", """"browseId":"FEmusic_home","params":${quote(params)}""")?.let(::parseMoodPage) ?: return@cached null
-            if (pageScope() != scope || (page.playlists.isEmpty() && page.songs.isEmpty())) return@cached null
-            if (page.songs.isNotEmpty()) page else {
-                val first = page.playlists.first()
-                page.copy(songs = networkFallback(emptyList()) { album(first.id)?.second }.orEmpty().take(24))
-            }
+            page.takeIf { pageScope() == scope && (it.shelves.isNotEmpty() || it.playlists.isNotEmpty() || it.songs.isNotEmpty()) }
         }
     }
     fun peekMood(mood: Mood): MoodPage? = peek("${pageScope()}/mood:${mood.params}")
@@ -756,19 +762,18 @@ internal class YouTubeMusic(
         val scope = pageScope()
         val shelves = homeAnswer(scope)?.let(::parseHome).orEmpty()
         if (pageScope() != scope || shelves.isEmpty()) return@withContext emptyList()
-        // Some accounts get only mix cards. Opening Home should still offer individual songs.
-        val hasSongs = shelves.any { shelf -> shelf.songs.isNotEmpty() || shelf.cards.any { it.kind == Card.Kind.SONG } }
-        val mix = if (hasSongs) null else shelves.firstNotNullOfOrNull { shelf -> shelf.cards.firstOrNull { it.kind == Card.Kind.MIX } }
-        val tracks = mix?.let { networkFallback(emptyList()) { playlistRadio(it.id)?.tracks } }.orEmpty().take(24)
-        val result = if (tracks.isEmpty()) shelves else listOf(Shelf(mix!!.title, tracks, emptyList())) + shelves
-        if (pageScope() != scope) return@withContext emptyList()
-        storeHome(scope, result)
-        result
+        storeHome(scope, shelves)
+        shelves
     }
 
     /** A mix or other watch playlist, played as YouTube Music plays it ("My Mix 1"). */
     suspend fun playlistRadio(playlistId: String): RadioPage? = withContext(ioDispatcher) {
-        post("next", """"playlistId":${quote(playlistId)},"params":"wAEB","isAudioOnly":true""")?.let(::parseRadio)
+        val id = playlistId.removePrefix("VL")
+        val fields = """"playlistId":${quote(id)},"isAudioOnly":true"""
+        suspend fun load(args: String): RadioPage? = catalogueRequest { post("next", args) }?.let { json ->
+            confirmedPlaylistQueue(id, json)?.takeIf { it.tracks.isNotEmpty() }?.let { RadioPage(it.tracks, it.continuation) }
+        }
+        load(fields) ?: load(fields + ",\"params\":\"wAEB\"")
     }
 
     internal data class WebClient(val version: String, val apiKey: String? = null, val visitor: String? = null)
@@ -992,7 +997,9 @@ internal class YouTubeMusic(
         /** The search filter YouTube Music's web app sends for "Artists". */
         private const val ARTISTS_ONLY = "EgWKAQIgAWoKEAoQAxAEEAkQBQ%3D%3D"
 
-        /** Artists and albums in a search answer (its rows and its top result card), in its order. */
+        private const val PLAYLISTS_ONLY = "EgWKAQIoAWoKEAoQAxAEEAkQBQ%3D%3D"
+
+        /** Artists, albums and playlists in a search answer (its rows and its top result card), in its order. */
         fun searchCards(json: String): List<Card> {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
             val top = collect(root, "musicCardShelfRenderer").mapNotNull { card ->
@@ -1000,7 +1007,7 @@ internal class YouTubeMusic(
             }
             val rows = collect(root, "musicResponsiveListItemRenderer").mapNotNull { row ->
                 val columns = (row["flexColumns"] as? List<*>).orEmpty().map { text(((it as? Map<*, *>)?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>)?.get("text")) }
-                card(dump(row["navigationEndpoint"]), columns.firstOrNull().orEmpty(), columns.getOrNull(1).orEmpty(), biggestImage(row["thumbnail"]))
+                card(dump(row["navigationEndpoint"] ?: (row["flexColumns"] as? List<*>)?.firstOrNull()), columns.firstOrNull().orEmpty(), columns.getOrNull(1).orEmpty(), biggestImage(row["thumbnail"]))
             }
             return (top + rows).distinctBy { it.id }
         }
@@ -1009,7 +1016,8 @@ internal class YouTubeMusic(
             if (title.isEmpty()) return null
             val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return null
             val kind = when {
-                nav.contains("MUSIC_PAGE_TYPE_ARTIST") || nav.contains("MUSIC_PAGE_TYPE_USER_CHANNEL") -> Card.Kind.ARTIST
+                nav.contains("MUSIC_PAGE_TYPE_ARTIST") -> Card.Kind.ARTIST
+                nav.contains("MUSIC_PAGE_TYPE_PLAYLIST") || id.startsWith("VL") -> Card.Kind.PLAYLIST
                 nav.contains("MUSIC_PAGE_TYPE_ALBUM") -> Card.Kind.ALBUM
                 else -> return null
             }
@@ -1315,8 +1323,13 @@ internal class YouTubeMusic(
                         nav.contains("MUSIC_PAGE_TYPE_PODCAST") || nav.contains("NON_MUSIC") -> null
                         nav.contains("MUSIC_PAGE_TYPE_ALBUM") -> id("browseId")?.let { Card(it, name, sub, cover, Card.Kind.ALBUM) }
                         nav.contains("MUSIC_PAGE_TYPE_ARTIST") -> id("browseId")?.let { Card(it, name, sub, cover, Card.Kind.ARTIST) }
-                        nav.contains("MUSIC_PAGE_TYPE_PLAYLIST") -> id("browseId")?.let { Card(it, name, sub, cover, Card.Kind.PLAYLIST) }
                         nav.contains("watchPlaylistEndpoint") -> id("playlistId")?.let { Card(it, name, sub, cover, Card.Kind.MIX) }
+                        nav.contains("MUSIC_PAGE_TYPE_PLAYLIST") -> id("browseId")?.let {
+                            val playlistId = it.removePrefix("VL")
+                            if (playlistId.startsWith("RD") && !playlistId.startsWith("RDCLAK"))
+                                Card(playlistId, name, sub, cover, Card.Kind.MIX)
+                            else Card(it, name, sub, cover, Card.Kind.PLAYLIST)
+                        }
                         nav.contains("watchEndpoint") -> id("videoId")?.let { Card(it, name, sub, cover, Card.Kind.SONG) }
                         else -> null
                     }
@@ -1360,7 +1373,7 @@ internal class YouTubeMusic(
                 val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return@mapNotNull null
                 OnlineAlbum(id, text(card["title"]), text(card["subtitle"]).ifEmpty { null }, biggestImage(card["thumbnailRenderer"]))
             }.distinctBy { it.id }
-            return MoodPage(playlists, parseSearch(json, keepOrder = true))
+            return MoodPage(playlists, parseSearch(json, keepOrder = true), parseHome(json))
         }
 
         private fun dump(o: Any?): String = when (o) {
