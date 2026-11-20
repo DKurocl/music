@@ -110,20 +110,17 @@ internal fun PlayerModeSymbol(
     val previousMode = remember { booleanArrayOf(on, one) }
     LaunchedEffect(on, one, still) {
         val changed = previousMode[0] != on || previousMode[1] != one
-        val enabled = !previousMode[0] && on && !one
+        // Turning on and changing mode roll the arrows once round the loop; turning off is quiet:
+        // the loop settles where it is while the plate and the "1" go.
+        val turningOff = previousMode[0] && !on
         previousMode[0] = on
         previousMode[1] = one
         if (shuffle || still) {
             turn.snapTo(0f)
             nudge.snapTo(1f)
         } else if (changed) kotlinx.coroutines.coroutineScope {
-            launch {
-                if (enabled) {
-                    if (nudge.value >= 0.995f) nudge.snapTo(0f)
-                    nudge.animateTo(1f, motion.defaultSpatialSpec())
-                } else nudge.animateTo(1f, motion.fastSpatialSpec())
-            }
-            if (!enabled) turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.defaultSpatialSpec())
+            launch { nudge.animateTo(1f, motion.fastSpatialSpec()) }
+            if (!turningOff) turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.defaultSpatialSpec())
             else if (turn.value % 1f != 0f) turn.animateTo(kotlin.math.ceil(turn.value), motion.fastSpatialSpec())
         }
     }

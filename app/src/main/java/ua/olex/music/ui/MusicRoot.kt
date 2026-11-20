@@ -616,6 +616,16 @@ fun MusicRoot(model: LibraryViewModel) {
             }
         }
     }
+    // Look ahead while a song plays: the next two have their stream address and cover ready before
+    // they start, so a skip or the next song never waits (see Prefetch). After a short settle, so the
+    // song that just started gets the network first.
+    LaunchedEffect(playing.mediaId, playing.nextIndex, playing.shuffle, network) {
+        if (!network || !playing.hasTrack) return@LaunchedEffect
+        kotlinx.coroutines.delay(1_500)
+        val next = playing.queue.getOrNull(playing.nextIndex)
+        val after = if (playing.shuffle || next == null) null else playing.queue.getOrNull(playing.nextIndex + 1)
+        context.graph.prefetch.upcoming(listOfNotNull(next, after).map { it.mediaId to it.artworkUri })
+    }
     val travelling by remember { androidx.compose.runtime.derivedStateOf { travel.fraction > 0f } }
     if (openPlayer || playing.hasTrack && travelling) {
         val settled by remember { androidx.compose.runtime.derivedStateOf { travel.fraction == 1f } }

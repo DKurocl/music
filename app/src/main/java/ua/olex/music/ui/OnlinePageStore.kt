@@ -13,6 +13,8 @@ internal class OnlinePageStore(private val directory: File) {
     @Synchronized
     fun read(scope: String, key: String): JSONObject? = runCatching {
         val file = file(scope, key)
+        // A page not opened for two weeks is out of date and of no use offline any more: gone.
+        if (file.exists() && System.currentTimeMillis() - file.lastModified() > MAX_IDLE_MS) { file.delete(); return null }
         val bytes = AtomicFile(file).openRead().use { it.readNBytes(MAX_PAGE + 1) }
         if (bytes.size > MAX_PAGE) return null
         JSONObject(bytes.toString(Charsets.UTF_8)).also { file.setLastModified(System.currentTimeMillis()) }
@@ -36,8 +38,9 @@ internal class OnlinePageStore(private val directory: File) {
             val files = directory.listFiles { f -> f.extension == "json" }.orEmpty()
             var total = files.sumOf { it.length() }
             var count = files.size
+            val stale = System.currentTimeMillis() - MAX_IDLE_MS
             for (old in files.sortedBy { it.lastModified() }) {
-                if (total <= MAX_BYTES && count <= MAX_FILES) break
+                if (total <= MAX_BYTES && count <= MAX_FILES && old.lastModified() >= stale) break
                 if (old == target) continue
                 val bytesBeforeDeletion = old.length()
                 if (old.delete()) { total -= bytesBeforeDeletion; count-- }
@@ -62,6 +65,8 @@ internal class OnlinePageStore(private val directory: File) {
         private const val MAX_PAGE = 2 * 1024 * 1024
         private const val MAX_BYTES = 16L * 1024 * 1024
         private const val MAX_FILES = 96
+        /** Pages unread this long are dropped (their last read touches the file). */
+        private const val MAX_IDLE_MS = 14L * 24 * 60 * 60 * 1000
 
         fun digest(value: String): String = MessageDigest.getInstance("SHA-256")
             .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 255) }

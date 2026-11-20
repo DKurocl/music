@@ -42,6 +42,7 @@ class AppGraph(context: Context) {
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
     val youTubeAccount by lazy { ua.olex.music.ui.YouTubeAccount(app) }
+    internal val prefetch by lazy { ua.olex.music.ui.Prefetch(app, youTube) }
     internal val youTube by lazy {
         ua.olex.music.ui.YouTubeMusic(
             pageStore = ua.olex.music.ui.OnlinePageStore(app.cacheDir.resolve("online-pages-v1")),

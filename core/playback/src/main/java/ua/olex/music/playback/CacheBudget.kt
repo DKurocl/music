@@ -129,7 +129,16 @@ internal class BudgetEvictor(private val changed: () -> Unit = {}, private val l
 
     private fun evict(cache: Cache, incoming: Long) {
         val max = limit()
-        while (size + incoming > max && spans.isNotEmpty()) runCatching { cache.removeSpan(spans.first()) }.onFailure { spans.pollFirst() }
+        // Least recently played first: over the budget, or not played for a month (a song he has
+        // moved on from shouldn't sit in the cache only because the budget is large).
+        val stale = System.currentTimeMillis() - MAX_IDLE_MS
+        while (spans.isNotEmpty() && (size + incoming > max || spans.first().lastTouchTimestamp < stale))
+            runCatching { cache.removeSpan(spans.first()) }.onFailure { spans.pollFirst() }
+    }
+
+    companion object {
+        /** How long a streamed song stays cached without being played again. */
+        const val MAX_IDLE_MS = 30L * 24 * 60 * 60 * 1000
     }
     fun trim(cache: Cache) = evict(cache, 0)
 }

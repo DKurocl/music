@@ -156,12 +156,7 @@ internal fun SettingsPage(
         }
 
         if (terms.isEmpty()) item(key = "group-Appearance and artwork") { Group("Appearance and artwork") }
-        setting("Colours from the cover artwork") {
-            var tint by remember { mutableStateOf(CoverColours.on(context)) }
-            Toggle(Glyph.PHOTO, "Colours from the cover", "Adds a soft tint to the player inside Music", tint, first = true) {
-                tint = it; prefs(CoverColours.PREFS).edit().putBoolean(CoverColours.KEY, it).apply() }
-        }
-        setting("Artist photos Deezer") { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos) { photos = it; images.enabled = it } }
+        setting("Artist photos Deezer") { Toggle(Glyph.PHOTO, "Artist photos", "Looked up by name on Deezer once, kept on the phone", photos, first = true) { photos = it; images.enabled = it } }
         // Moving covers from Apple Music, with the owner's own MusicKit key.
 
         setting("Moving covers from Apple Music artwork") {
