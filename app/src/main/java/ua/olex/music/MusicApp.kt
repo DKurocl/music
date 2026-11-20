@@ -1,5 +1,6 @@
 package ua.olex.music
 
+import kotlinx.coroutines.launch
 import android.app.Application
 import android.content.Context
 import ua.olex.music.library.LibraryDatabase
@@ -137,7 +138,17 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             }
         },
     ).debounce(300).flowOn(Dispatchers.Default)
-    override suspend fun recordPlayback(track: Track, observedAt: Long) = graph.userLibrary.recordPlay(track, observedAt)
+    private val playReports = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+    override suspend fun recordPlayback(track: Track, observedAt: Long): Long {
+        // A YouTube Music song played here goes into the account's history too, so its
+        // recommendations (and this app's Home) follow what the owner actually listens to.
+        val video = track.id.value.removePrefix("yt:").takeIf { track.id.value.startsWith("yt:") }
+            ?: track.uri.removePrefix("ytm://").takeIf { track.uri.startsWith("ytm://") }
+        if (video != null && graph.youTubeOn.value && graph.youTubeAccount.signedIn.value) playReports.launch {
+            runCatching { graph.youTube.reportPlay(video) }
+        }
+        return graph.userLibrary.recordPlay(track, observedAt)
+    }
     override suspend fun updateListening(eventId: Long, millis: Long) = graph.userLibrary.updateListening(eventId, millis)
     override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean) = kotlinx.coroutines.withContext(Dispatchers.Default) {
         val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
