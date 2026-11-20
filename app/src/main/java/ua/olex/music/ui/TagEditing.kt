@@ -238,11 +238,11 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                 coverError?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodySmall) }
                 group("Files")
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("Rename by tags", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); androidx.compose.material3.Switch(rename, { rename = it })
+                    Text("Rename by tags", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); AppSwitch(rename, { rename = it })
                 }
                 if (rename) OutlinedTextField(nameTemplate, { nameTemplate = it }, label = { Text("File name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("Move into folders", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); androidx.compose.material3.Switch(moveFiles, { moveFiles = it })
+                    Text("Move into folders", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f)); AppSwitch(moveFiles, { moveFiles = it })
                 }
                 if (moveFiles) OutlinedTextField(folderTemplate, { folderTemplate = it }, label = { Text("Folder") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 if (rename || moveFiles) Text("Use %artist%, %albumartist%, %album%, %title%, %track%, %disc%, %year%, %genre%.",

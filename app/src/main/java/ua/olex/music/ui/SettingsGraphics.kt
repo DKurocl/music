@@ -22,10 +22,16 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 @Composable
-internal fun StateSwitch(on: Boolean) {
-    Switch(checked = on, onCheckedChange = null, thumbContent = {
-        Symbol(if (on) Glyph.CHECK else Glyph.CLOSE, size = 14.dp)
-    })
+internal fun StateSwitch(on: Boolean) = AppSwitch(on, null)
+
+/**
+ * The app's one switch, as Android's own Settings draw it: a check in the thumb when on, an empty
+ * thumb when off. Every toggle in the app uses it, so they all look and move the same.
+ */
+@Composable
+internal fun AppSwitch(checked: Boolean, onCheckedChange: ((Boolean) -> Unit)?, modifier: Modifier = Modifier, enabled: Boolean = true) {
+    Switch(checked = checked, onCheckedChange = onCheckedChange, modifier = modifier, enabled = enabled,
+        thumbContent = if (checked) ({ Symbol(Glyph.CHECK, size = 14.dp) }) else null)
 }
 
 /** The envelope illustrates what the fade does. Changing the setting redraws it once. */
