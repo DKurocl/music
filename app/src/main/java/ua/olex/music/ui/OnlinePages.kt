@@ -187,14 +187,8 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 val subtitle = artist?.listeners ?: if (artist != null || state is Load.Wait) "YouTube Music" else if (playable.isNotEmpty()) "From your library" else null
                 ArtistHero(artist?.photo ?: target.photo ?: local?.artworkUri, name, subtitle)
                 Spacer(Modifier.height(16.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(enabled = playable.isNotEmpty(), onClick = { nav.play(playable.shuffled(), 0, origin) }, modifier = Modifier.weight(1f).height(52.dp)) {
-                        Symbol(Glyph.SHUFFLE, size = 20.dp); Spacer(Modifier.size(8.dp)); Text("Shuffle", maxLines = 1)
-                    }
-                    FilledTonalButton(enabled = playable.isNotEmpty(), onClick = { nav.play(playable, 0, origin) }, modifier = Modifier.weight(1f).height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text("Play", maxLines = 1)
-                    }
-                }
+                PageActions(shuffleFirst = true, enabled = playable.isNotEmpty(),
+                    onPlay = { nav.play(playable, 0, origin) }, onShuffle = { nav.play(playable.shuffled(), 0, origin) })
             }
         }
         if (onlineTracks.isNotEmpty()) {
@@ -340,12 +334,8 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
                 (album?.subtitle ?: target.subtitle)?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis) }
                 if (!target.playlist && artistName.isNotEmpty()) TextButton(onClick = { nav.open(onlineArtistTarget(songs.first())) }) { Text(artistName) }
                 Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(enabled = songs.isNotEmpty(), onClick = { nav.play(songs, 0, origin) }, modifier = Modifier.height(52.dp)) {
-                        Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(if (incomplete) "Play loaded songs" else "Play all")
-                    }
-                    KickFilledTonalIconButton(enabled = songs.isNotEmpty(), onClick = { nav.play(songs.shuffled(), 0, origin) },
-                        modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { taps -> Symbol(Glyph.SHUFFLE, kick = taps) }
+                PageActions(shuffleFirst = false, enabled = songs.isNotEmpty(), playLabel = if (incomplete) "Play loaded" else "Play",
+                    onPlay = { nav.play(songs, 0, origin) }, onShuffle = { nav.play(songs.shuffled(), 0, origin) }) {
                     // The whole album in lossless from Soulseek, into the library. Nothing to fetch
                     // once every song plays from a file.
                     if (!target.playlist && songs.isNotEmpty() && album?.partial != true && !localFallback) DownloadButton(ua.olex.music.soulseek.SoulseekDownloads.albumKey(artistName, title),
@@ -666,6 +656,34 @@ internal fun MediaCard(cover: String?, title: String, subtitle: String?, modifie
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 textAlign = if (round) androidx.compose.ui.text.style.TextAlign.Center else null, modifier = Modifier.padding(horizontal = 4.dp)) }
         }
+    }
+}
+
+/**
+ * The one action row of album, playlist and artist pages: two wide buttons of equal width (the
+ * main action filled, the other tonal) and any further actions as round tonal buttons after them.
+ * Albums and playlists lead with Play, artists with Shuffle, as YouTube Music does.
+ */
+@Composable
+internal fun PageActions(shuffleFirst: Boolean, enabled: Boolean, onPlay: () -> Unit, onShuffle: () -> Unit,
+    playLabel: String = "Play", extras: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {}) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        @Composable fun play(filled: Boolean) {
+            val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+                Symbol(Glyph.PLAY, size = 20.dp, filled = true); Spacer(Modifier.size(8.dp)); Text(playLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (filled) Button(enabled = enabled, onClick = onPlay, modifier = Modifier.weight(1f).height(52.dp), content = content)
+            else FilledTonalButton(enabled = enabled, onClick = onPlay, modifier = Modifier.weight(1f).height(52.dp), content = content)
+        }
+        @Composable fun shuffle(filled: Boolean) {
+            val content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit = {
+                Symbol(Glyph.SHUFFLE, size = 20.dp); Spacer(Modifier.size(8.dp)); Text("Shuffle", maxLines = 1)
+            }
+            if (filled) Button(enabled = enabled, onClick = onShuffle, modifier = Modifier.weight(1f).height(52.dp), content = content)
+            else FilledTonalButton(enabled = enabled, onClick = onShuffle, modifier = Modifier.weight(1f).height(52.dp), content = content)
+        }
+        if (shuffleFirst) { shuffle(true); play(false) } else { play(true); shuffle(false) }
+        extras()
     }
 }
 

@@ -31,6 +31,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Rule
 import org.junit.Test
+import androidx.compose.ui.semantics.getOrNull
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
@@ -800,6 +801,21 @@ class DesignGalleryTest {
         repeat(10) { Thread.sleep(150); compose.mainClock.advanceTimeBy(100); compose.waitForIdle() }
         val image = compose.onRoot().captureToImage().asAndroidBitmap()
         File("build/reports/ui-previews/gallery").apply { mkdirs() }.resolve("$name.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        auditTouchTargets(name)
+    }
+
+    /** Every tappable thing on the screen gets at least 48 x 48 dp (Material's touch target); smaller ones are listed. */
+    private fun auditTouchTargets(name: String) {
+        val density = compose.density.density
+        val small = compose.onAllNodes(androidx.compose.ui.test.hasClickAction()).fetchSemanticsNodes().mapNotNull { node ->
+            val w = node.touchBoundsInRoot.width / density; val h = node.touchBoundsInRoot.height / density
+            if (w >= 47.5f && h >= 47.5f || w < 1f || h < 1f) return@mapNotNull null
+            val label = (node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ContentDescription)?.joinToString()
+                ?: node.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text)?.joinToString()
+                ?: node.config.getOrNull(androidx.compose.ui.semantics.SemanticsActions.OnClick)?.label ?: "?")
+            "$name\t${"%.0f".format(w)}x${"%.0f".format(h)}\t$label"
+        }
+        if (small.isNotEmpty()) File("build/reports/ui-previews/touch-audit.txt").appendText(small.joinToString("\n", postfix = "\n"))
     }
 
     /** Capture the production vector marks on the same elapsed timeline, including their quiet resting frame. */
