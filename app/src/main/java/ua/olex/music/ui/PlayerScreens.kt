@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.animation.animateContentSize
 import coil3.toBitmap
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
@@ -734,10 +735,8 @@ internal fun PlayerPage(
                 Modifier.widthIn(max = 420.dp).fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
-                val deadline = state.sleepDeadlineMs
-                SignalPath(format, state.buffering && state.error == null, onAudioPath,
-                    if (deadline == null) Modifier else Modifier.weight(1f, fill = false))
-                if (deadline != null) SleepCountdown(deadline, onTimer, Modifier.weight(1f, fill = false))
+                // The sleep countdown lives in the dock's timer button, not beside the format.
+                SignalPath(format, state.buffering && state.error == null, onAudioPath)
             }
             Spacer(Modifier.height(12.dp))
             Spacer(Modifier.weight(1f))
@@ -745,11 +744,14 @@ internal fun PlayerPage(
                 onSeek((position() + if (forward) 10_000L else -10_000L).coerceIn(0L, state.durationMs.coerceAtLeast(0L)))
             })
             Spacer(Modifier.height(28.dp))
+            // On only while time is actually left: a passed deadline lights nothing.
+            val sleepLabel = state.sleepDeadlineMs?.let { rememberSleepLabel(it) }
             val context = LocalContext.current
             var feel by remember(context) { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
             PlayerDock(
                 lyrics = if (inlineLyrics != null) lyricsShown else lyricsSheetOpen,
-                inlineLyrics = inlineLyrics != null, timer = state.sleepDeadlineMs != null,
+                inlineLyrics = inlineLyrics != null, timer = sleepLabel != null,
+                timerLabel = sleepLabel,
                 queue = queueOpen, output = when (route?.glyph()) {
                     Glyph.HEADPHONES -> PlayerDockMark.HEADPHONES
                     Glyph.USB -> PlayerDockMark.USB
@@ -928,6 +930,8 @@ internal fun PlayerDock(
     lyrics: Boolean, inlineLyrics: Boolean, timer: Boolean, queue: Boolean, output: PlayerDockMark, feel: Boolean,
     ready: Boolean, connected: Boolean, onLyrics: () -> Unit, onTimer: () -> Unit, onQueue: () -> Unit,
     onOutput: () -> Unit, onFeel: () -> Unit,
+    /** The sleep countdown ("29 min"); the timer button grows into a pill that shows it. */
+    timerLabel: String? = null,
 ) {
     val still = LocalPowerSave.current
     val spatial = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
@@ -953,7 +957,8 @@ internal fun PlayerDock(
         Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             ToggleAction(PlayerDockMark.LYRICS, "Lyrics", lyrics, ready, if (lyrics) "Shown" else "Hidden",
                 modifier = settle(0), checked = inlineLyrics, onClick = onLyrics)
-            ToggleAction(PlayerDockMark.SLEEP, "Sleep timer", timer, connected, if (timer) "On" else "Off", settle(1), onClick = onTimer)
+            ToggleAction(PlayerDockMark.SLEEP, "Sleep timer", timer, connected, if (timer) timerLabel ?: "On" else "Off", settle(1),
+                badge = timerLabel.takeIf { timer }, onClick = onTimer)
             ToggleAction(PlayerDockMark.QUEUE, "Open queue", queue, ready, null, settle(2), highlight = false, onClick = onQueue)
             ToggleAction(output, "Change output", false, ready, null, settle(3), onClick = onOutput)
             ToggleAction(PlayerDockMark.FEEL, "Feel the music", feel, ready, if (feel) "On" else "Off",
@@ -965,7 +970,9 @@ internal fun PlayerDock(
 @Composable
 internal fun ToggleAction(
     mark: PlayerDockMark, label: String, on: Boolean, enabled: Boolean, state: String?,
-    modifier: Modifier, checked: Boolean = false, highlight: Boolean = true, onClick: () -> Unit,
+    modifier: Modifier, checked: Boolean = false, highlight: Boolean = true,
+    /** Text beside the icon (the sleep countdown): the button becomes a tonal pill that holds it. */
+    badge: String? = null, onClick: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -982,11 +989,22 @@ internal fun ToggleAction(
         haptics.tick()
         onClick()
     }
-    Box(Modifier.size(48.dp).then(modifier).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
-        .then(action).semantics { contentDescription = label; if (state != null) stateDescription = state },
-        contentAlignment = Alignment.Center) {
-        PlayerDockSymbol(mark, on, push, active, kick,
-            if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f), colors.onSecondaryContainer)
+    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<androidx.compose.ui.unit.IntSize>()
+    // The pill grows out of the round button and folds back into it when the timer ends.
+    Box(Modifier.height(48.dp).then(modifier).animateContentSize(spatial), contentAlignment = Alignment.Center) {
+        if (badge == null) Box(Modifier.size(48.dp).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
+            .then(action).semantics { contentDescription = label; if (state != null) stateDescription = state },
+            contentAlignment = Alignment.Center) {
+            PlayerDockSymbol(mark, on, push, active, kick,
+                if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f), colors.onSecondaryContainer)
+        }
+        else Row(Modifier.height(44.dp).graphicsLayer { val p = push.value.coerceIn(0f, 1f); scaleX = 1f - 0.05f * p; scaleY = scaleX }
+            .clip(CircleShape).background(colors.secondaryContainer).then(action)
+            .semantics { contentDescription = label; if (state != null) stateDescription = state }
+            .padding(start = 10.dp, end = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            PlayerDockSymbol(mark, on, push, active, kick, colors.onSecondaryContainer, colors.onSecondaryContainer)
+            Text(badge, style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1)
+        }
     }
 }
 
@@ -1239,10 +1257,12 @@ private val quickGlyphs = listOf(Glyph.PLAY_NEXT, Glyph.ADD_TO_QUEUE, Glyph.FAVO
 /** For the song playing now: a mix from it leads, then keeping it. */
 private val currentQuickGlyphs = listOf(Glyph.RADIO, Glyph.FAVOURITE, Glyph.PLAYLIST_ADD)
 
-/** The remaining minutes or the finishing-song state fits next to the audio format. */
+/**
+ * The sleep timer's remaining time as a short label, ticking once a minute while on screen; null
+ * once the deadline has passed, so nothing stale stays behind when the timer has done its work.
+ */
 @Composable
-private fun SleepCountdown(deadline: Long, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val cs = MaterialTheme.colorScheme
+internal fun rememberSleepLabel(deadline: Long): String? {
     val waitingForEnd = deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var now by remember(deadline) { mutableLongStateOf(android.os.SystemClock.elapsedRealtime()) }
@@ -1256,12 +1276,10 @@ private fun SleepCountdown(deadline: Long, onClick: () -> Unit, modifier: Modifi
             }
         }
     }
-    val text = if (waitingForEnd) "Finishing song" else "${((deadline - now).coerceAtLeast(0) + 59_999) / 60_000} min"
-    Row(modifier.clip(CircleShape).clickable(onClickLabel = "Sleep timer", onClick = onClick)
-        .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Symbol(Glyph.SLEEP, size = 16.dp, color = cs.tertiary, filled = true)
-        TrackLabel(text, style = MaterialTheme.typography.labelLarge, color = cs.tertiary)
+    return when {
+        waitingForEnd -> "Song end"
+        now >= deadline -> null
+        else -> "${((deadline - now) + 59_999) / 60_000} min"
     }
 }
 

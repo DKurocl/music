@@ -655,7 +655,10 @@ internal fun MediaCard(cover: String?, title: String, subtitle: String?, modifie
     val textBlock = rememberCardTextHeight()
     // A fixed width in a rail; the cell's width in a grid (size null).
     val frame = if (size != null) Modifier.size(size) else Modifier.fillMaxWidth().aspectRatio(1f)
-    Column(modifier.then(if (size != null) Modifier.width(size) else Modifier).squish(0.03f).clip(RoundedCornerShape(20.dp)).clickable(onClickLabel = "Open $title", onClick = onClick),
+    Column(modifier.then(if (size != null) Modifier.width(size) else Modifier).squish(0.03f)
+        // The press area: round at the top like the cover, tighter at the bottom with room under the
+        // text, so the corner never shaves the subtitle's first letter.
+        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 12.dp, bottomEnd = 12.dp)).clickable(onClickLabel = "Open $title", onClick = onClick),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
         if (round) Artwork(cover, frame.clip(androidx.compose.foundation.shape.CircleShape), (size ?: 148.dp) / 2, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
         else Artwork(cover, frame, 16.dp, pixels = ua.olex.music.model.ArtworkPlan.MEDIUM)
@@ -666,6 +669,7 @@ internal fun MediaCard(cover: String?, title: String, subtitle: String?, modifie
             subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 textAlign = if (round) androidx.compose.ui.text.style.TextAlign.Center else null, modifier = Modifier.padding(horizontal = 4.dp)) }
         }
+        Spacer(Modifier.height(8.dp))
     }
 }
 
