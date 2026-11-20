@@ -11,12 +11,18 @@ import ua.olex.music.model.Track
 import java.io.File
 
 /**
- * Lyrics fetched from the internet when the owner asks, kept in the app's own storage per song
+ * Lyrics fetched from the internet (by themselves when a song has none, or when the owner asks), kept in the app's own storage per song
  * identity (so every copy of a song shares them, and a rescan keeps them). Sidecar files beside
  * the music still win; these come before lyrics embedded in the file.
  */
-class DownloadedLyrics(context: Context, private val online: OnlineLyrics = OnlineLyrics()) {
+class DownloadedLyrics(
+    context: Context,
+    private val online: OnlineLyrics = OnlineLyrics(),
+    /** Plain lyrics from YouTube Music, asked only when the timed services found nothing. */
+    private val lastResort: suspend (Track) -> String? = { null },
+) {
     private val dir = File(context.filesDir, "lyrics").apply { mkdirs() }
+    private val misses = java.util.Collections.synchronizedSet(HashSet<String>())
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
@@ -31,11 +37,19 @@ class DownloadedLyrics(context: Context, private val online: OnlineLyrics = Onli
     data class Fetched(val source: String, val text: String)
 
     /**
-     * Looks the song up (Kugou, then LRCLIB), drops translations and credit lines, and keeps the
+     * Looks the song up (Kugou, NetEase, LRCLIB, then YouTube Music), drops translations and credit lines, and keeps the
      * result as LRC (word-timed where the source is); returns it, or null when nothing matched.
      */
-    suspend fun fetch(track: Track): Fetched? = withContext(Dispatchers.IO) {
-        val found = online.find(track.artists.firstOrNull() ?: track.artist, track.title, track.album, track.durationMs) ?: return@withContext null
+    suspend fun fetch(track: Track, force: Boolean = false): Fetched? = withContext(Dispatchers.IO) {
+        // A song the services don't know is asked once per session unless the owner asks again:
+        // the player and the lock screen both resolve lyrics, and a miss shouldn't cost two lookups each play.
+        val key = writeKey(track)
+        if (!force && key in misses) return@withContext null
+        val found = online.find(track.artists.firstOrNull() ?: track.artist, track.title, track.album, track.durationMs)
+            ?: runCatching { lastResort(track) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { text ->
+                FoundLyrics(text, "YouTube Music", FoundLyrics.Format.PLAIN, ua.olex.music.lyrics.Lyrics.parse(text))
+            }
+            ?: return@withContext null.also { misses += key }
         val clean = ua.olex.music.lyrics.LyricsCleanup.clean(found.lyrics, track.title, track.artist)
         val plain = clean.sync == ua.olex.music.lyrics.Sync.NONE
         val text = if (plain) clean.lines.joinToString("\n") { it.text } else ua.olex.music.lyrics.LrcWriter.write(clean)

@@ -271,7 +271,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         onlineLyricsStatus = "Searching online…"
         viewModelScope.launch {
             onlineLyricsStatus = try {
-                graph.downloadedLyrics.fetch(graph.userLibrary.keepReference(track).bind(track))?.let { found ->
+                graph.downloadedLyrics.fetch(graph.userLibrary.keepReference(track).bind(track), force = true)?.let { found ->
                     // Kept in the file too, replacing what it had, so other players and a reinstall see them.
                     if ('#' !in track.id.value && !YouTubeMusic.isOnline(track)) lyricsForFile = track to found.text
                     "Found on ${found.source}"

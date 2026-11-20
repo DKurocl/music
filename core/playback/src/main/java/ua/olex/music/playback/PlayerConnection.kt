@@ -457,7 +457,10 @@ class PlayerConnection(context: Context) {
             hasPrevious = player.hasPreviousMediaItem(),
             queueSize = player.mediaItemCount,
             positionMs = player.currentPosition.coerceAtLeast(0),
-            error = PlaybackSourceItems.error(item) ?: player.playerError?.let(::playbackErrorMessage),
+            // A player error only stands while the player is stopped by it: once the service retries or
+            // moves on (buffering, ready, playing) an old error would sit under music that plays fine.
+            error = PlaybackSourceItems.error(item)
+                ?: player.playerError?.takeIf { player.playbackState == Player.STATE_IDLE && !player.isPlaying }?.let(::playbackErrorMessage),
             sleepDeadlineMs = (player as? MediaController)?.sessionExtras?.getLong(SleepTimerCommand.DEADLINE)?.takeIf { it > 0 },
             sleepTimerError = _state.value.sleepTimerError,
             queue = queueSnapshot,

@@ -47,7 +47,8 @@ enum class Glyph(val codepoint: Int) {
     CALENDAR(0xEBCC), PIANO(0xE521), HI_RES(0xE024), MIC(0xE31D), UNPLAYED(0xE440),
     // Where a song plays from (docs/specs/M10_ONLINE.md, D2), and an artist's radio.
     CLOUD(0xE2BD), CLOUD_DONE(0xE2BF), CLOUD_OFF(0xE2C1), DOWNLOADING(0xF001), RADIO(0xE03E),
-    SHARE(0xE80D), HOME(0xE88A), PAUSE(0xE034);
+    SHARE(0xE80D), HOME(0xE88A), PAUSE(0xE034), VIBRATION(0xE62D), TRENDING(0xE8E5),
+    WIFI(0xE63E), VIDEO(0xE063), FOLDER_OFF(0xEB83), UNDO(0xE166);
 
     val text: String = String(Character.toChars(codepoint))
 

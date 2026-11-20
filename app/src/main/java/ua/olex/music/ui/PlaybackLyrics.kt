@@ -28,7 +28,17 @@ internal suspend fun AppGraph.resolveLyrics(request: Track): LocalLyricsState = 
     val fallback = if (downloaded != null && (embedded.lines.isEmpty() || downloaded.sync.ordinal >= embedded.sync.ordinal))
         LocalLyricsState(downloaded, "Downloaded lyrics", mediaId = track.id.value)
         else LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)
-    try {
+    val local = localLyrics(track, fallback)
+    // A song with no lyrics of its own is looked up online by itself, once: what is found is kept,
+    // and a removed result leaves an empty marker (read() is then not null), so it is not asked again.
+    if (local.lyrics.lines.isNotEmpty() || downloadedLyrics.read(track, aliases) != null) return@withContext local
+    val found = runCatching { downloadedLyrics.fetch(userLibrary.keepReference(track).bind(track))?.let { ua.olex.music.lyrics.Lyrics.parse(it.text) } }
+        .getOrNull()?.takeIf { it.lines.isNotEmpty() }
+    if (found != null) LocalLyricsState(found, "Found online", mediaId = track.id.value) else local
+}
+
+private suspend fun AppGraph.localLyrics(track: Track, fallback: LocalLyricsState): LocalLyricsState {
+    return try {
         val sidecar = musicFiles.lyrics(track.path)
         if (sidecar.status == ua.olex.music.library.SidecarStatus.FOUND) {
             val parsed = sidecar.text?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY

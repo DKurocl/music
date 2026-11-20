@@ -473,6 +473,8 @@ fun MusicRoot(model: LibraryViewModel) {
         // The mini player floats over the page: the page runs under it to the navigation bar, with a
         // soft fade (not a solid band) so it reads as floating, as Google's own players do.
         val playerInset = if (playing.hasTrack) 84.dp else 0.dp
+        // Only the page follows Back; the floating mini player stays where it is.
+        Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().graphicsLayer {
             val back = if (page == Page.STATS) 0f else destinationBackProgress
             translationX = destinationBackDirection * 24.dp.toPx() * back
@@ -562,6 +564,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 personal = personal, personalActions = model.personalActions, sortOrders = model.sortOrders.collectAsStateWithLifecycle().value, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = stats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             ) }
+        }
         }
         }
         }
@@ -777,7 +780,7 @@ fun MusicRoot(model: LibraryViewModel) {
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
             if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
             if (online || '#' in track.id.value) null else TrackAction(Glyph.DELETE, "Move to trash") { moveToTrash(listOf(track)) },
-            if (youTubeOn && network) TrackAction(Glyph.MOTION, "Find music video") { actionTrack = null; videoTrack = track } else null,
+            if (youTubeOn && network) TrackAction(Glyph.VIDEO, "Find music video") { actionTrack = null; videoTrack = track } else null,
         ))
     }
     editingTags?.let { tracks ->

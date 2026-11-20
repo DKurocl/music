@@ -215,7 +215,7 @@ internal fun describe(p: SmartPlaylist): String {
 }
 
 private fun icon(p: SmartPlaylist): Glyph = when (p.sort) {
-    SmartSort.MOST_PLAYED -> Glyph.WAVE
+    SmartSort.MOST_PLAYED -> Glyph.TRENDING
     SmartSort.RECENTLY_PLAYED -> Glyph.HISTORY
     SmartSort.RECENTLY_ADDED -> Glyph.ADD
     SmartSort.TOP_RATED -> Glyph.FAVOURITE

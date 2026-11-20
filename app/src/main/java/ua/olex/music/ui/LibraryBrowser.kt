@@ -2,6 +2,7 @@
 
 package ua.olex.music.ui
 
+import androidx.compose.material3.SegmentedButton
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.width
@@ -849,18 +850,38 @@ private fun LibrarySortControl(scope: TrackSortScope, order: TrackSortOrder, onC
         TrackSortMode.PLAYS -> "Most played"
         TrackSortMode.RATING -> "Rating"
     }
-    androidx.compose.foundation.layout.Box {
-        // A chip like the filters beside it, so sort and filter read as one row of list options.
-        androidx.compose.material3.FilterChip(selected = order != TrackSortOrder(), onClick = { expanded = true },
-            leadingIcon = { Symbol(Glyph.SORT, size = 18.dp) },
-            label = { Text("Sort: ${label(order.mode)}${if (order.descending) " descending" else ""}") })
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            TrackSortMode.entries.forEach { mode ->
-                DropdownMenuItem(text = { Text(label(mode)) }, onClick = { onChange(order.copy(mode = mode)); expanded = false })
+    // A chip like the filters beside it, so sort and filter read as one row of list options.
+    androidx.compose.material3.FilterChip(selected = order != TrackSortOrder(), onClick = { expanded = true },
+        leadingIcon = { Symbol(Glyph.SORT, size = 18.dp) },
+        trailingIcon = { Symbol(Glyph.DOWN, size = 18.dp) },
+        label = { Text("Sort: ${label(order.mode)}" + if (order.descending) " ↓" else "") })
+    // A sheet, as Google's Files and Photos sort: the direction as a segmented choice on top, then
+    // one rounded group of orders with a tick on the chosen one. Picking an order closes it.
+    if (expanded) AppSheet(onDismiss = { expanded = false }) {
+        val cs = MaterialTheme.colorScheme
+        Text("Sort by", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(horizontal = 24.dp))
+        Spacer(Modifier.height(16.dp))
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+            listOf(false to "Ascending", true to "Descending").forEachIndexed { i, (down, text) ->
+                SegmentedButton(selected = order.descending == down, onClick = { onChange(order.copy(descending = down)) },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2)) { Text(text) }
             }
-            DropdownMenuItem(text = { Text("Descending") }, trailingIcon = { Checkbox(checked = order.descending, onCheckedChange = null) },
-                onClick = { onChange(order.copy(descending = !order.descending)); expanded = false })
         }
+        Spacer(Modifier.height(16.dp))
+        Column(Modifier.padding(horizontal = 16.dp).clip(RoundedCornerShape(24.dp)).background(cs.surfaceContainer)
+            .verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+            TrackSortMode.entries.forEach { mode ->
+                val chosen = mode == order.mode
+                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    .clickable { onChange(order.copy(mode = mode)); expanded = false }
+                    .background(if (chosen) cs.secondaryContainer else androidx.compose.ui.graphics.Color.Transparent)
+                    .padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(label(mode), style = MaterialTheme.typography.bodyLarge, color = if (chosen) cs.onSecondaryContainer else cs.onSurface, modifier = Modifier.weight(1f))
+                    if (chosen) Symbol(Glyph.CHECK, color = cs.onSecondaryContainer, size = 20.dp)
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
     }
 }
 
@@ -989,7 +1010,7 @@ private fun SelectionActions(enabled: Boolean, onPlay: () -> Unit, onNext: () ->
     val haptics = rememberHaptics()
     androidx.compose.material3.HorizontalFloatingToolbar(expanded = true, modifier = modifier,
         colors = androidx.compose.material3.FloatingToolbarDefaults.vibrantFloatingToolbarColors()) {
-        listOf(Triple(Glyph.PLAY, "Play selected", onPlay), Triple(Glyph.NEXT, "Play next", onNext), Triple(Glyph.QUEUE, "Add to queue", onQueue),
+        listOf(Triple(Glyph.PLAY, "Play selected", onPlay), Triple(Glyph.PLAY_NEXT, "Play next", onNext), Triple(Glyph.ADD_TO_QUEUE, "Add to queue", onQueue),
             Triple(Glyph.PLAYLIST_ADD, "Add to playlist", onPlaylist), Triple(Glyph.EDIT, "Edit tags", onTags),
             Triple(Glyph.DELETE, "Move to trash", onTrash)).forEachIndexed { i, (glyph, label, action) ->
             KickIconButton(enabled = enabled, onClick = { haptics.confirm(); action() },
@@ -1045,23 +1066,21 @@ private enum class BrowseTile(val title: String, val glyph: Glyph, val tab: Libr
 private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Unit, onTile: (BrowseTile) -> Unit) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    // The basic grid is present on the first frame. Optional tiles and genre art arrive together,
-    // so a fast genre calculation cannot put artwork at the top while the grid is still empty.
-    val membership = LibraryMembership(library.byId)
-    val (available, genres) = androidx.compose.runtime.key(membership) {
-        rememberOffMain(membership, initial = (basicBrowseTiles to emptyList<MusicCollection>())) {
-            val tiles = BrowseTile.entries.filterTo(HashSet()) { tile ->
-                when (tile) {
-                    BrowseTile.COMPOSERS -> library.composers.isNotEmpty()
-                    BrowseTile.YEARS -> library.years.size > 1
-                    BrowseTile.GENRES -> library.genres.size > 1
-                    BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }
-                    BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }
-                    else -> true
-                }
+    // Worked out in the same frame (the index already holds genres, composers and years; the
+    // format scan stops at the first match), so the page opens whole instead of growing tiles
+    // and pushing the grid down a moment later.
+    val (available, genres) = remember(library) {
+        val tiles = BrowseTile.entries.filterTo(HashSet()) { tile ->
+            when (tile) {
+                BrowseTile.COMPOSERS -> library.composers.isNotEmpty()
+                BrowseTile.YEARS -> library.years.size > 1
+                BrowseTile.GENRES -> library.genres.size > 1
+                BrowseTile.HI_RES -> library.songs.any { it.format?.hiRes == true }
+                BrowseTile.LOSSLESS -> library.songs.any { it.format?.lossless == true }
+                else -> true
             }
-            tiles.toSet() to library.genres.sortedByDescending { it.tracks.size }.take(6)
         }
+        tiles.toSet() to library.genres.sortedByDescending { it.tracks.size }.take(6)
     }
     val accents = listOf(cs.primaryContainer to cs.onPrimaryContainer, cs.secondaryContainer to cs.onSecondaryContainer, cs.tertiaryContainer to cs.onTertiaryContainer)
     val columns = if (androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.5f) 1 else 2
@@ -1084,17 +1103,18 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
                         val amount by androidx.compose.animation.core.animateFloatAsState(if (down && !still) 1f else 0f,
                             MaterialTheme.motionScheme.fastSpatialSpec(), label = "Browse icon press")
                         val (bg, fg) = accents[group]
+                        // Each tile wears one of M3 Expressive's shapes behind its icon; a press
+                        // turns the shape and squeezes the tile, as Pixel's launcher folders do.
+                        val shape = browseShapes[tile.ordinal % browseShapes.size].toShape()
                         androidx.compose.material3.Surface(onClick = { haptics.tick(); onTile(tile) }, interactionSource = interaction,
-                            shape = RoundedCornerShape(22.dp), color = cs.surfaceContainer, modifier = Modifier.weight(1f).heightIn(min = 72.dp)) {
-                            Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Box(Modifier.size(40.dp).graphicsLayer {
-                                    rotationZ = amount * if (group == 1) -16f else 13f
-                                    scaleX = 1f + amount * 0.12f
-                                    scaleY = scaleX
-                                }.clip(RoundedCornerShape(14.dp)).background(bg), contentAlignment = Alignment.Center) {
-                                    Symbol(tile.glyph, color = fg, filled = true)
+                            shape = RoundedCornerShape(24.dp), color = cs.surfaceContainer, modifier = Modifier.weight(1f).heightIn(min = 76.dp).squish(0.04f)) {
+                            Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(Modifier.size(46.dp).graphicsLayer {
+                                    rotationZ = amount * if (group == 1) -30f else 30f
+                                }.clip(shape).background(bg), contentAlignment = Alignment.Center) {
+                                    Symbol(tile.glyph, color = fg, filled = true, modifier = Modifier.graphicsLayer { rotationZ = -amount * if (group == 1) -30f else 30f })
                                 }
-                                Text(tile.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                Text(tile.title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -1115,9 +1135,11 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
     }
 }
 
-private val basicBrowseTiles = setOf(
-    BrowseTile.SONGS, BrowseTile.ALBUMS, BrowseTile.ARTISTS, BrowseTile.FOLDERS,
-    BrowseTile.HISTORY, BrowseTile.UNPLAYED,
+private val browseShapes = listOf(
+    androidx.compose.material3.MaterialShapes.Cookie6Sided, androidx.compose.material3.MaterialShapes.Clover4Leaf,
+    androidx.compose.material3.MaterialShapes.Sunny, androidx.compose.material3.MaterialShapes.Cookie4Sided,
+    androidx.compose.material3.MaterialShapes.Pentagon, androidx.compose.material3.MaterialShapes.Cookie9Sided,
+    androidx.compose.material3.MaterialShapes.Flower, androidx.compose.material3.MaterialShapes.Gem,
 )
 
 /** A genre as a card: up to three covers fanned on the right, the name and size on the left. */

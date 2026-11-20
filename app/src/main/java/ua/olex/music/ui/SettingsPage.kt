@@ -134,7 +134,7 @@ internal fun SettingsPage(
             var strength by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.strength(context)) }
             val haptics = rememberHaptics()
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Toggle(Glyph.WAVE, "Feel the music", "The phone taps with the beat and the bass, in time with what you hear. Pauses in Battery Saver",
+                Toggle(Glyph.VIBRATION, "Feel the music", "The phone taps with the beat and the bass, in time with what you hear. Pauses in Battery Saver",
                     feel, first = true, last = !feel) { feel = it; ua.olex.music.playback.MusicHaptics.set(context, it, strength) }
                 androidx.compose.animation.AnimatedVisibility(feel) {
                     Surface(shape = RoundedCornerShape(4.dp, 4.dp, 24.dp, 24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
@@ -182,7 +182,7 @@ internal fun SettingsPage(
         setting("Only on Wi-Fi moving covers") {
             val apple = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.appleMotion }
             var wifi by remember { mutableStateOf(apple.wifiOnly) }
-            Toggle(Glyph.SPEAKER, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
+            Toggle(Glyph.WIFI, "Only on Wi-Fi", "Moving covers are a few megabytes each", wifi, last = true) { wifi = it; apple.wifiOnly = it }
         }
 
         if (terms.isEmpty()) item(key = "group-Library") { Group("Library") }
@@ -357,7 +357,7 @@ private fun tint(glyph: Glyph): Pair<androidx.compose.ui.graphics.Color, android
 
     return when (glyph) {
         Glyph.TUNE, Glyph.USB, Glyph.BATTERY, Glyph.SPEAKER -> cs.primaryFixedDim to cs.onPrimaryFixed
-        Glyph.PLAY, Glyph.HEADPHONES, Glyph.WAVE, Glyph.STAR -> cs.tertiaryFixedDim to cs.onTertiaryFixed
+        Glyph.PLAY, Glyph.HEADPHONES, Glyph.VIBRATION, Glyph.WAVE, Glyph.STAR -> cs.tertiaryFixedDim to cs.onTertiaryFixed
         Glyph.SEARCH, Glyph.PERSON, Glyph.MOTION, Glyph.LOCK -> cs.primaryContainer to cs.onPrimaryContainer
         else -> cs.secondaryFixedDim to cs.onSecondaryFixed
     }

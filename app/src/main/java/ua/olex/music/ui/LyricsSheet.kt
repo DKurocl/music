@@ -136,7 +136,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                             })
                         }
                         if (timed && onSaveTiming != null) add { first, last -> ToolRow(Glyph.EDIT, "Fix timing", "Tap each line as it is sung", first, last, onClick = { editing = true; follow = false; draft = lyrics }) }
-                        if (onResetTiming != null) add { first, last -> ToolRow(Glyph.REFRESH, "Restore original", "Undo your timing", first, last, onClick = onResetTiming) }
+                        if (onResetTiming != null) add { first, last -> ToolRow(Glyph.UNDO, "Restore original", "Undo your timing", first, last, onClick = onResetTiming) }
                         if (timed) add { first, last ->
                             val context = androidx.compose.ui.platform.LocalContext.current
                             var lock by remember { mutableStateOf(ua.olex.music.playback.LockScreenLyrics.get(context)) }
@@ -148,7 +148,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                         onChooseFolder?.let { choose -> add { first, last -> ToolRow(Glyph.FOLDER, "Choose music folder",
                             note ?: if (folders.isEmpty()) "To read .lrc files beside your songs" else folders.take(2).joinToString(" · "), first, last, onClick = choose) } }
                         onReload?.let { reload -> add { first, last -> ToolRow(Glyph.REFRESH, "Reload", "Read the lyrics files again", first, last, onClick = reload) } }
-                        if (folders.isNotEmpty()) onClearFolders?.let { clear -> add { first, last -> ToolRow(Glyph.HIDDEN, "Clear folder access", null, first, last, onClick = clear) } }
+                        if (folders.isNotEmpty()) onClearFolders?.let { clear -> add { first, last -> ToolRow(Glyph.FOLDER_OFF, "Clear folder access", null, first, last, onClick = clear) } }
                     }
                     itemsIndexed(rows) { i, row -> row(i == 0, i == rows.lastIndex) }
                 }
