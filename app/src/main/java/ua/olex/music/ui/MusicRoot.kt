@@ -688,16 +688,23 @@ fun MusicRoot(model: LibraryViewModel) {
             onNext = { whenConnected = { model.next() }; model.connectPlayer() },
             onPrevious = { whenConnected = { model.previous() }; model.connectPlayer() })
     }
-    if (model.mixLoading && !systemOpening) Box(Modifier.fillMaxSize().safeDrawingPadding(),
-        contentAlignment = Alignment.TopCenter) {
+    // Only when a mix takes a moment; it drops in from the top and leaves the same way.
+    val mixWaiting = rememberPatient(model.mixLoading && !systemOpening)
+    Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
+        androidx.compose.animation.AnimatedVisibility(mixWaiting,
+            enter = if (powerSave) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.fadeIn(MaterialTheme.motionScheme.fastEffectsSpec()) +
+                androidx.compose.animation.slideInVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { -it / 2 },
+            exit = if (powerSave) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.fadeOut(MaterialTheme.motionScheme.fastEffectsSpec()) +
+                androidx.compose.animation.slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { -it / 2 }) {
         androidx.compose.material3.Surface(Modifier.padding(top = 68.dp), shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh, shadowElevation = 3.dp) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!powerSave) androidx.compose.material3.CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                if (!powerSave) androidx.compose.material3.LoadingIndicator(Modifier.size(24.dp))
                 Text("Preparing mix…", style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
             }
+        }
         }
     }
     } // PlayerCoverLayout
