@@ -82,32 +82,45 @@ internal class YouTubeMusic(
     suspend fun searchAll(query: String, onPrimary: suspend (Found) -> Unit = {}): Found = withContext(ioDispatcher) {
         val scope = pageScope()
         val fields = """"query":${quote(query)}"""
-        val plain = searchResponse(fields) ?: throw java.io.IOException("YouTube Music didn't answer")
-        val cards = searchCards(plain)
-        val primary = Found(parseSearch(plain, keepOrder = true).distinctBy { it.id },
+        val plain = searchResponse(fields)
+        val cards = plain?.let(::searchCards).orEmpty()
+        val primary = Found(plain?.let { parseSearch(it, keepOrder = true) }.orEmpty().distinctBy { it.id },
             cards.filter { it.kind == Card.Kind.ARTIST }.take(8),
             cards.filter { it.kind == Card.Kind.ALBUM }.take(10),
             cards.filter { it.kind == Card.Kind.PLAYLIST }.take(12))
         if (pageScope() == scope) rememberAlbumLinks(scope, primary.songs)
-        onPrimary(primary)
-        suspend fun filtered(params: String, kind: Card.Kind) = kotlinx.coroutines.withTimeoutOrNull(4_000) {
-            searchResponse(fields + ",\"params\":" + quote(params))?.let(::searchCards)?.filter { it.kind == kind }
-        }.orEmpty()
+        if (plain != null) onPrimary(primary)
+        suspend fun filtered(params: String) = kotlinx.coroutines.withTimeoutOrNull(if (plain == null) 9_000L else 4_000L) {
+            searchResponse(fields + ",\"params\":" + quote(params))
+        }
         val moreArtists = if (primary.artists.none { TextFold.fold(it.title) == TextFold.fold(query) })
-            async { filtered(ARTISTS_ONLY, Card.Kind.ARTIST) } else null
-        val morePlaylists = if (primary.playlists.isEmpty()) async { filtered(PLAYLISTS_ONLY, Card.Kind.PLAYLIST) } else null
-        primary.copy(artists = (primary.artists + moreArtists?.await().orEmpty()).distinctBy { it.id }.take(8),
-            playlists = (primary.playlists + morePlaylists?.await().orEmpty()).distinctBy { it.id }.take(12))
+            async { filtered(ARTISTS_ONLY) } else null
+        val moreAlbums = if (primary.albums.isEmpty()) async { filtered(ALBUMS_ONLY) } else null
+        val moreSongs = if (primary.songs.isEmpty()) async { filtered(SONGS_ONLY) } else null
+        val morePlaylists = if (primary.playlists.isEmpty()) async { filtered(PLAYLISTS_ONLY) } else null
+        val artistAnswer = moreArtists?.await()
+        val albumAnswer = moreAlbums?.await()
+        val songAnswer = moreSongs?.await()
+        val playlistAnswer = morePlaylists?.await()
+        if (plain == null && artistAnswer == null && albumAnswer == null && songAnswer == null && playlistAnswer == null) {
+            throw java.io.IOException("YouTube Music didn't answer")
+        }
+        primary.copy(
+            songs = primary.songs.ifEmpty { songAnswer?.let { parseSearch(it, keepOrder = true) }.orEmpty().distinctBy { it.id } },
+            artists = (primary.artists + artistAnswer?.let(::searchCards).orEmpty().filter { it.kind == Card.Kind.ARTIST }).distinctBy { it.id }.take(8),
+            albums = primary.albums.ifEmpty { albumAnswer?.let(::searchCards).orEmpty().filter { it.kind == Card.Kind.ALBUM }.take(10) },
+            playlists = primary.playlists.ifEmpty { playlistAnswer?.let(::searchCards).orEmpty().filter { it.kind == Card.Kind.PLAYLIST }.take(12) },
+        ).also { if (pageScope() == scope && it.songs != primary.songs) rememberAlbumLinks(scope, it.songs) }
     }
 
-    private suspend fun searchResponse(fields: String): String? {
+    private suspend fun searchResponse(fields: String): String? = cached("${pageScope()}/search:$fields") {
         val headers = account()
-        fun valid(json: String?) = json?.let { response ->
-            (ua.olex.music.lyrics.Json.parse(response) as? Map<*, *>)?.takeUnless { "error" in it }?.let { response }
+        fun valid(json: String?) = json?.takeIf { response ->
+            runCatching { (ua.olex.music.lyrics.Json.parse(response) as? Map<*, *>)?.containsKey("error") == false }.getOrDefault(false)
         }
-        return kotlinx.coroutines.withTimeoutOrNull(9_000) {
+        kotlinx.coroutines.withTimeoutOrNull(6_000) {
             valid(catalogueRequest { post("search", fields, headers = headers) })
-        } ?: if (headers == null) null else kotlinx.coroutines.withTimeoutOrNull(7_000) {
+        } ?: if (headers == null) null else kotlinx.coroutines.withTimeoutOrNull(6_000) {
             valid(catalogueRequest { post("search", fields, headers = null) })
         }
     }
@@ -127,14 +140,12 @@ internal class YouTubeMusic(
         }
         if (offline) return@withContext null
         val fields = """"query":${quote(name)}"""
-        suspend fun exact(headers: Map<String, String>?, filtered: Boolean): Pair<String, String>? {
+        suspend fun exact(filtered: Boolean): Pair<String, String>? {
             val args = if (filtered) fields + ",\"params\":\"$ARTISTS_ONLY\"" else fields
-            return catalogueRequest { post("search", args, headers = headers) }?.let(::artistIds)
+            return searchResponse(args)?.let(::artistIds)
                 ?.firstOrNull { TextFold.fold(it.second) == folded }
         }
-        val headers = account()
-        val exact = exact(null, true) ?: exact(null, false)
-            ?: headers?.let { exact(it, false) }
+        val exact = exact(false) ?: exact(true)
         if (pageScope() != scope) return@withContext null
         exact?.let { (id, _) ->
             keep(memoryKey, id)
@@ -157,7 +168,10 @@ internal class YouTubeMusic(
             saved?.let(onPage)
             val fresh = networkFallback(saved) {
                 suspend fun browse(headers: Map<String, String>?): Pair<String, OnlineArtist>? {
-                    return cataloguePage(id, headers) { json -> parseArtist(id, json, knownName)?.let { json to it } }
+                    return cataloguePage(id, headers) { json ->
+                        parseArtist(id, json, knownName)?.takeIf { it.songs.isNotEmpty() || it.videos.isNotEmpty() ||
+                            it.albums.isNotEmpty() || it.singles.isNotEmpty() }?.let { json to it }
+                    }
                 }
                 val public = browse(null)
                 val headers = if (public == null) account() else null
@@ -229,12 +243,14 @@ internal class YouTubeMusic(
     }
 
     /** Prefer the channel linked from the song. Search credits can recover a page with a failed browse. */
-    suspend fun artistPage(name: String, channelId: String?, seed: Track?, offline: Boolean,
+    suspend fun artistPage(name: String, channelId: String?, seed: Track?, offline: Boolean, full: Boolean = false,
         onPage: (OnlineArtist) -> Unit = {}): OnlineArtist? = withContext(ioDispatcher) {
         val scope = pageScope()
         val id = channelId ?: seed?.let { artistOfTrack(it)?.first } ?: artistId(name, offline)
         if (pageScope() != scope) return@withContext null
-        if (id != null) artist(id, offline, full = !offline, knownName = name, onPage = onPage)?.let { return@withContext it }
+        if (id != null) artist(id, offline, full = full && !offline, knownName = name, onPage = onPage)
+            ?.takeIf { it.songs.isNotEmpty() || it.albums.isNotEmpty() || it.singles.isNotEmpty() || it.videos.isNotEmpty() }
+            ?.let { return@withContext it }
         if (offline) return@withContext null
         val folded = TextFold.fold(name)
         fun matchesName(track: Track) = TextFold.fold(track.artist) == folded ||
@@ -261,7 +277,7 @@ internal class YouTubeMusic(
             null, null, songs, emptyList(), emptyList(), partial = true)
         if (creditedId != null && creditedId != id) {
             onPage(fallback)
-            artist(creditedId, full = true, knownName = name, onPage = onPage)?.let { return@withContext it }
+            artist(creditedId, full = full, knownName = name, onPage = onPage)?.let { return@withContext it }
         }
         fallback
     }
@@ -277,14 +293,14 @@ internal class YouTubeMusic(
         val json = kotlinx.coroutines.withTimeoutOrNull(7_000) {
             catalogueRequest { post("browse", """"browseId":${quote(id)}"""", headers = headers) }
         }
-        json?.let(parse)?.let { return it }
+        json?.let { runCatching { parse(it) }.getOrNull() }?.let { return it }
         if (transport != null) return null
         val url = catalogueUrl(id) ?: return null
         val request = okhttp3.Request.Builder().url(url)
             .header("User-Agent", USER_AGENT).header("Accept", "text/html")
             .apply { headers?.get("Cookie")?.let { header("Cookie", it) } }.build()
         val html = kotlinx.coroutines.withTimeoutOrNull(6_000) { catalogueRequest { execute(request) } }
-        return html?.let(::initialCatalogueData)?.let(parse)
+        return html?.let(::initialCatalogueData)?.let { runCatching { parse(it) }.getOrNull() }
     }
 
     private data class OpenedPlaylist(val album: OnlineAlbum, val tracks: List<Track>, val next: PlaylistPage?)
@@ -876,7 +892,7 @@ internal class YouTubeMusic(
 
         private val catalogueId = Regex("[A-Za-z0-9_-]{2,128}")
         private val youtubeVideoId = Regex("[A-Za-z0-9_-]{11}")
-        private val initialDataAssignment = Regex("""(?:\bytInitialData|window\[["']ytInitialData["']\])\s*=\s*(\{)""")
+        private val initialDataAssignment = Regex("""(?:\bytInitialData|window\[["']ytInitialData["']\])\s*(?:=|\.push\()\s*(\{)""")
 
         private fun queueFields(id: String) =
             """"playlistId":${quote(id)},"isAudioOnly":true,"enablePersistentPlaylistPanel":true,"tunerSettingValue":"AUTOMIX_SETTING_NORMAL""""
@@ -919,8 +935,10 @@ internal class YouTubeMusic(
                         '{' -> depth++
                         '}' -> if (--depth == 0) {
                             val data = html.substring(start, index + 1)
-                            val root = ua.olex.music.lyrics.Json.parse(data) as? Map<*, *>
+                            val root = runCatching { ua.olex.music.lyrics.Json.parse(data) as? Map<*, *> }.getOrNull()
                             if (root?.containsKey("contents") == true || root?.containsKey("header") == true) return data
+                            val nested = root?.get("data") as? Map<*, *>
+                            if (nested?.containsKey("contents") == true || nested?.containsKey("header") == true) return dump(nested)
                             break
                         }
                     }
@@ -1019,11 +1037,10 @@ internal class YouTubeMusic(
         }
 
         /** The search filter YouTube Music's web app sends for "Artists". */
-        private const val ARTISTS_ONLY = "EgWKAQIgAWoKEAoQAxAEEAkQBQ%3D%3D"
-
-        private const val SONGS_ONLY = "EgWKAQIIAWoKEAoQAxAEEAkQBQ%3D%3D"
-
-        private const val PLAYLISTS_ONLY = "EgWKAQIoAWoKEAoQAxAEEAkQBQ%3D%3D"
+        private const val ARTISTS_ONLY = "EgWKAQIgAWoMEA4QChADEAQQCRAF"
+        private const val ALBUMS_ONLY = "EgWKAQIYAWoMEA4QChADEAQQCRAF"
+        private const val SONGS_ONLY = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
+        private const val PLAYLISTS_ONLY = "EgWKAQIoAWoMEA4QChADEAQQCRAF"
 
         /** Artists, albums and playlists in a search answer (its rows and its top result card), in its order. */
         fun searchCards(json: String): List<Card> {
@@ -1032,10 +1049,18 @@ internal class YouTubeMusic(
                 card(dump(card["title"]) + dump(card["onTap"]), text(card["title"]), text(card["subtitle"]), biggestImage(card["thumbnail"]))
             }
             val rows = collect(root, "musicResponsiveListItemRenderer").mapNotNull { row ->
-                val columns = (row["flexColumns"] as? List<*>).orEmpty().map { text(((it as? Map<*, *>)?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>)?.get("text")) }
-                card(dump(row["navigationEndpoint"] ?: (row["flexColumns"] as? List<*>)?.firstOrNull()), columns.firstOrNull().orEmpty(), columns.getOrNull(1).orEmpty(), biggestImage(row["thumbnail"]))
+                val columns = (row["flexColumns"] as? List<*>).orEmpty()
+                val labels = columns.map { text(((it as? Map<*, *>)?.get("musicResponsiveListItemFlexColumnRenderer") as? Map<*, *>)?.get("text")) }
+                val title = labels.firstOrNull().orEmpty()
+                val subtitle = labels.getOrNull(1).orEmpty()
+                val cover = biggestImage(row["thumbnail"])
+                card(dump(row["navigationEndpoint"]), title, subtitle, cover)
+                    ?: card(dump(columns.firstOrNull()), title, subtitle, cover)
             }
-            return (top + rows).distinctBy { it.id }
+            val carousel = collect(root, "musicTwoRowItemRenderer").mapNotNull { row ->
+                card(dump(row["navigationEndpoint"]), text(row["title"]), text(row["subtitle"]), biggestImage(row["thumbnailRenderer"]))
+            }
+            return (top + rows + carousel).distinctBy { it.id }
         }
 
         private fun card(nav: String, title: String, subtitle: String, cover: String?): Card? {
@@ -1048,7 +1073,9 @@ internal class YouTubeMusic(
                 else -> return null
             }
             // "Artist \u2022 7.76M monthly audience" reads as the audience; "Album \u2022 Air \u2022 1998" as "Air \u2022 1998".
-            val sub = subtitle.split(" \u2022 ").drop(1).joinToString(" \u2022 ").replace(" monthly audience", " listeners").replace(" monthly listeners", " listeners").ifEmpty { null }
+            val fields = subtitle.split(" \u2022 ")
+            val sub = fields.drop(if (fields.firstOrNull() in listOf("Artist", "Album", "Playlist", "Single", "EP")) 1 else 0)
+                .joinToString(" \u2022 ").replace(" monthly audience", " listeners").replace(" monthly listeners", " listeners").ifEmpty { null }
             return Card(id, title, sub, cover, kind)
         }
 

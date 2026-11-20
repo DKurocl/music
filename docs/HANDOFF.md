@@ -1,3 +1,13 @@
+# Artist and album recovery
+
+[код] Search reuses account-scoped answers and checks filtered catalogue results if the main
+request fails or omits a category. It keeps already available results while the filters run.
+Artist pages retain the cover and control positions while loading, defer expanded discography
+requests until "See all", and include library tracks that were absent from the provider list.
+Albums can play a confirmed local release while the provider is unavailable.
+Local check: `git diff --check`. CI covers canonical navigation and partial search failures.
+Live catalogue checks require the Pixel because the workspace proxy blocks YouTube Music (403).
+
 # Separate YouTube Music and library search
 
 [код] Search has two sources with a shared query and separate result lists. YouTube Music

@@ -181,18 +181,32 @@ class YouTubeMusicTest {
         assertEquals(2, firstRequests)
     }
 
-    @Test fun artistLookupUsesExactCreditWhenFilteredSearchReturnsADifferentArtist() = kotlinx.coroutines.runBlocking {
-        val filtered = """{"musicCardShelfRenderer":{"title":{"runs":[{"text":"Someone else"}]},"onTap":{"browseEndpoint":{"browseId":"UCwrong","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}"""
+    @Test fun artistLookupReusesTheExactCreditInTheGeneralSearchAnswer() = kotlinx.coroutines.runBlocking {
         val credit = """{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"melancholicjoana","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_USER_CHANNEL"}}}]}}}"""
         var calls = 0
         val source = YouTubeMusic(transport = { endpoint, fields, _ ->
             assertEquals("search", endpoint)
             calls++
-            if ("params" in fields) filtered else credit
+            assertFalse("params" in fields)
+            credit
         })
         assertEquals("UCcorrect", source.artistId("melancholicjoana"))
         assertEquals("UCcorrect", source.artistId("melancholicjoana"))
-        assertEquals(2, calls)
+        assertEquals(1, calls)
+    }
+
+    @Test fun theGeneralArtistCardSurvivesFailedFilteredSearches() = kotlinx.coroutines.runBlocking {
+        val card = """{"musicCardShelfRenderer":{"title":{"runs":[{"text":"Mac DeMarco"}]},
+            "onTap":{"browseEndpoint":{"browseId":"UCMacDeMarco","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}}"""
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            assertEquals("search", endpoint)
+            if ("params" in fields) throw java.io.IOException("Filtered search unavailable")
+            card
+        })
+        val answer = source.searchAll("Mac DeMarco")
+        assertEquals("UCMacDeMarco", answer.artists.single().id)
+        assertTrue(answer.albums.isEmpty())
+        assertTrue(answer.songs.isEmpty())
     }
 
     @Test fun linkedArtistAndAlbumRecoverConfirmedSongsOnBrowseFailure() = kotlinx.coroutines.runBlocking {
