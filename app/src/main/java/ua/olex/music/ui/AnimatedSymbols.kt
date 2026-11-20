@@ -106,7 +106,7 @@ internal fun PlayerModeSymbol(
     val crossover by animateFloatAsState(if (shuffle && on) 1f else 0f,
         if (still) snap() else motion.defaultSpatialSpec(), label = "Shuffle crossover")
     val turn = remember { Animatable(0f, visibilityThreshold = 0.003f) }
-    val nudge = remember { Animatable(0f) }
+    val nudge = remember { Animatable(1f).apply { updateBounds(0f, 1f) } }
     val previousMode = remember { booleanArrayOf(on, one) }
     LaunchedEffect(on, one, still) {
         val changed = previousMode[0] != on || previousMode[1] != one
@@ -115,13 +115,13 @@ internal fun PlayerModeSymbol(
         previousMode[1] = one
         if (shuffle || still) {
             turn.snapTo(0f)
-            nudge.snapTo(0f)
+            nudge.snapTo(1f)
         } else if (changed) kotlinx.coroutines.coroutineScope {
             launch {
                 if (enabled) {
-                    nudge.animateTo(1f, motion.fastSpatialSpec())
-                    nudge.animateTo(0f, androidx.compose.animation.core.spring(stiffness = 600f, dampingRatio = 0.5f))
-                } else nudge.animateTo(0f, motion.fastSpatialSpec())
+                    if (nudge.value >= 0.995f) nudge.snapTo(0f)
+                    nudge.animateTo(1f, motion.defaultSpatialSpec())
+                } else nudge.animateTo(1f, motion.fastSpatialSpec())
             }
             if (!enabled) turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.defaultSpatialSpec())
             else if (turn.value % 1f != 0f) turn.animateTo(kotlin.math.ceil(turn.value), motion.fastSpatialSpec())
@@ -181,8 +181,10 @@ internal fun PlayerModeSymbol(
                                 val angle = Math.toDegrees(kotlin.math.atan2(tangent.y, tangent.x).toDouble()).toFloat()
                                 translate(tip.x, tip.y) { rotate(angle, Offset.Zero) { drawPath(ModeOutlines.repeatHead, ink) } }
                             }
-                        } else if (!still && kotlin.math.abs(nudge.value) > 0.008f) {
-                            val slide = -120f * nudge.value
+                        } else if (!still && nudge.value in 0.004f..0.995f) {
+                            val bend = if (nudge.value < 0.78f) kotlin.math.sin(nudge.value / 0.78f * kotlin.math.PI)
+                                else -0.18 * kotlin.math.sin((nudge.value - 0.78f) / 0.22f * kotlin.math.PI)
+                            val slide = -120f * bend.toFloat()
                             repeat(2) { index ->
                                 rotate(index * 180f, svgCenter) {
                                     drawPath(ModeOutlines.repeatNudgeRail, ink, style = Stroke(80f, cap = StrokeCap.Round))
