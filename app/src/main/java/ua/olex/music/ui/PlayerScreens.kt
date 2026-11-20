@@ -807,7 +807,6 @@ internal fun PlayerPlayToggle(playing: Boolean, enabled: Boolean, waiting: Boole
     val focused by interaction.collectIsFocusedAsState()
     val active = playerControlSelection(playing && enabled)
     val push = playerControlPress(pressed)
-    val ink = { androidx.compose.ui.graphics.lerp(colors.onSurfaceVariant, colors.onSecondaryContainer, active.value.coerceIn(0f, 1f)) }
     Box(Modifier.size(size).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
         .toggleable(playing, interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Checkbox) {
             if (it) haptics.play() else haptics.pause()
@@ -817,7 +816,8 @@ internal fun PlayerPlayToggle(playing: Boolean, enabled: Boolean, waiting: Boole
             if (waiting) stateDescription = "Getting ready"
         }, contentAlignment = Alignment.Center) {
         if (waiting) androidx.compose.material3.LoadingIndicator(Modifier.size(29.dp), color = if (playing && enabled) colors.onSecondaryContainer else colors.onSurfaceVariant)
-        else PlayPauseSymbol(playing, 30.dp, pressed) { if (enabled) ink() else colors.onSurface.copy(alpha = 0.38f) }
+        else PlayPauseSymbol(playing, 30.dp, pressed,
+            if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f), active, colors.onSecondaryContainer)
     }
 }
 
@@ -837,7 +837,7 @@ internal fun SkipButton(
             onLongClickLabel = if (forward) "Forward 10 seconds" else "Back 10 seconds", onLongClick = onHold, onClick = onClick)
         .semantics { contentDescription = if (forward) "Next" else "Previous" }, contentAlignment = Alignment.Center) {
         SkipSymbol(forward, 28.dp, kick = 0, pressed = pressed,
-            color = if (!enabled) colors.onSurface.copy(alpha = 0.38f) else colors.onSurfaceVariant)
+            color = if (!enabled) colors.onSurface.copy(alpha = 0.38f) else colors.onSurfaceVariant, pressedInk = colors.onSecondaryContainer)
     }
 }
 
@@ -949,10 +949,8 @@ internal fun ToggleAction(
     Box(Modifier.size(48.dp).then(modifier).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
         .then(action).semantics { contentDescription = label; if (state != null) stateDescription = state },
         contentAlignment = Alignment.Center) {
-        PlayerDockSymbol(mark, on, pressed, kick) {
-            if (!enabled) colors.onSurface.copy(alpha = 0.38f)
-            else androidx.compose.ui.graphics.lerp(colors.onSurfaceVariant, colors.onSecondaryContainer, active.value.coerceIn(0f, 1f))
-        }
+        PlayerDockSymbol(mark, on, push, active, kick,
+            if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f), colors.onSecondaryContainer)
     }
 }
 

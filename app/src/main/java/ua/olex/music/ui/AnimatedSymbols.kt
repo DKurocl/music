@@ -71,6 +71,19 @@ internal fun Modifier.playerControlContainer(active: State<Float>, push: State<F
         }
     }
 
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.controlInk(
+    mask: Path, selection: Float, press: Float, glyphScale: Float, off: Color, on: Color,
+    drawIcon: androidx.compose.ui.graphics.drawscope.DrawScope.(Color) -> Unit,
+) {
+    val shape = plate(center, 44.dp.toPx() / glyphScale, selection.coerceIn(0f, 1f), press.coerceIn(0f, 1f))
+    if (shape.width <= 0f) drawIcon(off) else {
+        mask.reset()
+        mask.addRoundRect(shape)
+        clipPath(mask, androidx.compose.ui.graphics.ClipOp.Difference) { drawIcon(off) }
+        clipPath(mask) { drawIcon(on) }
+    }
+}
+
 /** Material Symbols Rounded SVGs use a 960-unit viewport with the baseline at zero. */
 @Composable
 internal fun PlayerModeSymbol(
@@ -103,7 +116,6 @@ internal fun PlayerModeSymbol(
         val unit = size.minDimension / 960f
         val pressure = push.value.coerceIn(0f, 1f)
         val selected = active.value.coerceIn(0f, 1f)
-        val shape = plate(center, 44.dp.toPx() / (1f - 0.12f * pressure), selected, pressure)
         val phase = if (still) 0f else turn.value % 1f
         val moving = phase > 0.003f && phase < 0.997f
         val headDistance = phase * rail.length / 2f
@@ -151,12 +163,7 @@ internal fun PlayerModeSymbol(
                 }
             }
         }
-        if (shape.width <= 0f) drawSymbol(offInk) else {
-            mask.reset()
-            mask.addRoundRect(shape)
-            clipPath(mask, androidx.compose.ui.graphics.ClipOp.Difference) { drawSymbol(offInk) }
-            clipPath(mask) { drawSymbol(onInk) }
-        }
+        controlInk(mask, selected, pressure, 1f - 0.12f * pressure, offInk, onInk) { drawSymbol(it) }
     }
 }
 
@@ -174,13 +181,13 @@ private object ModeOutlines {
 internal enum class PlayerDockMark { LYRICS, SLEEP, QUEUE, SPEAKER, HEADPHONES, USB, FEEL }
 
 @Composable
-internal fun PlayerDockSymbol(mark: PlayerDockMark, active: Boolean, pressed: Boolean, kick: Int, color: () -> Color) {
+internal fun PlayerDockSymbol(
+    mark: PlayerDockMark, active: Boolean, pushState: State<Float>, selection: State<Float>, kick: Int, offInk: Color, onInk: Color,
+) {
     val still = LocalPowerSave.current
     val motion = MaterialTheme.motionScheme
     val phase by animateFloatAsState(if (active) 1f else 0f, if (still) snap() else motion.defaultSpatialSpec(),
         label = "Dock gesture position")
-    val pressure by animateFloatAsState(if (pressed) 0.88f else 1f, if (still) snap() else motion.fastSpatialSpec(),
-        label = "Dock icon pressure")
     val impulse = androidx.compose.runtime.remember { androidx.compose.animation.core.Animatable(0f) }
     androidx.compose.runtime.LaunchedEffect(kick, still) {
         if (still || coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) {
@@ -190,14 +197,14 @@ internal fun PlayerDockSymbol(mark: PlayerDockMark, active: Boolean, pressed: Bo
             impulse.animateTo(0f, motion.fastSpatialSpec())
         }
     }
+    val mask = remember { Path() }
     val movingDocument = androidx.compose.runtime.remember(mark) { if (mark == PlayerDockMark.LYRICS) Path() else null }
 
     Canvas(Modifier.size(24.dp).graphicsLayer {
-        scaleX = if (still) 1f else pressure
+        scaleX = 1f - 0.12f * pushState.value.coerceIn(0f, 1f)
         scaleY = scaleX
     }) {
         val unit = size.minDimension / 960f
-        val ink = color()
         val selected = if (still) (if (active) 1f else 0f) else phase.coerceIn(0f, 1f)
         val push = if (still) 0f else impulse.value.coerceIn(0f, 1f)
         // The peaks are different poses along one spatial spring. Reversing the state unwinds
@@ -208,62 +215,65 @@ internal fun PlayerDockSymbol(mark: PlayerDockMark, active: Boolean, pressed: Bo
         }
         val lead = pulse(0f, 0.82f)
         val follow = pulse(0.17f, 1f)
-        scale(unit, unit, pivot = Offset.Zero) {
-            translate(top = 960f) {
-                when (mark) {
-                    PlayerDockMark.LYRICS -> {
-                        val document = checkNotNull(movingDocument)
-                        fun sheet(filled: Boolean, alpha: Float) {
-                            if (alpha == 0f) return
-                            val lines = if (filled) DockOutlines.lyricsFilledLines else DockOutlines.lyricsLines
-                            document.reset()
-                            document.addPath(if (filled) DockOutlines.lyricsFilledPage else DockOutlines.lyricsPage)
-                            lines.forEachIndexed { index, path ->
+        val pressure = pushState.value.coerceIn(0f, 1f)
+        controlInk(mask, selection.value, pressure, 1f - pressure * 0.12f, offInk, onInk) { ink ->
+            scale(unit, unit, pivot = Offset.Zero) {
+                translate(top = 960f) {
+                    when (mark) {
+                        PlayerDockMark.LYRICS -> {
+                            val document = checkNotNull(movingDocument)
+                            fun sheet(filled: Boolean, alpha: Float) {
+                                if (alpha == 0f) return
+                                val lines = if (filled) DockOutlines.lyricsFilledLines else DockOutlines.lyricsLines
+                                document.reset()
+                                document.addPath(if (filled) DockOutlines.lyricsFilledPage else DockOutlines.lyricsPage)
+                                lines.forEachIndexed { index, path ->
+                                    val start = index * 0.11f
+                                    document.addPath(path, Offset(50f * pulse(start, 0.78f + start), 0f))
+                                }
+                                drawPath(document, ink, alpha = alpha)
+                            }
+                            sheet(false, 1f - selected)
+                            sheet(true, selected)
+                            translate(-18f * follow, -48f * follow) {
+                                rotate(-12f * follow, Offset(790f, -675f)) { drawPath(DockOutlines.lyricsNote, ink) }
+                            }
+                        }
+                        PlayerDockMark.SLEEP -> {
+                            val sway = push + (if (active) 1f else -1f) * 0.65f * follow
+                            rotate(-24f * sway.coerceIn(-1f, 1f), svgCenter) { drawPath(DockOutlines.moon, ink) }
+                        }
+                        PlayerDockMark.QUEUE -> {
+                            DockOutlines.queueLines.forEachIndexed { index, path ->
+                                // The lowest line leads the opening; the top line leads the return.
                                 val start = index * 0.11f
-                                document.addPath(path, Offset(50f * pulse(start, 0.78f + start), 0f))
+                                val step = pulse(start, 0.78f + start)
+                                translate(left = 65f * step, top = -28f * step) { drawPath(path, ink) }
                             }
-                            drawPath(document, ink, alpha = alpha)
+                            translate(35f * follow, -22f * follow) { drawPath(DockOutlines.queueNote, ink) }
                         }
-                        sheet(false, 1f - selected)
-                        sheet(true, selected)
-                        translate(-18f * follow, -48f * follow) {
-                            rotate(-12f * follow, Offset(790f, -675f)) { drawPath(DockOutlines.lyricsNote, ink) }
-                        }
-                    }
-                    PlayerDockMark.SLEEP -> {
-                        val sway = push + (if (active) 1f else -1f) * 0.65f * follow
-                        rotate(-24f * sway.coerceIn(-1f, 1f), svgCenter) { drawPath(DockOutlines.moon, ink) }
-                    }
-                    PlayerDockMark.QUEUE -> {
-                        DockOutlines.queueLines.forEachIndexed { index, path ->
-                            // The lowest line leads the opening; the top line leads the return.
-                            val start = index * 0.11f
-                            val step = pulse(start, 0.78f + start)
-                            translate(left = 65f * step, top = -28f * step) { drawPath(path, ink) }
-                        }
-                        translate(35f * follow, -22f * follow) { drawPath(DockOutlines.queueNote, ink) }
-                    }
-                    PlayerDockMark.SPEAKER -> {
-                        rotate(-7f * push, svgCenter) {
-                            drawPath(DockOutlines.speakerBody, ink)
-                            scale(1f + 0.17f * push, 1f + 0.17f * push, Offset(480f, -360f)) {
-                                drawPath(DockOutlines.speakerDriver, ink)
+                        PlayerDockMark.SPEAKER -> {
+                            rotate(-7f * push, svgCenter) {
+                                drawPath(DockOutlines.speakerBody, ink)
+                                scale(1f + 0.17f * push, 1f + 0.17f * push, Offset(480f, -360f)) {
+                                    drawPath(DockOutlines.speakerDriver, ink)
+                                }
                             }
                         }
-                    }
-                    PlayerDockMark.HEADPHONES -> scale(1f + 0.14f * push, 1f - 0.055f * push, svgCenter) {
-                        drawPath(DockOutlines.headphones, ink)
-                    }
-                    PlayerDockMark.USB -> translate(top = -69f * push) { drawPath(DockOutlines.usb, ink) }
-                    PlayerDockMark.FEEL -> {
-                        translate(left = 34f * (lead - 1.35f * follow)) {
-                            drawPath(DockOutlines.phone, ink, alpha = 1f - selected)
-                            drawPath(DockOutlines.phoneFilled, ink, alpha = selected)
+                        PlayerDockMark.HEADPHONES -> scale(1f + 0.14f * push, 1f - 0.055f * push, svgCenter) {
+                            drawPath(DockOutlines.headphones, ink)
                         }
-                        DockOutlines.phoneWaves.forEachIndexed { index, path ->
-                            val side = if (index < 2) -1f else 1f
-                            val wave = if (index == 0 || index == 3) follow else lead
-                            translate(left = side * 53f * wave) { drawPath(path, ink) }
+                        PlayerDockMark.USB -> translate(top = -69f * push) { drawPath(DockOutlines.usb, ink) }
+                        PlayerDockMark.FEEL -> {
+                            translate(left = 34f * (lead - 1.35f * follow)) {
+                                drawPath(DockOutlines.phone, ink, alpha = 1f - selected)
+                                drawPath(DockOutlines.phoneFilled, ink, alpha = selected)
+                            }
+                            DockOutlines.phoneWaves.forEachIndexed { index, path ->
+                                val side = if (index < 2) -1f else 1f
+                                val wave = if (index == 0 || index == 3) follow else lead
+                                translate(left = side * 53f * wave) { drawPath(path, ink) }
+                            }
                         }
                     }
                 }
@@ -313,7 +323,7 @@ private object DockOutlines {
 @Composable
 internal fun PlayPauseSymbol(
     playing: Boolean, size: androidx.compose.ui.unit.Dp, pressed: Boolean = LocalIconPressed.current,
-    color: (() -> Color)? = null,
+    color: Color? = null, selected: State<Float>? = null, selectedInk: Color? = null,
 ) {
     val still = LocalPowerSave.current
     val motion = MaterialTheme.motionScheme
@@ -321,10 +331,11 @@ internal fun PlayPauseSymbol(
     val pressure = playerControlPress(pressed)
     val ink = androidx.compose.material3.LocalContentColor.current
     val path = remember { Path() }
+    val mask = remember { Path() }
     Canvas(Modifier.size(size).graphicsLayer { scaleX = 1f - pressure.value * 0.12f; scaleY = scaleX }) {
         val progress = if (still) (if (playing) 1f else 0f) else morph.coerceIn(0f, 1f)
-        val paint = color?.invoke() ?: ink
         val unit = this.size.minDimension / 960f
+        fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSymbol(paint: Color) {
         scale(unit, unit, pivot = Offset.Zero) {
             translate(top = 960f) {
                 when (progress) {
@@ -348,6 +359,11 @@ internal fun PlayPauseSymbol(
                 }
             }
         }
+        }
+        val press = pressure.value.coerceIn(0f, 1f)
+        if (selected != null && selectedInk != null) {
+            controlInk(mask, selected.value, press, 1f - 0.12f * press, color ?: ink, selectedInk) { drawSymbol(it) }
+        } else drawSymbol(color ?: ink)
     }
 }
 
@@ -355,6 +371,7 @@ internal fun PlayPauseSymbol(
 internal fun SkipSymbol(
     forward: Boolean, size: androidx.compose.ui.unit.Dp, kick: Int,
     pressed: Boolean = LocalIconPressed.current, color: Color = androidx.compose.material3.LocalContentColor.current,
+    pressedInk: Color? = null,
 ) {
     val still = LocalPowerSave.current
     val motion = MaterialTheme.motionScheme
@@ -367,17 +384,22 @@ internal fun SkipSymbol(
             pulse.animateTo(0f, motion.fastSpatialSpec())
         }
     }
+    val mask = remember { Path() }
     Canvas(Modifier.size(size)) {
         val unit = this.size.minDimension / 960f
         val force = if (still) (if (pressed) 1f else 0f) else maxOf(pressure, pulse.value).coerceIn(-0.12f, 1f)
-        scale(unit, unit, pivot = Offset.Zero) {
-            translate(top = 960f) {
-                scale(if (forward) 1f else -1f, 1f, svgCenter) {
-                    scale(1f - 0.2f * force, 1f, Offset(416f, -480f)) { drawPath(TransportOutlines.skipArrow, color) }
-                    translate(left = 1.dp.toPx() / unit * force) { drawPath(TransportOutlines.skipStop, color) }
+        fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSymbol(ink: Color) {
+            scale(unit, unit, pivot = Offset.Zero) {
+                translate(top = 960f) {
+                    scale(if (forward) 1f else -1f, 1f, svgCenter) {
+                        scale(1f - 0.2f * force, 1f, Offset(416f, -480f)) { drawPath(TransportOutlines.skipArrow, ink) }
+                        translate(left = 1.dp.toPx() / unit * force) { drawPath(TransportOutlines.skipStop, ink) }
+                    }
                 }
             }
         }
+        if (pressedInk == null) drawSymbol(color)
+        else controlInk(mask, 0f, force.coerceIn(0f, 1f), 1f, color, pressedInk) { drawSymbol(it) }
     }
 }
 

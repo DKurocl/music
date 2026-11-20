@@ -941,8 +941,17 @@ class DesignGalleryTest {
             }
         }
 
-        fun tap(i: Int) = compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-$i"))).performClick()
-        fun capture(tag: String) = compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
+        val actions = (4..21).associateWith { index ->
+            compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-$index")))
+                .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!
+        }
+        val targets = (names.indices.map { "motion-$it" } + "motion-dock").map {
+            compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot
+        }
+        fun capture() : List<Bitmap> {
+            val screen = compose.onRoot().captureToImage().asAndroidBitmap()
+            return targets.map { rect -> Bitmap.createBitmap(screen, rect.left.toInt(), rect.top.toInt(), rect.width.toInt(), rect.height.toInt()) }
+        }
         val rows = List(names.size + 1) { arrayListOf<Bitmap>() }
         compose.runOnIdle { listOf(1, 3).forEach { sources[it].tryEmit(press) } }
         compose.mainClock.advanceTimeBy(500)
@@ -951,8 +960,7 @@ class DesignGalleryTest {
         val dock = names.size
         for (ms in (0..500 step 50).toList() + 680) {
             if (ms != 0) compose.mainClock.advanceTimeBy(if (ms == 680) 180L else 50L, ignoreFrameDuration = true)
-            names.indices.forEach { index -> rows[index] += capture("motion-$index") }
-            rows[dock] += capture("motion-dock")
+            capture().forEachIndexed { index, frame -> rows[index] += frame }
             if (ms == 450) settledAt450 = rows.map { it.last() }
             if (ms == 500) {
                 val at450 = checkNotNull(settledAt450)
@@ -965,11 +973,14 @@ class DesignGalleryTest {
                     sources[2].tryEmit(press)
                     sources[3].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press))
                     showDock.value = true
+                    actions.values.forEach { it() }
                 }
-                (4..21).forEach(::tap)
             }
-            if (ms == 100) { tap(20); tap(21) }
-            if (ms == 200) tap(21)
+            if (ms == 100) compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-20"))).performClick()
+            if (ms == 100 || ms == 200) compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-21"))).performClick()
+            if (ms == 500) compose.runOnIdle {
+                listOf(0, 2).forEach { sources[it].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press)) }
+            }
         }
         for (index in 20..21) org.junit.Assert.assertTrue(names[index], rows[index].first().sameAs(rows[index].last()))
         org.junit.Assert.assertTrue("Shuffle off clears its plate", rows[4].first().sameAs(rows[5].last()))
