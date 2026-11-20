@@ -124,7 +124,7 @@ internal fun LibraryBrowser(
     onCollection: (String?) -> Unit = {}, closeCollection: Int = 0, onCollectionClosed: () -> Unit = {},
     /** Set when something here was opened from another place: Back from it goes there. */
     onLeave: (() -> Unit)? = null,
-    /** YouTube Music's songs for the query, shown under the library's (null while it looks). */
+    /** YouTube Music results for the query (null while loading). */
     online: OnlineSearch? = null, onlineOn: Boolean = false,
     /** Bumped when the Search tab is tapped again: back to the tiles and the field focused (as Google Play does). */
     focusSearch: Int = 0, onSearchFocused: () -> Unit = {},
@@ -270,14 +270,10 @@ internal fun LibraryBrowser(
             dismissButton = { TextButton(onClick = { missingFavourite = null }) { Text("Cancel") } })
     }
 
-    val resultList = androidx.compose.foundation.lazy.rememberLazyListState()
-    var lastResultQuery by rememberSaveable { mutableStateOf(query) }
-    LaunchedEffect(query) {
-        if (query.isNotBlank() && query != lastResultQuery) {
-            lastResultQuery = query
-            resultList.requestScrollToItem(0)
-        }
-    }
+    val showSources = mode == BrowserMode.SEARCH && onlineOn
+    var searchLibrary by rememberSaveable { mutableStateOf(false) }
+    val showLibraryResults = !showSources || searchLibrary
+    val resultList = androidx.compose.runtime.key(query, showLibraryResults) { androidx.compose.foundation.lazy.rememberLazyListState() }
     var fieldFocused by remember { mutableStateOf(false) }
     val browserRoute = if (searching) "results" else selected?.id ?: browsing ?: tabName
     val browserDepth = (if (browsing != null || mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS) 1 else 0) +
@@ -331,6 +327,14 @@ internal fun LibraryBrowser(
                 .onFocusChanged { if (it.isFocused) lens++ }
                 .onFocusChanged { fieldFocused = it.isFocused },
         )
+        if (searching && showSources) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(selected = !searchLibrary, onClick = { searchLibrary = false },
+                    label = { Text("YouTube Music") })
+                androidx.compose.material3.FilterChip(selected = searchLibrary, onClick = { searchLibrary = true },
+                    label = { Text("Your library") })
+            }
+        }
         // Typing mode (a tap in the field, or a second tap on Search): only recent searches, nothing else.
         if (mode == BrowserMode.SEARCH && !searching && selected == null && browsing == null && fieldFocused) {
             val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -426,21 +430,27 @@ internal fun LibraryBrowser(
         LaunchedEffect(selected?.id, headerGone) { onCollection(selected?.let { if (headerGone) it.name else "" }) }
         val railTracks = if (!searching && selected == null && tab == LibraryTab.SONGS && (order.mode == TrackSortMode.DEFAULT || order.mode == TrackSortMode.TITLE)) visible else null
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current + (if (picking) 80.dp else 0.dp))) {
-            scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
+            if (!searching || showLibraryResults) scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }
             when {
-                searching -> {
-                    val local = search?.takeIf { it.query == query }
-                    val found = online?.takeIf { it.query == query && onlineOn }
-                    val waiting = onlineOn && network && query.trim().length >= 2 && found == null
+                searching && !showLibraryResults -> {
+                    val found = online?.takeIf { it.query == query }
                     val webSongs = found?.tracks.orEmpty()
-                    val matched = webSongs.mapTo(HashSet()) { it.id }
-                    val localSongs = visible.orEmpty().filterNot { it.id in matched }
-                    val groups = searchGroups.groupBy { it.first }
-                    if (local == null) item(key = "local-search") { BrowserMessage("Searching…") }
-                    if (local?.failed == true) item(key = "local-failed") { ErrorNotice("Couldn't search your library.", onRetrySearch) }
                     val webGroups = found?.let { listOf("Artists" to it.artists, "Albums" to it.albums, "Playlists" to it.playlists) }.orEmpty()
-                    val webCards = webGroups.flatMap { it.second }
-                    if (webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("Songs on YouTube Music") }
+                    val exactArtist = found?.artists?.firstOrNull {
+                        ua.olex.music.model.TextFold.fold(it.title) == ua.olex.music.model.TextFold.fold(query)
+                    }
+                    when {
+                        !network -> item(key = "online-offline") { BrowserMessage("You’re offline. Search your library instead.") }
+                        query.trim().length < 2 -> item(key = "online-short") { BrowserMessage("Enter at least two characters.") }
+                        found == null -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
+                        found.failed -> item(key = "online-failed") { ErrorNotice("Couldn't search YouTube Music.", onRetrySearch) }
+                        webSongs.isEmpty() && webGroups.all { it.second.isEmpty() } ->
+                            item(key = "online-empty") { BrowserMessage("No results on YouTube Music.") }
+                    }
+                    exactArtist?.let { artist ->
+                        item(key = "online-top-artist") { OnlineResultRow(artist) { onSearchUsed(query) } }
+                    }
+                    if (webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("Songs") }
                     itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
                             onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
@@ -448,10 +458,19 @@ internal fun LibraryBrowser(
                             nav.playTrackMix?.invoke(track) ?: nav.play(webSongs, i, "Search")
                         }
                     }
-                    for ((label, cards) in webGroups) if (cards.isNotEmpty()) {
+                    for ((label, results) in webGroups) {
+                        val cards = results.filterNot { it == exactArtist }
+                        if (cards.isEmpty()) continue
                         item(key = "web-title-$label") { SearchHeading(label) }
                         items(cards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
                     }
+                }
+                searching -> {
+                    val local = search?.takeIf { it.query == query }
+                    val localSongs = visible.orEmpty()
+                    val groups = searchGroups.groupBy { it.first }
+                    if (local == null) item(key = "local-search") { BrowserMessage("Searching…") }
+                    if (local?.failed == true) item(key = "local-failed") { ErrorNotice("Couldn't search your library.", onRetrySearch) }
                     for ((kind, hits) in groups) {
                         item(key = "group-title-$kind") { SearchHeading(if (kind == LibraryTab.ARTISTS) "Artists in your library" else "Albums in your library") }
                         hits.forEach { (_, collection) ->
@@ -462,11 +481,9 @@ internal fun LibraryBrowser(
                                     leadingContent = { if (kind == LibraryTab.ARTISTS) ArtistImage(collection.name, Modifier.size(56.dp), 56.dp) else Artwork(collection.artworkUri, Modifier.size(56.dp), corner = 12.dp) },
                                     // Same inset and rounded press as the song rows below, so all results share one left edge.
                                     modifier = Modifier.padding(horizontal = 8.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(20.dp)).clickable { onSearchUsed(query)
-                                        if (kind == LibraryTab.ARTISTS && onlineOn) nav.open(OnlineTarget.Artist(collection.name))
-                                        else {
-                                            openedFromOutside = null; backToArtist = null; returnQuery = query
-                                            tabName = kind.name; selectedId = collection.id; onQueryChange("")
-                                        } },
+                                        openedFromOutside = null; backToArtist = null; returnQuery = query
+                                        tabName = kind.name; selectedId = collection.id; onQueryChange("")
+                                    },
                                 )
                             }
                         }
@@ -479,13 +496,9 @@ internal fun LibraryBrowser(
                             nav.playTrackMix?.invoke(track) ?: onPlay(localSongs, index)
                         }
                     }
-                    when {
-                        waiting -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
-                        found?.failed == true -> item(key = "online-failed") { ErrorNotice("Couldn't search YouTube Music.", onRetrySearch) }
-                        local != null && !local.failed && local.tracks.isEmpty() && groups.isEmpty() && webCards.isEmpty() && webSongs.isEmpty() ->
-                            item(key = "nothing") { EmptyState(Glyph.SEARCH, if (onlineOn && !network) "Nothing found offline" else "Nothing found",
-                                "Try fewer words, or part of a title, artist or album.", shape = androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape()) }
-                    }
+                    if (local != null && !local.failed && local.tracks.isEmpty() && groups.isEmpty())
+                        item(key = "nothing") { EmptyState(Glyph.SEARCH, "Nothing found in your library",
+                            "Try fewer words, or part of a title, artist or album.", shape = androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape()) }
                 }
                 selected != null && tab == LibraryTab.ARTISTS -> {
                     // The artist's page: who they are, their albums, then their most played songs.
@@ -495,7 +508,6 @@ internal fun LibraryBrowser(
                             onShuffle = { visible?.let(onShuffle) }, onAdd = { visible?.let(onAddToPlaylist) }, enabled = !visible.isNullOrEmpty())
                     }
                     item(key = "artist-bio") { ArtistBio(selected.name) }
-                    item(key = "artist-online") { MoreOnYouTubeMusic(selected.name, library, currentId) }
                     if (albums.isNotEmpty()) {
                         item(key = "artist-albums-title") { PageHeading(if (albums.size == 1) "Album" else "Albums") }
                         item(key = "artist-albums") {
@@ -524,6 +536,7 @@ internal fun LibraryBrowser(
                             }
                         }
                     }
+                    item(key = "artist-online") { MoreOnYouTubeMusic(selected.name, library, currentId) }
                 }
                 selected != null -> {
                     item(key = "collection-header") {

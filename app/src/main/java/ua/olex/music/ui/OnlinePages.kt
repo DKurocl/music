@@ -147,7 +147,10 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val state = key(target, accountScope, network) {
         produceState<Load<YouTubeMusic.OnlineArtist>>(Load.Wait, retry) {
-            val artist = graph.youTube.artistPage(target.name, target.id, target.seed, offline = !network) { value = Load.Done(it) }
+            val artist = try {
+                graph.youTube.artistPage(target.name, target.id, target.seed, offline = !network) { value = Load.Done(it) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
             if (artist != null) value = Load.Done(artist)
             else if (value !is Load.Done) value = Load.Failed
         }.value
@@ -173,10 +176,18 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
                 placeholders(cover = true)
             }
             Load.Failed -> {
-                item { OnlineFailed(target.name, Glyph.SEARCH, target.id) { retry++ } }
-                mine?.let { local -> item {
-                    TextButton(onClick = { nav.openLocalArtist(local) }, modifier = Modifier.padding(horizontal = 16.dp)) { Text("From your library") }
-                } }
+                if (mine == null) item { OnlineFailed(target.name, Glyph.SEARCH, target.id) { retry++ } }
+                else {
+                    val local = mine
+                    item(key = "local-head") { OnlineHeading(local.name) }
+                    item(key = "retry-artist") { ErrorNotice("Couldn't load this artist from YouTube Music.") { retry++ } }
+                    item(key = "local-songs-h") { OnlineHeading("Songs in your library") }
+                    itemsIndexed(local.tracks, key = { _, song -> song.id.value }, contentType = { _, _ -> "song" }) { index, song ->
+                        TrackRow(song, current = song.id.value == currentId, onMore = { nav.actions(song) }) {
+                            nav.play(local.tracks, index, local.name)
+                        }
+                    }
+                }
             }
             is Load.Done -> {
                 val artist = state.value
@@ -355,7 +366,7 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
  */
 @Composable
 internal fun MoreOnYouTubeMusic(name: String, library: LibraryIndex, currentId: String?) {
-    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as? ua.olex.music.MusicApp)?.graph ?: return
     val on by graph.youTubeOn.collectAsStateWithLifecycle()
     if (!on) return
     val nav = LocalOnlineNav.current

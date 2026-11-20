@@ -142,6 +142,47 @@ class LibraryBrowserTest {
         compose.runOnIdle { assertEquals(1, retries) }
     }
 
+    @Test fun youtubeSearchOpensAtTheTopWhenItsResultsArriveAfterTheLibrary() {
+        val online = mutableStateOf<OnlineSearch?>(null)
+        val artist = YouTubeMusic.Card("UCsinger", "Singer", "Artist on YouTube Music", null, YouTubeMusic.Card.Kind.ARTIST)
+        var opened: OnlineTarget? = null
+        compose.setContent {
+            BrowserTestTheme {
+                CompositionLocalProvider(LocalNetwork provides true, LocalOnlineNav provides OnlineNav(open = { opened = it })) {
+                    LibraryBrowser(library, PaddingValues(), "Singer", LibrarySearchResult("Singer", listOf(opening)), {},
+                        null, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH, online = online.value, onlineOn = true)
+                }
+            }
+        }
+        compose.onNodeWithText("Artists in your library").assertDoesNotExist()
+        compose.onNodeWithText("Your library").performClick()
+        compose.onNodeWithText("Artists in your library").assertIsDisplayed()
+        compose.runOnIdle { online.value = OnlineSearch("Singer", listOf(opening), artists = listOf(artist)) }
+        compose.onNodeWithText("Artists in your library").assertIsDisplayed()
+        compose.onNodeWithText("YouTube Music").performClick()
+        compose.onNodeWithText("Artist on YouTube Music").assertIsDisplayed()
+        compose.onNodeWithText("Z Opening").assertIsDisplayed()
+        compose.onNodeWithText("Artists in your library").assertDoesNotExist()
+        compose.onNodeWithText("Artist on YouTube Music").performClick()
+        compose.runOnIdle { assertEquals(OnlineTarget.Artist("Singer", "UCsinger"), opened) }
+    }
+
+    @Test fun localArtistResultOpensItsLibraryCollectionWhileYouTubeIsEnabled() {
+        val query = mutableStateOf("Singer")
+        compose.setContent {
+            BrowserTestTheme {
+                CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { error("Opened an online page") })) {
+                    LibraryBrowser(library, PaddingValues(), query.value, LibrarySearchResult("Singer", listOf(opening)),
+                        { query.value = it }, null, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH, onlineOn = true)
+                }
+            }
+        }
+        compose.onNodeWithText("Your library").performClick()
+        compose.onNodeWithText("2 songs", substring = false).performClick()
+        compose.runOnIdle { assertEquals("", query.value) }
+        compose.onNodeWithText("Play all").assertIsDisplayed()
+    }
+
     @Test fun queryCanBeEnteredAndClearedWithoutChangingTheLibrary() {
         val query = mutableStateOf("")
         compose.setContent {
