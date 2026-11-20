@@ -858,6 +858,7 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
     val pressed by interaction.collectIsPressedAsState()
     val focused by interaction.collectIsFocusedAsState()
     val active = playerControlSelection(on && enabled)
+    val push = playerControlPress(pressed)
     var kick by remember { mutableIntStateOf(0) }
     val click = if (repeat == null) {
         Modifier.toggleable(on, interactionSource = interaction, indication = null, enabled = enabled,
@@ -877,11 +878,11 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
             onClick()
         }
     }
-    Box(Modifier.size(size).clip(RoundedCornerShape(18.dp)).playerControlContainer(active, pressed, focused, selectedCorner = 0.32f)
+    Box(Modifier.size(size).clip(RoundedCornerShape(18.dp)).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
         .then(click).semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE, kick = kick, pressed = pressed) {
-            playerControlInk(colors, colors.surface, active.value, enabled)
-        }
+        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE, kick = kick,
+            active = active, push = push, offInk = if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f),
+            onInk = colors.onSecondaryContainer)
     }
 }
 

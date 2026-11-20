@@ -884,6 +884,53 @@ class DesignGalleryTest {
 
     @Test fun transportModeGesturesRetargetAt100Ms() = transportModeFrames(rapid = true)
 
+    @Test fun transportTransitionsSettleWithin450Ms() {
+        val names = listOf("shuffle-on", "shuffle-off", "repeat-all", "repeat-one", "repeat-off")
+        val shuffle = listOf(androidx.compose.runtime.mutableStateOf(false), androidx.compose.runtime.mutableStateOf(true))
+        val repeat = RepeatMode.entries.map { androidx.compose.runtime.mutableStateOf(it) }
+        compose.setContent {
+            AppTheme {
+                androidx.compose.foundation.layout.Row(Modifier.background(MaterialTheme.colorScheme.surface)) {
+                    names.forEachIndexed { index, name ->
+                        androidx.compose.foundation.layout.Box(Modifier.padding(4.dp).testTag(name)) {
+                            if (index < 2) ModeToggle(shuffle = shuffle[index].value, enabled = true) {
+                                shuffle[index].value = !shuffle[index].value
+                            } else {
+                                val mode = repeat[index - 2]
+                                ModeToggle(repeat = mode.value, enabled = true) {
+                                    mode.value = RepeatMode.entries[(mode.value.ordinal + 1) % 3]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val output = File("build/reports/ui-previews/gallery").apply { mkdirs() }
+        val nodes = names.map { compose.onNodeWithTag(it) }
+        fun frame(ms: Int) = nodes.mapIndexed { index, node ->
+            node.captureToImage().asAndroidBitmap().also { image ->
+                output.resolve("16c-${names[index]}-${ms.toString().padStart(3, '0')}.png").outputStream().use {
+                    image.compress(Bitmap.CompressFormat.PNG, 100, it)
+                }
+            }
+        }
+        compose.mainClock.autoAdvance = false
+        val start = frame(0)
+        names.forEach { name -> compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag(name))).performClick() }
+        var at450 = emptyList<Bitmap>()
+        for (ms in 50..500 step 50) {
+            compose.mainClock.advanceTimeBy(50, ignoreFrameDuration = true)
+            val frames = frame(ms)
+            if (ms == 450) at450 = frames
+            if (ms == 500) {
+                names.indices.forEach { index -> org.junit.Assert.assertTrue(names[index], at450[index].sameAs(frames[index])) }
+                org.junit.Assert.assertTrue("Shuffle off has no plate", start[0].sameAs(frames[1]))
+                org.junit.Assert.assertTrue("Repeat off has no plate", start[2].sameAs(frames[4]))
+            }
+        }
+    }
+
     private fun transportModeFrames(rapid: Boolean) {
         val shuffle = androidx.compose.runtime.mutableStateOf(false)
         val repeatMode = androidx.compose.runtime.mutableStateOf(if (rapid) RepeatMode.OFF else RepeatMode.ALL)
@@ -903,15 +950,16 @@ class DesignGalleryTest {
         val initialBounds = listOf(shuffleNode.getUnclippedBoundsInRoot(), repeatNode.getUnclippedBoundsInRoot())
         val output = File("build/reports/ui-previews/gallery").apply { mkdirs() }
         val prefix = if (rapid) "16b-transport-retarget" else "16a-transport-modes"
-        fun frame(ms: Int) {
+        fun frame(ms: Int): Bitmap {
             val image = compose.onNodeWithTag("transport-modes").captureToImage().asAndroidBitmap()
             output.resolve("$prefix-${ms.toString().padStart(3, '0')}.png").outputStream().use {
                 image.compress(Bitmap.CompressFormat.PNG, 100, it)
             }
+            return image
         }
 
         compose.mainClock.autoAdvance = false
-        frame(0)
+        val initial = frame(0)
         shuffleNode.performClick()
         repeatNode.performClick()
         val taps = if (rapid) setOf(100, 200) else emptySet()
@@ -919,7 +967,10 @@ class DesignGalleryTest {
         var time = 0
         for (ms in (taps + samples).sorted()) {
             compose.mainClock.advanceTimeBy((ms - time).toLong(), ignoreFrameDuration = true)
-            if (ms in samples) frame(ms)
+            if (ms in samples) {
+                val image = frame(ms)
+                if (rapid && ms == 680) org.junit.Assert.assertTrue("Both off plates cleared", initial.sameAs(image))
+            }
             if (ms == 100) shuffleNode.performClick()
             if (ms in taps) repeatNode.performClick()
             time = ms
