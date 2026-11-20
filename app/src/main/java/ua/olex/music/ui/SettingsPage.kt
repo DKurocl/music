@@ -278,7 +278,8 @@ internal fun SettingsPage(
             }
             val scope = androidx.compose.runtime.rememberCoroutineScope()
             if (terms.isEmpty()) {
-                CacheUsageCard(sizes)
+                CacheUsageCard(sizes, ua.olex.music.playback.CacheBudget.bytes(context).takeIf { limit != ua.olex.music.playback.CacheBudget.UNLIMITED } ?: Long.MAX_VALUE,
+                    ua.olex.music.playback.CacheBudget.label(limit))
                 Spacer(Modifier.height(8.dp))
             }
             Row(Glyph.HISTORY, "Cache limit", ua.olex.music.playback.CacheBudget.label(limit), first = true) { editing = true }
