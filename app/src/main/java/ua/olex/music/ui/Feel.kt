@@ -112,7 +112,6 @@ class Haptics(private val view: View) {
     fun tick() = perform(HapticFeedbackConstants.SEGMENT_TICK)
     fun longPress() = perform(HapticFeedbackConstants.LONG_PRESS)
     fun confirm() = perform(HapticFeedbackConstants.CONFIRM)
-    fun reject() = perform(HapticFeedbackConstants.REJECT)
     private fun perform(constant: Int) { view.performHapticFeedback(constant) }
 }
 

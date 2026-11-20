@@ -26,7 +26,7 @@ import androidx.compose.ui.unit.dp
 internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect: (String?) -> Unit) {
     LazyRow(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).selectableGroup().testTag("home-moods"), contentPadding = PaddingValues(horizontal = 16.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        item(key = "all") { MoodChip("For you", Glyph.MIX, selected == null) { onSelect(null) } }
+        item(key = "all") { MoodChip("For you", Glyph.SMART, selected == null) { onSelect(null) } }
         items(moods, key = { "mood-" + it.label }) { mood ->
             MoodChip(mood.label, moodGlyph(mood.label), selected == mood.label) {
                 onSelect(mood.label)
