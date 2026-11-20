@@ -52,7 +52,7 @@ class LibraryBrowserTest {
         compose.onNodeWithText("Albums").performClick()
         compose.onNodeWithText("Record").performClick()
         capture("album")
-        compose.onNodeWithText("Play all").performClick()
+        compose.onNodeWithText("Play").performClick()
         compose.runOnIdle {
             assertEquals(listOf(opening, finale), played)
             assertEquals(0, start)
@@ -208,7 +208,7 @@ class LibraryBrowserTest {
         }
         compose.onNodeWithText("Albums").performClick()
         compose.onNodeWithText("Record").performClick()
-        compose.onNodeWithText("Play all").performScrollTo().assertIsDisplayed().performClick()
+        compose.onNodeWithText("Play").performScrollTo().assertIsDisplayed().performClick()
         capture("album-dark-font2")
         compose.runOnIdle { assertEquals(true, played) }
     }
