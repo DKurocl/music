@@ -712,11 +712,7 @@ internal fun PlayerPage(
             }
             Spacer(Modifier.height(20.dp))
             PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp), restoring)
-            if (restoring) {
-                Box(Modifier.heightIn(min = 48.dp), contentAlignment = Alignment.Center) {
-                    Text("Restoring playback…", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant)
-                }
-            } else Row(
+            if (restoring) Spacer(Modifier.height(48.dp)) else Row(
                 Modifier.widthIn(max = 420.dp).fillMaxWidth(),
                 horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -798,7 +794,12 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
                             if (state.playWhenReady && state.buffering) stateDescription = "Getting ready"
                         },
                     ) {
-                        PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, pressed)
+                        // While the player connects (an open from the widget), M3E's loading shape
+                        // breathes in the button; it becomes Play or Pause once the service answers.
+                        androidx.compose.animation.Crossfade(state.connecting && !state.isPlaying, label = "Play button") { connecting ->
+                            if (connecting) androidx.compose.material3.LoadingIndicator(Modifier.size(if (compact) 40.dp else 48.dp), color = cs.onPrimary)
+                            else PlayPauseSymbol(playing, if (compact) 36.dp else 44.dp, pressed)
+                        }
                     }
                 }
                 SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
