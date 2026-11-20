@@ -701,13 +701,7 @@ private fun ArtistHeader(artist: MusicCollection, albums: Int, showBack: Boolean
             ArtistImage(artist.name, Modifier.fillMaxSize(), 160.dp, androidx.compose.ui.graphics.RectangleShape)
         }
         androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = enabled, onClick = onShuffle, modifier = Modifier.weight(1f).height(52.dp)) {
-                Symbol(Glyph.SHUFFLE, size = 20.dp); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Shuffle", maxLines = 1)
-            }
-            androidx.compose.material3.FilledTonalButton(enabled = enabled, onClick = onPlay, modifier = Modifier.weight(1f).height(52.dp)) {
-                Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play", maxLines = 1)
-            }
+        PageActions(shuffleFirst = true, enabled = enabled, onPlay = onPlay, onShuffle = onShuffle) {
             KickFilledTonalIconButton(enabled = enabled, onClick = onAdd, modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { k -> Symbol(Glyph.PLAYLIST_ADD, kick = k) }
         }
     }
@@ -758,12 +752,7 @@ private fun CollectionHeader(collection: MusicCollection, artist: Boolean = fals
             style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant,
         )
         androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(enabled = enabled, onClick = onPlay, modifier = Modifier.height(52.dp)) {
-                Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play all")
-            }
-            KickFilledTonalIconButton(enabled = enabled, onClick = onShuffle,
-                modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { taps -> Symbol(Glyph.SHUFFLE, kick = taps) }
+        PageActions(shuffleFirst = artist, enabled = enabled, onPlay = onPlay, onShuffle = onShuffle) {
             KickFilledTonalIconButton(enabled = enabled, onClick = onAdd,
                 modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { taps -> Symbol(Glyph.PLAYLIST_ADD, kick = taps) }
             if (!artist) collection.tracks.firstOrNull()?.let { MotionCoverButton(it) }
