@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 
 private val svgCenter = Offset(480f, -480f)
 
@@ -40,7 +41,7 @@ private fun symbolPath(data: String): Path = PathParser().parsePathString(data).
 internal fun playerControlSelection(selected: Boolean): State<Float> {
     val target = if (selected) 1f else 0f
     return if (LocalPowerSave.current) rememberUpdatedState(target)
-        else animateFloatAsState(target, MaterialTheme.motionScheme.fastSpatialSpec(), label = "Player control selection")
+        else animateFloatAsState(target, MaterialTheme.motionScheme.defaultSpatialSpec(), label = "Player control selection")
 }
 
 @Composable
@@ -87,17 +88,21 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.controlInk(
 /** Material Symbols Rounded SVGs use a 960-unit viewport with the baseline at zero. */
 @Composable
 internal fun PlayerModeSymbol(
-    shuffle: Boolean, on: Boolean, one: Boolean, kick: Int,
+    shuffle: Boolean, on: Boolean, one: Boolean,
     active: State<Float>, push: State<Float>, offInk: Color, onInk: Color,
 ) {
     val still = LocalPowerSave.current
     val motion = MaterialTheme.motionScheme
     val crossover by animateFloatAsState(if (shuffle && on) 1f else 0f,
-        if (still) snap() else motion.fastSpatialSpec(), label = "Shuffle crossover")
+        if (still) snap() else motion.defaultSpatialSpec(), label = "Shuffle crossover")
     val turn = remember { Animatable(0f, visibilityThreshold = 0.003f) }
-    LaunchedEffect(kick, still) {
-        if (shuffle || still || kick == 0) turn.snapTo(0f)
-        else turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.fastSpatialSpec())
+    val previousMode = remember { booleanArrayOf(on, one) }
+    LaunchedEffect(on, one, still) {
+        val changed = previousMode[0] != on || previousMode[1] != one
+        previousMode[0] = on
+        previousMode[1] = one
+        if (shuffle || still) turn.snapTo(0f)
+        else if (changed) turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.defaultSpatialSpec())
     }
     val numeral by animateFloatAsState(if (one) 1f else 0f,
         if (still) snap() else motion.fastSpatialSpec(), label = "Repeat one numeral")
@@ -137,8 +142,8 @@ internal fun PlayerModeSymbol(
                         val position = if (still) (if (on) 1f else 0f) else crossover.coerceIn(0f, 1f)
                         val weave = if (position <= 0.004f || position >= 0.996f) 0f else 4f * position * (1f - position)
                         rotate(10f * weave, svgCenter) {
-                            translate(-18f * weave, -18f * weave) { drawPath(ModeOutlines.shuffleTail, ink) }
-                            translate(18f * weave, 18f * weave) { drawPath(ModeOutlines.shuffleUnder, ink) }
+                            translate(-86f * weave, -86f * weave) { drawPath(ModeOutlines.shuffleTail, ink) }
+                            translate(86f * weave, 86f * weave) { drawPath(ModeOutlines.shuffleUnder, ink) }
                         }
                         rotate(-10f * weave, svgCenter) {
                             translate(14f * weave, -14f * weave) { drawPath(ModeOutlines.shuffleOver, ink) }
@@ -198,6 +203,20 @@ internal fun PlayerDockSymbol(
         }
     }
     val mask = remember { Path() }
+    val rows = remember { List(3) { Animatable(if (active) 1f else 0f) } }
+    LaunchedEffect(active, still, mark) {
+        if (mark == PlayerDockMark.LYRICS || mark == PlayerDockMark.QUEUE) kotlinx.coroutines.coroutineScope {
+            rows.forEachIndexed { index, anim ->
+                launch {
+                    if (still || coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) anim.snapTo(if (active) 1f else 0f)
+                    else {
+                        kotlinx.coroutines.delay(40L * if (active) index else 2 - index)
+                        anim.animateTo(if (active) 1f else 0f, motion.defaultSpatialSpec())
+                    }
+                }
+            }
+        }
+    }
     val movingDocument = androidx.compose.runtime.remember(mark) { if (mark == PlayerDockMark.LYRICS) Path() else null }
 
     Canvas(Modifier.size(24.dp).graphicsLayer {
@@ -212,6 +231,10 @@ internal fun PlayerDockSymbol(
         fun pulse(start: Float, end: Float): Float {
             val time = ((selected - start) / (end - start)).coerceIn(0f, 1f)
             return 4f * time * (1f - time)
+        }
+        fun rowTravel(index: Int): Float {
+            val t = if (still) 0f else rows[index].value.coerceIn(0f, 1f)
+            return 4f * t * (1f - t)
         }
         val lead = pulse(0f, 0.82f)
         val follow = pulse(0.17f, 1f)
@@ -228,8 +251,7 @@ internal fun PlayerDockSymbol(
                                 document.reset()
                                 document.addPath(if (filled) DockOutlines.lyricsFilledPage else DockOutlines.lyricsPage)
                                 lines.forEachIndexed { index, path ->
-                                    val start = index * 0.11f
-                                    document.addPath(path, Offset(50f * pulse(start, 0.78f + start), 0f))
+                                    document.addPath(path, Offset(124f * rowTravel(index), 0f))
                                 }
                                 drawPath(document, ink, alpha = alpha)
                             }
@@ -246,9 +268,8 @@ internal fun PlayerDockSymbol(
                         PlayerDockMark.QUEUE -> {
                             DockOutlines.queueLines.forEachIndexed { index, path ->
                                 // The lowest line leads the opening; the top line leads the return.
-                                val start = index * 0.11f
-                                val step = pulse(start, 0.78f + start)
-                                translate(left = 65f * step, top = -28f * step) { drawPath(path, ink) }
+                                val step = rowTravel(index)
+                                translate(left = -124f * step, top = -16f * step) { drawPath(path, ink) }
                             }
                             translate(35f * follow, -22f * follow) { drawPath(DockOutlines.queueNote, ink) }
                         }
@@ -387,12 +408,12 @@ internal fun SkipSymbol(
     val mask = remember { Path() }
     Canvas(Modifier.size(size)) {
         val unit = this.size.minDimension / 960f
-        val force = if (still) (if (pressed) 1f else 0f) else maxOf(pressure, pulse.value).coerceIn(-0.12f, 1f)
+        val force = if (still) (if (pressed) 1f else 0f) else (if (kick == 0) pressure else maxOf(pressure, pulse.value)).coerceIn(-0.12f, 1f)
         fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSymbol(ink: Color) {
             scale(unit, unit, pivot = Offset.Zero) {
                 translate(top = 960f) {
                     scale(if (forward) 1f else -1f, 1f, svgCenter) {
-                        scale(1f - 0.2f * force, 1f, Offset(416f, -480f)) { drawPath(TransportOutlines.skipArrow, ink) }
+                        scale(1f - 0.23f * force, 1f, Offset(470f, -480f)) { drawPath(TransportOutlines.skipArrow, ink) }
                         translate(left = 1.dp.toPx() / unit * force) { drawPath(TransportOutlines.skipStop, ink) }
                     }
                 }
