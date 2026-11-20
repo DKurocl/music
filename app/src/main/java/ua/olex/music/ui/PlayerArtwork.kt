@@ -176,7 +176,7 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
 @Composable
 internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
     val directOpen = LocalDirectPlayerOpen.current
-    val surface = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer
+    val surface = androidx.compose.material3.MaterialTheme.colorScheme.surface
     val density = LocalDensity.current
     val margin = with(density) { 12.dp.toPx() }
     val radius = with(density) { 28.dp.toPx() }

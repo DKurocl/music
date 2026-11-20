@@ -581,6 +581,7 @@ internal fun rememberMoodView(mood: YouTubeMusic.Mood, online: Boolean): MoodVie
  */
 @Composable
 internal fun OnlineResultRow(card: YouTubeMusic.Card, onOpened: () -> Unit = {}) {
+    PrefetchWhenSeen(card)
     val nav = LocalOnlineNav.current
     val artist = card.kind == YouTubeMusic.Card.Kind.ARTIST
     ListItem(
@@ -617,6 +618,7 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
     LazyRow(state = state, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
         flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(state, androidx.compose.foundation.gestures.snapping.SnapPosition.Start)) {
         items(cards, key = { it.id }) { card ->
+            PrefetchWhenSeen(card)
             MediaCard(card.cover, card.title, card.subtitle, size = size, round = card.kind == YouTubeMusic.Card.Kind.ARTIST) {
                 when (card.kind) {
                     YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
@@ -737,4 +739,17 @@ internal fun rememberLoadingPulse(): () -> Float {
     val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "loading").animateFloat(0.55f, 1f,
         androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse), label = "pulse")
     return { pulse.value }
+}
+
+/** A card that stays on screen for half a second has its page loaded behind it (see [Prefetch]). */
+@Composable
+internal fun PrefetchWhenSeen(card: YouTubeMusic.Card) {
+    if (androidx.compose.ui.platform.LocalInspectionMode.current) return
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? ua.olex.music.MusicApp ?: return
+    val network = LocalNetwork.current
+    LaunchedEffect(card.id, network) {
+        if (!network) return@LaunchedEffect
+        kotlinx.coroutines.delay(500)
+        app.graph.prefetch.page(card)
+    }
 }

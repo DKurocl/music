@@ -533,15 +533,10 @@ internal fun PlayerPage(
             override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity { pulled = 0f; return androidx.compose.ui.unit.Velocity.Zero }
         }
     }
-    val coverTint = rememberCoverTint(state.artworkUri, cs.surfaceContainerHigh)
     androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides cs.onSurface) {
     Box(
-        // Material's calm tonal surface, a little lighter at the top; with "Colours from the cover" on,
-        // that top takes a soft tint of the cover (as Pixel's own player does), easing between songs.
-        Modifier.fillMaxSize().nestedScroll(upToQueue).drawWithCache {
-            val background = Brush.verticalGradient(0f to coverTint.value, 0.55f to cs.surface, 1f to cs.surface)
-            onDrawBehind { drawRect(background) }
-        },
+        // One solid surface, as the system media player: no gradient behind the cover.
+        Modifier.fillMaxSize().nestedScroll(upToQueue).background(cs.surface),
     ) {
         // At least a screen tall, so spare height is shared between the blocks instead of pooling
         // under the toolbar on tall phones; with large text it still scrolls.
@@ -1283,40 +1278,6 @@ internal fun rememberSleepLabel(deadline: Long): String? {
     }
 }
 
-/** The owner's choice: the player's top tinted by the song's cover (on by default). */
-internal object CoverColours {
-    const val PREFS = "look"; const val KEY = "cover_colours"
-    fun on(context: android.content.Context) = context.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).getBoolean(KEY, true)
-}
-
-/**
- * The player's top colour: the surface blended toward the cover's average colour (light enough for
- * light theme, deep enough for dark), worked out off the main thread from a tiny copy of the cover
- * and eased between songs. The plain surface when the setting is off or the cover can't be read.
- */
-@Composable
-private fun rememberCoverTint(artwork: String?, surface: androidx.compose.ui.graphics.Color): androidx.compose.runtime.State<androidx.compose.ui.graphics.Color> {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
-    val target by androidx.compose.runtime.produceState(surface, artwork, surface, dark) {
-        value = if (artwork == null || !CoverColours.on(context)) surface else kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                val thumbnail = ua.olex.music.library.ArtworkUris.variant(artwork, context.packageName, ArtworkPlan.SMALL)
-                val request = coil3.request.ImageRequest.Builder(context).data(thumbnail).size(24).build()
-                val image = (coil3.SingletonImageLoader.get(context).execute(request) as? coil3.request.SuccessResult)?.image ?: return@runCatching surface
-                val bitmap = image.toBitmap(24, 24)
-                var r = 0L; var g = 0L; var b = 0L; var n = 0
-                for (x in 0 until bitmap.width) for (y in 0 until bitmap.height) {
-                    val c = bitmap.getPixel(x, y); r += (c shr 16) and 255; g += (c shr 8) and 255; b += c and 255; n++
-                }
-                val cover = androidx.compose.ui.graphics.Color((r / n).toInt(), (g / n).toInt(), (b / n).toInt())
-                // Keep it a surface: mostly the theme's own tone, a third of the cover's colour.
-                androidx.compose.ui.graphics.lerp(surface, cover, if (dark) 0.28f else 0.22f)
-            }.getOrDefault(surface)
-        }
-    }
-    return androidx.compose.animation.animateColorAsState(target, MaterialTheme.motionScheme.slowEffectsSpec(), label = "cover-tint")
-}
 
 /** The selection mark: an empty ring, or a filled circle with a tick that springs in. */
 @Composable
