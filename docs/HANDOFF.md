@@ -1,3 +1,10 @@
+# Start a mix by tapping a track
+
+[код] Individual picks in Home, moods and Search now call the same song radio path as
+Start mix. Search keeps the matched YouTube ID on local copies so the file can seed the
+correct radio. Ready-made mixes still use their playlist ID. If the radio and local library
+produce no next tracks, the selected track can still start.
+
 # YouTube Music shelves, search and playback restoration
 
 [код] Home and moods retain the returned shelves and their titles. Provider mixes use the

@@ -58,6 +58,8 @@ internal class OnlineNav(
     val playMood: (YouTubeMusic.Mood, YouTubeMusic.MoodPage?) -> Unit = { _, _ -> },
     /** Plays a YouTube Music mix ("My Mix 1") by its playlist id, endless like a mix. */
     val playMix: (String, String) -> Unit = { _, _ -> },
+    /** Plays an individually selected recommendation or search result as the seed of a mix. */
+    val playTrackMix: ((Track) -> Unit)? = null,
 )
 
 internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
@@ -590,7 +592,10 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
                     YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
                     YouTubeMusic.Card.Kind.ARTIST -> nav.open(OnlineTarget.Artist(card.title, card.id))
                     YouTubeMusic.Card.Kind.MIX -> { haptics.spin(); nav.playMix(card.id, card.title) }
-                    YouTubeMusic.Card.Kind.SONG -> nav.play(listOf(card.song()), 0, null)
+                    YouTubeMusic.Card.Kind.SONG -> {
+                        val song = card.song()
+                        nav.playTrackMix?.invoke(song) ?: nav.play(listOf(song), 0, null)
+                    }
                 }
             }, horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start) {
                 if (round) Artwork(card.cover, Modifier.size(size).clip(androidx.compose.foundation.shape.CircleShape), size / 2)
