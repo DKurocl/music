@@ -847,8 +847,10 @@ internal fun PlayerPlayToggle(
         contentDescription = if (playing) "Pause" else "Play"
         if (waiting) stateDescription = "Getting ready"
     }, contentAlignment = Alignment.Center) {
-        if (waiting) androidx.compose.material3.LoadingIndicator(Modifier.size(38.dp), color = colors.onPrimary)
-        else PlayPauseSymbol(playing, minOf(size - 8.dp, 40.dp), pressed, colors.onPrimary)
+        Box(Modifier.graphicsLayer { scaleX = 1f - push.coerceIn(-1f, 1f) * 0.06f; scaleY = scaleX }) {
+            if (waiting) androidx.compose.material3.LoadingIndicator(Modifier.size(38.dp), color = colors.onPrimary)
+            else PlayPauseSymbol(playing, minOf(size - 8.dp, 40.dp), pressed = false, color = colors.onPrimary)
+        }
     }
 }
 
