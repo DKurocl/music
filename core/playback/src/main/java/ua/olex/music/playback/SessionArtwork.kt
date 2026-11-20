@@ -19,7 +19,7 @@ import java.util.concurrent.Callable
 @OptIn(UnstableApi::class)
 internal class SessionArtwork(context: Context) : BitmapLoader {
     private val app = context.applicationContext
-    private val source = DataSourceBitmapLoader(app, 384)
+    private val source = DataSourceBitmapLoader.Builder(app).setMaximumOutputDimension(384).build()
     private val worker = DataSourceBitmapLoader.DEFAULT_EXECUTOR_SERVICE.get()
 
     override fun supportsMimeType(mimeType: String) = source.supportsMimeType(mimeType)
