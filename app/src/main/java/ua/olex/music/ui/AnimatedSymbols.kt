@@ -51,6 +51,16 @@ internal fun playerControlPress(pressed: Boolean): State<Float> {
         else animateFloatAsState(target, MaterialTheme.motionScheme.fastSpatialSpec(), label = "Player control press")
 }
 
+@Composable
+internal fun playerPressRelease(pressed: Boolean): State<Float> {
+    val target = if (pressed) 1f else 0f
+    val motion = MaterialTheme.motionScheme
+    return if (LocalPowerSave.current) rememberUpdatedState(target) else animateFloatAsState(
+        target, if (pressed) motion.fastSpatialSpec() else androidx.compose.animation.core.spring(stiffness = 600f, dampingRatio = 0.5f),
+        label = "Transport release",
+    )
+}
+
 private fun plate(center: Offset, full: Float, selected: Float, pressed: Float): RoundRect {
     val expansion = maxOf(selected, pressed * 0.72f).coerceIn(0f, 1f).takeIf { it >= 0.012f } ?: 0f
     val side = full * expansion * (1f - 0.1f * pressed)
@@ -96,13 +106,26 @@ internal fun PlayerModeSymbol(
     val crossover by animateFloatAsState(if (shuffle && on) 1f else 0f,
         if (still) snap() else motion.defaultSpatialSpec(), label = "Shuffle crossover")
     val turn = remember { Animatable(0f, visibilityThreshold = 0.003f) }
+    val nudge = remember { Animatable(0f) }
     val previousMode = remember { booleanArrayOf(on, one) }
     LaunchedEffect(on, one, still) {
         val changed = previousMode[0] != on || previousMode[1] != one
+        val enabled = !previousMode[0] && on && !one
         previousMode[0] = on
         previousMode[1] = one
-        if (shuffle || still) turn.snapTo(0f)
-        else if (changed) turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.defaultSpatialSpec())
+        if (shuffle || still) {
+            turn.snapTo(0f)
+            nudge.snapTo(0f)
+        } else if (changed) kotlinx.coroutines.coroutineScope {
+            launch {
+                if (enabled) {
+                    nudge.animateTo(1f, motion.fastSpatialSpec())
+                    nudge.animateTo(0f, androidx.compose.animation.core.spring(stiffness = 600f, dampingRatio = 0.5f))
+                } else nudge.animateTo(0f, motion.fastSpatialSpec())
+            }
+            if (!enabled) turn.animateTo(kotlin.math.floor(turn.value + 0.07f) + 1f, motion.defaultSpatialSpec())
+            else if (turn.value % 1f != 0f) turn.animateTo(kotlin.math.ceil(turn.value), motion.fastSpatialSpec())
+        }
     }
     val numeral by animateFloatAsState(if (one) 1f else 0f,
         if (still) snap() else motion.fastSpatialSpec(), label = "Repeat one numeral")
@@ -158,6 +181,15 @@ internal fun PlayerModeSymbol(
                                 val angle = Math.toDegrees(kotlin.math.atan2(tangent.y, tangent.x).toDouble()).toFloat()
                                 translate(tip.x, tip.y) { rotate(angle, Offset.Zero) { drawPath(ModeOutlines.repeatHead, ink) } }
                             }
+                        } else if (!still && kotlin.math.abs(nudge.value) > 0.008f) {
+                            val slide = -120f * nudge.value
+                            repeat(2) { index ->
+                                rotate(index * 180f, svgCenter) {
+                                    drawPath(ModeOutlines.repeatNudgeRail, ink, style = Stroke(80f, cap = StrokeCap.Round))
+                                    drawLine(ink, Offset(280f, -720f), Offset(686f + slide, -720f), 80f, StrokeCap.Round)
+                                    translate(686f + slide, -720f) { drawPath(ModeOutlines.repeatHead, ink) }
+                                }
+                            }
                         } else drawPath(ModeOutlines.repeat, ink)
                         val digit = if (still) (if (one) 1f else 0f) else numeral.coerceIn(0f, 1.12f)
                         if (digit > 0.012f) {
@@ -179,6 +211,7 @@ private object ModeOutlines {
     val shuffleOver = symbolPath("M172-172q-11-11-11-28t11-28l492-492h-64q-17 0-28.5-11.5T560-760q0-17 11.5-28.5T600-800h160q17 0 28.5 11.5T800-760v160q0 17-11.5 28.5T760-560q-17 0-28.5-11.5T720-600v-64L228-172q-11 11-28 11t-28-11Z")
     val shuffleTail = symbolPath("M171-732q-11-11-11-28t11-28q11-11 27.5-11t28.5 11l168 167q11 11 11.5 27.5T395-565q-11 11-28 11t-28-11L171-732Z")
     val repeat = symbolPath("m274-200 34 34q12 12 11.5 28T308-110q-12 12-28.5 12.5T251-109L148-212q-6-6-8.5-13t-2.5-15q0-8 2.5-15t8.5-13l103-103q12-12 28.5-11.5T308-370q11 12 11.5 28T308-314l-34 34h406v-120q0-17 11.5-28.5T720-440q17 0 28.5 11.5T760-400v120q0 33-23.5 56.5T680-200H274Zm412-480H280v120q0 17-11.5 28.5T240-520q-17 0-28.5-11.5T200-560v-120q0-33 23.5-56.5T280-760h406l-34-34q-12-12-11.5-28t11.5-28q12-12 28.5-12.5T709-851l103 103q6 6 8.5 13t2.5 15q0 8-2.5 15t-8.5 13L709-589q-12 12-28.5 11.5T652-590q-11-12-11.5-28t11.5-28l34-34Z")
+    val repeatNudgeRail = symbolPath("M240-560V-680Q240-720 280-720")
     val repeatHead = symbolPath("M0 40l-34 34q-12 12-11.5 28t11.5 28q12 12 28.5 11.5t28.5-12.5l103-103q6-6 8.5-13t2.5-15q0-8-2.5-15t-8.5-13l-103-103q-12-12-28.5-11.5T-34-130q-12 12-11.5 28t11.5 28L0-40H-45v80Z")
     val one = symbolPath("M460-540h-30q-13 0-21.5-8.5T400-570q0-13 8.5-21.5T430-600h50q17 0 28.5 11.5T520-560v170q0 13-8.5 21.5T490-360q-13 0-21.5-8.5T460-390v-150Z")
 }
@@ -202,6 +235,14 @@ internal fun PlayerDockSymbol(
             impulse.animateTo(0f, motion.fastSpatialSpec())
         }
     }
+    val wave = remember { Animatable(1f) }
+    LaunchedEffect(kick, still, mark) {
+        if (still || mark != PlayerDockMark.SPEAKER) wave.snapTo(1f)
+        else if (kick != 0) {
+            if (wave.value >= 0.999f) wave.snapTo(0f)
+            wave.animateTo(1f, androidx.compose.animation.core.tween(350, easing = androidx.compose.animation.core.LinearEasing))
+        }
+    }
     val mask = remember { Path() }
     val rows = remember { List(3) { Animatable(if (active) 1f else 0f) } }
     LaunchedEffect(active, still, mark) {
@@ -210,7 +251,7 @@ internal fun PlayerDockSymbol(
                 launch {
                     if (still || coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) anim.snapTo(if (active) 1f else 0f)
                     else {
-                        kotlinx.coroutines.delay(40L * if (active) index else 2 - index)
+                        kotlinx.coroutines.delay((if (mark == PlayerDockMark.QUEUE) 50L else 40L) * if (active) index else 2 - index)
                         anim.animateTo(if (active) 1f else 0f, motion.defaultSpatialSpec())
                     }
                 }
@@ -269,12 +310,15 @@ internal fun PlayerDockSymbol(
                             DockOutlines.queueLines.forEachIndexed { index, path ->
                                 // The lowest line leads the opening; the top line leads the return.
                                 val step = rowTravel(index)
-                                translate(left = -124f * step, top = -16f * step) { drawPath(path, ink) }
+                                translate(left = -160f * step) { drawPath(path, ink) }
                             }
-                            translate(35f * follow, -22f * follow) { drawPath(DockOutlines.queueNote, ink) }
+                            translate(top = -120f * follow) { drawPath(DockOutlines.queueNote, ink) }
                         }
                         PlayerDockMark.SPEAKER -> {
-                            rotate(-7f * push, svgCenter) {
+                            val ripple = if (still) 1f else wave.value
+                            if (ripple < 1f) drawCircle(ink, radius = 280f * (1f + 0.6f * ripple), center = svgCenter,
+                                alpha = 0.5f * (1f - ripple), style = Stroke(36f))
+                            rotate(-12f * push, svgCenter) {
                                 drawPath(DockOutlines.speakerBody, ink)
                                 scale(1f + 0.17f * push, 1f + 0.17f * push, Offset(480f, -360f)) {
                                     drawPath(DockOutlines.speakerDriver, ink)
@@ -396,7 +440,7 @@ internal fun SkipSymbol(
 ) {
     val still = LocalPowerSave.current
     val motion = MaterialTheme.motionScheme
-    val pressure by animateFloatAsState(if (pressed) 1f else 0f, if (still) snap() else motion.fastSpatialSpec(), label = "Skip pressure")
+    val pressure by playerPressRelease(pressed)
     val pulse = remember { Animatable(0f) }
     LaunchedEffect(kick, still) {
         if (still) pulse.snapTo(0f)
@@ -408,13 +452,13 @@ internal fun SkipSymbol(
     val mask = remember { Path() }
     Canvas(Modifier.size(size)) {
         val unit = this.size.minDimension / 960f
-        val force = if (still) (if (pressed) 1f else 0f) else (if (kick == 0) pressure else maxOf(pressure, pulse.value)).coerceIn(-0.12f, 1f)
+        val force = if (still) (if (pressed) 1f else 0f) else (if (kick == 0) pressure else maxOf(pressure, pulse.value)).coerceIn(-0.215f, 1f)
         fun androidx.compose.ui.graphics.drawscope.DrawScope.drawSymbol(ink: Color) {
             scale(unit, unit, pivot = Offset.Zero) {
                 translate(top = 960f) {
                     scale(if (forward) 1f else -1f, 1f, svgCenter) {
-                        scale(1f - 0.23f * force, 1f, Offset(470f, -480f)) { drawPath(TransportOutlines.skipArrow, ink) }
-                        translate(left = 1.dp.toPx() / unit * force) { drawPath(TransportOutlines.skipStop, ink) }
+                        scale(1f - 0.28f * force, 1f, Offset(470f, -480f)) { drawPath(TransportOutlines.skipArrow, ink) }
+                        translate(left = 1.5.dp.toPx() / unit * force) { drawPath(TransportOutlines.skipStop, ink) }
                     }
                 }
             }

@@ -897,6 +897,7 @@ class DesignGalleryTest {
         val modes = mapOf(6 to RepeatMode.OFF, 7 to RepeatMode.ALL, 8 to RepeatMode.ONE, 21 to RepeatMode.OFF)
             .mapValues { androidx.compose.runtime.mutableStateOf(it.value) }
         val showDock = androidx.compose.runtime.mutableStateOf(false)
+        val groupPlaying = androidx.compose.runtime.mutableStateOf(false)
         compose.setContent {
             androidx.compose.material3.MaterialExpressiveTheme(colorScheme = androidx.compose.material3.darkColorScheme()) {
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
@@ -932,6 +933,10 @@ class DesignGalleryTest {
                             }
                         }
                     }
+                    androidx.compose.foundation.layout.Box(Modifier.testTag("motion-group").size(350.dp, 76.dp)) {
+                        Transport(now.copy(playWhenReady = groupPlaying.value), { groupPlaying.value = !groupPlaying.value },
+                            onNext = {}, onPrevious = {}, onShuffle = {}, onRepeat = {}, onSkipHeld = {})
+                    }
                     androidx.compose.foundation.layout.Box(Modifier.testTag("motion-dock").height(60.dp).width(268.dp)) {
                         if (showDock.value) PlayerDock(false, true, false, false, PlayerDockMark.SPEAKER, false,
                             ready = true, connected = true, onLyrics = {}, onTimer = {}, onQueue = {}, onOutput = {}, onFeel = {})
@@ -940,7 +945,7 @@ class DesignGalleryTest {
             }
         }
 
-        val targets = (names.indices.map { "motion-$it" } + "motion-dock").map {
+        val targets = (names.indices.map { "motion-$it" } + listOf("motion-dock", "motion-group")).map {
             compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot
         }
         val touch = compose.onRoot()
@@ -956,25 +961,21 @@ class DesignGalleryTest {
         }
 
         val sample = (0..500 step 50).toSet() + 680
-        val animationFrames = (0..688 step 16).toSet()
-        val rows = List(names.size + 1) { arrayListOf<Bitmap>() }
+        val rows = List(names.size + 2) { arrayListOf<Bitmap>() }
         val output = File("build/reports/ui-previews/player-motion").apply { mkdirs() }
-        val gifFrames = output.resolve("gif-frames").apply { mkdirs() }
+        val groupPlay = compose.onNode(
+            hasContentDescription("Play") and hasAnyAncestor(hasTestTag("motion-group"))
+        ).fetchSemanticsNode().boundsInRoot.center
         compose.mainClock.autoAdvance = false
         touch.performTouchInput { down(1, targets[1].center); down(3, targets[3].center) }
         compose.mainClock.advanceTimeBy(500)
         var previous = 0
         var settledAt450: List<Bitmap>? = null
         val dock = names.size
-        for (ms in (sample + animationFrames + setOf(100, 200, 500)).sorted()) {
+        for (ms in (sample + setOf(100, 150, 200, 500)).sorted()) {
             if (ms != 0) compose.mainClock.advanceTimeBy((ms - previous).toLong(), ignoreFrameDuration = true)
             val frames = capture()
             if (ms in sample) frames.forEachIndexed { index, frame -> rows[index] += frame }
-            if (ms in animationFrames) frames.forEachIndexed { index, bitmap ->
-                val name = (names.getOrNull(index) ?: "Dock entrance").lowercase().replace(Regex("[^a-z0-9]+"), "-")
-                gifFrames.resolve("${index.toString().padStart(2, '0')}-$name/${ms.toString().padStart(3, '0')}.png").apply { parentFile?.mkdirs() }
-                    .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-            }
             if (ms == 450) settledAt450 = frames
             if (ms == 500) {
                 val at450 = checkNotNull(settledAt450)
@@ -983,12 +984,13 @@ class DesignGalleryTest {
             if (ms == 0) {
                 touch.performTouchInput {
                     up(1); up(3)
-                    down(0, targets[0].center); down(2, targets[2].center)
+                    down(0, targets[0].center); down(2, targets[2].center); down(4, groupPlay)
                 }
                 compose.runOnIdle { showDock.value = true }
                 click(*(4..21).toList().toIntArray())
             }
             if (ms == 100) click(20, 21)
+            if (ms == 150) touch.performTouchInput { up(4) }
             if (ms == 200) click(21)
             if (ms == 500) touch.performTouchInput { up(0); up(2) }
             previous = ms
@@ -999,24 +1001,39 @@ class DesignGalleryTest {
         org.junit.Assert.assertFalse("Previous compresses", rows[0].first().sameAs(rows[0][3]))
         org.junit.Assert.assertFalse("Next compresses", rows[2].first().sameAs(rows[2][3]))
 
-        val labels = names + "Dock entrance"
+        val labels = names
         val cell = 108
         val labelWidth = 234
         val width = labelWidth + rows.first().size * cell
-        val sheet = Bitmap.createBitmap(width, 34 + rows.size * 121, Bitmap.Config.ARGB_8888)
+        val sheet = Bitmap.createBitmap(width, 34 + names.size * 121 + 2250, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(sheet)
         canvas.drawColor(0xff181a20.toInt())
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE; textSize = 19f }
         val times = (0..500 step 50).toList() + 680
         times.forEachIndexed { index, time -> canvas.drawText("$time ms", (labelWidth + cell * index + 6).toFloat(), 23f, paint) }
-        rows.forEachIndexed { index, frames ->
+        rows.take(names.size).forEachIndexed { index, frames ->
             val y = 34 + index * 121
             canvas.drawText(labels[index], 10f, y + 55f, paint)
             frames.forEachIndexed { column, frame ->
                 val x = labelWidth + column * cell
-                val height = if (index == dock) cell.toFloat() * frame.height / frame.width else 104f
-                val top = y + (104f - height) / 2f
-                canvas.drawBitmap(frame, null, android.graphics.RectF(x.toFloat(), top, x + 104f, top + height), null)
+                val scale = minOf(104f / frame.width, 104f / frame.height)
+                val w = frame.width * scale
+                val h = frame.height * scale
+                val left = x + (104f - w) / 2f
+                val top = y + (104f - h) / 2f
+                canvas.drawBitmap(frame, null, android.graphics.RectF(left, top, left + w, top + h), null)
+            }
+        }
+        var y = 34 + names.size * 121
+        for ((label, frames) in listOf("Dock entrance" to rows[dock], "Transport ButtonGroup press and release" to rows[dock + 1])) {
+            canvas.drawText(label, 10f, y + 24f, paint)
+            y += 38
+            val step = frames.first().height + 32
+            frames.chunked(2).forEach { pair ->
+                pair.forEachIndexed { column, bitmap ->
+                    canvas.drawBitmap(bitmap, (10 + column * (bitmap.width + 32)).toFloat(), y.toFloat(), null)
+                }
+                y += step
             }
         }
         output.resolve("player-control-frames.png").outputStream().use { sheet.compress(Bitmap.CompressFormat.PNG, 100, it) }
