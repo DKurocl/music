@@ -240,6 +240,7 @@ internal fun LibraryBrowser(
         backToArtist = null
         if (artist != null && tab == LibraryTab.ALBUMS) { tabName = LibraryTab.ARTISTS.name; selectedId = artist; return }
         if (openedFromOutside == "collection" && onLeave != null) { openedFromOutside = null; selectedId = null; browsing = null; onLeave(); return }
+        if (selectedId == null && mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS) { tabName = LibraryTab.PLAYLISTS.name; return }
         selectedId = null
         returnQuery?.let { returnQuery = null; onQueryChange(it) }
     }
@@ -360,13 +361,6 @@ internal fun LibraryBrowser(
                 Text(BrowseTile.valueOf(name).title, style = MaterialTheme.typography.titleLarge)
             }
         }
-        if (!searching && mode == BrowserMode.LIBRARY && selected == null && tab != LibraryTab.PLAYLISTS) {
-            Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                KickIconButton(onClick = { tabName = LibraryTab.PLAYLISTS.name },
-                    modifier = Modifier.semantics { contentDescription = "Back to playlists" }) { taps -> Symbol(Glyph.BACK, kick = taps) }
-                Text(tab.title, style = MaterialTheme.typography.titleLarge)
-            }
-        }
         if (!searching && mode == BrowserMode.ALL && selected == null) {
             androidx.compose.foundation.lazy.LazyRow(
                 contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -411,6 +405,7 @@ internal fun LibraryBrowser(
             onNext = { batch { onEnqueue(it, true) } }, onQueue = { batch { onEnqueue(it, false) } },
             onPlaylist = { batch(onAddToPlaylist) }, onTags = { batch(onEditTags) })
         if (!searching && tab == LibraryTab.SMART) {
+            if (mode == BrowserMode.LIBRARY) LaunchedEffect(Unit) { onCollection(tab.title) }
             SmartPlaylistBrowser(smart, currentId, Modifier.weight(1f), onPlay = onPlay, onShuffle = onShuffle, onTrackActions = onTrackActions,
                 onSave = onSaveSmart, onDelete = onDeleteSmart)
         } else if (!searching && tab == LibraryTab.PLAYLISTS && personalActions != null) {
@@ -429,7 +424,12 @@ internal fun LibraryBrowser(
         } else Box(Modifier.weight(1f)) {
         val listState = if (searching) resultList else androidx.compose.runtime.key(tabName, selected?.id) { androidx.compose.foundation.lazy.rememberLazyListState() }
         val headerGone by remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex > 0 } }
-        LaunchedEffect(selected?.id, headerGone) { onCollection(selected?.let { if (headerGone) it.name else "" }) }
+        // A list opened from Playlists (Favourites, Smart, History) names itself in the top bar with
+        // Back, as Google's apps do, instead of a second title row under the place's title.
+        val subList = !searching && mode == BrowserMode.LIBRARY && tab != LibraryTab.PLAYLISTS
+        LaunchedEffect(selected?.id, headerGone, subList, tab) {
+            onCollection(selected?.let { if (headerGone) it.name else "" } ?: if (subList) tab.title else null)
+        }
         val railTracks = if (!searching && selected == null && tab == LibraryTab.SONGS && (order.mode == TrackSortMode.DEFAULT || order.mode == TrackSortMode.TITLE)) visible else null
         LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(bottom = 16.dp + LocalPlayerInset.current + (if (picking) 80.dp else 0.dp))) {
             if (!searching || showLibraryResults) scanError?.let { item(key = "scan-error") { ErrorNotice(it, onRescan) } }

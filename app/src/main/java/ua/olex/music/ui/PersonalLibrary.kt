@@ -187,9 +187,7 @@ internal fun PlaylistBrowser(
         if (selected == null) {
             if (shortcuts != null) item(key = "playlist-shortcuts") { shortcuts() }
             item(key = "playlist-heading") {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 12.dp, top = 8.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("Your playlists", Modifier.weight(1f), style = MaterialTheme.typography.titleLargeEmphasized)
+                SectionHeader("Your playlists", trailing = {
                     Box {
                         FilledTonalIconButton(onClick = { playlistMenu = true }, enabled = !loadingDocument,
                             modifier = Modifier.semantics { contentDescription = "Add a playlist" }) { Symbol(Glyph.ADD) }
@@ -202,7 +200,7 @@ internal fun PlaylistBrowser(
                             })
                         }
                     }
-                }
+                })
             }
             if (remoteLoading && youTubePlaylists.isEmpty()) item(key = "loading-remote-playlists") { PlaceholderRow() }
             if (remoteFailed) item(key = "retry-remote-playlists") { ErrorNotice("Couldn't load your YouTube Music playlists.") { remoteRetry++ } }
