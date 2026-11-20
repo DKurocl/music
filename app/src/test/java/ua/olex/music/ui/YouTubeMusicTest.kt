@@ -1,5 +1,6 @@
 package ua.olex.music.ui
 
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -219,6 +220,63 @@ class YouTubeMusicTest {
         assertEquals("UCcorrect", page.id)
         assertEquals(3, page.songs.size)
         assertNull(source.peekArtist("UCcorrect"))
+    }
+
+    @Test fun playlistBrowseRecoversFromTheAlternateWatchRequest() = kotlinx.coroutines.runBlocking {
+        val row = """{"playlistPanelVideoRenderer":{"videoId":"track","title":{"simpleText":"Song"},
+            "longBylineText":{"simpleText":"Artist"}}}"""
+        fun payload(playlistId: String) =
+            """{"playlistPanelRenderer":{"playlistId":"$playlistId","totalVideos":1,"contents":[$row]}}"""
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            when {
+                endpoint == "browse" -> null
+                "wAEB" in fields -> payload("PLtest")
+                else -> payload("PLunrelated")
+            }
+        })
+        val opened = source.albumPage(YouTubeMusic.OnlineAlbum("VLPLtest", "Playlist", null, null), null, false)
+        assertEquals("Song", opened?.second?.single()?.title)
+        assertEquals(false, opened?.first?.partial)
+    }
+
+    @Test fun searchPublishesSongsBeforeOptionalRequestsFinish() = kotlinx.coroutines.runBlocking {
+        val shown = kotlinx.coroutines.CompletableDeferred<YouTubeMusic.Found>()
+        val finish = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val json = """{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"track"},
+            "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Ode to Viceroy"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Mac DeMarco"},{"text":" • "},{"text":"2"}]}}}]}}"""
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            assertEquals("search", endpoint)
+            if ("params" in fields) { finish.await(); "{}" } else json
+        })
+        val result = launch { source.searchAll("Mac DeMarco") { shown.complete(it) } }
+        assertEquals("Mac DeMarco", kotlinx.coroutines.withTimeout(3_000) { shown.await() }.songs.single().artist)
+        assertTrue(result.isActive)
+        finish.complete(Unit)
+        result.join()
+    }
+
+    @Test fun artistProfileCanRecoverThroughTheCreditedCatalogueChannel() = kotlinx.coroutines.runBlocking {
+        val songs = """{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"track"},
+            "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Ode to Viceroy"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Mac DeMarco","navigationEndpoint":{
+                "browseEndpoint":{"browseId":"UCcatalogue","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}]}}}]}}"""
+        val full = """{"musicImmersiveHeaderRenderer":{"title":{"simpleText":"Mac DeMarco"}},"contents":[$songs]}"""
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            when {
+                endpoint == "search" -> songs
+                "UCcatalogue" in fields -> full
+                else -> null
+            }
+        })
+        var preview: YouTubeMusic.OnlineArtist? = null
+        val result = source.artistPage("Mac DeMarco", "UCprofile", null, false) {
+            if (it.partial) preview = it
+        }
+        assertEquals("UCcatalogue", preview?.id)
+        assertEquals("UCcatalogue", result?.id)
+        assertEquals("Ode to Viceroy", result?.songs?.single()?.title)
+        assertEquals(false, result?.partial)
     }
 
     @Test fun publicArtistProfileAcceptsAlternateHeadersButRejectsErrorPages() {

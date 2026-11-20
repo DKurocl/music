@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,14 +100,19 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         .combine(graph.youTubeOn) { text, on -> text to on }
         .combine(graph.network) { (text, on), connected -> text to (on && connected) }
         .combine(searchRetry) { request, _ -> request }
-        .mapLatest { (text, on) ->
-            if (!on || text.trim().length < 2) return@mapLatest null
-            try {
-                val found = graph.youTube.searchAll(text.trim())
+        .transformLatest { (text, on) ->
+            if (!on || text.trim().length < 2) {
+                emit(null)
+                return@transformLatest
+            }
+            fun result(found: YouTubeMusic.Found) =
                 OnlineSearch(text, found.songs, artists = found.artists, albums = found.albums, playlists = found.playlists)
+            try {
+                val found = graph.youTube.searchAll(text.trim()) { emit(result(it)) }
+                emit(result(found))
             }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { OnlineSearch(text, emptyList(), failed = true) }
+            catch (_: Exception) { emit(OnlineSearch(text, emptyList(), failed = true)) }
         }.combine(catalogue) { found, catalogue ->
             if (found == null) return@combine null
             val owned = YouTubeMusic.indexOf(catalogue ?: LibraryIndex.EMPTY)
