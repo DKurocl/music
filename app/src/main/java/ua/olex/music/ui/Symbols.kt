@@ -1,7 +1,5 @@
 package ua.olex.music.ui
 
-import androidx.compose.ui.Alignment
-import androidx.compose.animation.togetherWith
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.animation.core.Animatable
@@ -36,10 +34,10 @@ import ua.olex.music.R
  * its FILL and wght axes, so icons fill in and thicken smoothly as Google's own apps do.
  */
 enum class Glyph(val codepoint: Int) {
-    PLAY(0xE037), NEXT(0xE044), PREVIOUS(0xE045), SHUFFLE(0xE043),
+    PLAY(0xE037), SHUFFLE(0xE043),
     QUEUE(0xE03D), MORE(0xE5D4), SEARCH(0xEF7A), CLOSE(0xE5CD), COLLAPSE(0xE5CF), BACK(0xE5C4), NOTE(0xE405),
     ALBUM(0xE019), PERSON(0xF0D3), FOLDER(0xE2C7), FAVOURITE(0xE87E), PLAYLIST_ADD(0xE03B), PLAYLIST(0xE05F),
-    LYRICS(0xEC0B), SLEEP(0xF159), SPEAKER(0xE32D), HEADPHONES(0xF01F), BLUETOOTH(0xE1A7), WAVE(0xE1B8),
+    SLEEP(0xF159), SPEAKER(0xE32D), HEADPHONES(0xF01F), BLUETOOTH(0xE1A7), WAVE(0xE1B8),
     HISTORY(0xE8B3), LIBRARY(0xE030), REFRESH(0xE5D5), CHECK(0xE668), ADD(0xE145), DELETE(0xE92E), EDIT(0xF097),
     DRAG(0xE25D), TUNE(0xE429), INFO(0xE88E), PLAY_NEXT(0xE066), ADD_TO_QUEUE(0xE05C), DOWN(0xE5DB),
     REMOVE(0xF08F), GENRE(0xE01D), STAR(0xF09A), SMART(0xE65F), STATS(0xF092), DUPLICATES(0xEB7D),
@@ -47,7 +45,7 @@ enum class Glyph(val codepoint: Int) {
     CALENDAR(0xEBCC), HI_RES(0xE024), MIC(0xE31D), UNPLAYED(0xE440),
     // Where a song plays from (docs/specs/M10_ONLINE.md, D2), and an artist's radio.
     CLOUD(0xE2BD), CLOUD_DONE(0xE2BF), CLOUD_OFF(0xE2C1), DOWNLOADING(0xF001), RADIO(0xE03E),
-    SHARE(0xE80D), HOME(0xE88A), PAUSE(0xE034), VIBRATION(0xE62D), TRENDING(0xE8E5),
+    SHARE(0xE80D), HOME(0xE88A), VIBRATION(0xE62D), TRENDING(0xE8E5),
     WIFI(0xE63E), VIDEO(0xE063), FOLDER_OFF(0xEB83), UNDO(0xE166);
 
     val text: String = String(Character.toChars(codepoint))
@@ -55,10 +53,10 @@ enum class Glyph(val codepoint: Int) {
     /** The small gesture this glyph plays when its button is tapped. */
     val motion: GlyphMotion get() = when (this) {
         SETTINGS, TUNE, REFRESH, SHUFFLE, MIX, RADIO, SLEEP -> GlyphMotion.TILT
-        NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
-        PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
+        PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
+        BACK -> GlyphMotion.NUDGE_LEFT
         DOWNLOAD, COLLAPSE, DOWN, MORE -> GlyphMotion.DROP
-        ADD_TO_QUEUE, PLAYLIST_ADD, PLAYLIST, QUEUE, LYRICS -> GlyphMotion.RISE
+        ADD_TO_QUEUE, PLAYLIST_ADD, PLAYLIST, QUEUE -> GlyphMotion.RISE
         FAVOURITE, CHECK, STAR, ADD -> GlyphMotion.CONFIRM
         else -> GlyphMotion.POP
     }
@@ -147,30 +145,6 @@ fun Symbol(
         paint.setAxes(fillFraction?.invoke() ?: fill, weight)
         drawContext.canvas.nativeCanvas.drawText(glyph.text, this.size.width / 2, (this.size.height + em) / 2, paint)
     }
-}
-
-/** The triangle unfolds into two stems. Playback changes from any controller retarget the same paths. */
-@Composable
-internal fun PlayPauseSymbol(playing: Boolean, size: Dp, pressed: Boolean = LocalIconPressed.current) {
-    // Google's own play_arrow and pause (Material Symbols, filled), trading places on a short
-    // spring of scale and fade, as Google's media controls do.
-    val still = LocalPowerSave.current
-    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-    val effects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
-    androidx.compose.animation.AnimatedContent(playing, transitionSpec = {
-        if (still) androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
-        else (androidx.compose.animation.fadeIn(effects) + androidx.compose.animation.scaleIn(spatial, 0.7f)) togetherWith
-            (androidx.compose.animation.fadeOut(effects) + androidx.compose.animation.scaleOut(spatial, 0.7f))
-    }, contentAlignment = Alignment.Center, label = "play pause") { on ->
-        Symbol(if (on) Glyph.PAUSE else Glyph.PLAY, size = size, filled = true, pressed = pressed)
-    }
-}
-
-/** The arrow travels towards its stop, compresses, then rebounds. Previous mirrors the whole gesture. */
-@Composable
-internal fun SkipSymbol(forward: Boolean, size: Dp, kick: Int) {
-    // Google's skip_next / skip_previous; the tap nudges them the way they point (Glyph.motion).
-    Symbol(if (forward) Glyph.NEXT else Glyph.PREVIOUS, size = size, filled = true, kick = kick)
 }
 
 internal val LocalIconPressed = androidx.compose.runtime.compositionLocalOf { false }

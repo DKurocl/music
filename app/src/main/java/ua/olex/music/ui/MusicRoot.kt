@@ -917,6 +917,7 @@ private fun NowPlaying(
     PlayerPage(state, format, route, favourite, position, onClose, onToggle, onNext, onPrevious, onSeek,
         onShuffle, onRepeat, onFavourite, onMore, onOutput = changeOutput, onQueue = { queueSheet = true },
         onLyrics = { lyricsOpen = true }, onAudioPath = { audioPath = true }, onTimer = { timerDialog = true },
+        queueOpen = queueSheet, lyricsSheetOpen = lyricsOpen,
         // "Playing from" names a playlist or mix when there is one; a tap then must not open the song's
         // album under that name, so it opens the album only when the line shows the album.
         onOpenAlbum = onOpenOrigin ?: if (originIsMix) ({ queueSheet = true }) else onOpenAlbum.takeIf { from == null }, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,

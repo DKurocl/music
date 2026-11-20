@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -880,105 +881,122 @@ class DesignGalleryTest {
         shot("01c-home-mood")
     }
 
-    @Test fun transportModeGestures() = transportModeFrames(rapid = false)
-
-    @Test fun transportModeGesturesRetargetAt100Ms() = transportModeFrames(rapid = true)
-
-    @Test fun transportTransitionsSettleWithin450Ms() {
-        val names = listOf("shuffle-on", "shuffle-off", "repeat-all", "repeat-one", "repeat-off")
-        val shuffle = listOf(androidx.compose.runtime.mutableStateOf(false), androidx.compose.runtime.mutableStateOf(true))
-        val repeat = RepeatMode.entries.map { androidx.compose.runtime.mutableStateOf(it) }
+    /** Captures production controls on one clock and writes one contact sheet for review. */
+    @Test
+    @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
+    fun playerControlMotionGallery() {
+        val names = listOf(
+            "Previous press", "Previous release", "Next press", "Next release",
+            "Shuffle on", "Shuffle off", "Repeat off to all", "Repeat all to one", "Repeat one to off",
+            "Play to pause", "Pause to play", "Lyrics show", "Lyrics hide", "Sleep arm", "Sleep turn off",
+            "Queue open", "Queue close", "Output picker", "Feel on", "Feel off", "Shuffle 0 and 100 ms", "Repeat 0, 100, 200 ms",
+        )
+        val press = androidx.compose.foundation.interaction.PressInteraction.Press(androidx.compose.ui.geometry.Offset.Zero)
+        val sources = List(4) { androidx.compose.foundation.interaction.MutableInteractionSource() }
+        val startsOn = setOf(5, 7, 8, 10, 12, 14, 16, 19)
+        val flags = names.indices.map { androidx.compose.runtime.mutableStateOf(it in startsOn) }
+        val modes = mapOf(6 to RepeatMode.OFF, 7 to RepeatMode.ALL, 8 to RepeatMode.ONE, 21 to RepeatMode.OFF)
+            .mapValues { androidx.compose.runtime.mutableStateOf(it.value) }
+        val showDock = androidx.compose.runtime.mutableStateOf(false)
         compose.setContent {
             AppTheme {
-                androidx.compose.foundation.layout.Row(Modifier.background(MaterialTheme.colorScheme.surface)) {
-                    names.forEachIndexed { index, name ->
-                        androidx.compose.foundation.layout.Box(Modifier.padding(4.dp).testTag(name)) {
-                            if (index < 2) ModeToggle(shuffle = shuffle[index].value, enabled = true) {
-                                shuffle[index].value = !shuffle[index].value
-                            } else {
-                                val mode = repeat[index - 2]
-                                ModeToggle(repeat = mode.value, enabled = true) {
-                                    mode.value = RepeatMode.entries[(mode.value.ordinal + 1) % 3]
+                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                    names.indices.chunked(7).forEach { row ->
+                        androidx.compose.foundation.layout.Row {
+                            row.forEach { index ->
+                                androidx.compose.foundation.layout.Box(Modifier.testTag("motion-$index")) {
+                                    val change = { flags[index].value = !flags[index].value }
+                                    when (index) {
+                                        in 0..3 -> SkipButton(index >= 2, true, 52.dp, interactionSource = sources[index], onClick = {})
+                                        4, 5, 20 -> ModeToggle(shuffle = flags[index].value, enabled = true, onClick = change)
+                                        6, 7, 8, 21 -> {
+                                            val value = modes.getValue(index)
+                                            ModeToggle(repeat = value.value, enabled = true) {
+                                                value.value = RepeatMode.entries[(value.value.ordinal + 1) % 3]
+                                            }
+                                        }
+                                        9, 10 -> PlayerPlayToggle(flags[index].value, enabled = true, waiting = false, onClick = change)
+                                        else -> {
+                                            val mark = when (index) {
+                                                11, 12 -> PlayerDockMark.LYRICS
+                                                13, 14 -> PlayerDockMark.SLEEP
+                                                15, 16 -> PlayerDockMark.QUEUE
+                                                17 -> PlayerDockMark.SPEAKER
+                                                else -> PlayerDockMark.FEEL
+                                            }
+                                            ToggleAction(mark, names[index], flags[index].value, enabled = true, state = null, modifier = Modifier,
+                                                checked = mark == PlayerDockMark.LYRICS || mark == PlayerDockMark.FEEL,
+                                                highlight = mark != PlayerDockMark.QUEUE && mark != PlayerDockMark.SPEAKER, onClick = change)
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            }
-        }
-        val output = File("build/reports/ui-previews/gallery").apply { mkdirs() }
-        val nodes = names.map { compose.onNodeWithTag(it) }
-        fun frame(ms: Int) = nodes.mapIndexed { index, node ->
-            node.captureToImage().asAndroidBitmap().also { image ->
-                output.resolve("16c-${names[index]}-${ms.toString().padStart(3, '0')}.png").outputStream().use {
-                    image.compress(Bitmap.CompressFormat.PNG, 100, it)
-                }
-            }
-        }
-        compose.mainClock.autoAdvance = false
-        val start = frame(0)
-        names.forEach { name -> compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag(name))).performClick() }
-        var at450 = emptyList<Bitmap>()
-        for (ms in 50..500 step 50) {
-            compose.mainClock.advanceTimeBy(50, ignoreFrameDuration = true)
-            val frames = frame(ms)
-            if (ms == 450) at450 = frames
-            if (ms == 500) {
-                names.indices.forEach { index -> org.junit.Assert.assertTrue(names[index], at450[index].sameAs(frames[index])) }
-                org.junit.Assert.assertTrue("Shuffle off has no plate", start[0].sameAs(frames[1]))
-                org.junit.Assert.assertTrue("Repeat off has no plate", start[2].sameAs(frames[4]))
-            }
-        }
-    }
-
-    private fun transportModeFrames(rapid: Boolean) {
-        val shuffle = androidx.compose.runtime.mutableStateOf(false)
-        val repeatMode = androidx.compose.runtime.mutableStateOf(if (rapid) RepeatMode.OFF else RepeatMode.ALL)
-        compose.setContent {
-            AppTheme {
-                androidx.compose.foundation.layout.Row(Modifier.testTag("transport-modes")
-                    .background(MaterialTheme.colorScheme.surface).padding(6.dp)) {
-                    ModeToggle(shuffle = shuffle.value, enabled = true) { shuffle.value = !shuffle.value }
-                    ModeToggle(repeat = repeatMode.value, enabled = true) {
-                        repeatMode.value = RepeatMode.entries[(repeatMode.value.ordinal + 1) % RepeatMode.entries.size]
+                    androidx.compose.foundation.layout.Box(Modifier.testTag("motion-dock").height(60.dp).fillMaxWidth()) {
+                        if (showDock.value) PlayerDock(false, true, false, false, PlayerDockMark.SPEAKER, false,
+                            ready = true, connected = true, onLyrics = {}, onTimer = {}, onQueue = {}, onOutput = {}, onFeel = {})
                     }
                 }
             }
         }
-        val shuffleNode = compose.onNodeWithContentDescription("Shuffle")
-        val repeatNode = compose.onNodeWithContentDescription("Repeat")
-        val initialBounds = listOf(shuffleNode.getUnclippedBoundsInRoot(), repeatNode.getUnclippedBoundsInRoot())
-        val output = File("build/reports/ui-previews/gallery").apply { mkdirs() }
-        val prefix = if (rapid) "16b-transport-retarget" else "16a-transport-modes"
-        fun frame(ms: Int): Bitmap {
-            val image = compose.onNodeWithTag("transport-modes").captureToImage().asAndroidBitmap()
-            output.resolve("$prefix-${ms.toString().padStart(3, '0')}.png").outputStream().use {
-                image.compress(Bitmap.CompressFormat.PNG, 100, it)
-            }
-            return image
-        }
 
+        fun tap(i: Int) = compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-$i"))).performClick()
+        fun capture(tag: String) = compose.onNodeWithTag(tag).captureToImage().asAndroidBitmap()
+        val rows = List(names.size + 1) { arrayListOf<Bitmap>() }
+        compose.runOnIdle { listOf(1, 3).forEach { sources[it].tryEmit(press) } }
+        compose.mainClock.advanceTimeBy(500)
         compose.mainClock.autoAdvance = false
-        val initial = frame(0)
-        shuffleNode.performClick()
-        repeatNode.performClick()
-        val taps = if (rapid) setOf(100, 200) else emptySet()
-        val samples = (60..480 step 60).toSet() + if (rapid) setOf(100, 160, 200, 260, 680) else emptySet()
-        var time = 0
-        for (ms in (taps + samples).sorted()) {
-            compose.mainClock.advanceTimeBy((ms - time).toLong(), ignoreFrameDuration = true)
-            if (ms in samples) {
-                val image = frame(ms)
-                if (rapid && ms == 680) org.junit.Assert.assertTrue("Both off plates cleared", initial.sameAs(image))
+        var settledAt450: List<Bitmap>? = null
+        val dock = names.size
+        for (ms in (0..500 step 50).toList() + 680) {
+            if (ms != 0) compose.mainClock.advanceTimeBy(if (ms == 680) 180L else 50L, ignoreFrameDuration = true)
+            names.indices.forEach { index -> rows[index] += capture("motion-$index") }
+            rows[dock] += capture("motion-dock")
+            if (ms == 450) settledAt450 = rows.map { it.last() }
+            if (ms == 500) {
+                val at450 = checkNotNull(settledAt450)
+                for (index in listOf(4, 5, 6, 7, 8, 20)) org.junit.Assert.assertTrue(names[index], at450[index].sameAs(rows[index].last()))
             }
-            if (ms == 100) shuffleNode.performClick()
-            if (ms in taps) repeatNode.performClick()
-            time = ms
+            if (ms == 0) {
+                compose.runOnIdle {
+                    sources[0].tryEmit(press)
+                    sources[1].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press))
+                    sources[2].tryEmit(press)
+                    sources[3].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press))
+                    showDock.value = true
+                }
+                (4..21).forEach(::tap)
+            }
+            if (ms == 100) { tap(20); tap(21) }
+            if (ms == 200) tap(21)
         }
-        val description = if (rapid) "Off" else "One"
-        repeatNode.assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, description))
-        if (rapid) shuffleNode.assertIsOff() else shuffleNode.assertIsOn()
-        org.junit.Assert.assertEquals(initialBounds, listOf(shuffleNode.getUnclippedBoundsInRoot(), repeatNode.getUnclippedBoundsInRoot()))
+        for (index in 20..21) org.junit.Assert.assertTrue(names[index], rows[index].first().sameAs(rows[index].last()))
+        org.junit.Assert.assertTrue("Shuffle off clears its plate", rows[4].first().sameAs(rows[5].last()))
+        org.junit.Assert.assertTrue("Repeat off clears its plate", rows[6].first().sameAs(rows[8].last()))
+
+        val labels = names + "Dock entrance"
+        val cell = 108
+        val labelWidth = 234
+        val width = labelWidth + rows.first().size * cell
+        val sheet = Bitmap.createBitmap(width, 34 + rows.size * 121, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(sheet)
+        canvas.drawColor(0xff181a20.toInt())
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE; textSize = 19f }
+        val times = (0..500 step 50).toList() + 680
+        times.forEachIndexed { index, time -> canvas.drawText("$time ms", (labelWidth + cell * index + 6).toFloat(), 23f, paint) }
+        rows.forEachIndexed { index, frames ->
+            val y = 34 + index * 121
+            canvas.drawText(labels[index], 10f, y + 55f, paint)
+            frames.forEachIndexed { column, frame ->
+                val x = labelWidth + column * cell
+                val height = if (index == dock) cell.toFloat() * frame.height / frame.width else 104f
+                val top = y + (104f - height) / 2f
+                canvas.drawBitmap(frame, null, android.graphics.RectF(x.toFloat(), top, x + 104f, top + height), null)
+            }
+        }
+        val output = File("build/reports/ui-previews/player-motion").apply { mkdirs() }
+        output.resolve("player-control-frames.png").outputStream().use { sheet.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
