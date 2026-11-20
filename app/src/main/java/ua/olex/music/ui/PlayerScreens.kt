@@ -33,7 +33,6 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import kotlinx.coroutines.launch
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -64,9 +63,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -499,6 +496,8 @@ internal fun PlayerPage(
     /** What the queue came from ("Top Hits", "Mix from Teardrop", "Search"), when known. */
     from: String? = null,
     restoring: Boolean = false,
+    queueOpen: Boolean = false,
+    lyricsSheetOpen: Boolean = false,
 ) {
     var lyricsShown by rememberSaveable { mutableStateOf(startWithLyrics) }
     val travel = LocalPlayerTravel.current
@@ -737,27 +736,27 @@ internal fun PlayerPage(
             }
             Spacer(Modifier.height(12.dp))
             Spacer(Modifier.weight(1f))
-            Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
+            Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat, onSkipHeld = { forward ->
+                onSeek((position() + if (forward) 10_000L else -10_000L).coerceIn(0L, state.durationMs.coerceAtLeast(0L)))
+            })
             Spacer(Modifier.height(28.dp))
-            // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
-            // The same 6dp around every icon, so a lit icon's circle sits evenly inside the pill.
-            Surface(shape = CircleShape, color = cs.surfaceContainerHigh) {
-                Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ToggleAction(Glyph.LYRICS, "Lyrics", lyricsShown && inlineLyrics != null, !restoring, if (lyricsShown) "Shown" else "Hidden") {
-                        if (inlineLyrics != null) lyricsShown = !lyricsShown else onLyrics()
-                    }
-                    ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
-                    ToggleAction(Glyph.QUEUE, "Open queue", false, !restoring, null, onQueue)
-                    ToggleAction(route.glyph(), "Change output", false, !restoring, null, onOutput)
-                    // Feel the music: the phone taps with the beat. One tap here, no trip to Settings.
-                    val context = androidx.compose.ui.platform.LocalContext.current
-                    var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
-                    ToggleAction(Glyph.VIBRATION, "Feel the music", feel, !restoring, if (feel) "On" else "Off") {
-                        feel = !feel
-                        ua.olex.music.playback.MusicHaptics.set(context, feel, ua.olex.music.playback.MusicHaptics.strength(context))
-                    }
-                }
-            }
+            val context = LocalContext.current
+            var feel by remember(context) { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
+            PlayerDock(
+                lyrics = if (inlineLyrics != null) lyricsShown else lyricsSheetOpen,
+                inlineLyrics = inlineLyrics != null, timer = state.sleepDeadlineMs != null,
+                queue = queueOpen, output = when (route?.glyph()) {
+                    Glyph.HEADPHONES -> PlayerDockMark.HEADPHONES
+                    Glyph.USB -> PlayerDockMark.USB
+                    else -> PlayerDockMark.SPEAKER
+                },
+                feel = feel, ready = !restoring, connected = state.connected,
+                onLyrics = { if (inlineLyrics != null) lyricsShown = !lyricsShown else onLyrics() },
+                onTimer = onTimer, onQueue = onQueue, onOutput = onOutput, onFeel = {
+                    feel = !feel
+                    ua.olex.music.playback.MusicHaptics.set(context, feel, ua.olex.music.playback.MusicHaptics.strength(context))
+                },
+            )
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
             state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(24.dp))
@@ -767,77 +766,78 @@ internal fun PlayerPage(
     }
 }
 
-/**
- * Previous, play/pause, next, flanked by shuffle and repeat. All are Material's own expressive
- * buttons: they squeeze their corners while pressed and the play button turns from round (paused)
- * to a wider rounded square (playing), as in Google's media controls. No extra animation on top.
- */
 @Composable
-private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onShuffle: () -> Unit = {}, onRepeat: () -> Unit = {}) {
-    val cs = MaterialTheme.colorScheme
-    val playing = state.playWhenReady
+private fun Transport(
+    state: PlayerState, onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit,
+    onShuffle: () -> Unit, onRepeat: () -> Unit, onSkipHeld: (Boolean) -> Unit,
+) {
     val haptics = rememberHaptics()
     androidx.compose.foundation.layout.BoxWithConstraints {
-        val compact = maxWidth < 372.dp
-        val separateModes = maxWidth < 282.dp
-        val modeSize = if (compact) 48.dp else 52.dp
-        val skipSize = if (compact) 48.dp else 64.dp
-        val gap = if (compact) 2.dp else 4.dp
-        val centerLimit = maxWidth - if (separateModes) skipSize * 2 + gap * 2 else (modeSize + skipSize) * 2 + gap * 4
-        val slotWidth = minOf(112.dp, centerLimit).coerceAtLeast(48.dp)
-        val targetWidth = minOf(if (playing) 112.dp else 88.dp, slotWidth)
-        val animatedWidth by animateDpAsState(targetWidth, MaterialTheme.motionScheme.fastSpatialSpec(), label = "play button shape")
-        val width = if (LocalPowerSave.current) targetWidth else animatedWidth.coerceIn(48.dp, slotWidth)
-        val shuffle: @Composable () -> Unit = {
-            ModeToggle(shuffle = state.shuffle, enabled = state.connected, size = modeSize, onClick = onShuffle)
-        }
-        val repeat: @Composable () -> Unit = {
-            ModeToggle(repeat = state.repeat, enabled = state.connected, size = modeSize, onClick = onRepeat)
-        }
+        val separateModes = maxWidth < 260.dp
+        val size = if (maxWidth >= 284.dp) 52.dp else 48.dp
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
-                if (!separateModes) shuffle()
-                SkipButton(Glyph.PREVIOUS, "Previous", state.connected, size = skipSize) { haptics.skip(false); onPrevious() }
-                // The button changes shape within its slot. A quick follow-up tap still finds Next.
-                Box(Modifier.width(slotWidth), contentAlignment = Alignment.Center) {
-                    val playInteraction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
-                    val pressed by playInteraction.collectIsPressedAsState()
-                    androidx.compose.material3.FilledIconToggleButton(
-                        checked = playing, onCheckedChange = { if (it) haptics.play() else haptics.pause(); onToggle() }, enabled = state.connected,
-                        interactionSource = playInteraction,
-                        shapes = IconButtonDefaults.toggleableShapes(CircleShape, RoundedCornerShape(20.dp), RoundedCornerShape(28.dp)),
-                        colors = IconButtonDefaults.filledIconToggleButtonColors(containerColor = cs.primary, contentColor = cs.onPrimary,
-                            checkedContainerColor = cs.primary, checkedContentColor = cs.onPrimary,
-                            disabledContainerColor = if (state.connecting || state.mediaId != null && state.error == null) cs.primary else cs.onSurface.copy(alpha = 0.12f),
-                            disabledContentColor = if (state.connecting || state.mediaId != null && state.error == null) cs.onPrimary else cs.onSurface.copy(alpha = 0.38f)),
-                        modifier = Modifier.width(width).height(if (compact) 72.dp else 88.dp).semantics {
-                            contentDescription = if (playing) "Pause" else "Play"
-                            if (state.playWhenReady && state.buffering) stateDescription = "Getting ready"
-                        },
-                    ) {
-                        // While the player connects (an open from the widget), M3E's loading shape
-                        // breathes in the button; it becomes Play or Pause once the service answers.
-                        // Also while a song opens (a stream resolving): one button that waits, then plays.
-                        val waiting = rememberPatient(state.connecting && !state.isPlaying || state.playWhenReady && state.buffering && state.error == null)
-                        PlayOrWait(waiting, playing, if (compact) 36.dp else 44.dp, if (compact) 40.dp else 48.dp, cs.onPrimary, pressed)
-                    }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (!separateModes) ModeToggle(shuffle = state.shuffle, enabled = state.connected, size = size, onClick = onShuffle)
+                SkipButton(false, state.connected, size, onHold = if (state.seekable) ({ onSkipHeld(false) }) else null) {
+                    haptics.skip(false)
+                    onPrevious()
                 }
-                SkipButton(Glyph.NEXT, "Next", state.hasNext, size = skipSize) { haptics.skip(true); onNext() }
-                if (!separateModes) repeat()
+                val waiting = rememberPatient(state.connecting && !state.isPlaying || state.playWhenReady && state.buffering && state.error == null)
+                PlayerPlayToggle(state.playWhenReady, state.connected, waiting, size, onToggle)
+                SkipButton(true, state.hasNext, size, onHold = if (state.seekable) ({ onSkipHeld(true) }) else null) {
+                    haptics.skip(true)
+                    onNext()
+                }
+                if (!separateModes) ModeToggle(repeat = state.repeat, enabled = state.connected, size = size, onClick = onRepeat)
             }
             if (separateModes) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                shuffle()
-                repeat()
+                ModeToggle(shuffle = state.shuffle, enabled = state.connected, size = size, onClick = onShuffle)
+                ModeToggle(repeat = state.repeat, enabled = state.connected, size = size, onClick = onRepeat)
             }
         }
     }
 }
 
-/** Previous and next: big bare icons (no tile behind), that give a little under the finger. */
 @Composable
-private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp = 64.dp, onClick: () -> Unit) {
-    KickIconButton(onClick, enabled = enabled, modifier = Modifier.size(size).semantics { contentDescription = label }) { kick ->
-        SkipSymbol(glyph == Glyph.NEXT, minOf(40.dp, size - 12.dp), kick)
+internal fun PlayerPlayToggle(playing: Boolean, enabled: Boolean, waiting: Boolean, size: Dp = 52.dp, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val haptics = rememberHaptics()
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val active = playerControlSelection(playing && enabled)
+    val push = playerControlPress(pressed)
+    val ink = { androidx.compose.ui.graphics.lerp(colors.onSurfaceVariant, colors.onSecondaryContainer, active.value.coerceIn(0f, 1f)) }
+    Box(Modifier.size(size).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
+        .toggleable(playing, interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Checkbox) {
+            if (it) haptics.play() else haptics.pause()
+            onClick()
+        }.semantics {
+            contentDescription = if (playing) "Pause" else "Play"
+            if (waiting) stateDescription = "Getting ready"
+        }, contentAlignment = Alignment.Center) {
+        if (waiting) androidx.compose.material3.LoadingIndicator(Modifier.size(29.dp), color = if (playing && enabled) colors.onSecondaryContainer else colors.onSurfaceVariant)
+        else PlayPauseSymbol(playing, 30.dp, pressed) { if (enabled) ink() else colors.onSurface.copy(alpha = 0.38f) }
+    }
+}
+
+@Composable
+internal fun SkipButton(
+    forward: Boolean, enabled: Boolean, size: Dp = 52.dp, onHold: (() -> Unit)? = null,
+    interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
+) {
+    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val active = playerControlSelection(false)
+    val push = playerControlPress(pressed)
+    val colors = MaterialTheme.colorScheme
+    Box(Modifier.size(size).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
+        .combinedClickable(interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button,
+            onLongClickLabel = if (forward) "Forward 10 seconds" else "Back 10 seconds", onLongClick = onHold, onClick = onClick)
+        .semantics { contentDescription = if (forward) "Next" else "Previous" }, contentAlignment = Alignment.Center) {
+        SkipSymbol(forward, 28.dp, kick = 0, pressed = pressed,
+            color = if (!enabled) colors.onSurface.copy(alpha = 0.38f) else colors.onSurfaceVariant)
     }
 }
 
@@ -886,22 +886,74 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
     }
 }
 
-/** A secondary control, Material's toggle icon button: tonal and squarer when on, the state spoken. */
+/** The dock stays mounted under its sheets, so its entrance runs once per player opening. */
 @Composable
-private fun ToggleAction(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String?, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
+internal fun PlayerDock(
+    lyrics: Boolean, inlineLyrics: Boolean, timer: Boolean, queue: Boolean, output: PlayerDockMark, feel: Boolean,
+    ready: Boolean, connected: Boolean, onLyrics: () -> Unit, onTimer: () -> Unit, onQueue: () -> Unit,
+    onOutput: () -> Unit, onFeel: () -> Unit,
+) {
+    val still = LocalPowerSave.current
+    val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val entrance = remember { List(5) { Animatable(if (still) 1f else 0f) } }
+    LaunchedEffect(still) {
+        if (still || coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) {
+            entrance.forEach { it.snapTo(1f) }
+        } else kotlinx.coroutines.coroutineScope {
+            entrance.forEachIndexed { index, progress ->
+                launch {
+                    delay(index * 30L)
+                    progress.animateTo(1f, spatial)
+                }
+            }
+        }
+    }
+    fun settle(index: Int) = Modifier.graphicsLayer {
+        val phase = if (still) 1f else entrance[index].value
+        translationY = 4.dp.toPx() * (1f - phase)
+        alpha = phase.coerceIn(0f, 1f)
+    }
+    Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
+        Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            ToggleAction(PlayerDockMark.LYRICS, "Lyrics", lyrics, ready, if (lyrics) "Shown" else "Hidden",
+                modifier = settle(0), checked = inlineLyrics, onClick = onLyrics)
+            ToggleAction(PlayerDockMark.SLEEP, "Sleep timer", timer, connected, if (timer) "On" else "Off", settle(1), onClick = onTimer)
+            ToggleAction(PlayerDockMark.QUEUE, "Open queue", queue, ready, null, settle(2), highlight = false, onClick = onQueue)
+            ToggleAction(output, "Change output", false, ready, null, settle(3), onClick = onOutput)
+            ToggleAction(PlayerDockMark.FEEL, "Feel the music", feel, ready, if (feel) "On" else "Off",
+                modifier = settle(4), checked = true, onClick = onFeel)
+        }
+    }
+}
+
+@Composable
+internal fun ToggleAction(
+    mark: PlayerDockMark, label: String, on: Boolean, enabled: Boolean, state: String?,
+    modifier: Modifier, checked: Boolean = false, highlight: Boolean = true, onClick: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    // Round in every state: the pill they sit in is round, so a square highlight looked pasted on.
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val focused by interaction.collectIsFocusedAsState()
+    val active = playerControlSelection(on && enabled && highlight)
+    val push = playerControlPress(pressed)
     var kick by remember { mutableIntStateOf(0) }
-    if (state == null) IconButton(onClick = { kick++; haptics.tick(); onClick() }, enabled = enabled, interactionSource = interaction, shapes = IconButtonDefaults.shapes(CircleShape, CircleShape),
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label }) { Symbol(glyph, color = cs.onSurfaceVariant, kick = kick, pressed = pressed) }
-    else androidx.compose.material3.IconToggleButton(
-        checked = on, onCheckedChange = { kick++; haptics.toggle(it); onClick() }, enabled = enabled, interactionSource = interaction, shapes = IconButtonDefaults.toggleableShapes(CircleShape, CircleShape, CircleShape),
-        colors = IconButtonDefaults.iconToggleButtonColors(contentColor = cs.onSurfaceVariant, checkedContainerColor = cs.secondaryContainer, checkedContentColor = cs.onSecondaryContainer),
-        modifier = Modifier.size(48.dp).semantics { contentDescription = label; stateDescription = state },
-    ) { Symbol(glyph, filled = on, kick = kick, pressed = pressed) }
+    val action = if (checked) Modifier.toggleable(on, interactionSource = interaction, indication = null, enabled = enabled,
+        role = androidx.compose.ui.semantics.Role.Checkbox) { haptics.toggle(it); onClick() }
+    else Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button) {
+        kick++
+        haptics.tick()
+        onClick()
+    }
+    Box(Modifier.size(48.dp).then(modifier).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
+        .then(action).semantics { contentDescription = label; if (state != null) stateDescription = state },
+        contentAlignment = Alignment.Center) {
+        PlayerDockSymbol(mark, on, pressed, kick) {
+            if (!enabled) colors.onSurface.copy(alpha = 0.38f)
+            else androidx.compose.ui.graphics.lerp(colors.onSurfaceVariant, colors.onSecondaryContainer, active.value.coerceIn(0f, 1f))
+        }
+    }
 }
 
 /** The file's format and bitrate, quiet under the seek bar; a tap opens the full audio path. */

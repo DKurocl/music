@@ -1,3 +1,12 @@
+# Player controls motion review
+
+[код] The player draws the controls from the Rounded Material SVGs. Skip compresses its
+triangle against the stop, a hold seeks ten seconds, and Play/Pause morphs its silhouette.
+Repeat keeps its loop stationary. The five dock gestures use the same SVG renderer and
+the dock staggers its entrance once per player mount. Sleep keeps the countdown by the seek bar.
+The `[player-motion-preview]` push marker runs only the offline player controls gallery.
+Local check: `git diff --check`. CI, visual review, and Pixel measurements are separate checks.
+
 # Player transport motion
 
 [код] Shuffle and Repeat draw Google's Material Symbols Rounded SVG outlines at rest.
