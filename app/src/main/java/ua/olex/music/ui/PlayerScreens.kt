@@ -524,8 +524,12 @@ internal fun PlayerPage(
             onDrawBehind { drawRect(background) }
         },
     ) {
+        // At least a screen tall, so spare height is shared between the blocks instead of pooling
+        // under the toolbar on tall phones; with large text it still scrolls.
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+        val screen = maxHeight
         Column(
-            Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).heightIn(min = screen).padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             PlayerHeader(
@@ -695,6 +699,7 @@ internal fun PlayerPage(
                 }
             }
             Spacer(Modifier.height(32.dp))
+            Spacer(Modifier.weight(1f))
             Row(Modifier.widthIn(max = 420.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     TrackLabel(state.title, style = MaterialTheme.typography.headlineSmallEmphasized, marquee = true)
@@ -721,6 +726,7 @@ internal fun PlayerPage(
                 if (deadline != null) SleepCountdown(deadline, onTimer, Modifier.weight(1f, fill = false))
             }
             Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.weight(1f))
             Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
             Spacer(Modifier.height(28.dp))
             // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
@@ -737,6 +743,7 @@ internal fun PlayerPage(
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }
             state.error?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp).fillMaxWidth()) }
             Spacer(Modifier.height(24.dp))
+        }
         }
     }
     }
