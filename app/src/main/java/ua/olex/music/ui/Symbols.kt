@@ -36,7 +36,7 @@ import ua.olex.music.R
  * its FILL and wght axes, so icons fill in and thicken smoothly as Google's own apps do.
  */
 enum class Glyph(val codepoint: Int) {
-    PLAY(0xE037), NEXT(0xE044), PREVIOUS(0xE045), SHUFFLE(0xE043), REPEAT(0xE040), REPEAT_ONE(0xE041),
+    PLAY(0xE037), NEXT(0xE044), PREVIOUS(0xE045), SHUFFLE(0xE043),
     QUEUE(0xE03D), MORE(0xE5D4), SEARCH(0xEF7A), CLOSE(0xE5CD), COLLAPSE(0xE5CF), BACK(0xE5C4), NOTE(0xE405),
     ALBUM(0xE019), PERSON(0xF0D3), FOLDER(0xE2C7), FAVOURITE(0xE87E), PLAYLIST_ADD(0xE03B), PLAYLIST(0xE05F),
     LYRICS(0xEC0B), SLEEP(0xF159), SPEAKER(0xE32D), HEADPHONES(0xF01F), BLUETOOTH(0xE1A7), WAVE(0xE1B8),
@@ -54,7 +54,7 @@ enum class Glyph(val codepoint: Int) {
 
     /** The small gesture this glyph plays when its button is tapped. */
     val motion: GlyphMotion get() = when (this) {
-        SETTINGS, TUNE, REFRESH, REPEAT, REPEAT_ONE, SHUFFLE, MIX, RADIO, SLEEP -> GlyphMotion.TILT
+        SETTINGS, TUNE, REFRESH, SHUFFLE, MIX, RADIO, SLEEP -> GlyphMotion.TILT
         NEXT, PLAY_NEXT, CHEVRON -> GlyphMotion.NUDGE_RIGHT
         PREVIOUS, BACK -> GlyphMotion.NUDGE_LEFT
         DOWNLOAD, COLLAPSE, DOWN, MORE -> GlyphMotion.DROP
@@ -130,7 +130,7 @@ fun Symbol(
         scaleX = scale
         scaleY = scale
         when (gesture) {
-            GlyphMotion.TILT -> rotationZ = pulse * (when (glyph) { Glyph.SLEEP, Glyph.SHUFFLE -> -14f; Glyph.REPEAT, Glyph.REPEAT_ONE -> 25f; else -> 16f })
+            GlyphMotion.TILT -> rotationZ = pulse * (when (glyph) { Glyph.SLEEP, Glyph.SHUFFLE -> -14f; else -> 16f })
             GlyphMotion.NUDGE_RIGHT -> translationX = pulse * 2.5.dp.toPx()
             GlyphMotion.NUDGE_LEFT -> translationX = pulse * -2.5.dp.toPx()
             GlyphMotion.DROP -> translationY = pulse * 2.5.dp.toPx()
