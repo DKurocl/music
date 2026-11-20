@@ -5,8 +5,11 @@ import androidx.compose.animation.core.snap
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -16,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
@@ -26,19 +30,24 @@ private val svgCenter = Offset(480f, -480f)
 
 private fun symbolPath(data: String): Path = PathParser().parsePathString(data).toPath()
 
+@Composable
+internal fun playerControlSelection(selected: Boolean): State<Float> {
+    val target = if (selected) 1f else 0f
+    return if (LocalPowerSave.current) rememberUpdatedState(target)
+        else animateFloatAsState(target, MaterialTheme.motionScheme.fastSpatialSpec(), label = "Player control selection")
+}
+
 /** Shape, press compression and selected color are drawn inside a stationary touch target. */
 @Composable
-internal fun Modifier.playerControlContainer(selected: Boolean, pressed: Boolean, selectedCorner: Float): Modifier {
+internal fun Modifier.playerControlContainer(active: State<Float>, pressed: Boolean, focused: Boolean, selectedCorner: Float): Modifier {
     val colors = MaterialTheme.colorScheme
     val motion = MaterialTheme.motionScheme
     val still = LocalPowerSave.current
-    val active = animateFloatAsState(if (selected) 1f else 0f,
-        if (still) snap() else motion.fastSpatialSpec(), label = "Player control selection")
     val push = animateFloatAsState(if (pressed) 1f else 0f,
         if (still) snap() else motion.fastSpatialSpec(), label = "Player control press")
     return drawBehind {
         val strength = active.value.coerceIn(0f, 1f)
-        val pressure = push.value.coerceIn(0f, 1f)
+        val pressure = if (still) (if (pressed) 1f else 0f) else push.value.coerceIn(0f, 1f)
         val visibility = maxOf(strength, pressure * 0.72f)
         if (visibility > 0f) {
             val radius = (0.5f + (selectedCorner - 0.5f) * strength) * (1f - pressure * 0.47f)
@@ -51,7 +60,25 @@ internal fun Modifier.playerControlContainer(selected: Boolean, pressed: Boolean
                 cornerRadius = CornerRadius(minOf(width, height) * radius),
             )
         }
+        if (focused) drawRoundRect(colors.primary, cornerRadius = CornerRadius(16.dp.toPx()),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
     }
+}
+
+/** Use the high-contrast side of the palette as the tonal surface changes beneath the icon. */
+internal fun playerControlInk(colors: ColorScheme, surface: Color, selection: Float, enabled: Boolean): Color {
+    if (!enabled) return colors.onSurface.copy(alpha = 0.38f)
+    val active = selection.coerceIn(0f, 1f)
+    val off = colors.onSurfaceVariant
+    val on = colors.onSecondaryContainer
+    if (active == 0f) return off
+    if (active == 1f) return on
+    val backdrop = lerp(surface, lerp(colors.surfaceContainerHighest, colors.secondaryContainer, active), active).luminance() + 0.05f
+    fun contrast(color: Color): Float {
+        val value = color.luminance() + 0.05f
+        return maxOf(value, backdrop) / minOf(value, backdrop)
+    }
+    return if (contrast(off) >= contrast(on)) off else on
 }
 
 /** Material Symbols Rounded SVGs use a 960-unit viewport with the baseline at zero. */
@@ -70,13 +97,16 @@ internal fun PlayerModeSymbol(shuffle: Boolean, on: Boolean, one: Boolean, kick:
     val numeral by animateFloatAsState(if (one) 1f else 0f,
         if (still) snap() else motion.fastSpatialSpec(), label = "Repeat one numeral")
 
-    Canvas(Modifier.size(24.dp).graphicsLayer { scaleX = pressure; scaleY = pressure }) {
+    Canvas(Modifier.size(24.dp).graphicsLayer {
+        scaleX = if (still) 1f else pressure
+        scaleY = scaleX
+    }) {
         val unit = size.minDimension / 960f
         val ink = color()
         scale(unit, unit, pivot = Offset.Zero) {
             translate(top = 960f) {
                 if (shuffle) {
-                    val phase = crossover.coerceIn(0f, 1f)
+                    val phase = if (still) (if (on) 1f else 0f) else crossover.coerceIn(0f, 1f)
                     val weave = 4f * phase * (1f - phase)
                     rotate(12f * weave, svgCenter) {
                         translate(-28f * weave, -28f * weave) { drawPath(ModeOutlines.shuffleTail, ink) }
@@ -86,8 +116,8 @@ internal fun PlayerModeSymbol(shuffle: Boolean, on: Boolean, one: Boolean, kick:
                         translate(16f * weave, -16f * weave) { drawPath(ModeOutlines.shuffleOver, ink) }
                     }
                 } else {
-                    rotate(turn % 180f, svgCenter) { drawPath(ModeOutlines.repeat, ink) }
-                    val digit = numeral.coerceIn(0f, 1.12f)
+                    rotate(if (still) 0f else turn % 180f, svgCenter) { drawPath(ModeOutlines.repeat, ink) }
+                    val digit = if (still) (if (one) 1f else 0f) else numeral.coerceIn(0f, 1.12f)
                     if (digit > 0f) scale(digit, digit, svgCenter) {
                         drawPath(ModeOutlines.one, ink, alpha = digit.coerceAtMost(1f))
                     }

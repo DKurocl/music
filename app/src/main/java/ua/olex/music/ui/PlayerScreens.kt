@@ -11,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.Spring
@@ -852,25 +853,20 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
         RepeatMode.ONE -> "One"
     }
     val colors = MaterialTheme.colorScheme
-    val motion = MaterialTheme.motionScheme
-    val still = LocalPowerSave.current
     val haptics = rememberHaptics()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val tint = animateColorAsState(
-        if (!enabled) colors.onSurface.copy(alpha = 0.38f) else if (on) colors.onSecondaryContainer else colors.onSurfaceVariant,
-        if (still) androidx.compose.animation.core.snap() else motion.fastEffectsSpec(), label = "Mode ink",
-    )
+    val focused by interaction.collectIsFocusedAsState()
+    val active = playerControlSelection(on && enabled)
     var kick by remember { mutableIntStateOf(0) }
-    val indication = androidx.compose.foundation.LocalIndication.current
     val click = if (repeat == null) {
-        Modifier.toggleable(on, interactionSource = interaction, indication = indication, enabled = enabled,
+        Modifier.toggleable(on, interactionSource = interaction, indication = null, enabled = enabled,
             role = androidx.compose.ui.semantics.Role.Switch) {
             haptics.toggle(it)
             onClick()
         }
     } else {
-        Modifier.clickable(interactionSource = interaction, indication = indication, enabled = enabled,
+        Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled,
             role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change repeat mode") {
             kick++
             when (repeat) {
@@ -881,9 +877,11 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
             onClick()
         }
     }
-    Box(Modifier.size(size).clip(RoundedCornerShape(18.dp)).playerControlContainer(on && enabled, pressed, selectedCorner = 0.32f)
+    Box(Modifier.size(size).clip(RoundedCornerShape(18.dp)).playerControlContainer(active, pressed, focused, selectedCorner = 0.32f)
         .then(click).semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE, kick = kick, pressed = pressed) { tint.value }
+        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE, kick = kick, pressed = pressed) {
+            playerControlInk(colors, colors.surface, active.value, enabled)
+        }
     }
 }
 
