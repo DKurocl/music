@@ -128,7 +128,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                             }
                         }
                         if (lyrics.lines.isNotEmpty()) add { first, last ->
-                            ToolRow(Glyph.NOTE, "Share lyrics", null, first, last, onClick = {
+                            ToolRow(Glyph.SHARE, "Share lyrics", null, first, last, onClick = {
                                 val text = lyrics.lines.joinToString("\n") { it.text }
                                 val intent = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
                                     .putExtra(android.content.Intent.EXTRA_TEXT, text)
