@@ -262,7 +262,7 @@ internal fun QuickPicks(title: String, songs: List<Track>, currentId: String?, o
                 val target = if (atEnd) 0 else (pager.currentPage + 1).coerceAtMost(columns.lastIndex)
                 scope.launch { if (still) pager.scrollToPage(target) else pager.animateScrollToPage(target) }
             }, modifier = Modifier.semantics { contentDescription = if (atEnd) "First picks" else "Next picks" }) { k ->
-                Symbol(if (atEnd) Glyph.BACK else Glyph.CHEVRON, size = 20.dp, color = cs.primary, kick = k)
+                Symbol(if (atEnd) Glyph.BACK else Glyph.CHEVRON, color = cs.onSurfaceVariant, kick = k)
             }
         }
     }) else null)
