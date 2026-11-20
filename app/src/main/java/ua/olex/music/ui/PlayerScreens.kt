@@ -121,6 +121,9 @@ internal fun Artwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int =
     }
 }
 
+/** Adds a song to the queue: next when true, at the end when false. Set once at the app's root. */
+internal val LocalEnqueue = androidx.compose.runtime.staticCompositionLocalOf<((Track, Boolean) -> Unit)?> { null }
+
 /**
  * A song in any list: cover, title, artist and the file's quality, an overflow for actions. The
  * playing song is marked with a filled wave and the accent color, never only by color.
@@ -136,6 +139,10 @@ internal fun TrackRow(
     /** In an album: the track number instead of the cover, and the artist only when it differs. */
     number: Int? = null, albumArtist: String? = null, showQuality: Boolean = true, onClick: () -> Unit,
 ) {
+    // Every song list swipes the same way: a row given no actions of its own uses the app's queue.
+    val enqueue = LocalEnqueue.current
+    val onPlayNext = onPlayNext ?: enqueue?.let { { it(track, true) } }
+    val onQueue = onQueue ?: enqueue?.let { { it(track, false) } }
     val marked = current || track.matchesPlayback(LocalPlayingTrack.current)
     if ((onPlayNext == null && onQueue == null) || selecting) { Box(modifier) { TrackRowContent(track, marked, onMore, selecting, checked, onSelect, number, albumArtist, showQuality, onClick) }; return }
     // Swipe right: play next. Swipe left: add to queue. The row follows the finger with growing
@@ -159,15 +166,13 @@ internal fun TrackRow(
             val iconScale by androidx.compose.animation.core.animateFloatAsState(if (armed) 1.1f else 0.9f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "swipe-icon")
             Row(Modifier.matchParentSize().padding(horizontal = 8.dp, vertical = 2.dp).clip(RoundedCornerShape(20.dp)).background(color).padding(horizontal = 24.dp),
                 horizontalArrangement = if (next) Arrangement.Start else Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-                // The icon sits in a solid circle of the label's ink, so it reads at a glance even
-                // before the row has moved far; it grows when the release would act.
-                Box(Modifier.size(36.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale }.clip(CircleShape).background(ink),
+                // Only the icon, in a solid circle of the action's ink: a word was cut off at the
+                // swipe's short reach, while the icon reads at a glance and grows when release would act.
+                Box(Modifier.size(40.dp).graphicsLayer { scaleX = iconScale; scaleY = iconScale }.clip(CircleShape).background(ink)
+                    .semantics { contentDescription = if (next) "Play next" else "Add to queue" },
                     contentAlignment = Alignment.Center) {
-                    Symbol(if (next) Glyph.PLAY_NEXT else Glyph.ADD_TO_QUEUE, filled = true, color = color, size = 20.dp)
+                    Symbol(if (next) Glyph.PLAY_NEXT else Glyph.ADD_TO_QUEUE, filled = true, color = color, size = 22.dp)
                 }
-                Spacer(Modifier.width(12.dp))
-                Text(if (next) "Play next" else "Add to queue",
-                    style = MaterialTheme.typography.titleSmall, color = ink, maxLines = 1)
             }
         }
         Box(Modifier.graphicsLayer { translationX = offset.value }
@@ -190,8 +195,8 @@ internal fun TrackRow(
                     change.consume()
                     raw += amount
                     if (raw > 0 && onPlayNext == null || raw < 0 && onQueue == null) raw = 0f
-                    val shown = rubber(raw, width * 0.6f)
-                    val past = kotlin.math.abs(shown) > width * 0.3f
+                    val shown = rubber(raw, width * 0.45f)
+                    val past = kotlin.math.abs(shown) > width * 0.2f
                     if (past != armed) { if (past) haptics.threshold(); armed = past }
                     scope.launch { offset.snapTo(shown) }
                 }
@@ -992,10 +997,11 @@ private fun SignalPath(format: String?, loading: Boolean, onClick: () -> Unit, m
     Row(modifier.clip(CircleShape).clickable(onClickLabel = "Open audio path", onClick = onClick)
         .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        // A new song's format usually arrives at once: the line stays empty (its height kept) rather
-        // than flashing "Reading", and the text fades from one to the next.
-        val waiting = rememberPatient(format == null && loading, delayMs = 600)
-        val text = format ?: when { waiting -> "Reading audio format…"; loading -> ""; else -> "Format unavailable" }
+        // Between songs the format goes blank for a moment and then arrives in parts (codec, then
+        // bitrate). The old line stays until the new one has settled, then fades over once.
+        val settled = rememberSettled(format, missing = format == null && loading)
+        val waiting = rememberPatient(settled == null && loading, delayMs = 600)
+        val text = settled ?: when { waiting -> "Reading audio format…"; loading -> ""; else -> "Format unavailable" }
         androidx.compose.animation.Crossfade(text, Modifier.weight(1f, fill = false), MaterialTheme.motionScheme.fastEffectsSpec(), label = "format") { line ->
             Text(line, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -1119,7 +1125,9 @@ internal fun PlaybackProgress(state: PlayerState, position: () -> Long, onSeek: 
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(if (restoring) " " else clock(dragged?.let { (it * duration).toLong() } ?: (seconds * 1_000)), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
-            Text(if (restoring) " " else clock(state.durationMs), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
+            // A new song reports its length a moment after it starts: keep the last length rather than flash 0:00.
+            val length = rememberSettled(state.durationMs, missing = state.durationMs <= 0, settleMs = 0)
+            Text(if (restoring) " " else clock(length), style = MaterialTheme.typography.labelMedium, color = cs.onSurfaceVariant)
         }
     }
 }

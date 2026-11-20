@@ -370,6 +370,7 @@ fun MusicRoot(model: LibraryViewModel) {
         }
     }
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
+        LocalEnqueue provides remember(model) { { track: Track, next: Boolean -> model.enqueue(listOf(track), next) } },
         LocalPlayingTrack provides playing.track,
         LocalOwnedSources provides if (model.allowed) personal.localCopies else emptyMap(),
         LocalNetwork provides network,
