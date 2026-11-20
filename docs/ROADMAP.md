@@ -29,6 +29,9 @@ separate commits to keep merges trivial.
 
 ## Personal Home
 
+- [x] Codex, 2026-11-20: recover missing catalogue results and stabilize artist and release pages
+  with integrated local copies. CI and on-device status in HANDOFF.md.
+
 - [x] Codex, 2026-11-19: preload the next song, simplify playing marks and make Search browse atomic.
 
 - [x] Codex, 2026-11-19: restore standard media notifications, keep a warm controller and stabilize Search entry.

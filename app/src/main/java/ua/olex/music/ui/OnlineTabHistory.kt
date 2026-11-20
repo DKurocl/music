@@ -29,7 +29,7 @@ internal class OnlineTabHistory {
                 for (place in Place.entries) putParcelableArrayList(place.name, ArrayList(history[place].map { page ->
                     when (page) {
                         is OnlineTarget.Artist -> bundleOf("artist" to page.name, "id" to page.id, "full" to page.full,
-                            "seed" to encodeSeed(page.seed))
+                            "seed" to encodeSeed(page.seed), "photo" to page.photo)
                         is OnlineTarget.Album -> bundleOf("album" to page.title, "id" to page.id, "playlist" to page.playlist,
                             "cover" to page.cover, "subtitle" to page.subtitle, "seed" to encodeSeed(page.seed))
                     }
@@ -42,7 +42,7 @@ internal class OnlineTabHistory {
                     val seed = args.getString("seed")?.let { json ->
                         runCatching { OnlinePageJson.tracks(org.json.JSONObject(json), "tracks").singleOrNull() }.getOrNull()
                     }
-                    if (artist != null) open(place, OnlineTarget.Artist(artist, id, args.getBoolean("full"), seed))
+                    if (artist != null) open(place, OnlineTarget.Artist(artist, id, args.getBoolean("full"), seed, args.getString("photo")))
                     else if (id != null) open(place, OnlineTarget.Album(id, args.getString("album").orEmpty(),
                         args.getBoolean("playlist"), args.getString("cover"), args.getString("subtitle"), seed))
                 }

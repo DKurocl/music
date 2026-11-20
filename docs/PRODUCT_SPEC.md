@@ -25,6 +25,10 @@ that land tagged and organized (M6).
 
 ## 2. Principles
 
+When YouTube Music is enabled, its catalogue leads Home recommendations and Search. Artist and
+release links retain their provider identity. Local copies can supply audio for matched recordings
+and keep local-only tracks playable with or without a connection.
+
 1. Sound is never made worse by the app: no resampling, dithering or processing unless the owner
    turned it on; bit depth kept to the mixer (float output). Shown, not claimed.
 2. The library is the files: tags read from the files, edits written back to the files, nothing
