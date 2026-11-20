@@ -619,7 +619,7 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
     val haptics = rememberHaptics()
     LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         items(cards, key = { it.id }) { card ->
-            MediaCard(card.cover, card.title, card.subtitle, size, round = card.kind == YouTubeMusic.Card.Kind.ARTIST) {
+            MediaCard(card.cover, card.title, card.subtitle, size = size, round = card.kind == YouTubeMusic.Card.Kind.ARTIST) {
                 when (card.kind) {
                     YouTubeMusic.Card.Kind.ALBUM -> nav.open(OnlineTarget.Album(card.id, card.title, cover = card.cover, subtitle = card.subtitle))
                     YouTubeMusic.Card.Kind.PLAYLIST -> nav.open(OnlineTarget.Album(card.id, card.title, playlist = true, cover = card.cover, subtitle = card.subtitle))
@@ -649,8 +649,8 @@ internal fun <T> CardRail(items: List<T>, key: (T) -> Any, card: @Composable (T)
  * one height whatever its text.
  */
 @Composable
-internal fun MediaCard(cover: String?, title: String, subtitle: String?, size: androidx.compose.ui.unit.Dp? = 148.dp, round: Boolean = false,
-    modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun MediaCard(cover: String?, title: String, subtitle: String?, modifier: Modifier = Modifier,
+    size: androidx.compose.ui.unit.Dp? = 148.dp, round: Boolean = false, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val textBlock = rememberCardTextHeight()
     // A fixed width in a rail; the cell's width in a grid (size null).
