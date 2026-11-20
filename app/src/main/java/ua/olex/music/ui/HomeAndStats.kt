@@ -217,7 +217,8 @@ internal fun HomePage(
                             }
                             if (shelf.cards.any { it.kind != YouTubeMusic.Card.Kind.SONG } && cards.isNotEmpty()) {
                                 item(key = "provider-cards-$index") {
-                                    if (serverSongs.isEmpty()) SectionTitle(shelf.title)
+                                    // Under a shelf's songs, its cards keep the 16dp the app puts between blocks.
+                                    if (serverSongs.isEmpty()) SectionTitle(shelf.title) else androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
                                     YouTubeCards(cards)
                                 }
                             }

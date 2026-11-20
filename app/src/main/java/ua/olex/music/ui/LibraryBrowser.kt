@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.heading
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.verticalScroll
@@ -1060,7 +1061,7 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
         groups.forEachIndexed { group, (heading, tiles) ->
             val rows = tiles.filter { it in available }.chunked(columns)
             if (rows.isNotEmpty()) item(key = heading) {
-                Text(heading, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 10.dp, bottom = 4.dp))
+                Text(heading, style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp).semantics { heading() })
             }
             items(rows.size, key = { "$heading-$it" }) { index ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1091,7 +1092,7 @@ private fun BrowseTiles(library: LibraryIndex, onGenre: (MusicCollection) -> Uni
         }
         // Your genres as big cover cards, as Google Play and Spotify fill their browse pages.
         if (genres.size > 1) {
-            item { Text("Your genres", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)) }
+            item { Text("Your genres", style = MaterialTheme.typography.titleLargeEmphasized, modifier = Modifier.padding(top = 20.dp, bottom = 4.dp).semantics { heading() }) }
             items(genreRows.size) { r ->
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     genreRows[r].forEach { genre -> GenreCard(genre, Modifier.weight(1f)) { haptics.tick(); onGenre(genre) } }
