@@ -106,7 +106,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 return@transformLatest
             }
             fun result(found: YouTubeMusic.Found) =
-                OnlineSearch(text, found.songs, artists = found.artists, albums = found.albums, playlists = found.playlists)
+                OnlineSearch(text, found.songs, artists = found.artists, albums = found.albums, playlists = found.playlists, top = found.top)
             try {
                 val found = graph.youTube.searchAll(text.trim()) { emit(result(it)) }
                 emit(result(found))
@@ -762,4 +762,5 @@ data class LibrarySearchResult(val query: String, val tracks: List<Track>, val f
 
 /** YouTube Music's answer to a search: songs not in the library. */
 internal data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false,
-    val artists: List<YouTubeMusic.Card> = emptyList(), val albums: List<YouTubeMusic.Card> = emptyList(), val playlists: List<YouTubeMusic.Card> = emptyList())
+    val artists: List<YouTubeMusic.Card> = emptyList(), val albums: List<YouTubeMusic.Card> = emptyList(), val playlists: List<YouTubeMusic.Card> = emptyList(),
+    val top: YouTubeMusic.Card? = null)

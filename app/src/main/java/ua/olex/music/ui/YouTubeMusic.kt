@@ -76,7 +76,7 @@ internal class YouTubeMusic(
         val singles: List<OnlineAlbum> = emptyList(), val related: List<Card> = emptyList(), val listeners: String? = null, val partial: Boolean = false)
 
     /** YouTube Music search results grouped by media type. */
-    data class Found(val songs: List<Track>, val artists: List<Card>, val albums: List<Card>, val playlists: List<Card> = emptyList())
+    data class Found(val songs: List<Track>, val artists: List<Card>, val albums: List<Card>, val playlists: List<Card> = emptyList(), val top: Card? = null)
 
     /** Publish the primary response while optional search filters fill missing categories. */
     suspend fun searchAll(query: String, onPrimary: suspend (Found) -> Unit = {}): Found = withContext(ioDispatcher) {
@@ -87,7 +87,7 @@ internal class YouTubeMusic(
         val primary = Found(plain?.let { parseSearch(it, keepOrder = true) }.orEmpty().distinctBy { it.id },
             cards.filter { it.kind == Card.Kind.ARTIST }.take(8),
             cards.filter { it.kind == Card.Kind.ALBUM }.take(10),
-            cards.filter { it.kind == Card.Kind.PLAYLIST }.take(12))
+            cards.filter { it.kind == Card.Kind.PLAYLIST }.take(12), plain?.let(::topCard))
         if (pageScope() == scope) rememberAlbumLinks(scope, primary.songs)
         if (primary.songs.isNotEmpty() || cards.isNotEmpty()) onPrimary(primary)
         suspend fun filtered(params: String) = kotlinx.coroutines.withTimeoutOrNull(if (plain == null) 9_000L else 4_000L) {
@@ -1059,6 +1059,14 @@ internal class YouTubeMusic(
         private const val PLAYLISTS_ONLY = "EgWKAQIoAWoMEA4QChADEAQQCRAF"
 
         /** Artists, albums and playlists in a search answer (its rows and its top result card), in its order. */
+        /** YouTube Music's "Top result" card, when it is an artist, album or playlist. */
+        fun topCard(json: String): Card? {
+            val root = ua.olex.music.lyrics.Json.parse(json) ?: return null
+            return collect(root, "musicCardShelfRenderer").firstNotNullOfOrNull { card ->
+                card(dump(card["title"]) + dump(card["onTap"]), text(card["title"]), text(card["subtitle"]), biggestImage(card["thumbnail"]))
+            }
+        }
+
         fun searchCards(json: String): List<Card> {
             val root = ua.olex.music.lyrics.Json.parse(json) ?: return emptyList()
             val top = collect(root, "musicCardShelfRenderer").mapNotNull { card ->

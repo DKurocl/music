@@ -660,9 +660,13 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
 
 /** The artist's photo across the page, the name on a soft shade at its foot, as YouTube Music draws it. */
 @Composable
-private fun ArtistHero(photo: String?, name: String, line: String?) {
+private fun ArtistHero(photo: String?, name: String, line: String?) =
+    ArtistHero(name, line) { Artwork(photo, Modifier.fillMaxSize(), 0.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE) }
+
+@Composable
+internal fun ArtistHero(name: String, line: String?, picture: @Composable () -> Unit) {
     Box(Modifier.fillMaxWidth().aspectRatio(1.2f).clip(RoundedCornerShape(28.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh)) {
-        Artwork(photo, Modifier.fillMaxSize(), 0.dp, pixels = ua.olex.music.model.ArtworkPlan.LARGE)
+        picture()
         Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
             0.45f to androidx.compose.ui.graphics.Color.Transparent, 1f to androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.72f))))
         Column(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
