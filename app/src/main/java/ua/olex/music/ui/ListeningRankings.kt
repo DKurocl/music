@@ -62,7 +62,7 @@ private fun LeaderCard(first: ListeningRank, artist: Boolean, modifier: Modifier
                 Symbol(Glyph.CHEVRON, size = 18.dp)
             }
             Box(Modifier.fillMaxWidth().height(96.dp), contentAlignment = if (artist) Alignment.CenterStart else Alignment.Center) {
-                if (artist) ArtistImage(first.title, Modifier.size(88.dp), 88.dp, MaterialShapes.Cookie9Sided.toShape())
+                if (artist) ArtistImage(first.title, Modifier.size(88.dp), 88.dp, MaterialShapes.Cookie9Sided.toShape(), fallback = first.song.artworkUri)
                 else Artwork(first.song.artworkUri, Modifier.size(80.dp).rotate(4f), 9.dp)
             }
             Text(first.title, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
