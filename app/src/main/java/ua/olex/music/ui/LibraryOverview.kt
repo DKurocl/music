@@ -7,6 +7,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.background
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.draw.clip
@@ -34,7 +36,8 @@ internal fun LibraryOverview(
         }
     }
     val cs = MaterialTheme.colorScheme
-    LazyColumn(modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current),
+    Box(modifier.fillMaxSize()) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp + LocalPlayerInset.current + if (selected.isNotEmpty()) 72.dp else 0.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item(key = "overview-controls") {
             Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -52,18 +55,6 @@ internal fun LibraryOverview(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
                     colors = TextFieldDefaults.colors(focusedContainerColor = cs.surfaceContainerHigh, unfocusedContainerColor = cs.surfaceContainerHigh,
                         focusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent))
-                androidx.compose.animation.AnimatedVisibility(selected.isNotEmpty()) {
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            val chosen = files.filter { it.uri in selected }
-                            onTrash(chosen)
-                            selected = emptySet()
-                        }, colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError)) {
-                            Symbol(Glyph.DELETE, size = 18.dp); Spacer(Modifier.width(8.dp)); Text("Move ${selected.size} to trash")
-                        }
-                        TextButton(onClick = { selected = emptySet() }) { Text("Clear") }
-                    }
-                }
             }
         }
         if (visible.isEmpty()) item(key = "overview-empty") {
@@ -90,5 +81,27 @@ internal fun LibraryOverview(
                 modifier = Modifier.clip(androidx.compose.foundation.shape.RoundedCornerShape(16.dp))
                     .toggleable(checked, onValueChange = { toggle() }, role = androidx.compose.ui.semantics.Role.Checkbox))
         }
+    }
+    // What to do with the chosen files floats above the mini player, as Google Files does: it is
+    // there wherever the list is scrolled, never only at the top.
+    androidx.compose.animation.AnimatedVisibility(selected.isNotEmpty(),
+        Modifier.align(androidx.compose.ui.Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = LocalPlayerInset.current + 12.dp),
+        enter = androidx.compose.animation.slideInVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it } + androidx.compose.animation.fadeIn(),
+        exit = androidx.compose.animation.slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it } + androidx.compose.animation.fadeOut()) {
+        Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp), color = cs.surfaceContainerHighest, shadowElevation = 6.dp) {
+            Row(Modifier.padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                IconButton(onClick = { selected = emptySet() }, modifier = Modifier.semantics { contentDescription = "Clear selection" }) { Symbol(Glyph.CLOSE) }
+                Text("${selected.size} selected", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(end = 8.dp))
+                Button(onClick = {
+                    val chosen = files.filter { it.uri in selected }
+                    onTrash(chosen)
+                    selected = emptySet()
+                }, colors = ButtonDefaults.buttonColors(containerColor = cs.error, contentColor = cs.onError)) {
+                    Symbol(Glyph.DELETE, size = 18.dp); Spacer(Modifier.width(8.dp)); Text("Move to trash")
+                }
+            }
+        }
+    }
     }
 }

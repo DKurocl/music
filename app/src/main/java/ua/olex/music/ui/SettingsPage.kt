@@ -66,7 +66,6 @@ internal fun SettingsPage(
         manage = android.provider.MediaStore.canManageMedia(context)
         onPauseOrDispose {}
     }
-    val version = remember { runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }.getOrNull().orEmpty() }
 
     val soulseek = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.soulseek }
     val soulseekJobs by soulseek.jobs.collectAsStateWithLifecycle()
@@ -298,7 +297,6 @@ internal fun SettingsPage(
         }
 
         if (terms.isNotEmpty() && matches == 0) item { Text("No settings found", Modifier.padding(16.dp)) }
-        if (terms.isEmpty()) item { Text("Music $version", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp, start = 16.dp)) }
     }
 }
 

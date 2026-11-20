@@ -33,6 +33,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.Painter
@@ -166,12 +167,53 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
     }
 }
 
-/** Keep the page at full size while its artwork travels separately. */
+/**
+ * The mini player grows into the player, as Google's media apps open it (a container transform):
+ * a surface spreads from the mini player's card to the whole screen, its corners opening from
+ * 28 dp, and the page's content fades in inside it over the second half, while the cover flies on
+ * its own. Follows the finger when dragged; everything is read while drawing.
+ */
 @Composable
 internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
     val directOpen = LocalDirectPlayerOpen.current
-    return graphicsLayer { alpha = if (directOpen) 1f else travel.fraction }
-        .onGloballyPositioned { travel.page = it }
+    val surface = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer
+    val density = LocalDensity.current
+    val margin = with(density) { 12.dp.toPx() }
+    val radius = with(density) { 28.dp.toPx() }
+    fun card(width: Float, height: Float): androidx.compose.ui.geometry.Rect {
+        val thumb = travel.thumbnail
+        // The mini player's card around its cover; the bottom of the screen if it isn't known.
+        return if (thumb.width > 0f) androidx.compose.ui.geometry.Rect(thumb.left - margin, thumb.top - margin, width - (thumb.left - margin), thumb.bottom + margin)
+            else androidx.compose.ui.geometry.Rect(margin, height - 6 * margin, width - margin, height - margin)
+    }
+    fun eased(p: Float) = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f).transform(p.coerceIn(0f, 1f))
+    fun bounds(width: Float, height: Float): androidx.compose.ui.geometry.Rect {
+        val p = eased(travel.fraction)
+        val from = card(width, height)
+        return androidx.compose.ui.geometry.Rect(from.left * (1 - p), from.top * (1 - p), from.right + (width - from.right) * p, from.bottom + (height - from.bottom) * p)
+    }
+    if (directOpen) return onGloballyPositioned { travel.page = it }
+    return drawBehind {
+        if (travel.fraction < 1f) {
+            val r = bounds(size.width, size.height)
+            drawRoundRect(surface, r.topLeft, r.size, androidx.compose.ui.geometry.CornerRadius(radius * (1f - eased(travel.fraction))))
+        }
+    }.graphicsLayer {
+        val p = travel.fraction
+        alpha = ((p - 0.35f) / 0.5f).coerceIn(0f, 1f)
+        if (p < 1f) {
+            val r = bounds(size.width, size.height)
+            val corner = radius * (1f - eased(p))
+            shape = object : androidx.compose.ui.graphics.Shape {
+                override fun createOutline(size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                    density: androidx.compose.ui.unit.Density) = androidx.compose.ui.graphics.Outline.Rounded(
+                    androidx.compose.ui.geometry.RoundRect(r, androidx.compose.ui.geometry.CornerRadius(corner)))
+            }
+            clip = true
+            // The content rises the last stretch with the surface instead of sitting still under it.
+            translationY = (1f - eased(p)) * r.top * 0.15f
+        } else clip = false
+    }.onGloballyPositioned { travel.page = it }
 }
 
 internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean, val preview: CoverFrame? = null)
