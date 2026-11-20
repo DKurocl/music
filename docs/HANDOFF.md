@@ -5,6 +5,11 @@ Start mix. Search keeps the matched YouTube ID on local copies so the file can s
 correct radio. Ready-made mixes still use their playlist ID. If the radio and local library
 produce no next tracks, the selected track can still start.
 
+[код] The Home interaction check taps an individual pick and checks its song ID, then
+opens a ready-made mix and checks its playlist ID. Tests, both lint tasks, R8 and
+owner certificate verification passed in branch CI.
+https://github.com/DKurocl/music/actions/runs/44680364178
+
 # YouTube Music shelves, search and playback restoration
 
 [код] Home and moods retain the returned shelves and their titles. Provider mixes use the
