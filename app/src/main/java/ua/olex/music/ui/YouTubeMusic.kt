@@ -936,8 +936,16 @@ internal class YouTubeMusic(
         synchronized(streams) { streams[id]?.takeIf { System.currentTimeMillis() - it.second < 4 * 3_600_000L }?.first }?.let { return it }
         val info = StreamInfo.getInfo(ServiceList.YouTube, "https://music.youtube.com/watch?v=$id")
         val best = info.audioStreams.filter { it.isUrl }.maxByOrNull { it.averageBitrate } ?: return null
+        // WebM/Opus carries no bitrate the player can read; the stream list says it, so keep it.
+        best.averageBitrate.takeIf { it > 0 }?.let { synchronized(bitrates) { bitrates[id] = it } }
         Uri.parse(best.content).also { synchronized(streams) { streams[id] = it to System.currentTimeMillis() } }
     }.getOrNull()
+
+    /** The bitrate of the stream chosen for a song, in kbps, once its address was looked up. */
+    fun kbps(id: String): Int? = synchronized(bitrates) { bitrates[id] }
+    private val bitrates = object : LinkedHashMap<String, Int>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Int>?) = size > 300
+    }
 
     // Bounded: a long session through many playlists keeps only the recent ones.
     private val streams = object : LinkedHashMap<String, Pair<Uri, Long>>(64, 0.75f, true) {

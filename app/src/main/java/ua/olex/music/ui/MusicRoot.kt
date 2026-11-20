@@ -650,12 +650,14 @@ fun MusicRoot(model: LibraryViewModel) {
         val currentTrack = model.currentTrack(playing)
         val input = playing.inputFormat
         val file = currentTrack?.format
-        val format = remember(file, input) {
+        // A YouTube Music stream's bitrate comes from its stream list, not from the file.
+        val onlineKbps = currentTrack?.takeIf(YouTubeMusic::isOnline)?.let { context.graph.youTube.kbps(it.id.value.removePrefix("yt:")) }
+        val format = remember(file, input, onlineKbps) {
             (file ?: input)?.let { reported ->
                 val matching = input?.takeIf { it.codec.equals(reported.codec, ignoreCase = true) }
                 val source = reported.copy(sampleRateHz = reported.sampleRateHz ?: matching?.sampleRateHz, bitrateKbps = null)
                 listOfNotNull(source.label, source.sampleRateHz?.takeUnless { source.lossless }?.let(::formatKhz),
-                    (reported.bitrateKbps ?: matching?.bitrateKbps)?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString(" · ")
+                    (reported.bitrateKbps ?: matching?.bitrateKbps ?: onlineKbps)?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString(" · ")
             }
         }
         // A queue item as a song: the library's file, or a YouTube Music stream.
