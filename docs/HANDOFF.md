@@ -1,3 +1,13 @@
+# Player transport motion
+
+[код] Shuffle and Repeat draw Google's Material Symbols Rounded SVG outlines at rest.
+Shuffle retargets its crossover when the mode changes during the gesture. Repeat keeps
+the same arrows while rotating and animates its numeral independently. The player draws
+the press shape, color and icon movement inside the existing touch slots. Removed the
+unused Repeat glyphs from the font and rebuilt the subset with `docs/design/symbols.py`.
+The gallery records 60 ms intervals and 100 ms interruption sequences. The player dock
+is the next stage. Local check: `git diff --check`. Physical Pixel motion needs verification.
+
 # Artist and album recovery
 
 [код] Search reuses account-scoped answers and checks filtered catalogue results if the main
