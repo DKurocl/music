@@ -90,7 +90,6 @@ internal fun StatsPage(library: LibraryIndex, modifier: Modifier, onPlay: (List<
                 range = it
             }
             val frame = snapshot
-            val catalog = rememberOffMain(library, initial = null) { ua.olex.music.model.LibraryStats.of(library) { null } }
             LazyColumn(Modifier.fillMaxSize().testTag("listening-cards"),
                 state = list, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp + viewport),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -116,16 +115,7 @@ internal fun StatsPage(library: LibraryIndex, modifier: Modifier, onPlay: (List<
                         EmptyState(Glyph.HEADPHONES, "Nothing played in this period", "Choose another period to see your listening.")
                     }
                 }
-                catalog?.takeIf { it.songs > 0 }?.let { inventory -> item(key = "library") {
-                    Surface(shape = RoundedCornerShape(24.dp), color = cs.surfaceContainerLow) {
-                        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Library", style = MaterialTheme.typography.titleMediumEmphasized)
-                            Text("${songCount(inventory.songs)} · ${inventory.albums} albums · ${inventory.artists} artists",
-                                style = MaterialTheme.typography.bodyMedium)
-                            Text("${inventory.lossless} lossless · ${inventory.hiRes} hi-res", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
-                        }
-                    }
-                } }
+                // The library size lives in Settings > Library overview; this page is about listening.
             }
         }
         val opened = detail

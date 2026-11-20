@@ -163,7 +163,7 @@ class ArtistImages(context: Context, private val http: (String) -> ByteArray? = 
 
 /** A round artist photo, or the artist's initial on a tonal circle while there is none. */
 @Composable
-internal fun ArtistImage(name: String, modifier: Modifier, size: Dp, shape: androidx.compose.ui.graphics.Shape = CircleShape) {
+internal fun ArtistImage(name: String, modifier: Modifier, size: Dp, shape: androidx.compose.ui.graphics.Shape = CircleShape, fallback: String? = null) {
     val context = LocalContext.current
     val images = (context.applicationContext as ua.olex.music.MusicApp).graph.artistImages
     // The disk is checked off the main thread; a photo seen before in this process shows at once.
@@ -172,7 +172,9 @@ internal fun ArtistImage(name: String, modifier: Modifier, size: Dp, shape: andr
     }
     val cs = MaterialTheme.colorScheme
     Box(modifier.clip(shape).background(cs.tertiaryContainer), contentAlignment = Alignment.Center) {
-        Text(name.trim().firstOrNull()?.uppercase() ?: "?", color = cs.onTertiaryContainer, fontSize = (size.value * 0.4f).sp,
+        // No photo yet: one of the artist's covers when known, else the initial.
+        if (fallback != null && file == null) AsyncImage(model = fallback, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        else Text(name.trim().firstOrNull()?.uppercase() ?: "?", color = cs.onTertiaryContainer, fontSize = (size.value * 0.4f).sp,
             style = MaterialTheme.typography.titleLarge)
         file?.let { AsyncImage(model = it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
     }
