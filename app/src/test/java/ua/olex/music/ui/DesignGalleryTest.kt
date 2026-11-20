@@ -990,7 +990,8 @@ class DesignGalleryTest {
                 empty = !waiting.value, error = null, onClose = { closed = true }, onRetry = {}, onPlay = { played++ })
         } } }
         compose.onNodeWithText(song.title).assertExists()
-        compose.onNodeWithText("Restoring playback…").assertExists()
+        // No placeholder text: the real player layout, Play loading until the service answers.
+        compose.onNodeWithText("Restoring playback…").assertDoesNotExist()
         // Play is live while restoring: it reconnects and starts the restored queue.
         compose.onNodeWithContentDescription("Play").performClick()
         compose.runOnIdle { org.junit.Assert.assertEquals(1, played) }
