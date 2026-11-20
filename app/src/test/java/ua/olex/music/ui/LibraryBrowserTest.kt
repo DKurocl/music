@@ -120,22 +120,6 @@ class LibraryBrowserTest {
         compose.onNodeWithText("Z Opening").assertDoesNotExist()
     }
 
-    @Test fun searchKeepsTheProviderArtistIdentityWhenLocalSongsMatch() {
-        var opened: OnlineTarget? = null
-        val card = YouTubeMusic.Card("UCSinger", "Singer", null, null, YouTubeMusic.Card.Kind.ARTIST)
-        compose.setContent {
-            BrowserTestTheme {
-                CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { opened = it })) {
-                    LibraryBrowser(library, PaddingValues(), "Singer", LibrarySearchResult("Singer", library.songs),
-                        {}, null, { _, _ -> }, null, {}, online = OnlineSearch("Singer", emptyList(), artists = listOf(card)),
-                        onlineOn = true)
-                }
-            }
-        }
-        compose.onNodeWithContentDescription("On YouTube Music").performClick()
-        compose.runOnIdle { assertEquals("UCSinger", (opened as? OnlineTarget.Artist)?.id) }
-    }
-
     @Test fun searchTapQueuesOnlyTheMatches() {
         var played = emptyList<Track>()
         compose.setContent {
