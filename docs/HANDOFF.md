@@ -97,6 +97,12 @@ their status near playback. EQ drags start near a band, and filtered Settings ro
 Local check: `git diff --check`. CI checks compilation, gallery and regressions. Cold and warm
 widget entry, touch and frame pacing on a real Pixel remain to be measured.
 
+[код] Targeted locally: `:app:testDebugUnitTest` for `MoodsTest`,
+`YouTubeMusicTest`, `YouTubeAccountTest`, and `YouTubePaginationTest`, and the Home interaction
+test in `DesignGalleryTest`, with `-PminSdk=35`. All passed. The generated Home frame was reviewed.
+Branch CI passed tests, debug and release lint, R8 assembly and signature verification.
+https://github.com/DKurocl/music/actions/runs/44678370852
+
 # Catalogue and playback feedback follow-up
 
 Home retains recommendation and album order when a new catalogue snapshot is published.
