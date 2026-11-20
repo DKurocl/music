@@ -1,3 +1,25 @@
+# Separate YouTube Music and library search
+
+[код] Search has two sources with a shared query and separate result lists. YouTube Music
+opens first. Its primary response appears while optional artist and playlist filters
+run. Matching local files keep the corresponding online result's place. Library
+artist rows open the local artist directly and keep their songs ahead of online
+catalogue additions.
+
+[код] If artist browse fails for a search profile, recover from the songs filter and
+follow a different channel only when the track credits explicitly name the artist.
+Local songs remain playable on an online artist page when its browse request fails.
+Playlist recovery checks the playlist ID in the alternate watch response. Public
+search can retry without account headers when a signed-in request fails.
+
+[код] Local Gradle `:app:testDebugUnitTest` (LibraryBrowserTest, YouTubeMusicTest,
+YouTubePaginationTest and YouTubeAccountTest, with `-PminSdk=35`) passed all 47
+tests. The Compose checks switch between the two sources and open a library artist
+with YouTube Music enabled. Transport fixtures cover delayed supplemental searches,
+a failed artist profile and a wrong playlist panel. The workspace proxy denied a
+live request to `music.youtube.com` with HTTP 403. A signed-in request on the Pixel
+remains unverified.
+
 # Start a mix by tapping a track
 
 [код] Individual picks in Home, moods and Search now call the same song radio path as
