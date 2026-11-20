@@ -800,8 +800,19 @@ internal class YouTubeMusic(
     /** YouTube Music's home: the owner's own when signed in (quick picks, mixes, listen again...). */
     suspend fun home(): List<Shelf> = withContext(ioDispatcher) {
         val scope = pageScope()
-        val shelves = homeAnswer(scope)?.let(::parseHome).orEmpty()
+        val first = homeAnswer(scope)
+        var shelves = first?.let(::parseHome).orEmpty()
         if (pageScope() != scope || shelves.isEmpty()) return@withContext emptyList()
+        // YouTube Music's home goes on below its first shelves (mixes, charts, listen again...): read
+        // the next pages too, so Home lists the same shelves in the same order.
+        var token = first?.let(::homeContinuation)
+        repeat(4) {
+            val next = token ?: return@repeat
+            val json = runCatching { post("browse", """"continuation":${quote(next)}""") }.getOrNull() ?: return@repeat
+            if (pageScope() != scope) return@withContext emptyList()
+            shelves = shelves + parseHome(json).filter { more -> shelves.none { it.title == more.title } }
+            token = homeContinuation(json)?.takeIf { it != next }
+        }
         storeHome(scope, shelves)
         shelves
     }
@@ -1003,6 +1014,11 @@ internal class YouTubeMusic(
                 Card(id, text(card["title"]).ifEmpty { return@mapNotNull null }, text(card["subtitle"]).ifEmpty { null }, biggestImage(card["thumbnailRenderer"]), Card.Kind.PLAYLIST)
             }.distinctBy { it.id }
         }
+
+        /** The token for Home's next shelves: the section list's own, not a carousel's. */
+        fun homeContinuation(json: String): String? =
+            Regex(""""nextContinuationData"\s*:\s*\{\s*"continuation"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+                ?: continuationOf(json)
 
         /** The token for the rest of a long list, in either form YouTube Music sends it. */
         fun continuationOf(json: String): String? =
