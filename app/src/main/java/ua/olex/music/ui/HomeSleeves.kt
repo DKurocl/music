@@ -255,9 +255,8 @@ internal fun QuickPicks(title: String, songs: List<Track>, currentId: String?, o
     val pager = rememberPagerState { columns.size }
     val scope = rememberCoroutineScope()
     val still = LocalPowerSave.current
-    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 10.dp, top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleLargeEmphasized)
-        if (columns.size > 1) {
+    SectionHeader(title, trailing = if (columns.size > 1) ({
+        run {
             val atEnd = pager.currentPage >= columns.lastIndex
             KickIconButton(onClick = {
                 val target = if (atEnd) 0 else (pager.currentPage + 1).coerceAtMost(columns.lastIndex)
@@ -266,7 +265,7 @@ internal fun QuickPicks(title: String, songs: List<Track>, currentId: String?, o
                 Symbol(if (atEnd) Glyph.BACK else Glyph.CHEVRON, size = 20.dp, color = cs.primary, kick = k)
             }
         }
-    }
+    }) else null)
     HorizontalPager(state = pager, pageSpacing = 8.dp,
         contentPadding = PaddingValues(start = 16.dp, end = if (columns.size > 1) 44.dp else 16.dp),
         verticalAlignment = Alignment.Top) { c ->
