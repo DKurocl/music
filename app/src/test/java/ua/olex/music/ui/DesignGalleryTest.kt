@@ -123,7 +123,9 @@ class DesignGalleryTest {
         fun card(id: String, name: String, subtitle: String, cover: Int, kind: YouTubeMusic.Card.Kind) =
             YouTubeMusic.Card(id, name, subtitle, demoSongs[cover].artworkUri, kind)
         val remote = androidx.compose.runtime.remember(small) {
-            if (small) emptyList() else listOf(YouTubeMusic.Shelf("Quick picks", demoSongs.filter { YouTubeMusic.isOnline(it) }, listOf(
+            val remotePicks = demoSongs.filter { YouTubeMusic.isOnline(it) } +
+                demoSongs.first().copy(id = TrackId("yt:quick-pick"), uri = "ytm://quick-pick")
+            if (small) emptyList() else listOf(YouTubeMusic.Shelf("Quick picks", remotePicks, listOf(
                 card("radio", "Night Drive Mix", "Personal radio", 4, YouTubeMusic.Card.Kind.MIX),
                 card("VLlate", "After Hours", "Downtempo", 3, YouTubeMusic.Card.Kind.PLAYLIST),
                 card("VLday", "Sunday Slowdown", "Acoustic", 1, YouTubeMusic.Card.Kind.PLAYLIST),
