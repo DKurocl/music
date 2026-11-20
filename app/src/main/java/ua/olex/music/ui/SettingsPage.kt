@@ -267,7 +267,7 @@ internal fun SettingsPage(
             val motion = remember { (context.applicationContext as ua.olex.music.MusicApp).graph.motionCovers }
             var limit by remember { mutableStateOf(ua.olex.music.playback.CacheBudget.limitMb(context)) }
             var editing by remember { mutableStateOf(false) }
-            var cleared by remember { mutableStateOf(0) }
+            var cleared by remember { androidx.compose.runtime.mutableIntStateOf(0) }
             var sizes by remember { mutableStateOf<List<Long>?>(null) }
             LaunchedEffect(cleared, limit) {
                 sizes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

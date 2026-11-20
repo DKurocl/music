@@ -67,3 +67,26 @@ internal fun ConnectedChoice(options: List<String>, selected: Int, onSelect: (In
         }
     }
 }
+
+/** An action chip in the same tonal, outline-free style as [AppChip] (M3 Expressive). */
+@Composable
+internal fun AppActionChip(
+    onClick: () -> Unit,
+    label: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    leadingIcon: (@Composable () -> Unit)? = null,
+    trailingIcon: (@Composable () -> Unit)? = null,
+) {
+    val cs = MaterialTheme.colorScheme
+    androidx.compose.material3.AssistChip(
+        onClick = onClick, label = label, modifier = modifier, enabled = enabled,
+        leadingIcon = leadingIcon, trailingIcon = trailingIcon,
+        shape = RoundedCornerShape(20.dp),
+        colors = androidx.compose.material3.AssistChipDefaults.assistChipColors(
+            containerColor = cs.surfaceContainerHigh, labelColor = cs.onSurface,
+            leadingIconContentColor = cs.onSurfaceVariant, trailingIconContentColor = cs.onSurfaceVariant,
+        ),
+        border = null,
+    )
+}

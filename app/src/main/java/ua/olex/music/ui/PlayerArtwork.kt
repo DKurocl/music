@@ -209,7 +209,7 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
 
 @Composable
 internal fun PlayerArtwork(uri: String?, modifier: Modifier, corner: Dp, pixels: Int, miniEndpoint: Boolean = false) {
-    var measured by remember { mutableStateOf(0) }
+    var measured by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val image = rememberCoverImage(uri, pixels, measured)
     PlayerCoverFace(image, modifier.onSizeChanged { measured = maxOf(it.width, it.height) }
         .then(if (miniEndpoint) Modifier.playerCoverEndpoint(true) else Modifier), corner)

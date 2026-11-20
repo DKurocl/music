@@ -46,7 +46,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
@@ -947,7 +946,7 @@ internal fun SleepTimerDialog(
     val end = ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK
     val runningEnd = active && deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
     val preferences = LocalContext.current.getSharedPreferences("sleep_timer", android.content.Context.MODE_PRIVATE)
-    var minutes by rememberSaveable { mutableStateOf(30) }
+    var minutes by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(30) }
     var endOfSong by rememberSaveable { mutableStateOf(false) }
     var finishTrack by rememberSaveable {
         mutableStateOf(if (active && !runningEnd) finishingTrack else preferences.getBoolean("finish_track", true))

@@ -300,7 +300,7 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
                 onlineStatus?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (onFindOnline != null) Button(onClick = onFindOnline) { Text("Find online") }
-                    androidx.compose.material3.OutlinedButton(onClick = onTools) { Text("More") }
+                    androidx.compose.material3.FilledTonalButton(onClick = onTools) { Text("More") }
                 }
             }
         } else LazyColumn(Modifier.fillMaxSize().nestedScroll(KeepScroll), state = list, contentPadding = PaddingValues(top = 48.dp, bottom = 200.dp),

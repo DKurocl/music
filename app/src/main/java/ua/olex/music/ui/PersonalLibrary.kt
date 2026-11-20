@@ -127,7 +127,7 @@ internal fun PlaylistBrowser(
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val youTubeOn by graph.youTubeOn.collectAsStateWithLifecycle()
     val network = LocalNetwork.current
-    var remoteRetry by remember(accountScope) { mutableStateOf(0) }
+    var remoteRetry by remember(accountScope) { androidx.compose.runtime.mutableIntStateOf(0) }
     var remoteFailed by remember(accountScope, youTubeOn) { mutableStateOf(false) }
     var remoteLoading by remember(accountScope, youTubeOn) { mutableStateOf(false) }
     val youTubePlaylists = androidx.compose.runtime.key(accountScope, youTubeOn) {
@@ -242,7 +242,7 @@ internal fun PlaylistBrowser(
                         FilledTonalButton(onClick = { adding = true }, modifier = Modifier.height(52.dp)) { Text("Add songs") }
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.AssistChip(enabled = !loadingDocument && selected.songs.isNotEmpty(), leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }, onClick = {
+                        AppActionChip(enabled = !loadingDocument && selected.songs.isNotEmpty(), leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) }, onClick = {
                             loadingDocument = true
                             scope.launch {
                                 try {
@@ -256,8 +256,8 @@ internal fun PlaylistBrowser(
                                 finally { loadingDocument = false }
                             }
                         }, label = { Text("Export M3U8") })
-                        androidx.compose.material3.AssistChip(leadingIcon = { Symbol(Glyph.EDIT, size = 18.dp) }, onClick = { namingId = selected.id }, label = { Text("Rename") })
-                        androidx.compose.material3.AssistChip(leadingIcon = { Symbol(Glyph.DELETE, size = 18.dp) }, onClick = { deleting = selected.id }, label = { Text("Delete") })
+                        AppActionChip(leadingIcon = { Symbol(Glyph.EDIT, size = 18.dp) }, onClick = { namingId = selected.id }, label = { Text("Rename") })
+                        AppActionChip(leadingIcon = { Symbol(Glyph.DELETE, size = 18.dp) }, onClick = { deleting = selected.id }, label = { Text("Delete") })
                     }
                 }
             }
