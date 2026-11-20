@@ -438,8 +438,21 @@ internal fun LibraryBrowser(
                     val groups = searchGroups.groupBy { it.first }
                     if (local == null) item(key = "local-search") { BrowserMessage("Searching…") }
                     if (local?.failed == true) item(key = "local-failed") { ErrorNotice("Couldn't search your library.", onRetrySearch) }
+                    val webGroups = found?.let { listOf("Artists" to it.artists, "Albums" to it.albums, "Playlists" to it.playlists) }.orEmpty()
+                    val webCards = webGroups.flatMap { it.second }
+                    if (webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("Songs on YouTube Music") }
+                    itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
+                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
+                            onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
+                            onSearchUsed(query); nav.play(webSongs, i, "Search")
+                        }
+                    }
+                    for ((label, cards) in webGroups) if (cards.isNotEmpty()) {
+                        item(key = "web-title-$label") { SearchHeading(label) }
+                        items(cards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
+                    }
                     for ((kind, hits) in groups) {
-                        item(key = "group-title-$kind") { SearchHeading(if (kind == LibraryTab.ARTISTS) "Artists" else "Albums") }
+                        item(key = "group-title-$kind") { SearchHeading(if (kind == LibraryTab.ARTISTS) "Artists in your library" else "Albums in your library") }
                         hits.forEach { (_, collection) ->
                             item(key = "group-$kind-${collection.id}") {
                                 androidx.compose.material3.ListItem(
@@ -457,26 +470,13 @@ internal fun LibraryBrowser(
                             }
                         }
                     }
-                    if (localSongs.isNotEmpty()) item(key = "songs-title") { SearchHeading("Songs") }
+                    if (localSongs.isNotEmpty()) item(key = "songs-title") { SearchHeading("Songs in your library") }
                     itemsIndexed(localSongs, key = { _, track -> track.id.value }, contentType = { _, _ -> "song" }) { index, track ->
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
                             checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
                             onSearchUsed(query)
-                            if (webSongs.isEmpty()) onPlay(localSongs, index) else nav.play(localSongs + webSongs, index, "Search")
+                            onPlay(localSongs, index)
                         }
-                    }
-                    val webGroups = found?.let { listOf("Artists" to it.artists, "Albums" to it.albums, "Playlists" to it.playlists) }.orEmpty()
-                    val webCards = webGroups.flatMap { it.second }
-                    if (webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("Songs on YouTube Music") }
-                    itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
-                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
-                            onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
-                            onSearchUsed(query); nav.play(webSongs, i, "Search")
-                        }
-                    }
-                    for ((label, cards) in webGroups) if (cards.isNotEmpty()) {
-                        item(key = "web-title-$label") { SearchHeading(label) }
-                        items(cards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
                     }
                     when {
                         waiting -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
