@@ -160,10 +160,12 @@ class LibraryBrowserTest {
         compose.runOnIdle { online.value = OnlineSearch("Singer", listOf(opening), artists = listOf(artist)) }
         compose.onNodeWithText("Artists in your library").assertIsDisplayed()
         compose.onNodeWithText("YouTube Music").performClick()
-        compose.onNodeWithText("Artist on YouTube Music").assertIsDisplayed()
+        // The exact artist leads as YouTube Music's "Top result" card.
+        compose.onNodeWithText("Top result").assertIsDisplayed()
+        compose.onNodeWithText("Artist on YouTube Music", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Z Opening").assertIsDisplayed()
         compose.onNodeWithText("Artists in your library").assertDoesNotExist()
-        compose.onNodeWithText("Artist on YouTube Music").performClick()
+        compose.onNodeWithText("Artist on YouTube Music", substring = true).performClick()
         compose.runOnIdle { assertEquals(OnlineTarget.Artist("Singer", "UCsinger"), opened) }
     }
 
@@ -180,7 +182,7 @@ class LibraryBrowserTest {
         compose.onNodeWithText("Your library").performClick()
         compose.onNodeWithText("2 songs", substring = false).performClick()
         compose.runOnIdle { assertEquals("", query.value) }
-        compose.onNodeWithText("Play all").assertIsDisplayed()
+        compose.onNodeWithText("Shuffle").assertIsDisplayed()
     }
 
     @Test fun queryCanBeEnteredAndClearedWithoutChangingTheLibrary() {
