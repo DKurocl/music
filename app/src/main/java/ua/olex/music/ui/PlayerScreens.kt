@@ -725,14 +725,22 @@ internal fun PlayerPage(
             Transport(state, onToggle, onNext, onPrevious, onShuffle, onRepeat)
             Spacer(Modifier.height(28.dp))
             // The less frequent actions in one light pill (M3E floating toolbar style), icons popping in.
+            // The same 6dp around every icon, so a lit icon's circle sits evenly inside the pill.
             Surface(shape = CircleShape, color = cs.surfaceContainerHigh) {
-                Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     ToggleAction(Glyph.LYRICS, "Lyrics", lyricsShown && inlineLyrics != null, !restoring, if (lyricsShown) "Shown" else "Hidden") {
                         if (inlineLyrics != null) lyricsShown = !lyricsShown else onLyrics()
                     }
                     ToggleAction(Glyph.SLEEP, "Sleep timer", state.sleepDeadlineMs != null, state.connected, if (state.sleepDeadlineMs != null) "On" else "Off", onTimer)
                     ToggleAction(Glyph.QUEUE, "Open queue", false, !restoring, null, onQueue)
                     ToggleAction(route.glyph(), "Change output", false, !restoring, null, onOutput)
+                    // Feel the music: the phone taps with the beat. One tap here, no trip to Settings.
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
+                    ToggleAction(Glyph.WAVE, "Feel the music", feel, !restoring, if (feel) "On" else "Off") {
+                        feel = !feel
+                        ua.olex.music.playback.MusicHaptics.set(context, feel, ua.olex.music.playback.MusicHaptics.strength(context))
+                    }
                 }
             }
             state.sleepTimerError?.let { Text(it, color = cs.error, modifier = Modifier.padding(top = 8.dp)) }

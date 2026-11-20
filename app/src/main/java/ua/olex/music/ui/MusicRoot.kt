@@ -357,6 +357,20 @@ fun MusicRoot(model: LibraryViewModel) {
     androidx.compose.runtime.LaunchedEffect(model.offlineNotice) {
         if (model.offlineNotice > 0) snackbar.showSnackbar("Offline: playing your files and saved songs only")
     }
+    // After a crash: say so once and offer the report (the stack, the app and Android versions;
+    // nothing personal) to share, then forget it.
+    LaunchedEffect(Unit) {
+        val file = java.io.File(context.filesDir, ua.olex.music.MusicApp.CRASH_FILE)
+        val report = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { if (file.exists()) runCatching { file.readText() }.getOrNull().also { file.delete() } else null }
+            ?: return@LaunchedEffect
+        if (snackbar.showSnackbar("Music closed unexpectedly", actionLabel = "Share report", withDismissAction = true,
+                duration = androidx.compose.material3.SnackbarDuration.Long) == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+            runCatching {
+                context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND)
+                    .setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, report), "Share crash report"))
+            }
+        }
+    }
     androidx.compose.runtime.CompositionLocalProvider(LocalSnackbar provides snackbar, LocalIsPlaying provides playing.isPlaying, LocalOnlineNav provides onlineNav,
         LocalPlayingTrack provides playing.track,
         LocalOwnedSources provides if (model.allowed) personal.localCopies else emptyMap(),
@@ -868,7 +882,12 @@ private fun NowPlaying(
     var queueSheet by rememberSaveable { mutableStateOf(false) }
     var audioPath by rememberSaveable { mutableStateOf(false) }
     var devicesOpen by rememberSaveable { mutableStateOf(false) }
-    val changeOutput: () -> Unit = { audioPath = false; devicesOpen = true }
+    // Straight to Android's own output picker, as Google's apps do; the app's sheet only when the
+    // system can't show it.
+    val changeOutput: () -> Unit = {
+        audioPath = false
+        if (!runCatching { monitor.showOutputSwitcher() }.getOrDefault(false)) devicesOpen = true
+    }
     if (devicesOpen) PlaybackDevices(route, monitor::showOutputSwitcher) { devicesOpen = false }
     if (audioPath) AudioPathSheet(format, route, state.audio, onDismiss = { audioPath = false }, onOutput = changeOutput, onEqualizer = { audioPath = false; onEqualizer() },
         sourceLabel = if (state.track?.uri?.startsWith("ytm://") == true || state.mediaId?.startsWith("yt:") == true)

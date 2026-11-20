@@ -109,9 +109,22 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     coil3.SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
+        // If the app ever crashes, what happened is kept (on the phone only) so the next start can
+        // offer to share it; Android's own crash handling then runs as usual.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, failure ->
+            runCatching {
+                java.io.File(filesDir, CRASH_FILE).writeText("Music ${packageManager.getPackageInfo(packageName, 0).versionName}\n" +
+                    "Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MODEL}\n" +
+                    "Thread ${thread.name}\n\n" + failure.stackTraceToString().take(16_000))
+            }
+            previous?.uncaughtException(thread, failure)
+        }
         // The library starts loading with the process, while the splash shows, not when Home asks.
         if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) graph.index
     }
+    companion object { const val CRASH_FILE = "last_crash.txt" }
+
     /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
     override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
         .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("image_cache").absolutePath.toPath() })

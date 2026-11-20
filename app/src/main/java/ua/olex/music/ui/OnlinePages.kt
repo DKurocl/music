@@ -612,7 +612,10 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
     val nav = LocalOnlineNav.current
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    // A rail comes to rest with a whole card on the 16dp edge, never one cut through its corners.
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    LazyRow(state = state, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+        flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(state, androidx.compose.foundation.gestures.snapping.SnapPosition.Start)) {
         items(cards, key = { it.id }) { card ->
             MediaCard(card.cover, card.title, card.subtitle, size = size, round = card.kind == YouTubeMusic.Card.Kind.ARTIST) {
                 when (card.kind) {
@@ -633,7 +636,9 @@ internal fun YouTubeCards(cards: List<YouTubeMusic.Card>, size: androidx.compose
 /** The one rail of the app: cards 16dp from the edge, 12dp apart, as YouTube Music lays its shelves. */
 @Composable
 internal fun <T> CardRail(items: List<T>, key: (T) -> Any, card: @Composable (T) -> Unit) {
-    LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    LazyRow(state = state, contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
+        flingBehavior = androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior(state, androidx.compose.foundation.gestures.snapping.SnapPosition.Start)) {
         items(items, key = key) { card(it) }
     }
 }

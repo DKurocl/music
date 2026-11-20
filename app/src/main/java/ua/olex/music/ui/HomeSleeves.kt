@@ -269,7 +269,11 @@ internal fun QuickPicks(title: String, songs: List<Track>, currentId: String?, o
     HorizontalPager(state = pager, pageSpacing = 8.dp,
         contentPadding = PaddingValues(start = 16.dp, end = if (columns.size > 1) 44.dp else 16.dp),
         verticalAlignment = Alignment.Top) { c ->
-        Column(Modifier.fillMaxWidth().padding(top = 4.dp).clip(RoundedCornerShape(22.dp)).background(cs.surfaceContainerLow)) {
+        // The column already passed would show as a sliver at the screen's edge: it fades as it leaves.
+        Column(Modifier.fillMaxWidth().graphicsLayer {
+            val behind = (pager.currentPage - c) + pager.currentPageOffsetFraction
+            alpha = (1f - behind).coerceIn(0f, 1f)
+        }.padding(top = 4.dp).clip(RoundedCornerShape(22.dp)).background(cs.surfaceContainerLow)) {
             columns[c].forEachIndexed { row, track ->
                 val marked = track.id.value == currentId || track.matchesPlayback(LocalPlayingTrack.current)
                 val haptics = rememberHaptics()
