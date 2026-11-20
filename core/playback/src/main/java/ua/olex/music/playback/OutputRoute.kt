@@ -28,7 +28,6 @@ class OutputRouteMonitor(context: Context) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val router = MediaRouter2.getInstance(app)
     private var started = false
-    private val music = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
     private val _route = MutableStateFlow(current())
     val route: StateFlow<OutputRoute?> = _route.asStateFlow()
 
@@ -77,7 +76,15 @@ class OutputRouteMonitor(context: Context) {
             .flatMap { it.selectedRoutes.asSequence() }
             .firstOrNull { !it.isSystemRoute }
         if (remote != null) return OutputRoute(OutputRoute.Kind.REMOTE, remote.name.toString(), emptyList())
-        val device = audio.getAudioDevicesForAttributes(music).firstOrNull() ?: return null
+        return deviceRoute(audio)
+    }
+}
+
+private val musicAttributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
+
+/** The phone's own output device for music (speaker, wired, USB, Bluetooth), as a route. */
+internal fun deviceRoute(audio: AudioManager): OutputRoute? {
+        val device = audio.getAudioDevicesForAttributes(musicAttributes).firstOrNull() ?: return null
         val kind = when (device.type) {
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER_SAFE, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> OutputRoute.Kind.SPEAKER
             AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_LINE_ANALOG -> OutputRoute.Kind.WIRED
@@ -88,5 +95,31 @@ class OutputRouteMonitor(context: Context) {
             else -> OutputRoute.Kind.OTHER
         }
         return OutputRoute(kind, device.productName?.toString().orEmpty(), device.sampleRates.sorted())
+}
+
+/**
+ * How much later than the player's clock music is heard on an output: Bluetooth codecs and the
+ * earbuds' own buffers add 100-250 ms that not every device reports to Android. Kept per output
+ * (the speaker, each pair of headphones), set by ear; synced lyrics (in the app and on the lock
+ * screen) and Feel the music follow it, so the words and the taps land with what is heard.
+ */
+object OutputDelay {
+    private const val PREFS = "output_delay"
+    const val STEP_MS = 10
+    const val MAX_MS = 400
+    private val _revision = MutableStateFlow(0)
+    /** Bumped on every change, so screens re-read the value. */
+    val revision: StateFlow<Int> = _revision.asStateFlow()
+
+    fun key(route: OutputRoute?): String = route?.let { "${it.kind}:${it.name}" } ?: "unknown"
+    fun ms(context: Context, route: OutputRoute?): Int =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(key(route), 0)
+    fun set(context: Context, route: OutputRoute?, ms: Int) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(key(route), ms.coerceIn(-MAX_MS, MAX_MS)).apply()
+        _revision.value++
     }
+    /** The phone's own output music goes to now (no cast routes). */
+    fun currentRoute(context: Context): OutputRoute? = context.getSystemService(AudioManager::class.java)?.let(::deviceRoute)
+    /** For the playback side, which has no monitor: the delay of the output music goes to now. */
+    fun current(context: Context): Int = ms(context, currentRoute(context))
 }

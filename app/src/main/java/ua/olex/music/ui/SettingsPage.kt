@@ -124,7 +124,25 @@ internal fun SettingsPage(
         if (terms.isNotEmpty()) setting("Equalizer and ReplayGain") { Row(Glyph.TUNE, "Equalizer and ReplayGain", "Per output EQ, Sony correction, loudness levelling", onClick = onEqualizer) }
         setting("Battery saver audio offload") { Toggle(Glyph.BATTERY, "Battery saver", "Audio chip plays while the screen is off", offload, first = true) {
             offload = it; prefs(UsbBitPerfect.PREFS).edit().putBoolean(PlaybackService.OFFLOAD_KEY, it).apply() } }
-        setting("Bit-perfect USB output DAC") { Toggle(Glyph.USB, "Bit-perfect USB output", "Each song at its own rate to a USB DAC", bitPerfect, last = true) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
+        setting("Bit-perfect USB output DAC") { Toggle(Glyph.USB, "Bit-perfect USB output", "Each song at its own rate to a USB DAC", bitPerfect) { bitPerfect = it; UsbBitPerfect.set(context, it) } }
+        // Headphones play a little behind the player's clock; synced lyrics and Feel the music wait
+        // the same, set by ear while a song plays, kept per output.
+        setting("Sound delay headphones bluetooth sync lyrics haptics latency") {
+            val revision by ua.olex.music.playback.OutputDelay.revision.collectAsStateWithLifecycle()
+            val route = remember(revision) { ua.olex.music.playback.OutputDelay.currentRoute(context) }
+            val delay = remember(route, revision) { ua.olex.music.playback.OutputDelay.ms(context, route) }
+            val name = route?.name?.takeIf { it.isNotBlank() && route.kind != ua.olex.music.playback.OutputRoute.Kind.SPEAKER } ?: "phone speaker"
+            val step = ua.olex.music.playback.OutputDelay.STEP_MS
+            Row(Glyph.HEADPHONES, "Sound delay · $name", if (delay == 0) "Lyrics and Feel the music follow the player as is"
+                else "Lyrics and Feel the music wait $delay ms for what you hear", last = true, trailing = {
+                androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
+                    KickIconButton(onClick = { ua.olex.music.playback.OutputDelay.set(context, route, delay - step) },
+                        modifier = Modifier.semantics { contentDescription = "Less delay" }) { k -> Symbol(Glyph.MINUS, kick = k) }
+                    KickIconButton(onClick = { ua.olex.music.playback.OutputDelay.set(context, route, delay + step) },
+                        modifier = Modifier.semantics { contentDescription = "More delay" }) { k -> Symbol(Glyph.ADD, kick = k) }
+                }
+            })
+        }
 
         // The phone taps with the kick drum and the bass, timed to what is heard (MusicHaptics).
         if (terms.isEmpty()) item(key = "group-Music haptics") { Group("Music haptics") }

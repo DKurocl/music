@@ -94,7 +94,8 @@ class LockScreenLyrics internal constructor(private val context: Context, privat
             }
             if (lyrics.sync == Sync.NONE) { shown.line = null; return@launch }
             while (isActive) {
-                val now = real.currentPosition + offsetMs
+                // What is heard, not what is played: headphones lag the player's clock (OutputDelay).
+                val now = real.currentPosition + offsetMs - OutputDelay.current(context)
                 val index = lyrics.indexAt(now)
                 shown.line = lyrics.lines.getOrNull(index)?.text?.takeIf { it.isNotBlank() } ?: "♪"
                 val next = lyrics.lines.drop(index + 1).firstOrNull { !it.background }?.startMs

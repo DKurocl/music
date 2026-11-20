@@ -876,6 +876,9 @@ private fun NowPlaying(
     val monitor = context.graph.output
     LifecycleStartEffect(monitor) { monitor.start(); onStopOrDispose { monitor.stop() } }
     val route by monitor.route.collectAsStateWithLifecycle()
+    // How late this output is heard (set by ear per output): synced lyrics follow what is heard.
+    val delayRevision by ua.olex.music.playback.OutputDelay.revision.collectAsStateWithLifecycle()
+    val outputLag = remember(route, delayRevision) { ua.olex.music.playback.OutputDelay.ms(context, route).toLong() }
     val lyricsPrefs = remember { context.getSharedPreferences("lyrics_display", android.content.Context.MODE_PRIVATE) }
     var lyricsScale by remember { androidx.compose.runtime.mutableFloatStateOf(lyricsPrefs.getFloat("text_scale", 1f)) }
     var lyricsSynced by remember { mutableStateOf(lyricsPrefs.getBoolean("synced", true)) }
@@ -891,7 +894,7 @@ private fun NowPlaying(
         if (online && lyricsState.mediaId == id && lyricsState.lyrics.lines.isEmpty() && asked.add(id)) onFindLyricsOnline()
     }
     if (lyricsOpen) LyricsSheet(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY,
-        state, lyricOffset, position, onSeek, onLyricOffset, onDismiss = { lyricsOpen = false },
+        state, lyricOffset, position, onSeek, onLyricOffset, onDismiss = { lyricsOpen = false }, outputLagMs = outputLag,
         source = if (lyricsState.mediaId == state.mediaId) lyricsState.source else "Loading local lyrics...",
         note = lyricsState.note.takeIf { lyricsState.mediaId == state.mediaId }, folders = musicFolders,
         onChooseFolder = onChooseMusicFolder, onClearFolders = onClearMusicFolders, onReload = onReloadLyrics,
@@ -945,7 +948,7 @@ private fun NowPlaying(
         onOpenAlbum = onOpenOrigin ?: if (originIsMix) ({ queueSheet = true }) else onOpenAlbum.takeIf { from == null }, onOpenArtist = onOpenArtist, motionCover = motionCover, onLyricsTools = { lyricsOpen = true }, from = from,
         inlineLyrics = { mod ->
             InlineLyrics(if (lyricsState.mediaId == state.mediaId) lyricsState.lyrics else ua.olex.music.lyrics.Lyrics.EMPTY, state, lyricOffset, position, onSeek,
-                onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus,
+                onTools = { lyricsOpen = true }, onFindOnline = onFindLyricsOnline, onlineStatus = onlineLyricsStatus, outputLagMs = outputLag,
                 // Words fill at 60 frames a second: smooth to the eye, without holding the panel at 120 Hz.
                 modifier = mod.preferredFrameRate(60f), textScale = lyricsScale, synced = lyricsSynced)
         })
