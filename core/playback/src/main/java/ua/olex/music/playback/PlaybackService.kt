@@ -368,7 +368,400 @@ class PlaybackService : MediaLibraryService() {
     private fun publishNowPlaying() {
         val player = exoOrNull() ?: return
         val meta = player.mediaMetadata
+        // Widget and tile queries go through Android services and can block the main looper on a skip.
         val item = player.currentMediaItem?.mediaMetadata
-        // Calls into Android's widget service stay off the playback looper.
         surfaceUpdates.trySend(PlaybackSurface((meta.title ?: item?.title)?.toString(),
             (meta.artist ?: item?.artist)?.toString(), (meta.artworkUri ?: item?.artworkUri)?.toString(), player.isPlaying))
+    }
+
+    private fun recordCurrentPlayback() {
+        val player = exoOrNull() ?: return
+        if (!player.isPlaying) return
+        val item = player.currentMediaItem ?: return
+        val meta = item.mediaMetadata
+        val occurrence = meta.extras?.getString(PlayerConnection.QUEUE_KEY) ?: item.mediaId
+        val meter = listening ?: return
+        if (item.mediaId.isBlank()) return
+        if (historyGate.shouldRecord(occurrence, player.isPlaying)) {
+            val track = PlayerConnection.track(item).let { it.copy(durationMs = it.durationMs.takeIf { ms -> ms > 0 } ?: player.duration.coerceAtLeast(0)) }
+            listeningOccurrence = occurrence
+            meter.begin(track)
+        } else meter.resume()
+    }
+
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? = session
+
+
+    /** Swiped away from recents: keep playing if music is playing, otherwise stop for good. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val player = session?.player
+        if (player == null || !player.playWhenReady || player.mediaItemCount == 0 ||
+            player.playbackState == Player.STATE_ENDED || player.playbackState == Player.STATE_IDLE
+        ) stopSelf()
+    }
+
+    override fun onDestroy() {
+        AudioLoadPriority.update(false)
+        lockLyrics?.release()
+        runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
+        getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
+        usb.clear()
+        lanServer.stop()
+        equalizerRoute?.stop()
+        equalizerRoute = null
+        persistence?.close()
+        persistence = null
+        listening?.close()
+        listening = null
+        scope.cancel()
+        session?.run { player.release(); release() }
+        session = null
+        super.onDestroy()
+    }
+
+    private var endOfTrack = false
+
+    private fun usesRemotePlayback(): Boolean =
+        session?.player?.deviceInfo?.playbackType == androidx.media3.common.DeviceInfo.PLAYBACK_TYPE_REMOTE
+
+    private fun stopRemoteAtBoundary() {
+        if (!endOfTrack || !usesRemotePlayback()) return
+        session?.player?.pause()
+        finishEndOfTrackTimer()
+    }
+
+    private fun armEndOfTrack() {
+        val active = session?.player ?: return
+        endOfTrack = active.currentMediaItem != null && active.playbackState != Player.STATE_ENDED
+        exoOrNull()?.pauseAtEndOfMediaItems = endOfTrack
+    }
+
+    private fun finishEndOfTrackTimer() {
+        if (!endOfTrack) return
+        endOfTrack = false
+        exoOrNull()?.pauseAtEndOfMediaItems = false
+        publishSleepTimer()
+    }
+
+    /** "+10 min": the running deadline moves later by exactly [ms]; the fade is planned again. */
+    private fun extendSleepTimer(ms: Long) {
+        if (endOfTrack || sleepTimer.deadlineMs == null) return
+        sleepJob?.cancel(); sleepJob = null
+        fading?.cancelSleepFade()
+        sleepTimer.extend(ms, SystemClock.elapsedRealtime())
+        publishSleepTimer()
+        scheduleSleep(((sleepTimer.deadlineMs ?: return) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+    }
+
+    private fun setSleepTimer(minutes: Int, finishTrack: Boolean) {
+        sleepJob?.cancel()
+        sleepJob = null
+        fading?.cancelSleepFade()
+        endOfTrack = false
+        exoOrNull()?.pauseAtEndOfMediaItems = false
+        val now = SystemClock.elapsedRealtime()
+        if (minutes == SleepTimerCommand.END_OF_TRACK) {
+            sleepTimer.set(0, now)
+            armEndOfTrack()
+        } else {
+            sleepTimer.set(minutes, now, if (finishTrack) SleepTimer.Expiry.FINISH_TRACK else SleepTimer.Expiry.PAUSE)
+        }
+        publishSleepTimer()
+        if (sleepTimer.deadlineMs == null) return
+        scheduleSleep(minutes * 60_000L)
+    }
+
+    private fun scheduleSleep(lengthMs: Long) {
+        val deadline = sleepTimer.deadlineMs ?: return
+        sleepJob = scope.launch {
+            val fadeMs = if (sleepTimer.expiry == SleepTimer.Expiry.PAUSE) minOf(30_000L, lengthMs / 4) else 0L
+            awaitSleepDeadline(deadline, fadeMs, SystemClock::elapsedRealtime) { remaining ->
+                val local = exoOrNull()
+                val active = session?.player
+                if (local?.isPlaying == true && active?.currentMediaItem == local.currentMediaItem) {
+                    fading?.sleepFade(remaining)
+                }
+            }
+            when (sleepTimer.expire(SystemClock.elapsedRealtime())) {
+                SleepTimer.Expiry.PAUSE -> {
+                    session?.player?.pause()
+                    fading?.cancelSleepFade()
+                }
+                SleepTimer.Expiry.FINISH_TRACK -> {
+                    if (session?.player?.playWhenReady == true) armEndOfTrack()
+                }
+                null -> return@launch
+            }
+            publishSleepTimer()
+        }
+    }
+
+    private fun publishSleepTimer() {
+        session?.let { current ->
+            current.setSessionExtras(Bundle(current.sessionExtras).apply {
+                val start = sleepTimer.startedAtMs
+                val deadline = sleepTimer.deadlineMs
+                putLong(SleepTimerCommand.DURATION, if (start != null && deadline != null) deadline - start else 0)
+                putLong(SleepTimerCommand.DEADLINE, if (endOfTrack) SleepTimerCommand.END_OF_TRACK_DEADLINE else sleepTimer.deadlineMs ?: 0)
+                putBoolean(SleepTimerCommand.FINISH_TRACK, sleepTimer.expiry == SleepTimer.Expiry.FINISH_TRACK)
+            })
+        }
+    }
+
+    private fun publishDiagnostics() {
+        session?.let { current -> current.setSessionExtras(Bundle(current.sessionExtras).apply {
+            putBundle(AudioDiagnostics.KEY, diagnostics.toBundle())
+        }) }
+    }
+
+    private fun AudioSink.AudioTrackConfig.signature() = AudioTrackLifecycle.Configuration(encoding, sampleRate, channelConfig, offload)
+
+    private suspend fun tree(): ua.olex.music.model.BrowseTree? = (application as? MediaCatalogOwner)?.browseTree()
+
+    private fun ua.olex.music.model.BrowseNode.toMediaItem(): MediaItem {
+        track?.let { t -> return PlayerConnection.mediaItem(t).buildUpon().setMediaId(id).build() }
+        val type = when {
+            id == ua.olex.music.model.BrowseTree.ROOT -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_MIXED
+            id.startsWith("section:albums") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS
+            id.startsWith("section:artists") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS
+            id.startsWith("section:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS
+            id.startsWith("album:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_ALBUM
+            id.startsWith("artist:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_ARTIST
+            id.startsWith("genre:") -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_GENRE
+            else -> androidx.media3.common.MediaMetadata.MEDIA_TYPE_PLAYLIST
+        }
+        return MediaItem.Builder().setMediaId(id).setMediaMetadata(
+            androidx.media3.common.MediaMetadata.Builder().setTitle(title).setSubtitle(subtitle).setArtist(subtitle)
+                .setArtworkUri(artworkUri?.let(android.net.Uri::parse))
+                // Collections can be opened and also played whole; sections only opened.
+                .setIsBrowsable(true).setIsPlayable(!id.startsWith("section:") && id != ua.olex.music.model.BrowseTree.ROOT)
+                .setMediaType(type).build(),
+        ).build()
+    }
+
+    private suspend fun selectSources(items: List<MediaItem>, rejected: Set<String> = emptySet(), allowDirect: Boolean = false): List<MediaItem> =
+        withContext(Dispatchers.Default) { PlaybackSourceItems.resolve(application as? MediaCatalogOwner, items, rejected, allowDirect) }
+
+    private suspend fun expandSources(items: List<MediaItem>, trusted: Boolean): List<MediaItem> {
+        if (items.isEmpty()) return emptyList()
+        if (trusted && items.all { it.requestMetadata.mediaUri != null || it.localConfiguration != null }) return items
+        val catalog = tree() ?: throw IllegalArgumentException("The library is unavailable")
+        return items.flatMap { item ->
+            if (trusted && (item.requestMetadata.mediaUri != null || item.localConfiguration != null || item.mediaId.startsWith("yt:"))) listOf(item)
+            else catalog.item(item.mediaId)?.track?.let { listOf(PlayerConnection.mediaItem(it)) }
+                ?: catalog.resolvePlay(item.mediaId)?.first?.map { PlayerConnection.mediaItem(it) }
+                ?: throw IllegalArgumentException("Unknown library item")
+        }.also { require(it.size <= ua.olex.music.model.TrackSelection.MAX_ITEMS) }
+    }
+
+    private fun <T> future(block: suspend () -> T): ListenableFuture<T> = scope.future { block() }
+
+    private fun <T> page(items: List<T>, page: Int, size: Int): List<T> {
+        val from = (page.toLong() * size).coerceAtMost(items.size.toLong()).toInt()
+        return items.subList(from, (from + size).coerceAtMost(items.size))
+    }
+
+    private inner class Callback : MediaLibrarySession.Callback {
+        override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?) =
+            Futures.immediateFuture(LibraryResult.ofItem(ua.olex.music.model.BrowseNode(ua.olex.music.model.BrowseTree.ROOT, "Library").toMediaItem(), params))
+
+        override fun onGetChildren(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, parentId: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
+            val snapshot = tree()
+            withContext(Dispatchers.Default) {
+                val nodes = snapshot?.children(parentId)
+                    ?: return@withContext LibraryResult.ofError<com.google.common.collect.ImmutableList<MediaItem>>(SessionError.ERROR_BAD_VALUE)
+                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(nodes, page, pageSize.coerceAtLeast(1)).map { it.toMediaItem() }), params)
+            }
+        }
+
+        override fun onGetItem(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, mediaId: String) = future {
+            tree()?.item(mediaId)?.let { LibraryResult.ofItem(it.toMediaItem(), null) } ?: LibraryResult.ofError(SessionError.ERROR_BAD_VALUE)
+        }
+
+        override fun onSearch(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, params: LibraryParams?) = future {
+            val snapshot = tree()
+            val count = withContext(Dispatchers.Default) { snapshot?.search(query)?.size ?: 0 }
+            session.notifySearchResultChanged(browser, query, count, params)
+            LibraryResult.ofVoid()
+        }
+
+        override fun onGetSearchResult(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, query: String, page: Int, pageSize: Int, params: LibraryParams?) = future {
+            val snapshot = tree()
+            withContext(Dispatchers.Default) {
+                val found = snapshot?.search(query).orEmpty()
+                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(found, page, pageSize.coerceAtLeast(1)).map { PlayerConnection.mediaItem(it) }), params)
+            }
+        }
+
+        /**
+         * A browser chose one item (a song in an album, a whole playlist) or Assistant asked to play
+         * a search: expand it to the collection it belongs to, starting at the chosen song. Items
+         * from the app itself already carry their queue and URIs and pass through unchanged.
+         */
+        /**
+         * "Resume" in the system media controls after a reboot or after the app was stopped: the
+         * saved queue, paused at its position, the same one the app restores.
+         */
+        override fun onPlaybackResumption(mediaSession: MediaSession, controller: MediaSession.ControllerInfo, isForPlayback: Boolean) = future {
+            val saved = persistence?.resumption() ?: throw UnsupportedOperationException("Nothing to resume")
+            MediaSession.MediaItemsWithStartPosition(saved.items, saved.index, saved.positionMs)
+        }
+
+        override fun onSetMediaItems(
+            mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: MutableList<MediaItem>, startIndex: Int, startPositionMs: Long,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val request = ++sourceRequest
+            persistence?.supersedeRestore()
+            recovery?.cancel()
+            return future {
+                val single = mediaItems.singleOrNull()
+                val unresolved = single != null && single.requestMetadata.mediaUri == null && single.localConfiguration == null
+                val resolved = if (unresolved) {
+                    val catalog = tree()
+                    val query = single.requestMetadata.searchQuery
+                    if (single.mediaId.isEmpty() && !query.isNullOrBlank()) catalog?.search(query)?.takeIf { it.isNotEmpty() }?.let { it to 0 }
+                    else catalog?.resolvePlay(single.mediaId)
+                } else null
+                val items = if (resolved != null) resolved.first.map { PlayerConnection.mediaItem(it) }
+                    else expandSources(mediaItems, controller.uid == Process.myUid())
+                if (request != sourceRequest) throw CancellationException("Superseded playback selection")
+                if (items.isEmpty()) {
+                    persistence?.acceptClear()
+                    return@future MediaSession.MediaItemsWithStartPosition(items, startIndex, startPositionMs)
+                }
+                val selected = selectSources(items, allowDirect = controller.uid == Process.myUid())
+                if (request != sourceRequest) throw CancellationException("Superseded playback selection")
+                val chosen = (resolved?.second ?: startIndex).coerceIn(0, selected.lastIndex.coerceAtLeast(0))
+                val available = selected.indices.filter { PlaybackSourceItems.error(selected[it]) == null }
+                val start = available.firstOrNull { it >= chosen } ?: available.firstOrNull() ?: chosen
+                MediaSession.MediaItemsWithStartPosition(selected, start,
+                    if (start == chosen && startPositionMs > 0) startPositionMs else androidx.media3.common.C.TIME_UNSET)
+            }
+        }
+
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            setScreenVisible(controller, false)
+        }
+
+        private fun setScreenVisible(controller: MediaSession.ControllerInfo, visible: Boolean) {
+            val changed = if (visible) appScreens.add(controller) else appScreens.remove(controller)
+            if (changed) lockLyrics?.appVisible = appScreens.isNotEmpty()
+        }
+
+        override fun onConnectAsync(
+            session: MediaSession, controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.ConnectionResult> {
+            val result = MediaSession.ConnectionResult.AcceptedResultBuilder(session, controller)
+            if (controller.uid == Process.myUid() && controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_HINT)) {
+                setScreenVisible(controller, controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_VISIBLE, true))
+            }
+            // Preserve Media3's default read-only permissions for untrusted controllers.
+            if (controller.uid == Process.myUid()) {
+                result.setAvailableSessionCommands(
+                    MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
+                        .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command)
+                        .add(LockScreenLyrics.uiVisibilityCommand)
+                        .build(),
+                )
+            }
+            return Futures.immediateFuture(result.build())
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession, controller: MediaSession.ControllerInfo, customCommand: SessionCommand, args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            if (customCommand.customAction == LockScreenLyrics.uiVisibilityCommand.customAction) {
+                if (controller.uid != Process.myUid() || !controller.connectionHints.getBoolean(LockScreenLyrics.APP_UI_HINT)) {
+                    return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                }
+                setScreenVisible(controller, args.getBoolean(LockScreenLyrics.APP_UI_VISIBLE))
+                return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
+            if (customCommand.customAction == ReplayGainCommand.ACTION) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                val accepted = runCatching {
+                    val text = requireNotNull(args.getString(ReplayGainCommand.KEY))
+                    val settings = ReplayGainCodec.decode(text)
+                    getSharedPreferences("replaygain-v1", MODE_PRIVATE).edit().putString("settings", ReplayGainCodec.encode(settings)).apply()
+                    replayGain = settings
+                    updateOffload()
+                    session.setSessionExtras(Bundle(session.sessionExtras).apply { putString(ReplayGainCommand.KEY, ReplayGainCodec.encode(settings)) })
+                }.isSuccess
+                return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
+            }
+            if (customCommand.customAction == EqualizerCommand.ACTION) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                val accepted = try {
+                    val route = args.getString(EqualizerCommand.ROUTE)
+                    val settings = args.getString(EqualizerCommand.SETTINGS)
+                    route != null && settings != null && equalizer.update(route, EqualizerCodec.decode(settings))
+                } catch (_: Exception) { false }
+                return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
+            }
+            if (customCommand.customAction == QueueCommand.ACTION) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                persistence?.supersedeRestore()
+                val replaceAfter = args.getString(QueueCommand.REPLACE_AFTER)
+                val radio = args.getBoolean(QueueCommand.RADIO)
+                val request = if (radio && replaceAfter == null) ++sourceRequest else sourceRequest
+                val result = SettableFuture.create<SessionResult>()
+                val job = scope.launch {
+                    try {
+                        val decoded = withContext(Dispatchers.Default) { QueueCommand.items(args) }
+                        val items = selectSources(decoded, allowDirect = true)
+                        if (this@PlaybackService.session !== session) {
+                            result.set(SessionResult(SessionError.ERROR_SESSION_DISCONNECTED))
+                        } else if (radio) {
+                            val usable = items.filter { PlaybackSourceItems.error(it) == null }
+                            val active = session.player
+                            val accepted = request == sourceRequest && if (replaceAfter == null) QueueCommand.startRadio(active, usable)
+                                else QueueCommand.startRadioFromCurrent(active, replaceAfter, usable)
+                            val receipt = Bundle()
+                            if (accepted) receipt.putString(QueueCommand.RADIO_TAIL, occurrence(usable.last()))
+                            result.set(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE, receipt))
+                        } else {
+                            QueueCommand.enqueue(exo, items, args.getBoolean(QueueCommand.NEXT))
+                            result.set(SessionResult(SessionResult.RESULT_SUCCESS))
+                        }
+                    } catch (cancelled: CancellationException) { result.cancel(false); throw cancelled }
+                    catch (_: Exception) { result.set(SessionResult(SessionError.ERROR_BAD_VALUE)) }
+                }
+                result.addListener({ if (result.isCancelled) job.cancel() }, com.google.common.util.concurrent.MoreExecutors.directExecutor())
+                job.invokeOnCompletion { if (!result.isDone) result.cancel(false) }
+                return result
+            }
+            if (customCommand.customAction != SleepTimerCommand.ACTION) {
+                return super.onCustomCommand(session, controller, customCommand, args)
+            }
+            val minutes = args.getInt(SleepTimerCommand.MINUTES, -1)
+            val extend = args.getLong(SleepTimerCommand.EXTEND_MS, 0L)
+            val code = when {
+                controller.uid != Process.myUid() -> SessionError.ERROR_PERMISSION_DENIED
+                extend > 0 -> { extendSleepTimer(extend); SessionResult.RESULT_SUCCESS }
+                minutes != SleepTimerCommand.END_OF_TRACK && minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
+                else -> { setSleepTimer(minutes, args.getBoolean(SleepTimerCommand.FINISH_TRACK)); SessionResult.RESULT_SUCCESS }
+            }
+            return Futures.immediateFuture(SessionResult(code))
+        }
+
+        /**
+         * Items cross the process boundary without their URI (a controller may not dictate what
+         * the service opens); the sender puts it in the request metadata and it is restored here.
+         * Streamed tracks will be resolved to a playable URL at this same point.
+         */
+        override fun onAddMediaItems(
+            mediaSession: MediaSession, controller: MediaSession.ControllerInfo, mediaItems: List<MediaItem>,
+        ): ListenableFuture<List<MediaItem>> = future {
+            selectSources(expandSources(mediaItems, controller.uid == Process.myUid()), allowDirect = controller.uid == Process.myUid())
+        }
+
+    }
+
+    companion object {
+        /** Extra on the app's launch intent: open the player (the media notification and lock screen tap). */
+        internal const val QUEUE_RESTORED = "ua.olex.music.queue_restored"
+        const val OPEN_PLAYER = "ua.olex.music.open_player"
+        /** In [UsbBitPerfect.PREFS]: the owner's battery-saver offload switch. */
+        const val OFFLOAD_KEY = "offload"
+    }
+}

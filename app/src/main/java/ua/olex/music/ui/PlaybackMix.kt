@@ -76,3 +76,41 @@ internal class PlaybackMix(
             val token = active.token
             val continuation = token?.let { nextPage(it) }
             continuation ?: (start ?: Mix.videoId(seed))?.takeUnless { active.providerOrder }?.let { firstPage(it) }
+        } else {
+            val video = Mix.videoId(seed) ?: source.find(seed)?.let(Mix::videoId)
+            video?.let { firstPage(it) }
+        } ?: return null
+        if (run !== expected) return null
+        val hidden = graph.excludedRecommendations()
+        val seen = (active?.seen.orEmpty() + queue.map(Mix::songKey) + hidden).toMutableSet()
+        val base = active?.seed ?: seed
+        suspend fun orderedTracks(answer: YouTubeMusic.RadioPage) = withContext(Dispatchers.Default) {
+            val provider = active?.takeIf { it.providerOrder }
+            if (provider == null) Mix.clean(answer.tracks, base, seen)
+            else answer.tracks.distinctBy { it.id }.filterNot { it.id.value in provider.ids }
+        }
+        var more = orderedTracks(page)
+        val visited = mutableSetOf(active?.token)
+        // An empty cleaned page can still have a usable continuation.
+        repeat(2) {
+            val token = page.continuation
+            if (more.isEmpty() && token != null && visited.add(token)) {
+                page = nextPage(token) ?: return@repeat
+                more = orderedTracks(page)
+            }
+        }
+        if (run !== expected || more.isEmpty()) return null
+        return QueueExtension(more) {
+            if (run !== expected) false else {
+                val updated = active ?: Run(seed, null, seen, queue.flatMap { listOfNotNull(it.id.value, it.requestedId) }.toMutableSet())
+                updated.token = page.continuation
+                updated.seen += more.map(Mix::songKey)
+                updated.ids += more.map { it.id.value }
+                run = updated
+                if (origin?.kind == "mix" && updated.id == origin.id) checkpoint(updated)
+                if (label == null) label = "Mix from ${seed.title}"
+                true
+            }
+        }
+    }
+}
