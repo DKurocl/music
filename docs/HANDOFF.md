@@ -1,11 +1,14 @@
 # Player controls motion review
 
-[код] The player draws the controls from the Rounded Material SVGs. Skip compresses its
-triangle against the stop, a hold seeks ten seconds, and Play/Pause morphs its silhouette.
-Repeat keeps its loop stationary. The five dock gestures use the same SVG renderer and
-the dock staggers its entrance once per player mount. Sleep keeps the countdown by the seek bar.
-The `[player-motion-preview]` push marker runs only the offline player controls gallery.
-Local check: `git diff --check`. CI, visual review, and Pixel measurements are separate checks.
+[код] The player draws the controls from Rounded Material SVGs. Skip has no plate, compresses
+its triangle against the stop, and seeks ten seconds on a hold. Play/Pause keeps its primary
+plate and morphs its silhouette. Shuffle and Repeat react to session state, and Repeat keeps
+its loop stationary. The dock staggers its entrance once per player mount. Sleep keeps the
+countdown by the seek bar.
+The `[player-motion-preview]` push marker runs the single offline gallery test. Its real touch
+sequences and 16 ms render samples passed in run 44778193106. The runner lacked FFmpeg, so
+GIFs were encoded locally from the exported PNGs. Physical Pixel timing and haptics remain
+device checks. Local check: `git diff --check`.
 
 # Player transport motion
 
