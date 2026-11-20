@@ -432,8 +432,9 @@ internal fun LibraryBrowser(
                     val local = search?.takeIf { it.query == query }
                     val found = online?.takeIf { it.query == query && onlineOn }
                     val waiting = onlineOn && network && query.trim().length >= 2 && found == null
-                    val localSongs = visible.orEmpty()
                     val webSongs = found?.tracks.orEmpty()
+                    val matched = webSongs.mapTo(HashSet()) { it.id }
+                    val localSongs = visible.orEmpty().filterNot { it.id in matched }
                     val groups = searchGroups.groupBy { it.first }
                     if (local == null) item(key = "local-search") { BrowserMessage("Searching…") }
                     if (local?.failed == true) item(key = "local-failed") { ErrorNotice("Couldn't search your library.", onRetrySearch) }
@@ -464,14 +465,18 @@ internal fun LibraryBrowser(
                             if (webSongs.isEmpty()) onPlay(localSongs, index) else nav.play(localSongs + webSongs, index, "Search")
                         }
                     }
-                    val webCards = found?.let { it.artists.take(4) + it.albums.take(6) }.orEmpty()
-                    if (webCards.isNotEmpty() || webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("More on YouTube Music") }
-                    items(webCards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
+                    val webGroups = found?.let { listOf("Artists" to it.artists, "Albums" to it.albums, "Playlists" to it.playlists) }.orEmpty()
+                    val webCards = webGroups.flatMap { it.second }
+                    if (webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("Songs on YouTube Music") }
                     itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
                             onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
-                            onSearchUsed(query); nav.play(localSongs + webSongs, localSongs.size + i, "Search")
+                            onSearchUsed(query); nav.play(webSongs, i, "Search")
                         }
+                    }
+                    for ((label, cards) in webGroups) if (cards.isNotEmpty()) {
+                        item(key = "web-title-$label") { SearchHeading(label) }
+                        items(cards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
                     }
                     when {
                         waiting -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }

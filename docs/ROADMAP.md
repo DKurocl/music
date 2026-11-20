@@ -15,6 +15,10 @@ Milestones M1, M2 and M4 to M8 touch different modules and can run in parallel b
 Files many tasks touch (`AppGraph`, `settings.gradle.kts`, the version catalog) change in small
 separate commits to keep merges trivial.
 
+## YouTube Music recommendations and playback restoration
+
+- [~] Codex, 2026-11-20: retain provider shelves and mix order, keep system artwork across restarts, and polish Play while restoring.
+
 ## Listening dashboard
 
 - [x] Codex, 2026-11-18: floating player viewport and artwork-led listening statistics.
