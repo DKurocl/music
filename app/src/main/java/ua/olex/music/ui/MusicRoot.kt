@@ -769,9 +769,15 @@ fun MusicRoot(model: LibraryViewModel) {
 
 @Composable
 internal fun ErrorNotice(message: String, onRetry: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(message, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium)
-        TextButton(onClick = onRetry) { Text("Retry") }
+    // A quiet tonal card, as Google's apps show a failed section: the reason, and Retry beside it.
+    androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.surfaceContainer, shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Symbol(Glyph.CLOUD, size = 20.dp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(message, modifier = Modifier.weight(1f).padding(horizontal = 12.dp).semantics { liveRegion = LiveRegionMode.Polite }, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick = onRetry) { Text("Retry", maxLines = 1) }
+        }
     }
 }
 
