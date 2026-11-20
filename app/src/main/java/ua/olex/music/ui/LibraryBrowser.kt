@@ -444,7 +444,8 @@ internal fun LibraryBrowser(
                     itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
                             onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
-                            onSearchUsed(query); nav.play(webSongs, i, "Search")
+                            onSearchUsed(query)
+                            nav.playTrackMix?.invoke(track) ?: nav.play(webSongs, i, "Search")
                         }
                     }
                     for ((label, cards) in webGroups) if (cards.isNotEmpty()) {
@@ -475,7 +476,7 @@ internal fun LibraryBrowser(
                         TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) }, selecting = picking,
                             checked = track.id in picked.ids, onSelect = { picking = true; picked = picked.toggle(track.id) }, onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
                             onSearchUsed(query)
-                            onPlay(localSongs, index)
+                            nav.playTrackMix?.invoke(track) ?: onPlay(localSongs, index)
                         }
                     }
                     when {

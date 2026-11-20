@@ -880,9 +880,11 @@ class DesignGalleryTest {
         var shuffles = 0
         val likedPlays = mutableListOf<TrackId>()
         var mix: String? = null
+        var mixSeed: TrackId? = null
         var online: OnlineTarget? = null
         compose.setContent { Shell("Home", Place.HOME, demoNow) {
-            CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { target -> online = target }, playMix = { id, _ -> mix = id })) {
+            CompositionLocalProvider(LocalOnlineNav provides OnlineNav(open = { target -> online = target }, playMix = { id, _ -> mix = id },
+                playTrackMix = { track -> mixSeed = track.id })) {
                 DemoHome(Modifier.fillMaxSize().padding(it),
                     onPlay = { songs, i, origin -> if (origin == "Liked") likedPlays += songs[i].id },
                     onShuffle = { if (it.isNotEmpty()) shuffles++ }, onOpenAlbum = { albumOpens++ }) { id -> opened = id }
@@ -904,6 +906,9 @@ class DesignGalleryTest {
         org.junit.Assert.assertEquals(listOf(demoSongs[0].id, demoSongs[2].id), likedPlays)
         compose.onNodeWithContentDescription("Next picks").performClick()
         compose.onNodeWithContentDescription("First picks").performClick()
+        val firstRemotePick = demoSongs.first { YouTubeMusic.isOnline(it) }
+        compose.onNodeWithText(firstRemotePick.title).performClick()
+        org.junit.Assert.assertEquals(firstRemotePick.id, mixSeed)
         compose.onNodeWithTag("home-feed").performScrollToNode(hasText("Night Drive Mix"))
         compose.onNodeWithText("Night Drive Mix").performClick()
         org.junit.Assert.assertEquals("radio", mix)
