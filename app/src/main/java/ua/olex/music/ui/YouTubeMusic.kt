@@ -522,6 +522,36 @@ internal class YouTubeMusic(
      * Likes or unlikes a song on the owner's YouTube Music account, so a heart in the app is a like
      * there too (and the other way it shows in his "Liked music"). Only when signed in; quiet on failure.
      */
+    /**
+     * Tells YouTube Music the signed-in owner played a song, as its web app does at the start of
+     * playback (the player's own statistics link): the song lands in the account's history, so
+     * Listen again, mixes and Home's recommendations learn from what plays here too.
+     */
+    suspend fun reportPlay(videoId: String): Boolean = withContext(ioDispatcher) {
+        val headers = account() ?: return@withContext false
+        // The player answers only with the current player script's signature time, as the web app sends it.
+        val sts = runCatching { init(); org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId) }.getOrNull()
+            ?: return@withContext false
+        val fields = """"videoId":${quote(videoId)},"playbackContext":{"contentPlaybackContext":{"signatureTimestamp":$sts}}"""
+        val json = catalogueRequest { post("player", fields, headers = headers) } ?: return@withContext false
+        val base = Regex(""""videostatsPlaybackUrl"\s*:\s*\{\s*"baseUrl"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
+            ?.replace("\\u0026", "&") ?: return@withContext false
+        val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+        val cpn = (1..16).map { alphabet[kotlin.random.Random.nextInt(alphabet.length)] }.joinToString("")
+        val url = "$base&ver=2&c=WEB_REMIX&cpn=$cpn".toHttpUrlOrNull() ?: return@withContext false
+        val request = okhttp3.Request.Builder().url(url).header("User-Agent", USER_AGENT)
+            .header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/")
+            .apply { headers.forEach { (k, v) -> header(k, v) } }.build()
+        catalogueRequest { execute(request, reportStatus = false) } != null
+    }
+
+    /** What YouTube Music suggests while a query is typed ("mac de" → "mac demarco", ...). */
+    suspend fun suggestions(input: String): List<String> = withContext(ioDispatcher) {
+        val json = catalogueRequest { post("music/get_search_suggestions", """"input":${quote(input)}""") } ?: return@withContext emptyList()
+        val root = ua.olex.music.lyrics.Json.parse(json) ?: return@withContext emptyList()
+        collect(root, "searchSuggestionRenderer").map { text(it["suggestion"]) }.filter { it.isNotBlank() }.distinct()
+    }
+
     suspend fun like(videoId: String, liked: Boolean, scope: String): Boolean = withContext(ioDispatcher) {
         if (pageScope() != scope) return@withContext false
         val headers = account() ?: return@withContext false

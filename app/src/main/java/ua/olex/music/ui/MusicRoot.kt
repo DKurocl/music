@@ -535,6 +535,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
                 online = model.online.collectAsStateWithLifecycle().value, onlineOn = youTubeOn,
+                suggestions = model.suggestions.collectAsStateWithLifecycle().value,
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, onCollectionClosed = { closeCollection = 0 },
                 focusSearch = if (place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
