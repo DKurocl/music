@@ -25,6 +25,8 @@ separate commits to keep merges trivial.
 
 ## Listening dashboard
 
+- [~] Codex, 2026-11-20: independent gesture motion for the five player dock icons, Shuffle and Repeat.
+
 - [x] Codex, 2026-11-18: floating player viewport and artwork-led listening statistics.
 
 ## Personal Home

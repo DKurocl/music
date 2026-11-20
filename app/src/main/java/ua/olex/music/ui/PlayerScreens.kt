@@ -788,11 +788,10 @@ private fun Transport(state: PlayerState, onToggle: () -> Unit, onNext: () -> Un
         val animatedWidth by animateDpAsState(targetWidth, MaterialTheme.motionScheme.fastSpatialSpec(), label = "play button shape")
         val width = if (LocalPowerSave.current) targetWidth else animatedWidth.coerceIn(48.dp, slotWidth)
         val shuffle: @Composable () -> Unit = {
-            ModeToggle(Glyph.SHUFFLE, "Shuffle", state.shuffle, state.connected, if (state.shuffle) "On" else "Off", switch = true, size = modeSize, onClick = onShuffle)
+            ModeToggle(shuffle = state.shuffle, enabled = state.connected, size = modeSize, onClick = onShuffle)
         }
         val repeat: @Composable () -> Unit = {
-            ModeToggle(if (state.repeat == RepeatMode.ONE) Glyph.REPEAT_ONE else Glyph.REPEAT, "Repeat", state.repeat != RepeatMode.OFF, state.connected,
-                when (state.repeat) { RepeatMode.OFF -> "Off"; RepeatMode.ALL -> "All"; RepeatMode.ONE -> "One" }, size = modeSize, onClick = onRepeat)
+            ModeToggle(repeat = state.repeat, enabled = state.connected, size = modeSize, onClick = onRepeat)
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(gap)) {
@@ -841,38 +840,50 @@ private fun SkipButton(glyph: Glyph, label: String, enabled: Boolean, size: Dp =
     }
 }
 
-/**
- * Shuffle and repeat as M3 Expressive toggle buttons: a bare icon when off; when on, a tonal
- * container grows in behind it and settles as a rounded square (the shape says "on"), and a press
- * squeezes the corners further. Both spring with the motion scheme.
- */
+/** Two shuffle states and three repeat states share the same fixed transport slots. */
 @Composable
-private fun ModeToggle(glyph: Glyph, label: String, on: Boolean, enabled: Boolean, state: String, switch: Boolean = false, size: Dp = 52.dp, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
+internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, enabled: Boolean, size: Dp = 52.dp, onClick: () -> Unit) {
+    val on = repeat?.let { it != RepeatMode.OFF } ?: shuffle
+    val label = if (repeat == null) "Shuffle" else "Repeat"
+    val state = when (repeat) {
+        null -> if (shuffle) "On" else "Off"
+        RepeatMode.OFF -> "Off"
+        RepeatMode.ALL -> "All"
+        RepeatMode.ONE -> "One"
+    }
+    val colors = MaterialTheme.colorScheme
+    val motion = MaterialTheme.motionScheme
+    val still = LocalPowerSave.current
     val haptics = rememberHaptics()
-    val tint by animateColorAsState(if (on) cs.onSecondaryContainer else cs.onSurfaceVariant, MaterialTheme.motionScheme.defaultEffectsSpec(), label = "mode")
-    val dot by animateFloatAsState(if (on) 1f else 0f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-dot")
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val corner by animateFloatAsState(if (pressed) 0.22f else if (on) 0.32f else 0.5f, MaterialTheme.motionScheme.fastSpatialSpec(), label = "mode-shape")
-    val container = cs.secondaryContainer
+    val tint = animateColorAsState(
+        if (!enabled) colors.onSurface.copy(alpha = 0.38f) else if (on) colors.onSecondaryContainer else colors.onSurfaceVariant,
+        if (still) androidx.compose.animation.core.snap() else motion.fastEffectsSpec(), label = "Mode ink",
+    )
     var kick by remember { mutableIntStateOf(0) }
-    Box(Modifier.size(size)
-        // Shuffle is on or off (a switch); repeat has three states (off, all, one): a button that speaks its state.
-        .then(if (switch) Modifier.toggleable(on, interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, role = androidx.compose.ui.semantics.Role.Switch) { kick++; haptics.toggle(it); onClick() }
-            else Modifier.clickable(interactionSource = interaction, indication = androidx.compose.foundation.LocalIndication.current, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change $label") { kick++; haptics.toggle(!on); onClick() })
-        .semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        // Drawn, not laid out: the container's growth and corner spring cost no relayout.
-        Box(Modifier.matchParentSize().padding(2.dp).drawBehind {
-            if (dot > 0.01f) {
-                val inset = (1f - dot) * this.size.minDimension * 0.3f
-                val w = this.size.width - inset * 2; val h = this.size.height - inset * 2
-                drawRoundRect(container.copy(alpha = dot.coerceIn(0f, 1f)), topLeft = androidx.compose.ui.geometry.Offset(inset, inset),
-                    size = androidx.compose.ui.geometry.Size(w, h),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(minOf(w, h) * corner))
+    val indication = androidx.compose.foundation.LocalIndication.current
+    val click = if (repeat == null) {
+        Modifier.toggleable(on, interactionSource = interaction, indication = indication, enabled = enabled,
+            role = androidx.compose.ui.semantics.Role.Switch) {
+            haptics.toggle(it)
+            onClick()
+        }
+    } else {
+        Modifier.clickable(interactionSource = interaction, indication = indication, enabled = enabled,
+            role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change repeat mode") {
+            kick++
+            when (repeat) {
+                RepeatMode.OFF -> haptics.toggle(true)
+                RepeatMode.ALL -> haptics.tick()
+                RepeatMode.ONE -> haptics.toggle(false)
             }
-        })
-        Symbol(glyph, color = if (enabled) tint else cs.onSurface.copy(alpha = 0.38f), filled = on, kick = kick, pressed = pressed)
+            onClick()
+        }
+    }
+    Box(Modifier.size(size).clip(RoundedCornerShape(18.dp)).playerControlContainer(on && enabled, pressed, selectedCorner = 0.32f)
+        .then(click).semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
+        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE, kick = kick, pressed = pressed) { tint.value }
     }
 }
 

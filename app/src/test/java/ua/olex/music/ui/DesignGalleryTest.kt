@@ -880,6 +880,56 @@ class DesignGalleryTest {
         shot("01c-home-mood")
     }
 
+    @Test fun transportModeGestures() = transportModeFrames(rapid = false)
+
+    @Test fun transportModeGesturesRetargetAt100Ms() = transportModeFrames(rapid = true)
+
+    private fun transportModeFrames(rapid: Boolean) {
+        val shuffle = androidx.compose.runtime.mutableStateOf(false)
+        val repeatMode = androidx.compose.runtime.mutableStateOf(if (rapid) RepeatMode.OFF else RepeatMode.ALL)
+        compose.setContent {
+            AppTheme {
+                androidx.compose.foundation.layout.Row(Modifier.testTag("transport-modes")
+                    .background(MaterialTheme.colorScheme.surface).padding(6.dp)) {
+                    ModeToggle(shuffle = shuffle.value, enabled = true) { shuffle.value = !shuffle.value }
+                    ModeToggle(repeat = repeatMode.value, enabled = true) {
+                        repeatMode.value = RepeatMode.entries[(repeatMode.value.ordinal + 1) % RepeatMode.entries.size]
+                    }
+                }
+            }
+        }
+        val shuffleNode = compose.onNodeWithContentDescription("Shuffle")
+        val repeatNode = compose.onNodeWithContentDescription("Repeat")
+        val initialBounds = listOf(shuffleNode.getUnclippedBoundsInRoot(), repeatNode.getUnclippedBoundsInRoot())
+        val output = File("build/reports/ui-previews/gallery").apply { mkdirs() }
+        val prefix = if (rapid) "16b-transport-retarget" else "16a-transport-modes"
+        fun frame(ms: Int) {
+            val image = compose.onNodeWithTag("transport-modes").captureToImage().asAndroidBitmap()
+            output.resolve("$prefix-${ms.toString().padStart(3, '0')}.png").outputStream().use {
+                image.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+
+        compose.mainClock.autoAdvance = false
+        frame(0)
+        shuffleNode.performClick()
+        repeatNode.performClick()
+        val taps = if (rapid) setOf(100, 200) else emptySet()
+        val samples = (60..480 step 60).toSet() + if (rapid) setOf(100, 160, 200, 260, 680) else emptySet()
+        var time = 0
+        for (ms in (taps + samples).sorted()) {
+            compose.mainClock.advanceTimeBy((ms - time).toLong(), ignoreFrameDuration = true)
+            if (ms in samples) frame(ms)
+            if (ms == 100) shuffleNode.performClick()
+            if (ms in taps) repeatNode.performClick()
+            time = ms
+        }
+        val description = if (rapid) "Off" else "One"
+        repeatNode.assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, description))
+        if (rapid) shuffleNode.assertIsOff() else shuffleNode.assertIsOn()
+        org.junit.Assert.assertEquals(initialBounds, listOf(shuffleNode.getUnclippedBoundsInRoot(), repeatNode.getUnclippedBoundsInRoot()))
+    }
+
     @Test @Config(qualifiers = "w412dp-h915dp-night-xhdpi")
     fun homeSmallLibrary() {
         compose.setContent { Shell("Home", Place.HOME) { DemoHome(Modifier.fillMaxSize().padding(it), small = true) } }
