@@ -1103,8 +1103,12 @@ class DesignGalleryTest {
         compose.setContent {
             Shell(if (open.value) "Your listening" else "Home", if (open.value) null else Place.HOME, demoNow,
                 statsTap = { open.value = true }) { pad ->
-                HomeListeningTransition(open.value, false, Modifier.padding(pad)) { shown ->
-                    if (shown) StatsPage(catalog, Modifier, { _, _ -> }) { kotlinx.coroutines.flow.flowOf(listOf(sample)) }
+                // The app's own page change: Your listening comes in on the shared X axis.
+                val screen = if (open.value) Screen("page:STATS", Place.HOME, Page.STATS, emptyList(), 1)
+                    else Screen("place:HOME", Place.HOME, null, emptyList(), 0)
+                androidx.compose.animation.AnimatedContent(screen, Modifier.padding(pad), contentKey = { it.route },
+                    transitionSpec = { pageTransition(initialState, targetState, still = false, afterGesture = false) }, label = "page") { s ->
+                    if (s.page == Page.STATS) StatsPage(catalog, Modifier, { _, _ -> }) { kotlinx.coroutines.flow.flowOf(listOf(sample)) }
                     else DemoHome(Modifier)
                 }
             }

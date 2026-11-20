@@ -76,6 +76,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.toShape
+import androidx.compose.animation.togetherWith
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -163,7 +164,9 @@ fun MusicRoot(model: LibraryViewModel) {
     val scroll = TopAppBarDefaults.pinnedScrollBehavior()
     // Three places (Home, Library, Search) and pages over Home (Stats, Duplicates): docs/DESIGN_SYSTEM.md.
     var place by rememberSaveable { mutableStateOf(Place.HOME) }
-    var statsBackCommitted by remember { mutableStateOf(false) }
+    // True for the one page change a back gesture finished: the gesture already moved the old page
+    // away, so the change itself only fades the new one in.
+    var backCommitted by remember { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf<Page?>(null) }
     var openPlaylist by rememberSaveable { mutableStateOf<Long?>(null) }
     var openInLibrary by remember { mutableStateOf<Pair<String, String>?>(null) }
@@ -309,10 +312,10 @@ fun MusicRoot(model: LibraryViewModel) {
                 destinationBackDirection = if (event.swipeEdge == androidx.activity.BackEventCompat.EDGE_LEFT) 1f else -1f
                 destinationBackProgress = event.progress
             }
+            backCommitted = destinationBackProgress > 0f
             when {
                 onlineStack.isNotEmpty() -> popOnline()
                 page != null -> {
-                    statsBackCommitted = page == Page.STATS && destinationBackProgress > 0f
                     page = if (page == Page.DUPLICATES || page == Page.LIBRARY_OVERVIEW) Page.SETTINGS else null
                 }
                 else -> go(Place.HOME)
@@ -447,7 +450,7 @@ fun MusicRoot(model: LibraryViewModel) {
                 actions = {
                     // Settings as a round tonal button, where Google's apps keep the account circle: it belongs there, not squeezed in.
                     if (onlineTop == null && place == Place.HOME && page == null) {
-                        HomeActions(onStats = { statsBackCommitted = false; page = Page.STATS },
+                        HomeActions(onStats = { page = Page.STATS },
                             onSettings = { settingsQuery = ""; page = Page.SETTINGS })
                     }
                 },
@@ -475,7 +478,7 @@ fun MusicRoot(model: LibraryViewModel) {
         // Only the page follows Back; the floating mini player stays where it is.
         Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().graphicsLayer {
-            val back = if (page == Page.STATS) 0f else destinationBackProgress
+            val back = destinationBackProgress
             translationX = destinationBackDirection * 24.dp.toPx() * back
             scaleX = 1f - 0.04f * back
             scaleY = scaleX
@@ -501,35 +504,37 @@ fun MusicRoot(model: LibraryViewModel) {
         // Where the owner is: a new place fades through, a page opened from it slides in from the side.
         val route = when {
             onlineStack.isNotEmpty() -> "online:${onlineStack.size}:${onlineStack.last()}"
-            page == Page.STATS -> "place:${Place.HOME.name}"
             page != null -> "page:${page!!.name}"
             else -> "place:${place.name}"
         }
-        Arrival(route, place, depth = onlineStack.size + if (page != null && page != Page.STATS) 1 else 0) {
+        // What is on screen, captured: the page leaving keeps drawing itself, not the one arriving.
+        val screen = Screen(route, place, page, onlineStack.toList(), onlineStack.size + (page?.depth ?: 0))
+        LaunchedEffect(screen.route, screen.place) { backCommitted = false }
+        androidx.compose.animation.AnimatedContent(screen, Modifier.fillMaxSize(), contentKey = { it.route + "|" + it.place },
+            transitionSpec = { pageTransition(initialState, targetState, powerSave, backCommitted) }, label = "page") { s ->
         when {
-            !model.allowed && !youTubeOn && page != Page.SETTINGS -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
-            model.scanError != null && list.isNullOrEmpty() && !youTubeOn && page != Page.SETTINGS -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
+            !model.allowed && !youTubeOn && s.page != Page.SETTINGS -> Notice(insets, "Your music", "Allow access to the audio files on this phone to play them.", "Allow", askForFiles)
+            model.scanError != null && list.isNullOrEmpty() && !youTubeOn && s.page != Page.SETTINGS -> Notice(insets, "Couldn't scan music", model.scanError.orEmpty(), "Retry", model::refresh)
             // Home's own shape while the library loads: the first real frame then lands in place.
-            library == null && page != Page.SETTINGS -> HomeSkeleton(Modifier.padding(insets))
-            onlineStack.isNotEmpty() -> when (val top = onlineStack.last()) {
+            library == null && s.page != Page.SETTINGS -> HomeSkeleton(Modifier.padding(insets))
+            s.online.isNotEmpty() -> when (val top = s.online.last()) {
                 // Each page in the stack keeps its own scroll, so Back to a previous online page lands where it was.
-                is OnlineTarget.Artist -> onlineStates.SaveableStateProvider("${place.name}/${onlineStack.size}") { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
-                is OnlineTarget.Album -> onlineStates.SaveableStateProvider("${place.name}/${onlineStack.size}") { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Artist -> onlineStates.SaveableStateProvider("${s.place.name}/${s.online.size}") { OnlineArtistPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
+                is OnlineTarget.Album -> onlineStates.SaveableStateProvider("${s.place.name}/${s.online.size}") { OnlineAlbumPage(top, requireNotNull(library), playing.mediaId, insets) { onlineTitleShown = it } }
             }
-            page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
+            s.page == Page.SETTINGS -> SettingsPage(Modifier.padding(insets), musicFolders.map { it.path }, model.scanning, model.ratingsToFiles,
                 onRatingsToFiles = model::changeRatingsToFiles, onEqualizer = { equalizerOpen = true }, onRescan = model::rescanManually,
                 onAddFolder = { chooseMusicFolder.launch(null) }, onClearFolders = model::clearMusicFolders, onDownloads = { model.requestDownloads(0) }, duplicateCount = model.duplicates.collectAsStateWithLifecycle().value.size, onDuplicates = { page = Page.DUPLICATES },
                 onLibraryOverview = { page = Page.LIBRARY_OVERVIEW }, initialQuery = settingsQuery)
-            page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
+            s.page == Page.LIBRARY_OVERVIEW -> LibraryOverview(list.orEmpty(), Modifier.padding(insets),
                 onDuplicates = { page = Page.DUPLICATES }, onStorage = { settingsQuery = "cache"; page = Page.SETTINGS }, onTrash = moveToTrash)
-            page == Page.DUPLICATES -> DuplicatesPage(model.duplicates.collectAsStateWithLifecycle().value, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
+            s.page == Page.DUPLICATES -> DuplicatesPage(model.duplicates.collectAsStateWithLifecycle().value, playing.mediaId, Modifier.padding(insets), onPlay = model::play) { tracks ->
                 moveToTrash(tracks)
             }
-            place == Place.HOME -> HomeListeningTransition(page == Page.STATS, statsBackCommitted, Modifier.padding(insets),
-                backProgress = { if (powerSave) 0f else destinationBackProgress * destinationBackDirection }) { listening ->
-                if (listening) StatsPage(requireNotNull(library), Modifier, model::play, context.graph.userLibrary::historySince)
-                else baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
-                    remember(personal.history) { personal.history.mapNotNull { it.track } }, stats, playing.mediaId, Modifier,
+            // Your listening is a page of its own, opened from Home like any other.
+            s.page == Page.STATS -> StatsPage(requireNotNull(library), Modifier.padding(insets), model::play, context.graph.userLibrary::historySince)
+            s.place == Place.HOME -> baseStates.SaveableStateProvider("place-HOME") { HomePage(requireNotNull(library),
+                    remember(personal.history) { personal.history.mapNotNull { it.track } }, stats, playing.mediaId, Modifier.padding(insets),
                     onPlay = model::playFrom, onTrackActions = { actionTrack = it }, favourites = remember(personal.favourites) { personal.favourites.mapNotNull { it.track } },
                     playlists = personal.playlists, accountPlaylists = homePlaylists, onShuffle = model::playShuffled,
                     homeActive = page == null,
@@ -541,25 +546,24 @@ fun MusicRoot(model: LibraryViewModel) {
                     onAllPlaylists = { clearOnline(Place.LIBRARY); go(Place.LIBRARY) },
                     moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
                     youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
-            }
-            else -> baseStates.SaveableStateProvider(if (place == Place.SEARCH) "place-SEARCH-$searchVisit" else "place-${place.name}") { LibraryBrowser(
+            else -> baseStates.SaveableStateProvider(if (s.place == Place.SEARCH) "place-SEARCH-$searchVisit" else "place-${s.place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
-                query = if (place == Place.SEARCH) query else "",
+                query = if (s.place == Place.SEARCH) query else "",
                 search = model.search.collectAsStateWithLifecycle().value, onQueryChange = model::setQuery,
-                mode = if (place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
+                mode = if (s.place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
                 online = model.online.collectAsStateWithLifecycle().value, onlineOn = youTubeOn,
                 suggestions = model.suggestions.collectAsStateWithLifecycle().value,
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, onCollectionClosed = { closeCollection = 0 },
-                focusSearch = if (place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { place == Place.SEARCH },
+                focusSearch = if (s.place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { s.place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
                 currentId = playing.mediaId, onPlay = model::play, onShuffle = model::playShuffled,
                 smart = model.smart.collectAsStateWithLifecycle().value, onSaveSmart = model::saveSmartPlaylist, onDeleteSmart = model::deleteSmartPlaylist,
                 onEditTags = { editingTags = it }, onTrash = moveToTrash,
                 scanError = model.scanError, onRescan = model::refresh,
                 onRetrySearch = model::retrySearch,
-                openPlaylist = openPlaylist.takeIf { place == Place.LIBRARY }, onOpenedPlaylist = { openPlaylist = null }, onPlayWithOrigin = model::playFrom,
+                openPlaylist = openPlaylist.takeIf { s.place == Place.LIBRARY }, onOpenedPlaylist = { openPlaylist = null }, onPlayWithOrigin = model::playFrom,
                 personal = personal, personalActions = model.personalActions, sortOrders = model.sortOrders.collectAsStateWithLifecycle().value, onSortOrder = model::setSortOrder, onEnqueue = model::enqueue, stats = stats,
                 onTrackActions = { actionTrack = it }, onAddToPlaylist = { playlistTracks = it },
             ) }
@@ -644,6 +648,11 @@ fun MusicRoot(model: LibraryViewModel) {
                     (reported.bitrateKbps ?: matching?.bitrateKbps)?.takeIf { it > 0 }?.let { "$it kbps" }).joinToString(" · ")
             }
         }
+        // A queue item as a song: the library's file, or a YouTube Music stream.
+        val queueTrack: (ua.olex.music.playback.QueueItem) -> Track? = { item ->
+            library?.byId?.get(TrackId(item.mediaId)) ?: if (item.mediaId.startsWith("yt:")) ua.olex.music.model.Track(TrackId(item.mediaId),
+                "${ua.olex.music.playback.OnlineStreams.SCHEME}://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, artworkUri = item.artworkUri) else null
+        }
         NowPlaying(
             playing, format = format,
             from = origin?.title ?: model.mixLabel ?: rawOrigin,
@@ -655,12 +664,9 @@ fun MusicRoot(model: LibraryViewModel) {
             onSleepTimer = model::setSleepTimer, onExtendSleep = model::extendSleepTimer,
             onClearNext = model::clearUpNext,
             // The queue as songs (files from the library, YouTube Music songs as streams), for the playlist picker.
-            onSaveQueue = {
-                playlistTracks = playing.queue.mapNotNull { item ->
-                    library?.byId?.get(TrackId(item.mediaId)) ?: if (item.mediaId.startsWith("yt:")) ua.olex.music.model.Track(TrackId(item.mediaId),
-                        "${ua.olex.music.playback.OnlineStreams.SCHEME}://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, artworkUri = item.artworkUri) else null
-                }.takeIf { it.isNotEmpty() }
-            },
+            onSaveQueue = { playlistTracks = playing.queue.mapNotNull(queueTrack).takeIf { it.isNotEmpty() } },
+            // A mix grown from any song in the queue, as from its ⋮ menu elsewhere.
+            onMixFrom = { key -> playing.queue.firstOrNull { it.key == key }?.let(queueTrack)?.let { haptics.spin(); model.startMix(it) } },
             onEqualizer = { equalizerOpen = true }, onPlaybackParameters = model::setPlaybackParameters,
             lyricsState = model.localLyrics.collectAsStateWithLifecycle().value, lyricOffset = model.lyricOffset.collectAsStateWithLifecycle().value, onLyricOffset = { offset -> lyricOwner?.let { model.setLyricOffset(it, offset) } },
             musicFolders = musicFolders.map { it.path }, onChooseMusicFolder = { chooseMusicFolder.launch(null) },
@@ -738,14 +744,17 @@ fun MusicRoot(model: LibraryViewModel) {
         val online = YouTubeMusic.isOnline(track)
         val saved = (track.recordingId ?: track.id.value) in personal.favouriteByTrackId
         val onlineAlbumId = rememberOnlineAlbumId(track.id.value, onlinePageScope)
-        TrackActionsSheet(track, saved, rating = stats[track.statsKey]?.rating ?: 0, onRate = { stars ->
+        // For the song that is playing, Play next and Add to queue mean nothing: the sheet offers a
+        // mix grown from it instead, up front.
+        val isPlaying = track.id.value == playing.mediaId || track.matchesPlayback(playing.track)
+        TrackActionsSheet(track, saved, current = isPlaying, rating = stats[track.statsKey]?.rating ?: 0, onRate = { stars ->
             model.setRating(track, stars)
             if (model.ratingsToFiles) requestTagWrite(listOf(track), TagEditRequest(mapOf("RATING" to if (stars == 0) "" else (stars * 20).toString()), quiet = true))
         },
             plays = stats[track.statsKey]?.plays ?: 0, onDismiss = { actionTrack = null }, actions = listOfNotNull(
             // A mix grown from this song, as YouTube Music's "Start radio", local files first.
             TrackAction(Glyph.RADIO, "Start mix") { haptics.spin(); model.startMix(track) },
-            TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
+            if (isPlaying) null else TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             // Never offered again in mixes, autoplay and Home; out of the queue now.
             if (online) TrackAction(Glyph.HIDDEN, "Don't recommend this song") {
                 model.dontRecommend(track); scope.launch { snackbar.showSnackbar("${track.title} won't be recommended again") }
@@ -774,7 +783,7 @@ fun MusicRoot(model: LibraryViewModel) {
                     }
                 }
             } else null,
-            TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
+            if (isPlaying) null else TrackAction(Glyph.ADD_TO_QUEUE, "Add to queue") { model.enqueue(listOf(track), false) },
             TrackAction(Glyph.FAVOURITE, if (saved) "Remove from favourites" else "Add to favourites", filled = saved) { model.toggleFavourite(track) },
             TrackAction(Glyph.PLAYLIST_ADD, "Add to playlist") { playlistTracks = listOf(track) },
             if (online) null else TrackAction(Glyph.EDIT, "Edit tags") { editingTags = listOf(track) },
@@ -836,7 +845,7 @@ private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onSleepTimer: (Int, Boolean) -> Unit, from: String? = null, onExtendSleep: ((Long) -> Unit)? = null,
-    onSaveQueue: (() -> Unit)? = null, onClearNext: (() -> Unit)? = null,
+    onSaveQueue: (() -> Unit)? = null, onClearNext: (() -> Unit)? = null, onMixFrom: ((String) -> Unit)? = null,
     onEqualizer: () -> Unit, onPlaybackParameters: (Float, Float) -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
     onQueuePlay: (String) -> Unit, onQueueMove: (String, Int) -> Unit, onQueueRemove: (String) -> Unit,
@@ -901,7 +910,8 @@ private fun NowPlaying(
             state.replayGain.mode.takeIf { it != ua.olex.music.dsp.ReplayGainMode.OFF }?.let { "ReplayGain: ${it.name.lowercase()}" },
         ), controls = { TempoAndPitch(state, onPlaybackParameters) })
     if (queueSheet) QueueSheet(state, onDismiss = { queueSheet = false }, onPlay = onQueuePlay, onMove = onQueueMove, onRemove = onQueueRemove, mixFrom = mixFrom,
-        onSave = onSaveQueue?.let { save -> { queueSheet = false; save() } }, onClearNext = onClearNext)
+        onSave = onSaveQueue?.let { save -> { queueSheet = false; save() } }, onClearNext = onClearNext,
+        onMix = onMixFrom?.let { mix -> { key: String -> queueSheet = false; mix(key) } })
     if (timerDialog) {
         SleepTimerDialog(
             deadline = state.sleepDeadlineMs,
@@ -1158,7 +1168,43 @@ private fun SleepDial(fraction: Float, enabled: Boolean, onDrag: (Float) -> Unit
 internal enum class Place(val title: String) { HOME("Home"), LIBRARY("Playlists"), SEARCH("Search") }
 
 /** Pages opened over Home. */
-internal enum class Page(val title: String) { STATS("Your listening"), DUPLICATES("Duplicates"), LIBRARY_OVERVIEW("Library overview"), SETTINGS("Settings") }
+/** A page over a place; [depth] orders them, so Settings › Library overview › Duplicates slide forward. */
+internal enum class Page(val title: String, val depth: Int) {
+    STATS("Your listening", 1), DUPLICATES("Duplicates", 3), LIBRARY_OVERVIEW("Library overview", 2), SETTINGS("Settings", 1)
+}
+
+/** What the page area shows, captured per frame so a leaving page keeps its own content. */
+internal data class Screen(val route: String, val place: Place, val page: Page?, val online: List<OnlineTarget>, val depth: Int)
+
+/**
+ * Page changes as Google's apps make them (Material motion): another tab fades through (out fast,
+ * in with a slight zoom); a deeper page comes in on the shared X axis (new from the side, old
+ * easing back) and Back mirrors it; after a back gesture the gesture has done the leaving.
+ */
+internal fun androidx.compose.animation.AnimatedContentTransitionScope<Screen>.pageTransition(
+    from: Screen, to: Screen, still: Boolean, afterGesture: Boolean,
+): androidx.compose.animation.ContentTransform {
+    val none = androidx.compose.animation.EnterTransition.None togetherWith androidx.compose.animation.ExitTransition.None
+    if (still) return none
+    val emphasized = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+    val outEasing = androidx.compose.animation.core.CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
+    if (afterGesture) return androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(150)) togetherWith
+        androidx.compose.animation.ExitTransition.None
+    val deeper = to.depth.compareTo(from.depth).let { if (it == 0 && to.place == from.place) 1 else it }
+    return if (to.place != from.place && to.depth == 0 && from.depth == 0 || deeper == 0) {
+        // Fade through: 90 ms out, then 210 ms in from 92 %.
+        (androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(210, 90, emphasized)) +
+            androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(210, 90, emphasized), initialScale = 0.92f)) togetherWith
+            androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(90, easing = outEasing))
+    } else {
+        // Shared axis X: 30 dp of travel, the old page fades out early, the new one in after it.
+        val shift = { full: Int -> (full * 0.08f).toInt().coerceAtMost(96) * deeper }
+        (androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(300, easing = emphasized)) { shift(it) } +
+            androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(210, 90, emphasized))) togetherWith
+            (androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(300, easing = emphasized)) { -shift(it) } +
+                androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(90, easing = outEasing)))
+    }.using(androidx.compose.animation.SizeTransform(clip = false))
+}
 
 /** The navigation bar: Home, Library, Search (M3E short navigation bar). */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
@@ -1204,19 +1250,19 @@ internal fun Modifier.arrivalMotion(route: Any?, section: Any, depth: Int): Modi
         androidx.compose.animation.core.Animatable(if (route == previousRoute && section == previousSection || still || switchingTabs) 1f else 0f)
     }
     androidx.compose.runtime.SideEffect { previousRoute = route; previousSection = section; previousDepth = depth }
-    val spec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+    // The incoming half of Material's fade through / shared axis: the new view rises from clear
+    // over 250 ms on the emphasized curve, 30 dp from the side when deeper or shallower, from 96 %
+    // when level. Starting near-opaque read as a blink.
+    val spec = androidx.compose.animation.core.tween<Float>(250, easing = androidx.compose.animation.core.CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f))
     LaunchedEffect(route, section, still) {
         if (still) progress.snapTo(1f) else if (progress.value != 1f) progress.animateTo(1f, spec)
     }
     val rtl = androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl
     return graphicsLayer {
         val remaining = if (still) 0f else 1f - progress.value
-        alpha = 1f - 0.10f * remaining
-        translationX = remaining * (if (rtl) -direction else direction) * 20.dp.toPx()
+        alpha = (1f - remaining * 1.15f).coerceIn(0f, 1f)
+        translationX = remaining * (if (rtl) -direction else direction) * 30.dp.toPx()
+        if (direction == 0) { scaleX = 1f - 0.04f * remaining; scaleY = scaleX }
     }
 }
 
-@Composable
-internal fun Arrival(route: Any, place: Place, depth: Int, content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().arrivalMotion(route, place, depth)) { content() }
-}

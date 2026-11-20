@@ -1160,7 +1160,7 @@ internal class TrackAction(val glyph: Glyph, val label: String, val filled: Bool
 /** A song's actions as a bottom sheet: the song on top, then one row per action with its icon. */
 @Composable
 internal fun TrackActionsSheet(
-    track: Track, favourite: Boolean, onDismiss: () -> Unit, actions: List<TrackAction>,
+    track: Track, favourite: Boolean, onDismiss: () -> Unit, actions: List<TrackAction>, current: Boolean = false,
     rating: Int = 0, onRate: ((Int) -> Unit)? = null, plays: Int = 0,
     ratingsToFiles: Boolean = false, onRatingsToFiles: ((Boolean) -> Unit)? = null,
 ) {
@@ -1169,7 +1169,9 @@ internal fun TrackActionsSheet(
         Column(Modifier.navigationBarsPadding().padding(bottom = 8.dp)) {
             ListItem(
                 headlineContent = { Text(track.title, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis) },
-                supportingContent = { Text(listOfNotNull(track.artist, track.album).joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                // A single's album carries the song's own name: said once, not twice.
+                supportingContent = { Text(listOfNotNull(track.artist, track.album?.takeUnless { it.equals(track.title, ignoreCase = true) || it.isBlank() })
+                    .joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 leadingContent = { Artwork(track.artworkUri, Modifier.size(56.dp), 14.dp) },
                 trailingContent = { if (favourite) Symbol(Glyph.FAVOURITE, filled = true, color = cs.primary) },
                 colors = ListItemDefaults.colors(containerColor = cs.surfaceContainerLow),
@@ -1182,7 +1184,7 @@ internal fun TrackActionsSheet(
                     }) { Symbol(Glyph.STAR, size = 28.dp, filled = star <= rating, color = if (star <= rating) cs.primary else cs.onSurfaceVariant) }
                 }
                 Spacer(Modifier.weight(1f))
-                Text(if (plays == 1) "1 play" else "$plays plays", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
+                if (plays > 0) Text(if (plays == 1) "1 play" else "$plays plays", style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant,
                     modifier = Modifier.padding(end = 12.dp))
             }
             if (onRate != null && onRatingsToFiles != null) Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1191,7 +1193,8 @@ internal fun TrackActionsSheet(
             }
             // The everyday four as big tonal tiles on top (as YouTube Music and Google Photos lay out
             // their share sheets), everything else as one rounded group of rows below them.
-            val quick = actions.filter { it.glyph in quickGlyphs }.sortedBy { quickGlyphs.indexOf(it.glyph) }
+            val order = if (current) currentQuickGlyphs else quickGlyphs
+            val quick = actions.filter { it.glyph in order }.sortedBy { order.indexOf(it.glyph) }
             val rest = actions - quick.toSet()
             if (quick.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 quick.forEach { action ->
@@ -1204,7 +1207,7 @@ internal fun TrackActionsSheet(
                         Column(Modifier.padding(horizontal = 4.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically)) {
                             Symbol(action.glyph, filled = action.filled, pressed = pressed)
-                            Text(when (action.glyph) { Glyph.ADD_TO_QUEUE -> "Queue"; Glyph.FAVOURITE -> if (action.filled) "Liked" else "Like"
+                            Text(when (action.glyph) { Glyph.ADD_TO_QUEUE -> "Queue"; Glyph.RADIO -> "Mix"; Glyph.FAVOURITE -> if (action.filled) "Liked" else "Like"
                                 Glyph.PLAYLIST_ADD -> "Playlist"; else -> action.label },
                                 style = MaterialTheme.typography.labelMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 2)
                         }
@@ -1233,6 +1236,8 @@ internal fun TrackActionsSheet(
 }
 
 private val quickGlyphs = listOf(Glyph.PLAY_NEXT, Glyph.ADD_TO_QUEUE, Glyph.FAVOURITE, Glyph.PLAYLIST_ADD)
+/** For the song playing now: a mix from it leads, then keeping it. */
+private val currentQuickGlyphs = listOf(Glyph.RADIO, Glyph.FAVOURITE, Glyph.PLAYLIST_ADD)
 
 /** The remaining minutes or the finishing-song state fits next to the audio format. */
 @Composable
