@@ -14,7 +14,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        SplashHandoff.install(this)
+        // The splash stays until Home has its library (or 0.7 s at most), then hands over.
+        val graph = (application as MusicApp).graph
+        SplashHandoff.install(this) { graph.index.value != null }
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
         if (savedInstanceState == null) { playFromSearch(intent); openPlayer(intent); openDownloads(intent); shortcut(intent) }

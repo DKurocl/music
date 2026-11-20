@@ -48,7 +48,7 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     onSaveTiming: ((Lyrics) -> Unit)? = null, onResetTiming: (() -> Unit)? = null,
     textScale: Float = 1f, onTextScale: (Float) -> Unit = {}, synced: Boolean = true, onSynced: (Boolean) -> Unit = {},
     romanized: Boolean = false, onRomanized: (Boolean) -> Unit = {},
-    translated: Boolean = false, onTranslated: (Boolean) -> Unit = {}) {
+    translated: Boolean = false, onTranslated: (Boolean) -> Unit = {}, outputLagMs: Long = 0) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // Timing editor: tap a line while it is sung to move it there; Save keeps it for this song.
     var editing by rememberSaveable(state.mediaId) { mutableStateOf(false) }
@@ -64,11 +64,11 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
     var now by remember(state.mediaId, lyrics) { mutableLongStateOf(0L) }
     val timed = lyrics.sync != Sync.NONE
     LaunchedEffect(dragging) { if (dragging) follow = false }
-    LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, lifecycle) {
+    LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, outputLagMs, lifecycle) {
         if (!timed) { current = -1; return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             do {
-                now = position() + offsetMs
+                now = position() + offsetMs - outputLagMs // what is heard: headphones lag the player
                 current = shownNow.indexAt(now)
                 if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.animation.core.withInfiniteAnimationFrameNanos { } else delay(100) }
             } while (state.isPlaying)
@@ -254,7 +254,7 @@ private val KeepScroll = object : androidx.compose.ui.input.nestedscroll.NestedS
  */
 @Composable
 internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, position: () -> Long, onSeek: (Long) -> Unit,
-    onTools: () -> Unit, onFindOnline: (() -> Unit)?, onlineStatus: String?, modifier: Modifier = Modifier, textScale: Float = 1f, synced: Boolean = true, romanized: Boolean = false, translated: Boolean = false) {
+    onTools: () -> Unit, onFindOnline: (() -> Unit)?, onlineStatus: String?, modifier: Modifier = Modifier, textScale: Float = 1f, synced: Boolean = true, romanized: Boolean = false, translated: Boolean = false, outputLagMs: Long = 0) {
     val cs = MaterialTheme.colorScheme
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val list = rememberLazyListState()
@@ -273,11 +273,11 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
     }
     val lines = if (romanized) romanizedLines ?: lyrics.lines else lyrics.lines
     LaunchedEffect(dragging) { if (dragging) follow = false }
-    LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, lifecycle, timed) {
+    LaunchedEffect(state.mediaId, state.isPlaying, state.positionMs, lyrics, offsetMs, outputLagMs, lifecycle, timed) {
         if (!timed) { current = -1; return@LaunchedEffect }
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             do {
-                now = position() + offsetMs
+                now = position() + offsetMs - outputLagMs // what is heard: headphones lag the player
                 current = lyrics.indexAt(now)
                 if (state.isPlaying) { if (lyrics.sync == Sync.WORD) androidx.compose.animation.core.withInfiniteAnimationFrameNanos { } else delay(100) }
             } while (state.isPlaying)
@@ -308,7 +308,7 @@ internal fun InlineLyrics(lyrics: Lyrics, state: PlayerState, offsetMs: Long, po
             itemsIndexed(lines) { index, line ->
                 Column {
                     LyricLine(line, index, current, { now }, timed, textScale) {
-                        if (timed) { onSeek((line.startMs - offsetMs).coerceAtLeast(0)); follow = true }
+                        if (timed) { onSeek((line.startMs - offsetMs + outputLagMs).coerceAtLeast(0)); follow = true }
                     }
                     if (translated) line.translation?.let { translation ->
                         Text(translation, style = MaterialTheme.typography.titleMedium,
