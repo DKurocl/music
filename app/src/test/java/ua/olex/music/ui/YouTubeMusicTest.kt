@@ -209,6 +209,17 @@ class YouTubeMusicTest {
         assertTrue(answer.songs.isEmpty())
     }
 
+    @Test fun filteredAlbumsCanRecoverARejectedGeneralSearch() = kotlinx.coroutines.runBlocking {
+        val card = """{"musicTwoRowItemRenderer":{"title":{"simpleText":"2"},"subtitle":{"simpleText":"Mac DeMarco"},
+            "navigationEndpoint":{"browseEndpoint":{"browseId":"MPREtwo","pageType":"MUSIC_PAGE_TYPE_ALBUM"}}}}"""
+        val source = YouTubeMusic(transport = { _, fields, _ ->
+            if ("EgWKAQIY" in fields) card else """{"error":{"code":400}}"""
+        })
+        val answer = source.searchAll("Mac DeMarco 2")
+        assertEquals("MPREtwo", answer.albums.single().id)
+        assertEquals("Mac DeMarco", answer.albums.single().subtitle)
+    }
+
     @Test fun linkedArtistAndAlbumRecoverConfirmedSongsOnBrowseFailure() = kotlinx.coroutines.runBlocking {
         val artist = """{"text":"DJ ZUP RAIii","navigationEndpoint":{"browseEndpoint":{"browseId":"UCcorrect","pageType":"MUSIC_PAGE_TYPE_ARTIST"}}}"""
         fun row(id: String, release: String) = """{"musicResponsiveListItemRenderer":{
