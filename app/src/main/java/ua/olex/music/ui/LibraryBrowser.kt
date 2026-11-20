@@ -126,7 +126,7 @@ internal fun LibraryBrowser(
     /** Set when something here was opened from another place: Back from it goes there. */
     onLeave: (() -> Unit)? = null,
     /** YouTube Music results for the query (null while loading). */
-    online: OnlineSearch? = null, onlineOn: Boolean = false,
+    online: OnlineSearch? = null, onlineOn: Boolean = false, suggestions: List<String> = emptyList(),
     /** Bumped when the Search tab is tapped again: back to the tiles and the field focused (as Google Play does). */
     focusSearch: Int = 0, onSearchFocused: () -> Unit = {},
     /** Open a Search tile from elsewhere (Home's "see all" for History and Smart playlists). */
@@ -337,6 +337,16 @@ internal fun LibraryBrowser(
                     label = { Text("YouTube Music") })
                 androidx.compose.material3.FilterChip(selected = searchLibrary, onClick = { searchLibrary = true },
                     label = { Text("Your library") })
+            }
+            // As YouTube Music completes a query while it is typed: one tap fills it in.
+            androidx.compose.animation.AnimatedVisibility(!searchLibrary && suggestions.isNotEmpty()) {
+                androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 4.dp)) {
+                    items(suggestions, key = { it }) { suggestion ->
+                        androidx.compose.material3.SuggestionChip(onClick = { onQueryChange(suggestion) }, label = { Text(suggestion, maxLines = 1) },
+                            icon = { Symbol(Glyph.SEARCH, size = 18.dp) }, modifier = Modifier.animateItem())
+                    }
+                }
             }
         }
         // Typing mode (a tap in the field, or a second tap on Search): only recent searches, nothing else.

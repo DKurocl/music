@@ -95,6 +95,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     }
 
     /** Keep YouTube's result positions and use a matching local copy at each corresponding row. */
+    /** YouTube Music's suggestions for what is being typed, a moment after each keystroke. */
+    internal val suggestions: StateFlow<List<String>> = query
+        .debounce { if (it.isBlank()) 0 else 150 }
+        .combine(graph.youTubeOn) { text, on -> text to on }
+        .combine(graph.network) { (text, on), connected -> text to (on && connected) }
+        .mapLatest { (text, on) ->
+            if (!on || text.trim().length < 2) emptyList()
+            else runCatching { graph.youTube.suggestions(text.trim()) }.getOrDefault(emptyList())
+                .filterNot { it.equals(text.trim(), ignoreCase = true) }.take(8)
+        }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     internal val online: StateFlow<OnlineSearch?> = query
         .debounce { if (it.isBlank()) 0 else 450 }
         .combine(graph.youTubeOn) { text, on -> text to on }
