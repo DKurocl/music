@@ -94,7 +94,10 @@ internal object NowPlaying {
                 setOnClickPendingIntent(R.id.widget_previous, button(context, KeyEvent.KEYCODE_MEDIA_PREVIOUS))
                 // A tap on the widget opens the player itself, as the media notification does.
                 context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply { putExtra(PlaybackService.OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let {
-                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 1, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+                    setOnClickPendingIntent(android.R.id.background, PendingIntent.getActivity(context, 1, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                        // The card itself grows into the player (the launcher's widget transition):
+                        // no app icon splash in between, only the surface colour.
+                        android.app.ActivityOptions.makeBasic().setSplashScreenStyle(android.window.SplashScreen.SPLASH_SCREEN_STYLE_SOLID_COLOR).toBundle()))
                 }
             }
         }

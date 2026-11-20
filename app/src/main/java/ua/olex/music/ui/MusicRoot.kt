@@ -390,6 +390,12 @@ fun MusicRoot(model: LibraryViewModel) {
         lastPlayerPreview = ua.olex.music.playback.LastPlayedPreview(playing.title, playing.artist, playing.artworkUri)
     }
     val openingSurface = systemOpening && !directOpen || expanded && !playing.hasTrack
+    // A control tapped while the service was still connecting runs as soon as the queue is there.
+    var whenConnected by remember { mutableStateOf<(() -> Unit)?>(null) }
+    LaunchedEffect(whenConnected, playing.connected, playing.hasTrack) {
+        val action = whenConnected
+        if (action != null && playing.connected && playing.hasTrack) { whenConnected = null; action() }
+    }
     PlayerCoverLayout(travel, playing.artworkUri, directOpen = directOpen) {
     if (!openingSurface) Scaffold(
         modifier = Modifier.nestedScroll(scroll.nestedScrollConnection)
@@ -678,7 +684,9 @@ fun MusicRoot(model: LibraryViewModel) {
         PlayerOpening(preview, empty = playing.connected && playing.queueRestored && !playing.hasTrack,
             error = playing.error.takeIf { !playing.connected && !playing.connecting },
             onClose = { expanded = false; model.dismissSystemPlayerRequest() }, onRetry = model::connectPlayer,
-            onPlay = { model.connectPlayer(); model.toggle() })
+            onPlay = { whenConnected = { if (!playing.playWhenReady) model.toggle() }; model.connectPlayer() },
+            onNext = { whenConnected = { model.next() }; model.connectPlayer() },
+            onPrevious = { whenConnected = { model.previous() }; model.connectPlayer() })
     }
     if (model.mixLoading && !systemOpening) Box(Modifier.fillMaxSize().safeDrawingPadding(),
         contentAlignment = Alignment.TopCenter) {

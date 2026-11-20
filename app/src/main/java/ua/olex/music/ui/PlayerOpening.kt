@@ -21,13 +21,14 @@ import ua.olex.music.playback.PlayerState
 /** Use the real player geometry during restore so artwork and controls stay in place. */
 @Composable
 internal fun PlayerOpening(preview: LastPlayedPreview?, empty: Boolean, error: String?,
-    onClose: () -> Unit, onRetry: () -> Unit, onPlay: () -> Unit = onRetry) {
+    onClose: () -> Unit, onRetry: () -> Unit, onPlay: () -> Unit = onRetry, onNext: () -> Unit = {}, onPrevious: () -> Unit = {}) {
     if (!empty && error == null) {
         // Play is live here: it reconnects and starts the restored queue.
-        val state = PlayerState(connected = true, title = preview?.title.orEmpty(), artist = preview?.artist.orEmpty(), artworkUri = preview?.artworkUri)
+        // Every control is live: a tap waits for the service and then does what it says.
+        val state = PlayerState(connected = true, connecting = true, hasNext = true, hasPrevious = true, title = preview?.title.orEmpty(), artist = preview?.artist.orEmpty(), artworkUri = preview?.artworkUri)
         CompositionLocalProvider(LocalPlayerTravel provides null) {
             PlayerPage(state, format = null, route = null, favourite = false, position = { 0L },
-                onClose = onClose, onToggle = onPlay, onNext = {}, onPrevious = {}, onSeek = {},
+                onClose = onClose, onToggle = onPlay, onNext = onNext, onPrevious = onPrevious, onSeek = {},
                 onShuffle = {}, onRepeat = {}, onFavourite = null, onMore = null,
                 onOutput = {}, onQueue = {}, onLyrics = {}, onAudioPath = {}, onTimer = {},
                 from = "Your queue", restoring = true)
