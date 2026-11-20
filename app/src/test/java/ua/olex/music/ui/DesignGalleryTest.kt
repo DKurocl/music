@@ -907,7 +907,7 @@ class DesignGalleryTest {
                                 androidx.compose.foundation.layout.Box(Modifier.testTag("motion-$index")) {
                                     val change = { flags[index].value = !flags[index].value }
                                     when (index) {
-                                        in 0..3 -> SkipButton(index >= 2, true, 52.dp, onClick = {})
+                                        in 0..3 -> SkipButton(index >= 2, true, size = 52.dp, onClick = {})
                                         4, 5, 20 -> ModeToggle(shuffle = flags[index].value, enabled = true, onClick = change)
                                         6, 7, 8, 21 -> {
                                             val value = modes.getValue(index)
