@@ -160,7 +160,9 @@ internal fun AppSheet(onDismiss: () -> Unit, containerColor: androidx.compose.ui
                 content()
             }
         }
-    } else androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = containerColor, sheetGesturesEnabled = gestures, content = content)
+    // Open all the way: a half-open sheet hides its own main button below the screen's edge.
+    } else androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = containerColor, sheetGesturesEnabled = gestures,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), content = content)
 }
 
 /** Room the floating mini player takes at the bottom of a page, so lists can scroll under it to their end. */
