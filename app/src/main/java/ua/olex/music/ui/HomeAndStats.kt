@@ -346,7 +346,11 @@ internal fun SectionHeader(text: String, onMore: (() -> Unit)? = null, trailing:
 internal fun HomeSkeleton(modifier: Modifier) {
     val tone = MaterialTheme.colorScheme.surfaceContainerHigh
     val pulse = rememberLoadingPulse()
-    Column(modifier.fillMaxSize().graphicsLayer { alpha = pulse() }.semantics { contentDescription = "Loading your library" }) {
+    // A quick start (the usual case) shows Home straight away; the outline only fades in if it waits.
+    val shown = rememberPatient(true, delayMs = 200)
+    val appear by androidx.compose.animation.core.animateFloatAsState(if (shown) 1f else 0f,
+        MaterialTheme.motionScheme.slowEffectsSpec(), label = "skeleton")
+    Column(modifier.fillMaxSize().graphicsLayer { alpha = pulse() * appear }.semantics { contentDescription = "Loading your library" }) {
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Box(Modifier.width(168.dp).height(36.dp).clip(RoundedCornerShape(16.dp)).background(tone))
             Box(Modifier.width(88.dp).height(36.dp).clip(RoundedCornerShape(50)).background(tone))
