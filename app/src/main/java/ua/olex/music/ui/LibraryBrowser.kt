@@ -272,6 +272,8 @@ internal fun LibraryBrowser(
 
     val showSources = mode == BrowserMode.SEARCH && onlineOn
     var searchLibrary by rememberSaveable { mutableStateOf(false) }
+    var searchKind by rememberSaveable { mutableStateOf(SearchKind.ALL.name) }
+    LaunchedEffect(query.isBlank()) { if (query.isBlank()) searchKind = SearchKind.ALL.name }
     val showLibraryResults = !showSources || searchLibrary
     val resultList = androidx.compose.runtime.key(query, showLibraryResults) { androidx.compose.foundation.lazy.rememberLazyListState() }
     var fieldFocused by remember { mutableStateOf(false) }
@@ -435,34 +437,63 @@ internal fun LibraryBrowser(
                 searching && !showLibraryResults -> {
                     val found = online?.takeIf { it.query == query }
                     val webSongs = found?.tracks.orEmpty()
-                    val webGroups = found?.let { listOf("Artists" to it.artists, "Albums" to it.albums, "Playlists" to it.playlists) }.orEmpty()
-                    val exactArtist = found?.artists?.firstOrNull {
-                        ua.olex.music.model.TextFold.fold(it.title) == ua.olex.music.model.TextFold.fold(query)
+                    val folded = ua.olex.music.model.TextFold.fold(query)
+                    // YouTube Music's own top result; else an artist named exactly as typed.
+                    val top = found?.top ?: found?.artists?.firstOrNull { ua.olex.music.model.TextFold.fold(it.title) == folded }
+                    val artists = found?.artists.orEmpty().filter { it.id != top?.id }
+                    val albums = found?.albums.orEmpty().filter { it.id != top?.id }
+                    val playlists = found?.playlists.orEmpty().filter { it.id != top?.id }
+                    // Chips as YouTube Music's search has them; only the kinds that have results.
+                    val kinds = buildList {
+                        if (webSongs.isNotEmpty()) add(SearchKind.SONGS)
+                        if (artists.isNotEmpty() || top?.kind == YouTubeMusic.Card.Kind.ARTIST) add(SearchKind.ARTISTS)
+                        if (albums.isNotEmpty() || top?.kind == YouTubeMusic.Card.Kind.ALBUM) add(SearchKind.ALBUMS)
+                        if (playlists.isNotEmpty() || top?.kind == YouTubeMusic.Card.Kind.PLAYLIST) add(SearchKind.PLAYLISTS)
                     }
+                    val kind = SearchKind.entries.firstOrNull { it.name == searchKind && (it == SearchKind.ALL || it in kinds) } ?: SearchKind.ALL
                     when {
                         !network -> item(key = "online-offline") { BrowserMessage("You’re offline. Search your library instead.") }
                         query.trim().length < 2 -> item(key = "online-short") { BrowserMessage("Enter at least two characters.") }
                         found == null -> items(3, key = { "online-wait-$it" }) { PlaceholderRow() }
                         found.failed -> item(key = "online-failed") { ErrorNotice("Couldn't search YouTube Music.", onRetrySearch) }
-                        webSongs.isEmpty() && webGroups.all { it.second.isEmpty() } ->
+                        webSongs.isEmpty() && top == null && artists.isEmpty() && albums.isEmpty() && playlists.isEmpty() ->
                             item(key = "online-empty") { BrowserMessage("No results on YouTube Music.") }
                     }
-                    exactArtist?.let { artist ->
-                        item(key = "online-top-artist") { OnlineResultRow(artist) { onSearchUsed(query) } }
-                    }
-                    if (webSongs.isNotEmpty()) item(key = "web-heading") { SearchHeading("Songs") }
-                    itemsIndexed(webSongs, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
-                        TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
-                            onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
-                            onSearchUsed(query)
-                            nav.playTrackMix?.invoke(track) ?: nav.play(webSongs, i, "Search")
+                    if (kinds.size > 1) item(key = "search-kinds", contentType = "chips") {
+                        androidx.compose.foundation.lazy.LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 4.dp)) {
+                            items(listOf(SearchKind.ALL) + kinds, key = { it.name }) { k ->
+                                androidx.compose.material3.FilterChip(selected = k == kind, onClick = { searchKind = k.name },
+                                    label = { Text(k.title, maxLines = 1) }, leadingIcon = if (k == kind) ({ Symbol(Glyph.CHECK, size = 18.dp) }) else null)
+                            }
                         }
                     }
-                    for ((label, results) in webGroups) {
-                        val cards = results.filterNot { it == exactArtist }
-                        if (cards.isEmpty()) continue
-                        item(key = "web-title-$label") { SearchHeading(label) }
-                        items(cards, key = { "web-${it.kind}-${it.id}" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
+                    val all = kind == SearchKind.ALL
+                    if (all && top != null) item(key = "top-result", contentType = "top") {
+                        SearchHeading("Top result")
+                        TopResultCard(top) { onSearchUsed(query) }
+                    }
+                    if (all || kind == SearchKind.SONGS) {
+                        // "All" shows the first songs, as YouTube Music does; the Songs chip shows every one.
+                        val shown = if (all) webSongs.take(4) else webSongs
+                        if (shown.isNotEmpty()) item(key = "web-heading", contentType = "title") { SearchHeading("Songs") }
+                        itemsIndexed(shown, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
+                            TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
+                                onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
+                                onSearchUsed(query)
+                                nav.playTrackMix?.invoke(track) ?: nav.play(webSongs, i, "Search")
+                            }
+                        }
+                        if (all && webSongs.size > shown.size) item(key = "songs-more", contentType = "more") {
+                            TextButton(onClick = { searchKind = SearchKind.SONGS.name }, modifier = Modifier.padding(horizontal = 12.dp)) { Text("Show all songs", maxLines = 1) }
+                        }
+                    }
+                    for ((k, label, cards) in listOf(Triple(SearchKind.ARTISTS, "Artists", artists), Triple(SearchKind.ALBUMS, "Albums", albums), Triple(SearchKind.PLAYLISTS, "Playlists", playlists))) {
+                        if (cards.isEmpty() || !(all || kind == k)) continue
+                        item(key = "web-title-$label", contentType = "title") { SearchHeading(label) }
+                        // "All" shows each kind as a row of cards; its own chip lists them all.
+                        if (all) item(key = "web-rail-$label", contentType = "yt-cards") { YouTubeCards(cards, size = if (k == SearchKind.ARTISTS) 112.dp else 132.dp) }
+                        else items(cards, key = { "web-${it.kind}-${it.id}" }, contentType = { "web-row" }) { card -> OnlineResultRow(card) { onSearchUsed(query) } }
                     }
                 }
                 searching -> {
@@ -669,20 +700,18 @@ private fun ArtistHeader(artist: MusicCollection, albums: Int, showBack: Boolean
     val minutes = artist.tracks.sumOf { it.durationMs } / 60_000
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         if (showBack) KickIconButton(onClick = onBack, modifier = Modifier.semantics { contentDescription = "Back to collections" }) { k -> Symbol(Glyph.BACK, kick = k) }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ArtistImage(artist.name, Modifier.size(120.dp), 120.dp)
-            Column(Modifier.padding(start = 20.dp).weight(1f)) {
-                Text(artist.name, style = MaterialTheme.typography.headlineSmallEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOfNotNull(songCount(artist.tracks.size), if (albums > 0) (if (albums == 1) "1 album" else "$albums albums") else null, if (minutes > 0) "$minutes min" else null).joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-            }
+        // As YouTube Music opens an artist: the photo across the page with the name on it, then Shuffle and Play.
+        ArtistHero(artist.name, listOfNotNull(songCount(artist.tracks.size), if (albums > 0) (if (albums == 1) "1 album" else "$albums albums") else null, if (minutes > 0) "$minutes min" else null).joinToString(" · ")) {
+            ArtistImage(artist.name, Modifier.fillMaxSize(), 160.dp, androidx.compose.ui.graphics.RectangleShape)
         }
         androidx.compose.foundation.layout.Spacer(Modifier.size(16.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(enabled = enabled, onClick = onPlay, modifier = Modifier.height(52.dp)) {
-                Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play all")
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = enabled, onClick = onShuffle, modifier = Modifier.weight(1f).height(52.dp)) {
+                Symbol(Glyph.SHUFFLE, size = 20.dp); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Shuffle", maxLines = 1)
             }
-            KickFilledTonalIconButton(enabled = enabled, onClick = onShuffle, modifier = Modifier.size(52.dp).semantics { contentDescription = "Shuffle" }) { k -> Symbol(Glyph.SHUFFLE, kick = k) }
+            androidx.compose.material3.FilledTonalButton(enabled = enabled, onClick = onPlay, modifier = Modifier.weight(1f).height(52.dp)) {
+                Symbol(Glyph.PLAY, size = 20.dp, filled = true); androidx.compose.foundation.layout.Spacer(Modifier.size(8.dp)); Text("Play", maxLines = 1)
+            }
             KickFilledTonalIconButton(enabled = enabled, onClick = onAdd, modifier = Modifier.size(52.dp).semantics { contentDescription = "Add all to playlist" }) { k -> Symbol(Glyph.PLAYLIST_ADD, kick = k) }
         }
     }
@@ -1139,6 +1168,51 @@ internal fun HubCard(title: String, subtitle: String, glyph: Glyph, shape: andro
             Column {
                 Text(title, style = MaterialTheme.typography.titleMediumEmphasized, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text(subtitle, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+/** The kinds a YouTube Music search can be narrowed to, as its chips. */
+internal enum class SearchKind(val title: String) { ALL("All"), SONGS("Songs"), ARTISTS("Artists"), ALBUMS("Albums"), PLAYLISTS("Playlists") }
+
+/**
+ * YouTube Music's "Top result": the artist, album or playlist the query most likely means, large,
+ * with its page a tap away and Play on the right.
+ */
+@Composable
+private fun TopResultCard(card: YouTubeMusic.Card, onOpened: () -> Unit) {
+    val nav = LocalOnlineNav.current
+    val cs = MaterialTheme.colorScheme
+    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
+    val scope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
+    val artist = card.kind == YouTubeMusic.Card.Kind.ARTIST
+    val playlist = card.kind == YouTubeMusic.Card.Kind.PLAYLIST
+    fun open() {
+        onOpened()
+        if (artist) nav.open(OnlineTarget.Artist(card.title, card.id))
+        else nav.open(OnlineTarget.Album(card.id, card.title, playlist = playlist, cover = card.cover, subtitle = card.subtitle))
+    }
+    androidx.compose.material3.Surface(onClick = ::open, color = cs.surfaceContainerHigh, shape = androidx.compose.foundation.shape.RoundedCornerShape(28.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).height(112.dp).squish(0.02f)) {
+        Row(Modifier.fillMaxSize().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (artist) Artwork(card.cover, Modifier.size(88.dp).clip(androidx.compose.foundation.shape.CircleShape), 44.dp)
+            else Artwork(card.cover, Modifier.size(88.dp), 18.dp)
+            Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+                Text(card.title, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(if (artist) "Artist" else if (playlist) "Playlist" else "Album", card.subtitle).joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            // Play straight from the card: the artist's top songs, or the album or playlist.
+            androidx.compose.material3.FilledIconButton(onClick = {
+                haptics.confirm(); onOpened()
+                scope.launch {
+                    val songs = runCatching { if (artist) graph.youTube.artist(card.id)?.songs else graph.youTube.album(card.id)?.second }.getOrNull().orEmpty()
+                    if (songs.isNotEmpty()) nav.play(songs, 0, card.title) else open()
+                }
+            }, modifier = Modifier.size(52.dp).semantics { contentDescription = "Play ${card.title}" }) {
+                Symbol(Glyph.PLAY, size = 26.dp, filled = true)
             }
         }
     }
