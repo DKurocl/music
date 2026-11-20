@@ -59,6 +59,10 @@ internal fun HomePage(
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember { HomeCache() },
 ) {
+    val playTrackMix = LocalOnlineNav.current.playTrackMix
+    fun playPick(tracks: List<Track>, index: Int, title: String) {
+        playTrackMix?.invoke(tracks[index]) ?: onPlay(tracks, index, title)
+    }
     var label by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
     val mood = moods.firstOrNull { it.label == label }
     androidx.activity.compose.BackHandler(homeActive && mood != null) { label = null }
@@ -208,7 +212,7 @@ internal fun HomePage(
                             } }
                             if (serverSongs.isNotEmpty()) item(key = "provider-songs-$index") {
                                 QuickPicks(shelf.title, serverSongs, currentId,
-                                    { _, i -> onPlay(serverSongs, i, shelf.title) }, onTrackActions)
+                                    { _, i -> playPick(serverSongs, i, shelf.title) }, onTrackActions)
                             }
                             if (shelf.cards.any { it.kind != YouTubeMusic.Card.Kind.SONG } && cards.isNotEmpty()) {
                                 item(key = "provider-cards-$index") {
@@ -220,11 +224,11 @@ internal fun HomePage(
                     } else if (shownSongs.isNotEmpty() && (shownMood == null || !frame.loading)) {
                         if (shownMood != null) item(key = "title") { SectionTitle(contextName) }
                         if (shownMood != null) item(key = "spread") {
-                            CoverSpread(shownSongs, currentId, { onPlay(shownSongs, it, contextName) }, onTrackActions)
+                            CoverSpread(shownSongs, currentId, { playPick(shownSongs, it, contextName) }, onTrackActions)
                         }
                         val start = if (shownMood == null) 0 else minOf(3, shownSongs.size)
                         if (start < shownSongs.size) item(key = "picks") {
-                            QuickPicks(if (shownMood == null) contextName else "More picks", remember(shownSongs, start) { if (start == 0) shownSongs else shownSongs.drop(start) }, currentId, { _, i -> onPlay(shownSongs, i + start, contextName) }, onTrackActions)
+                            QuickPicks(if (shownMood == null) contextName else "More picks", remember(shownSongs, start) { if (start == 0) shownSongs else shownSongs.drop(start) }, currentId, { _, i -> playPick(shownSongs, i + start, contextName) }, onTrackActions)
                         }
                     } else if (frame.loading) {
                         item(key = "loading") { PlaceholderRow() }

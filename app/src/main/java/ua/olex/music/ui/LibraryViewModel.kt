@@ -110,7 +110,9 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }.combine(catalogue) { found, catalogue ->
             if (found == null) return@combine null
             val owned = YouTubeMusic.indexOf(catalogue ?: LibraryIndex.EMPTY)
-            found.copy(tracks = found.tracks.map { owned.copyOf(it) ?: it }.distinctBy { it.id })
+            found.copy(tracks = found.tracks.map { track ->
+                owned.copyOf(track)?.copy(requestedId = track.id.value) ?: track
+            }.distinctBy { it.id })
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
@@ -545,7 +547,11 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      */
     fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
 
-    private suspend fun playMix(seed: Track, label: String) {
+    /** A tap must still play its selected song if no recommendations are available. */
+    fun playSelectionMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}", allowSeedOnly = true) }
+
+    private suspend fun playMix(seed: Track, label: String, allowSeedOnly: Boolean = false) {
+        val retry: () -> Unit = { if (allowSeedOnly) playSelectionMix(seed) else startMix(seed) }
         val atRequest = playing.value
         val seedOccurrence = atRequest.queue.getOrNull(atRequest.queueIndex)?.takeIf {
             it.mediaId == seed.id.value || seed.matchesPlayback(atRequest.track)
@@ -586,24 +592,24 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                     excluded = excludedSongs + used)
             }
         }
-        if (upcoming.isEmpty()) {
-            mixFailure = MixFailure("No other playable songs were found for ${seed.title}.") { startMix(seed) }
+        if (upcoming.isEmpty() && !allowSeedOnly) {
+            mixFailure = MixFailure("No other playable songs were found for ${seed.title}.", retry)
             return
         }
         seen += upcoming.map(Mix::songKey)
         val state = playing.value
         val current = state.queue.getOrNull(state.queueIndex)
         if (seedOccurrence != null && seedOccurrence != current?.key) {
-            mixFailure = MixFailure("The song changed while the mix was getting ready.") { startMix(seed) }
+            mixFailure = MixFailure("The song changed while the mix was getting ready.", retry)
             return
         }
-        val sameSeed = current != null && (state.mediaId == seed.id.value || seed.matchesPlayback(state.track))
+        val sameSeed = upcoming.isNotEmpty() && current != null && (state.mediaId == seed.id.value || seed.matchesPlayback(state.track))
         val run = PlaybackMix.Run(seed, result?.continuation, seen,
             (upcoming.map { it.id.value } + listOfNotNull(seed.id.value, state.mediaId.takeIf { sameSeed })).toMutableSet(),
             startFrom = video)
         val queue = if (sameSeed) upcoming else listOf(seed) + upcoming
         if (!applyRadio(run, label, queue, current?.key.takeIf { sameSeed })) {
-            mixFailure = MixFailure("The player couldn't confirm the new queue.") { startMix(seed) }
+            mixFailure = MixFailure("The player couldn't confirm the new queue.", retry)
         }
     }
 

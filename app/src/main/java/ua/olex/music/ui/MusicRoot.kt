@@ -341,6 +341,7 @@ fun MusicRoot(model: LibraryViewModel) {
             download = { start -> if (context.graph.soulseek.account == null) afterSignIn = start else start() },
             playMood = { mood, moodPage -> model.startMood(mood, moodPage) },
             playMix = { id, title -> model.startPlaylistRadio(id, title) },
+            playTrackMix = model::playSelectionMix,
         )
     }
     val powerSave = rememberPowerSave()
