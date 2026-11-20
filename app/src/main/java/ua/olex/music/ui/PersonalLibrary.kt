@@ -205,8 +205,12 @@ internal fun PlaylistBrowser(
             if (remoteLoading && youTubePlaylists.isEmpty()) item(key = "loading-remote-playlists") { PlaceholderRow() }
             if (remoteFailed) item(key = "retry-remote-playlists") { ErrorNotice("Couldn't load your YouTube Music playlists.") { remoteRetry++ } }
             if (!remoteLoading && !remoteFailed && playlists.isEmpty() && youTubePlaylists.isEmpty()) item(key = "empty-playlists") {
-                Text("No playlists yet", Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                EmptyState(Glyph.PLAYLIST, "No playlists yet", "Gather songs for a mood, a trip or a friend. Add any song with ⋮ › Add to playlist.",
+                    shape = androidx.compose.material3.MaterialShapes.Clover4Leaf.toShape()) {
+                    androidx.compose.material3.Button(onClick = { create = true }) {
+                        Symbol(Glyph.ADD, size = 18.dp); Spacer(Modifier.width(8.dp)); Text("New playlist")
+                    }
+                }
             }
             items(playlists, key = { it.id }) { playlist ->
                 PlaylistListRow(playlist.name, songCount(playlist.songs.size),

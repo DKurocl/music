@@ -104,9 +104,9 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                         modifier = Modifier.semantics { contentDescription = "Enable equalizer" })
                 }
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (state.sony) FilterChip(selected = draft.profile == SonyCorrection.settings.profile, enabled = editable,
+                    if (state.sony) AppChip(selected = draft.profile == SonyCorrection.settings.profile, enabled = editable,
                         onClick = { apply(SonyCorrection.settings.copy(channels = draft.channels)) }, label = { Text("Sony correction") })
-                    FilterChip(selected = draft.bands.all { it.gainDb == 0.0 }, enabled = editable,
+                    AppChip(selected = draft.bands.all { it.gainDb == 0.0 }, enabled = editable,
                         onClick = { apply(EqualizerSettings(enabled = draft.enabled, channels = draft.channels)) }, label = { Text("Flat") })
                     AssistChip(enabled = editable && !importing, onClick = {
                         importRoute = state.routeKey; importProfile.launch(arrayOf("text/plain", "application/octet-stream"))
@@ -355,7 +355,7 @@ private fun EqualizerBandDialog(band: EqualizerBand, onDismiss: () -> Unit, onAp
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterType.entries.forEach { value ->
-                    FilterChip(selected = type == value, onClick = { type = value }, label = {
+                    AppChip(selected = type == value, onClick = { type = value }, label = {
                         Text(when (value) { FilterType.PEAK -> "Peak"; FilterType.LOW_SHELF -> "Low shelf"; FilterType.HIGH_SHELF -> "High shelf" })
                     })
                 }

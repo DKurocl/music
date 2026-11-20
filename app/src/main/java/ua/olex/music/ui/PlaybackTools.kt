@@ -38,7 +38,7 @@ internal fun TempoAndPitch(state: PlayerState, onChange: (Float, Float) -> Unit)
             Text("Speed and pitch", style = MaterialTheme.typography.titleMedium)
             TextButton(onClick = { onChange(1f, 1f) }) { Text("Reset") }
         }
-        FilterChip(selected = linked, onClick = {
+        AppChip(selected = linked, onClick = {
             linked = !linked
             if (linked) { pitch = speed; onChange(speed, speed) }
         }, label = { Text("Link pitch to speed") })

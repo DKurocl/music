@@ -29,6 +29,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import ua.olex.music.playback.PlayerState
 
@@ -272,11 +273,16 @@ internal fun QueueSheet(state: PlayerState, onDismiss: () -> Unit, onPlay: (Stri
                             ) { Symbol(Glyph.DRAG, color = if (dragging) cs.primary else cs.onSurfaceVariant) }
                         }
                     },
-                    colors = ListItemDefaults.colors(containerColor = if (dragging) cs.surfaceContainerHighest else cs.surfaceContainerLow),
+                    // One connected group (M3 Expressive): tight joins, round ends, the playing song
+                    // tonal; a lifted song rounds fully and floats above the others while it moves.
+                    colors = ListItemDefaults.colors(containerColor = when { dragging -> cs.surfaceContainerHighest
+                        current -> cs.secondaryContainer; else -> cs.surfaceContainer }),
                     modifier = Modifier
                         .then(if (dragging) Modifier else Modifier.animateItem())
                         .zIndexWhen(dragging)
-                        .graphicsLayer { if (dragging) { translationY = dragOffset; shadowElevation = 12f } }
+                        .graphicsLayer { if (dragging) { translationY = dragOffset; shadowElevation = 12f; shape = RoundedCornerShape(24.dp); clip = true } }
+                        .padding(horizontal = 12.dp).padding(bottom = 2.dp)
+                        .clip(if (dragging) RoundedCornerShape(24.dp) else segmentShape(index == 0, index == (if (filtering) (matches?.size ?: 0) else order.size) - 1))
                         .clickable { onPlay(item.key) }
                         .semantics {
                             contentDescription = "${item.title}, ${item.artist}, queue item ${position + 1}" + item.sourceError?.let { ", $it" }.orEmpty()

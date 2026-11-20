@@ -113,13 +113,13 @@ internal fun ListeningDetailSheet(detail: ListeningDetail, s: ListeningSummary, 
             }
             if (leaders.isNotEmpty()) LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 items(leaders, key = { it.song.id }) { rank ->
-                    FilterChip(selected = rank == leader, onClick = {
+                    AppChip(selected = rank == leader, onClick = {
                         if (leader != rank) {
                             haptics.tick()
                             list.requestScrollToItem(0)
                             chosen = rank.song.id
                         }
-                    }, shape = CircleShape,
+                    },
                         label = { Text(if (detail == ListeningDetail.ALBUMS && leaders.count { it.title == rank.title } > 1)
                             "${rank.title} · ${rank.song.artist}" else rank.title) })
                 }

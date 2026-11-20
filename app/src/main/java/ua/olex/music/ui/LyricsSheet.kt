@@ -107,15 +107,15 @@ internal fun LyricsSheet(lyrics: Lyrics, state: PlayerState, offsetMs: Long, pos
                     if (lyrics.lines.isNotEmpty()) item(key = "appearance") {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterChip(selected = synced, onClick = { onSynced(true) }, enabled = timed, label = { Text("Synced") })
-                                FilterChip(selected = !synced || !timed, onClick = { onSynced(false) }, label = { Text("Static") })
+                                AppChip(selected = synced, onClick = { onSynced(true) }, enabled = timed, label = { Text("Synced") })
+                                AppChip(selected = !synced || !timed, onClick = { onSynced(false) }, label = { Text("Static") })
                             }
                             Text("Text size · ${(textScale * 100).toInt()}%", style = MaterialTheme.typography.titleMedium)
                             Slider(textScale, onTextScale, valueRange = 0.8f..1.4f, steps = 5)
                             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                FilterChip(selected = romanized, onClick = { onRomanized(!romanized) }, label = { Text("Romanize") })
+                                AppChip(selected = romanized, onClick = { onRomanized(!romanized) }, label = { Text("Romanize") })
                                 if (lyrics.lines.any { !it.translation.isNullOrBlank() }) {
-                                    FilterChip(selected = translated, onClick = { onTranslated(!translated) }, label = { Text("Show translation") })
+                                    AppChip(selected = translated, onClick = { onTranslated(!translated) }, label = { Text("Show translation") })
                                 }
                             }
                         }
