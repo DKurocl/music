@@ -773,8 +773,9 @@ private fun Transport(
 ) {
     val haptics = rememberHaptics()
     androidx.compose.foundation.layout.BoxWithConstraints {
-        val separateModes = maxWidth < 260.dp
-        val size = if (maxWidth >= 284.dp) 52.dp else 48.dp
+        val separateModes = maxWidth < 296.dp
+        val size = if (maxWidth >= 340.dp) 52.dp else 48.dp
+        val playSlot = minOf(112.dp, maxWidth - if (separateModes) size * 2 + 8.dp else size * 4 + 16.dp).coerceAtLeast(48.dp)
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 if (!separateModes) ModeToggle(shuffle = state.shuffle, enabled = state.connected, size = size, onClick = onShuffle)
@@ -783,7 +784,7 @@ private fun Transport(
                     onPrevious()
                 }
                 val waiting = rememberPatient(state.connecting && !state.isPlaying || state.playWhenReady && state.buffering && state.error == null)
-                PlayerPlayToggle(state.playWhenReady, state.connected, waiting, size, onToggle)
+                PlayerPlayToggle(state.playWhenReady, state.connected, waiting, playSlot, onToggle)
                 SkipButton(true, state.hasNext, size, onHold = if (state.seekable) ({ onSkipHeld(true) }) else null) {
                     haptics.skip(true)
                     onNext()
@@ -799,45 +800,51 @@ private fun Transport(
 }
 
 @Composable
-internal fun PlayerPlayToggle(playing: Boolean, enabled: Boolean, waiting: Boolean, size: Dp = 52.dp, onClick: () -> Unit) {
+internal fun PlayerPlayToggle(playing: Boolean, enabled: Boolean, waiting: Boolean, size: Dp = 112.dp, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val focused by interaction.collectIsFocusedAsState()
-    val active = playerControlSelection(playing && enabled)
+    val active = playerControlSelection(playing)
     val push = playerControlPress(pressed)
-    Box(Modifier.size(size).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
-        .toggleable(playing, interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Checkbox) {
-            if (it) haptics.play() else haptics.pause()
-            onClick()
-        }.semantics {
-            contentDescription = if (playing) "Pause" else "Play"
-            if (waiting) stateDescription = "Getting ready"
-        }, contentAlignment = Alignment.Center) {
-        if (waiting) androidx.compose.material3.LoadingIndicator(Modifier.size(29.dp), color = if (playing && enabled) colors.onSecondaryContainer else colors.onSurfaceVariant)
-        else PlayPauseSymbol(playing, 30.dp, pressed,
-            if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f), active, colors.onSecondaryContainer)
+    val height = minOf(size, 72.dp)
+    Box(Modifier.width(size).height(height).drawBehind {
+        val t = active.value.coerceIn(0f, 1f)
+        val pressure = push.value.coerceIn(0f, 1f)
+        val width = minOf(this.size.width, (88f + 24f * t).dp.toPx()) * (1f - pressure * 0.08f)
+        val bodyHeight = this.size.height * (1f - pressure * 0.08f)
+        val rounding = minOf(width, bodyHeight) * (0.5f - 0.16f * t - pressure * 0.10f)
+        val position = androidx.compose.ui.geometry.Offset(center.x - width / 2, center.y - bodyHeight / 2)
+        val box = androidx.compose.ui.geometry.Size(width, bodyHeight)
+        val corner = androidx.compose.ui.geometry.CornerRadius(rounding)
+        drawRoundRect(colors.primary, position, box, corner)
+        if (focused) drawRoundRect(colors.onPrimary, position, box, corner, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+    }.toggleable(playing, interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Checkbox) {
+        if (it) haptics.play() else haptics.pause()
+        onClick()
+    }.semantics {
+        contentDescription = if (playing) "Pause" else "Play"
+        if (waiting) stateDescription = "Getting ready"
+    }, contentAlignment = Alignment.Center) {
+        if (waiting) androidx.compose.material3.LoadingIndicator(Modifier.size(38.dp), color = colors.onPrimary)
+        else PlayPauseSymbol(playing, minOf(size - 8.dp, 40.dp), pressed, colors.onPrimary)
     }
 }
 
 @Composable
 internal fun SkipButton(
-    forward: Boolean, enabled: Boolean, size: Dp = 52.dp, onHold: (() -> Unit)? = null,
-    interactionSource: MutableInteractionSource? = null, onClick: () -> Unit,
+    forward: Boolean, enabled: Boolean, size: Dp = 52.dp, onHold: (() -> Unit)? = null, onClick: () -> Unit,
 ) {
-    val interaction = interactionSource ?: remember { MutableInteractionSource() }
+    val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val focused by interaction.collectIsFocusedAsState()
-    val active = playerControlSelection(false)
-    val push = playerControlPress(pressed)
     val colors = MaterialTheme.colorScheme
-    Box(Modifier.size(size).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
+    Box(Modifier.size(size)
         .combinedClickable(interactionSource = interaction, indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button,
             onLongClickLabel = if (forward) "Forward 10 seconds" else "Back 10 seconds", onLongClick = onHold, onClick = onClick)
         .semantics { contentDescription = if (forward) "Next" else "Previous" }, contentAlignment = Alignment.Center) {
         SkipSymbol(forward, 28.dp, kick = 0, pressed = pressed,
-            color = if (!enabled) colors.onSurface.copy(alpha = 0.38f) else colors.onSurfaceVariant, pressedInk = colors.onSecondaryContainer)
+            color = if (!enabled) colors.onSurface.copy(alpha = 0.38f) else colors.onSurfaceVariant)
     }
 }
 
@@ -859,7 +866,6 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
     val focused by interaction.collectIsFocusedAsState()
     val active = playerControlSelection(on && enabled)
     val push = playerControlPress(pressed)
-    var kick by remember { mutableIntStateOf(0) }
     val click = if (repeat == null) {
         Modifier.toggleable(on, interactionSource = interaction, indication = null, enabled = enabled,
             role = androidx.compose.ui.semantics.Role.Switch) {
@@ -869,7 +875,6 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
     } else {
         Modifier.clickable(interactionSource = interaction, indication = null, enabled = enabled,
             role = androidx.compose.ui.semantics.Role.Button, onClickLabel = "Change repeat mode") {
-            kick++
             when (repeat) {
                 RepeatMode.OFF -> haptics.toggle(true)
                 RepeatMode.ALL -> haptics.tick()
@@ -880,7 +885,7 @@ internal fun ModeToggle(shuffle: Boolean = false, repeat: RepeatMode? = null, en
     }
     Box(Modifier.size(size).clip(RoundedCornerShape(18.dp)).playerControlContainer(active, push, focused, colors.secondaryContainer, colors.primary)
         .then(click).semantics { contentDescription = label; stateDescription = state }, contentAlignment = Alignment.Center) {
-        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE, kick = kick,
+        PlayerModeSymbol(shuffle = repeat == null, on = on, one = repeat == RepeatMode.ONE,
             active = active, push = push, offInk = if (enabled) colors.onSurfaceVariant else colors.onSurface.copy(alpha = 0.38f),
             onInk = colors.onSecondaryContainer)
     }

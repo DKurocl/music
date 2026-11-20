@@ -25,6 +25,13 @@ jobs:
           gradle-version: 9.9.1
       - name: Render the player controls only
         run: gradle :app:testDebugUnitTest --tests '*playerControlMotionGallery*' -PminSdk=35 --offline --no-daemon
+      - name: Encode the sixteen millisecond frames as GIFs
+        run: |
+          gallery=app/build/reports/ui-previews/player-motion
+          mkdir -p "$gallery/gifs"
+          for row in "$gallery"/gif-frames/*; do
+            ffmpeg -v error -framerate 62.5 -pattern_type glob -i "$row/*.png" +              -filter_complex "[0:v]split[a][b];[a]palettegen[p];[b][p]paletteuse" -loop 0 "$gallery/gifs/${row##*/}.gif"
+          done
       - uses: actions/upload-artifact@v4
         if: always()
         with:

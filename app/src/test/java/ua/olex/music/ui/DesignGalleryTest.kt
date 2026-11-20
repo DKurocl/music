@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.background
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -891,23 +892,21 @@ class DesignGalleryTest {
             "Play to pause", "Pause to play", "Lyrics show", "Lyrics hide", "Sleep arm", "Sleep turn off",
             "Queue open", "Queue close", "Output picker", "Feel on", "Feel off", "Shuffle 0 and 100 ms", "Repeat 0, 100, 200 ms",
         )
-        val press = androidx.compose.foundation.interaction.PressInteraction.Press(androidx.compose.ui.geometry.Offset.Zero)
-        val sources = List(4) { androidx.compose.foundation.interaction.MutableInteractionSource() }
         val startsOn = setOf(5, 7, 8, 10, 12, 14, 16, 19)
         val flags = names.indices.map { androidx.compose.runtime.mutableStateOf(it in startsOn) }
         val modes = mapOf(6 to RepeatMode.OFF, 7 to RepeatMode.ALL, 8 to RepeatMode.ONE, 21 to RepeatMode.OFF)
             .mapValues { androidx.compose.runtime.mutableStateOf(it.value) }
         val showDock = androidx.compose.runtime.mutableStateOf(false)
         compose.setContent {
-            AppTheme {
+            androidx.compose.material3.MaterialExpressiveTheme(colorScheme = androidx.compose.material3.darkColorScheme()) {
                 Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-                    names.indices.chunked(7).forEach { row ->
+                    names.indices.chunked(5).forEach { row ->
                         androidx.compose.foundation.layout.Row {
                             row.forEach { index ->
                                 androidx.compose.foundation.layout.Box(Modifier.testTag("motion-$index")) {
                                     val change = { flags[index].value = !flags[index].value }
                                     when (index) {
-                                        in 0..3 -> SkipButton(index >= 2, true, 52.dp, interactionSource = sources[index], onClick = {})
+                                        in 0..3 -> SkipButton(index >= 2, true, 52.dp, onClick = {})
                                         4, 5, 20 -> ModeToggle(shuffle = flags[index].value, enabled = true, onClick = change)
                                         6, 7, 8, 21 -> {
                                             val value = modes.getValue(index)
@@ -933,7 +932,7 @@ class DesignGalleryTest {
                             }
                         }
                     }
-                    androidx.compose.foundation.layout.Box(Modifier.testTag("motion-dock").height(60.dp).fillMaxWidth()) {
+                    androidx.compose.foundation.layout.Box(Modifier.testTag("motion-dock").height(60.dp).width(268.dp)) {
                         if (showDock.value) PlayerDock(false, true, false, false, PlayerDockMark.SPEAKER, false,
                             ready = true, connected = true, onLyrics = {}, onTimer = {}, onQueue = {}, onOutput = {}, onFeel = {})
                     }
@@ -941,50 +940,64 @@ class DesignGalleryTest {
             }
         }
 
-        val actions = (4..21).associateWith { index ->
-            compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-$index")))
-                .fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsActions.OnClick].action!!
-        }
         val targets = (names.indices.map { "motion-$it" } + "motion-dock").map {
             compose.onNodeWithTag(it).fetchSemanticsNode().boundsInRoot
         }
-        fun capture() : List<Bitmap> {
-            val screen = compose.onRoot().captureToImage().asAndroidBitmap()
+        val touch = compose.onRoot()
+        fun click(vararg indices: Int) = touch.performTouchInput {
+            for (i in indices) {
+                down(i + 10, targets[i].center)
+                up(i + 10)
+            }
+        }
+        fun capture(): List<Bitmap> {
+            val screen = touch.captureToImage().asAndroidBitmap()
             return targets.map { rect -> Bitmap.createBitmap(screen, rect.left.toInt(), rect.top.toInt(), rect.width.toInt(), rect.height.toInt()) }
         }
+
+        val sample = (0..500 step 50).toSet() + 680
+        val animationFrames = (0..688 step 16).toSet()
         val rows = List(names.size + 1) { arrayListOf<Bitmap>() }
-        compose.runOnIdle { listOf(1, 3).forEach { sources[it].tryEmit(press) } }
-        compose.mainClock.advanceTimeBy(500)
+        val output = File("build/reports/ui-previews/player-motion").apply { mkdirs() }
+        val gifFrames = output.resolve("gif-frames").apply { mkdirs() }
         compose.mainClock.autoAdvance = false
+        touch.performTouchInput { down(1, targets[1].center); down(3, targets[3].center) }
+        compose.mainClock.advanceTimeBy(500)
+        var previous = 0
         var settledAt450: List<Bitmap>? = null
         val dock = names.size
-        for (ms in (0..500 step 50).toList() + 680) {
-            if (ms != 0) compose.mainClock.advanceTimeBy(if (ms == 680) 180L else 50L, ignoreFrameDuration = true)
-            capture().forEachIndexed { index, frame -> rows[index] += frame }
-            if (ms == 450) settledAt450 = rows.map { it.last() }
+        for (ms in (sample + animationFrames + setOf(100, 200, 500)).sorted()) {
+            if (ms != 0) compose.mainClock.advanceTimeBy((ms - previous).toLong(), ignoreFrameDuration = true)
+            val frames = capture()
+            if (ms in sample) frames.forEachIndexed { index, frame -> rows[index] += frame }
+            if (ms in animationFrames) frames.forEachIndexed { index, bitmap ->
+                val name = (names.getOrNull(index) ?: "Dock entrance").lowercase().replace(Regex("[^a-z0-9]+"), "-")
+                gifFrames.resolve("${index.toString().padStart(2, '0')}-$name/${ms.toString().padStart(3, '0')}.png").apply { parentFile?.mkdirs() }
+                    .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            }
+            if (ms == 450) settledAt450 = frames
             if (ms == 500) {
                 val at450 = checkNotNull(settledAt450)
-                for (index in listOf(4, 5, 6, 7, 8, 20)) org.junit.Assert.assertTrue(names[index], at450[index].sameAs(rows[index].last()))
+                for (index in listOf(4, 5, 6, 7, 8, 20)) org.junit.Assert.assertTrue(names[index], at450[index].sameAs(frames[index]))
             }
             if (ms == 0) {
-                compose.runOnIdle {
-                    sources[0].tryEmit(press)
-                    sources[1].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press))
-                    sources[2].tryEmit(press)
-                    sources[3].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press))
-                    showDock.value = true
-                    actions.values.forEach { it() }
+                touch.performTouchInput {
+                    up(1); up(3)
+                    down(0, targets[0].center); down(2, targets[2].center)
                 }
+                compose.runOnIdle { showDock.value = true }
+                click(*(4..21).toList().toIntArray())
             }
-            if (ms == 100) compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-20"))).performClick()
-            if (ms == 100 || ms == 200) compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("motion-21"))).performClick()
-            if (ms == 500) compose.runOnIdle {
-                listOf(0, 2).forEach { sources[it].tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press)) }
-            }
+            if (ms == 100) click(20, 21)
+            if (ms == 200) click(21)
+            if (ms == 500) touch.performTouchInput { up(0); up(2) }
+            previous = ms
         }
         for (index in 20..21) org.junit.Assert.assertTrue(names[index], rows[index].first().sameAs(rows[index].last()))
         org.junit.Assert.assertTrue("Shuffle off clears its plate", rows[4].first().sameAs(rows[5].last()))
         org.junit.Assert.assertTrue("Repeat off clears its plate", rows[6].first().sameAs(rows[8].last()))
+        org.junit.Assert.assertFalse("Previous compresses", rows[0].first().sameAs(rows[0][3]))
+        org.junit.Assert.assertFalse("Next compresses", rows[2].first().sameAs(rows[2][3]))
 
         val labels = names + "Dock entrance"
         val cell = 108
@@ -1006,7 +1019,6 @@ class DesignGalleryTest {
                 canvas.drawBitmap(frame, null, android.graphics.RectF(x.toFloat(), top, x + 104f, top + height), null)
             }
         }
-        val output = File("build/reports/ui-previews/player-motion").apply { mkdirs() }
         output.resolve("player-control-frames.png").outputStream().use { sheet.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
