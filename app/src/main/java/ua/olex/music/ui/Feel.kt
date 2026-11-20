@@ -253,3 +253,18 @@ internal fun PlayOrWait(waiting: Boolean, playing: Boolean, iconSize: androidx.c
         else PlayPauseSymbol(playing, iconSize, pressed)
     }
 }
+
+/**
+ * A value that changes once, not in steps: while it is [missing] (a new song still loading) the
+ * last one stays for up to [holdMs]; a new value waits [settleMs] for the next report to land, so
+ * "FLAC" then "FLAC · 2116 kbps", or a format then a blank then a format, shows as one change.
+ */
+@Composable
+internal fun <T> rememberSettled(value: T, missing: Boolean, settleMs: Long = 250, holdMs: Long = 1_200): T {
+    var shown by remember { androidx.compose.runtime.mutableStateOf(value) }
+    androidx.compose.runtime.LaunchedEffect(value, missing) {
+        if (missing) kotlinx.coroutines.delay(holdMs) else if (shown != value && settleMs > 0) kotlinx.coroutines.delay(settleMs)
+        shown = value
+    }
+    return shown
+}
