@@ -136,7 +136,7 @@ internal class YouTubeMusic(
     ): OnlineArtist? = withContext(ioDispatcher) {
         val scope = pageScope()
         val key = if (full) "artist-full:$id" else "artist:$id"
-        cached(if (offline) "$scope/offline/$key" else "$scope/$key", keepResult = { value: OnlineArtist -> !value.partial }) {
+        cached(if (offline) "$scope/offline/$key" else "$scope/$key") {
             fun read(name: String) = pageStore?.read(scope, name)?.let { runCatching { OnlinePageJson.artist(it) }.getOrNull() }
             val saved = read(key) ?: read(if (full) "artist:$id" else "artist-full:$id")
             if (offline) return@cached saved
@@ -147,21 +147,14 @@ internal class YouTubeMusic(
                 }
                 val public = browse(null)
                 val headers = if (public == null) account() else null
-                val (json, initial) = public ?: headers?.let { browse(it) } ?: run {
-                    val name = knownName?.takeIf { it.isNotBlank() } ?: return@networkFallback null
-                    val songs = catalogueSearch(name).filter { track ->
-                        track.artists.any { TextFold.fold(it) == TextFold.fold(name) }
-                    }
-                    if (songs.isEmpty()) return@networkFallback null
-                    return@networkFallback OnlineArtist(id, name, null, null, songs, emptyList(), emptyList(), partial = true)
-                }
+                val (json, initial) = public ?: headers?.let { browse(it) } ?: return@networkFallback null
                 if (full) {
                     if (saved == null) onPage(initial)
                     expandArtist(initial, json, scope, headers, onPage)
                 } else initial
             }
             if (pageScope() != scope) return@cached null
-            if (fresh != null && fresh !== saved && !fresh.partial) {
+            if (fresh != null && fresh !== saved) {
                 pageStore?.write(scope, key, OnlinePageJson.artist(fresh))
                 rememberAlbumLinks(scope, fresh.songs + fresh.videos)
             }
@@ -1016,7 +1009,7 @@ internal class YouTubeMusic(
             if (title.isEmpty()) return null
             val id = Regex(""""browseId"\s*:\s*"([^"]+)"""").find(nav)?.groupValues?.get(1) ?: return null
             val kind = when {
-                nav.contains("MUSIC_PAGE_TYPE_ARTIST") -> Card.Kind.ARTIST
+                nav.contains("MUSIC_PAGE_TYPE_ARTIST") || nav.contains("MUSIC_PAGE_TYPE_USER_CHANNEL") -> Card.Kind.ARTIST
                 nav.contains("MUSIC_PAGE_TYPE_PLAYLIST") || id.startsWith("VL") -> Card.Kind.PLAYLIST
                 nav.contains("MUSIC_PAGE_TYPE_ALBUM") -> Card.Kind.ALBUM
                 else -> return null
