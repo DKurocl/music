@@ -3,6 +3,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The owner's Earbuds app: turn its EQ off for Sony correction, act when the sleep timer ends. -->
+    <uses-permission android:name="ua.olex.sonyanc.permission.CONTROL" />
+    <queries><package android:name="ua.olex.sonyanc" /></queries>
 
     <application>
         <!-- Exported: the system, Android Auto and Bluetooth media buttons bind to it. -->

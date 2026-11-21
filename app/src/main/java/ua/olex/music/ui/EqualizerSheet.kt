@@ -112,7 +112,7 @@ internal fun EqualizerSheet(state: EqualizerState, connected: Boolean, error: St
                         importRoute = state.routeKey; importProfile.launch(arrayOf("text/plain", "application/octet-stream"))
                     }, label = { Text(if (importing) "Importing..." else "Import AutoEq") }, leadingIcon = { Symbol(Glyph.FOLDER, size = 18.dp) })
                 }
-                if (state.sony) Text("Sony correction is AutoEq from Rtings measurements; turn Sony's own EQ off first.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                if (state.sony) Text("Sony correction is AutoEq from Rtings measurements. With the Earbuds app installed, the earbuds' own EQ turns off by itself.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
                 BandSlider("Preamp", "${String.format(Locale.ROOT, "%.1f", draft.preampDb)} dB", draft.preampDb.toFloat(), -36f..12f, editable, "Equalizer preamp",
                     onLabel = null, onChange = { draft = draft.copy(preampDb = it.toDouble()) }, onDone = { onApply(state.routeKey, draft) })
                 // The sound as a curve: drag a band's dot up or down; its chip below opens exact settings.

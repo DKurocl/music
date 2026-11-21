@@ -56,7 +56,7 @@ internal object EqualizerCommand {
 }
 
 /** Service-owned route isolation. Switching outputs publishes a new immutable audio-thread snapshot. */
-internal class EqualizerController(context: Context, private val onChanged: (EqualizerState) -> Unit) {
+internal class EqualizerController(private val context: Context, private val onChanged: (EqualizerState) -> Unit) {
     private val preferences = context.getSharedPreferences("equalizer-v1", Context.MODE_PRIVATE)
     var state = EqualizerState()
         private set
@@ -87,6 +87,8 @@ internal class EqualizerController(context: Context, private val onChanged: (Equ
         state = state.copy(settings = settings)
         active = settings
         onChanged(state)
+        // Sony correction already shapes the sound: the earbuds' own EQ goes off (Earbuds app).
+        if (settings.enabled && settings.profile == ua.olex.music.dsp.SonyCorrection.name) EarbudsLink.send(context, EarbudsLink.EQ_OFF)
         return true
     }
 }

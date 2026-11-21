@@ -439,6 +439,7 @@ class PlaybackService : MediaLibraryService() {
     private fun finishEndOfTrackTimer() {
         if (!endOfTrack) return
         endOfTrack = false
+        EarbudsLink.send(this, EarbudsLink.SLEEP)
         exoOrNull()?.pauseAtEndOfMediaItems = false
         publishSleepTimer()
     }
@@ -486,6 +487,7 @@ class PlaybackService : MediaLibraryService() {
                 SleepTimer.Expiry.PAUSE -> {
                     session?.player?.pause()
                     fading?.cancelSleepFade()
+                    EarbudsLink.send(this@PlaybackService, EarbudsLink.SLEEP)
                 }
                 SleepTimer.Expiry.FINISH_TRACK -> {
                     if (session?.player?.playWhenReady == true) armEndOfTrack()
