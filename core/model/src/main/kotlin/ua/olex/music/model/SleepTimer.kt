@@ -39,6 +39,6 @@ class SleepTimer {
     }
 
     companion object {
-        const val MAX_MINUTES = 180
+        const val MAX_MINUTES = 120
     }
 }

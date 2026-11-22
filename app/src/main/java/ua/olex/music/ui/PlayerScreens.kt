@@ -378,7 +378,9 @@ internal fun MiniPlayer(state: PlayerState, position: () -> Long, onOpen: () -> 
             .graphicsLayer {
                 translationX = rubber(dragX, 48.dp.toPx())
                 // Up opens the player; down has nowhere to go, so it stretches a little and springs back.
-                alpha = 1f - (travel?.fraction ?: 0f)
+                // Its content leaves in the first quarter of the opening and comes back only in the
+                // last quarter of the closing, when the container has become the card again.
+                alpha = (1f - (travel?.fraction ?: 0f) / 0.25f).coerceIn(0f, 1f)
                 translationY = if (dragUp < 0f) -rubber(dragUp, 16.dp.toPx()) else 0f
             }
             .pointerInput(state.hasNext) {
@@ -928,26 +930,9 @@ internal fun PlayerDock(
     /** The sleep countdown ("29 min"); the timer button grows into a pill that shows it. */
     timerLabel: String? = null,
 ) {
-    val still = LocalPowerSave.current
-    val spatial = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
-    val entrance = remember { List(5) { Animatable(if (still) 1f else 0f) } }
-    LaunchedEffect(still) {
-        if (still || coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) {
-            entrance.forEach { it.snapTo(1f) }
-        } else kotlinx.coroutines.coroutineScope {
-            entrance.forEachIndexed { index, progress ->
-                launch {
-                    delay(index * 30L)
-                    progress.animateTo(1f, spatial)
-                }
-            }
-        }
-    }
-    fun settle(index: Int) = Modifier.graphicsLayer {
-        val phase = if (still) 1f else entrance[index].value
-        translationY = 8.dp.toPx() * (1f - phase)
-        alpha = phase.coerceIn(0f, 1f)
-    }
+    // The dock is simply there, as in Google's apps: no staggered entrance when the player opens
+    // or finishes loading (that read as the buttons arriving late).
+    @Suppress("UNUSED_PARAMETER") fun settle(index: Int): Modifier = Modifier
     Surface(shape = CircleShape, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
         Row(Modifier.padding(6.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             ToggleAction(PlayerDockMark.LYRICS, "Lyrics", lyrics, ready, if (lyrics) "Shown" else "Hidden",
@@ -1013,8 +998,10 @@ private fun SignalPath(format: String?, loading: Boolean, onClick: () -> Unit, m
         // Between songs the format goes blank for a moment and then arrives in parts (codec, then
         // bitrate). The old line stays until the new one has settled, then fades over once.
         val settled = rememberSettled(format, missing = format == null && loading)
-        val waiting = rememberPatient(settled == null && loading, delayMs = 600)
-        val text = settled ?: when { waiting -> "Reading audio format…"; loading -> ""; else -> "Format unavailable" }
+        // Nothing is said until the format is known: no "reading" or "unavailable" placeholder (a
+        // stream may never report one); the line simply fades in once there is something to say.
+        @Suppress("UNUSED_VARIABLE") val unused = loading
+        val text = settled ?: ""
         androidx.compose.animation.Crossfade(text, Modifier.weight(1f, fill = false), MaterialTheme.motionScheme.fastEffectsSpec(), label = "format") { line ->
             Text(line, style = MaterialTheme.typography.labelLarge, color = cs.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

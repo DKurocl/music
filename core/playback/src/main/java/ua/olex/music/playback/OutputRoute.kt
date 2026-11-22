@@ -98,28 +98,100 @@ internal fun deviceRoute(audio: AudioManager): OutputRoute? {
 }
 
 /**
- * How much later than the player's clock music is heard on an output: Bluetooth codecs and the
- * earbuds' own buffers add 100-250 ms that not every device reports to Android. Kept per output
- * (the speaker, each pair of headphones), set by ear; synced lyrics (in the app and on the lock
- * screen) and Feel the music follow it, so the words and the taps land with what is heard.
+ * How much later than the player's clock music is heard on an output, worked out by itself.
+ *
+ * The player already follows the delay an output reports to Android (its position is what the
+ * output presents), so lyrics and Feel the music are right wherever it is reported. Bluetooth
+ * headphones that report nothing still lag 150-250 ms: [LatencyProbe] measures what an output
+ * reports, once per output, and when Bluetooth reports almost nothing the usual lag is added.
+ * The owner's ± trims on top of that, by ear, per output.
  */
 object OutputDelay {
-    private const val PREFS = "output_delay"
+    private const val PREFS = "output_delay_v2"
     const val STEP_MS = 10
     const val MAX_MS = 400
+    /** Below this a Bluetooth output is taken as reporting nothing of its own buffers. */
+    private const val REPORTED_MS = 80
+    private const val BLUETOOTH_MS = 200
+    private const val LE_AUDIO_MS = 120
     private val _revision = MutableStateFlow(0)
     /** Bumped on every change, so screens re-read the value. */
     val revision: StateFlow<Int> = _revision.asStateFlow()
 
     fun key(route: OutputRoute?): String = route?.let { "${it.kind}:${it.name}" } ?: "unknown"
-    fun ms(context: Context, route: OutputRoute?): Int =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getInt(key(route), 0)
-    fun set(context: Context, route: OutputRoute?, ms: Int) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putInt(key(route), ms.coerceIn(-MAX_MS, MAX_MS)).apply()
+    private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    /** What the output reported when measured, or null before the first measurement. */
+    fun reported(context: Context, route: OutputRoute?): Int? = prefs(context).getInt("reported:" + key(route), -1).takeIf { it >= 0 }
+
+    /** Pure, unit-tested: the lag added by itself for an output that reports [reported] ms. */
+    fun automatic(kind: OutputRoute.Kind?, reported: Int?): Int = when {
+        reported == null || reported >= REPORTED_MS -> 0
+        kind == OutputRoute.Kind.BLUETOOTH -> BLUETOOTH_MS
+        kind == OutputRoute.Kind.LE_AUDIO -> LE_AUDIO_MS
+        else -> 0
+    }
+    fun automatic(context: Context, route: OutputRoute?): Int = automatic(route?.kind, reported(context, route))
+    /** The owner's trim by ear, on top of the automatic part. */
+    fun trim(context: Context, route: OutputRoute?): Int = prefs(context).getInt("trim:" + key(route), 0)
+    fun setTrim(context: Context, route: OutputRoute?, ms: Int) {
+        prefs(context).edit().putInt("trim:" + key(route), ms.coerceIn(-MAX_MS, MAX_MS)).apply()
         _revision.value++
     }
+    /** All of it: what lyrics and Feel the music wait on this output. */
+    fun ms(context: Context, route: OutputRoute?): Int = (automatic(context, route) + trim(context, route)).coerceIn(-MAX_MS, MAX_MS)
+    @Deprecated("The trim is set; the automatic part is measured", ReplaceWith("setTrim(context, route, ms)"))
+    fun set(context: Context, route: OutputRoute?, ms: Int) = setTrim(context, route, ms - automatic(context, route))
+
+    /** Measures [route] once (in the background, a second of silence); later calls do nothing. */
+    fun ensureMeasured(context: Context, route: OutputRoute?) {
+        if (route == null || route.kind == OutputRoute.Kind.REMOTE || reported(context, route) != null) return
+        val reported = LatencyProbe.measure() ?: return
+        prefs(context).edit().putInt("reported:" + key(route), reported).apply()
+        _revision.value++
+    }
+
     /** The phone's own output music goes to now (no cast routes). */
     fun currentRoute(context: Context): OutputRoute? = context.getSystemService(AudioManager::class.java)?.let(::deviceRoute)
     /** For the playback side, which has no monitor: the delay of the output music goes to now. */
     fun current(context: Context): Int = ms(context, currentRoute(context))
+}
+
+/**
+ * The delay an output reports to Android, measured with a silent track: frames written minus
+ * frames the output says it has presented, less the time since that report. Bluetooth headphones
+ * that send their delay show it here; those that don't show only the phone's own buffer.
+ */
+internal object LatencyProbe {
+    fun measure(): Int? = runCatching {
+        val rate = 48_000
+        val format = android.media.AudioFormat.Builder().setSampleRate(rate)
+            .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT).setChannelMask(android.media.AudioFormat.CHANNEL_OUT_STEREO).build()
+        val min = android.media.AudioTrack.getMinBufferSize(rate, android.media.AudioFormat.CHANNEL_OUT_STEREO, android.media.AudioFormat.ENCODING_PCM_16BIT)
+        val track = android.media.AudioTrack.Builder().setAudioAttributes(musicAttributes).setAudioFormat(format)
+            .setBufferSizeInBytes(min * 2).setTransferMode(android.media.AudioTrack.MODE_STREAM).build()
+        try {
+            track.setVolume(0f)
+            track.play()
+            val silence = ByteArray(min)
+            val stamp = android.media.AudioTimestamp()
+            val samples = mutableListOf<Int>()
+            var written = 0L
+            val start = System.nanoTime()
+            while (System.nanoTime() - start < 1_500_000_000L) {
+                val n = track.write(silence, 0, silence.size)
+                if (n <= 0) break
+                written += n / 4
+                if (System.nanoTime() - start > 600_000_000L && track.getTimestamp(stamp)) {
+                    val pending = (written - stamp.framePosition) * 1_000.0 / rate
+                    val since = (System.nanoTime() - stamp.nanoTime) / 1_000_000.0
+                    samples += (pending - since).toInt()
+                }
+            }
+            samples.sorted().getOrNull(samples.size / 2)?.coerceIn(0, 1_000)
+        } finally {
+            runCatching { track.stop() }
+            track.release()
+        }
+    }.getOrNull()
 }

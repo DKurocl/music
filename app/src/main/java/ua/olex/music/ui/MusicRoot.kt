@@ -665,9 +665,12 @@ fun MusicRoot(model: LibraryViewModel) {
             library?.byId?.get(TrackId(item.mediaId)) ?: if (item.mediaId.startsWith("yt:")) ua.olex.music.model.Track(TrackId(item.mediaId),
                 "${ua.olex.music.playback.OnlineStreams.SCHEME}://${item.mediaId.removePrefix("yt:")}", item.title, item.artist, artworkUri = item.artworkUri) else null
         }
+        val fromLine = origin?.title ?: model.mixLabel ?: rawOrigin
+        val openingContext = LocalContext.current
+        LaunchedEffect(fromLine) { LastOpening.remember(openingContext, fromLine) }
         NowPlaying(
             playing, format = format,
-            from = origin?.title ?: model.mixLabel ?: rawOrigin,
+            from = fromLine,
             onOpenOrigin = openOrigin,
             originIsMix = model.mixLabel != null || origin?.kind == "mix",
             position = { model.positionMs }, onClose = { expanded = false },
@@ -879,6 +882,8 @@ private fun NowPlaying(
     // How late this output is heard (set by ear per output): synced lyrics follow what is heard.
     val delayRevision by ua.olex.music.playback.OutputDelay.revision.collectAsStateWithLifecycle()
     val outputLag = remember(route, delayRevision) { ua.olex.music.playback.OutputDelay.ms(context, route).toLong() }
+    // Each output is measured once, when music first goes to it.
+    LaunchedEffect(route) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ua.olex.music.playback.OutputDelay.ensureMeasured(context, route) } }
     val lyricsPrefs = remember { context.getSharedPreferences("lyrics_display", android.content.Context.MODE_PRIVATE) }
     var lyricsScale by remember { androidx.compose.runtime.mutableFloatStateOf(lyricsPrefs.getFloat("text_scale", 1f)) }
     var lyricsSynced by remember { mutableStateOf(lyricsPrefs.getBoolean("synced", true)) }
@@ -935,7 +940,7 @@ private fun NowPlaying(
             active = state.sleepDeadlineMs != null,
             onDismiss = { timerDialog = false },
             onSet = { minutes, finishTrack -> onSleepTimer(minutes, finishTrack); timerDialog = false },
-            onExtend = onExtendSleep?.let { extend -> { ms: Long -> extend(ms); timerDialog = false } },
+            onAdjust = { minutes, finishTrack -> onSleepTimer(minutes, finishTrack) },
         )
     }
 
@@ -955,7 +960,11 @@ private fun NowPlaying(
 
 }
 
-/** A running countdown and its stop behavior stay visible until the owner edits or cancels it. */
+/**
+ * The sleep timer, as Google's Clock sets one: a dial on a two-hour scale (the same scale before and
+ * while it runs, so starting it never makes the ring jump to full), quick lengths, −5 / +5 that stay
+ * open for as many taps as wanted (while it runs too), and one switch: finish the song or fade out.
+ */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 internal fun SleepTimerDialog(
@@ -963,38 +972,41 @@ internal fun SleepTimerDialog(
     onDismiss: () -> Unit,
     onSet: (Int, Boolean) -> Unit,
     deadline: Long? = null,
-    onExtend: ((Long) -> Unit)? = null,
-    durationMs: Long? = null,
+    @Suppress("UNUSED_PARAMETER") onExtend: ((Long) -> Unit)? = null,
+    @Suppress("UNUSED_PARAMETER") durationMs: Long? = null,
     finishingTrack: Boolean = false,
+    /** Changes the running timer without closing the sheet (−5 / +5, the switch). */
+    onAdjust: (Int, Boolean) -> Unit = onSet,
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
-    val end = ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK
+    val max = 120
     val runningEnd = active && deadline == ua.olex.music.playback.SleepTimerCommand.END_OF_TRACK_DEADLINE
     val preferences = LocalContext.current.getSharedPreferences("sleep_timer", android.content.Context.MODE_PRIVATE)
     var minutes by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(30) }
-    var endOfSong by rememberSaveable { mutableStateOf(false) }
-    var finishTrack by rememberSaveable {
-        mutableStateOf(if (active && !runningEnd) finishingTrack else preferences.getBoolean("finish_track", true))
-    }
-    var changed by rememberSaveable { mutableStateOf(!active) }
+    var finishTrack by rememberSaveable { mutableStateOf(if (active && !runningEnd) finishingTrack else preferences.getBoolean("finish_track", true)) }
     // A running timer counts down on the dial, once a second.
     var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(active, deadline, changed) {
-        while (active && deadline != null && !runningEnd && !changed) {
+    LaunchedEffect(active, deadline) {
+        while (active && deadline != null && !runningEnd) {
             now = android.os.SystemClock.elapsedRealtime()
             kotlinx.coroutines.delay(1_000)
         }
     }
     val leftMs = if (active && deadline != null && !runningEnd) (deadline - now).coerceAtLeast(0) else null
-    val showingRun = active && !changed
-    val runningSpan = durationMs ?: remember(deadline) { leftMs?.coerceAtLeast(1) ?: 1 }
-    fun selectMinutes(value: Int) {
-        val bounded = value.coerceIn(5, 120)
-        if (bounded != minutes || endOfSong) haptics.tick()
+    val running = leftMs != null
+    // Whole minutes left, as −5 / +5 count from them.
+    val leftMinutes = leftMs?.let { ((it + 59_999L) / 60_000L).toInt() } ?: 0
+    fun select(value: Int) {
+        val bounded = value.coerceIn(5, max)
+        if (bounded != minutes) haptics.tick()
         minutes = bounded
-        endOfSong = false
-        changed = true
+    }
+    fun adjust(delta: Int) {
+        val next = (leftMinutes + delta).coerceIn(1, max)
+        if (next == leftMinutes) return
+        haptics.tick()
+        onAdjust(next, finishTrack)
     }
     AppSheet(onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp),
@@ -1005,25 +1017,26 @@ internal fun SleepTimerDialog(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // The dial: drag around it in 5 minute steps (up to 2 hours), as Google's Clock sets a timer.
+                // The dial: drag around it in 5 minute steps, up to 2 hours. Running, it shows the time
+                // left on the same scale and is not dragged.
                 SleepDial(
                     fraction = when {
-                        showingRun && leftMs != null -> (leftMs.toFloat() / runningSpan).coerceIn(0f, 1f)
-                        showingRun && runningEnd || endOfSong -> 1f
-                        else -> minutes / 120f
+                        leftMs != null -> (leftMs / (max * 60_000f)).coerceIn(0f, 1f)
+                        runningEnd -> 1f
+                        else -> minutes / max.toFloat()
                     },
-                    enabled = !showingRun,
-                    onDrag = { fraction -> selectMinutes(kotlin.math.round(fraction * 24).toInt() * 5) },
+                    enabled = !active,
+                    onDrag = { fraction -> select(kotlin.math.round(fraction * 24).toInt() * 5) },
                 ) {
                     when {
-                        showingRun && leftMs != null -> {
+                        leftMs != null -> {
                             Text("%d:%02d".format(leftMs / 60_000, leftMs / 1_000 % 60), style = MaterialTheme.typography.displayMediumEmphasized)
-                            Text("left", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                            val at = java.time.LocalTime.now().plusSeconds(leftMs / 1_000)
+                            Text("left · until ${"%02d:%02d".format(at.hour, at.minute)}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
                         }
-                        (showingRun && runningEnd) || endOfSong -> {
+                        runningEnd -> {
                             Symbol(Glyph.NOTE, size = 44.dp, filled = true, color = cs.primary)
-                            Text(if (showingRun) "Finishing this song" else "End of this song",
-                                style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
+                            Text("Finishing this song", style = MaterialTheme.typography.titleMedium, color = cs.onSurfaceVariant)
                         }
                         else -> {
                             Text("$minutes", style = MaterialTheme.typography.displayLargeEmphasized)
@@ -1031,44 +1044,34 @@ internal fun SleepTimerDialog(
                             Text("min · until ${"%02d:%02d".format(at.hour, at.minute)}", style = MaterialTheme.typography.titleSmall, color = cs.onSurfaceVariant)
                         }
                     }
-                    if (showingRun) TextButton(onClick = {
-                        minutes = leftMs?.let { ((it + 150_000L) / 300_000L * 5).toInt().coerceIn(5, 120) } ?: 30
-                        endOfSong = runningEnd
-                        if (!runningEnd) finishTrack = finishingTrack
-                        changed = true
-                        haptics.tick()
-                    }) { Text("Edit timer") }
-                    else if (!endOfSong) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { selectMinutes(minutes - 5) }, enabled = minutes > 5,
+                    if (!runningEnd) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = { if (running) adjust(-5) else select(minutes - 5) }, enabled = if (running) leftMinutes > 1 else minutes > 5,
                             modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
-                        TextButton(onClick = { selectMinutes(minutes + 5) }, enabled = minutes < 120,
+                        TextButton(onClick = { if (running) adjust(5) else select(minutes + 5) }, enabled = if (running) leftMinutes < max else minutes < max,
                             modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
                     }
                 }
-                // Quick lengths as one connected group; End of song last.
+                // Quick lengths as one connected group (they start a new countdown while one runs).
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
-                    val options = listOf(15, 30, 45, 60, end)
+                    val options = listOf(15, 30, 45, 60)
                     options.forEachIndexed { i, m ->
-                        val checked = !showingRun && if (m == end) endOfSong else !endOfSong && minutes == m
+                        val checked = !active && minutes == m
                         androidx.compose.material3.ToggleButton(checked = checked, onCheckedChange = {
-                            haptics.tick(); changed = true
-                            if (m == end) endOfSong = true else { endOfSong = false; minutes = m }
+                            haptics.tick()
+                            if (active) onAdjust(m, finishTrack) else minutes = m
                         }, shapes = when (i) { 0 -> androidx.compose.material3.ButtonGroupDefaults.connectedLeadingButtonShapes()
                             options.lastIndex -> androidx.compose.material3.ButtonGroupDefaults.connectedTrailingButtonShapes()
                             else -> androidx.compose.material3.ButtonGroupDefaults.connectedMiddleButtonShapes() },
                             contentPadding = PaddingValues(0.dp),
-                            modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = if (m == end) "When this song ends" else "$m minutes" }) {
-                            if (m == end) Symbol(Glyph.NOTE, size = 20.dp, filled = checked) else Text("$m")
-                        }
+                            modifier = Modifier.weight(1f).height(48.dp).semantics { contentDescription = "$m minutes" }) { Text("$m") }
                     }
                 }
-                if (showingRun && !runningEnd) {
-                    Text(if (finishingTrack) "The song playing when time is up will finish." else "Music fades out before the timer ends.",
-                        modifier = Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
-                } else if (!showingRun && !endOfSong) {
+                if (!runningEnd) {
                     fun changeFinishTrack(checked: Boolean) {
                         haptics.toggle(checked)
                         finishTrack = checked
+                        preferences.edit().putBoolean("finish_track", checked).apply()
+                        if (running) onAdjust(leftMinutes, checked)
                     }
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
                         .background(cs.surfaceContainerHigh)
@@ -1077,26 +1080,21 @@ internal fun SleepTimerDialog(
                         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Finish the song", style = MaterialTheme.typography.titleMedium)
-                            Text(if (finishTrack) "When the countdown ends" else "Fade out when the countdown ends",
+                            Text(if (finishTrack) "The song playing when time is up plays to its end" else "Music fades out as the countdown ends",
                                 style = MaterialTheme.typography.bodyMedium, color = cs.onSurfaceVariant)
                         }
                         AppSwitch(checked = finishTrack, onCheckedChange = null)
                     }
                 }
             }
-            if (showingRun) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (leftMs != null) androidx.compose.material3.FilledTonalButton(onClick = {
-                    haptics.confirm()
-                    onExtend?.invoke(10 * 60_000L) ?: onSet((leftMs / 60_000 + 10).toInt(), finishingTrack)
-                },
-                    modifier = Modifier.weight(1f).height(56.dp)) { Text("+10 min") }
-                Button(onClick = { haptics.toggle(false); onSet(0, false) }, modifier = Modifier.weight(1f).height(56.dp)) { Text("Turn off") }
+            if (active) Button(onClick = { haptics.toggle(false); onSet(0, false) }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
+                Text("Turn off", style = MaterialTheme.typography.titleMedium)
             } else Button(onClick = {
                 haptics.confirm()
-                if (!endOfSong) preferences.edit().putBoolean("finish_track", finishTrack).apply()
-                onSet(if (endOfSong) end else minutes, !endOfSong && finishTrack)
+                preferences.edit().putBoolean("finish_track", finishTrack).apply()
+                onSet(minutes, finishTrack)
             }, modifier = Modifier.fillMaxWidth().height(56.dp)) {
-                Text(if (active) "Change timer" else "Start", style = MaterialTheme.typography.titleMedium)
+                Text("Start", style = MaterialTheme.typography.titleMedium)
             }
         }
     }
@@ -1113,7 +1111,8 @@ private fun SleepDial(fraction: Float, enabled: Boolean, onDrag: (Float) -> Unit
     val update by androidx.compose.runtime.rememberUpdatedState(onDrag)
     var dragging by remember { mutableStateOf(false) }
     val shown by androidx.compose.animation.core.animateFloatAsState(fraction,
-        if (dragging || LocalPowerSave.current) androidx.compose.animation.core.snap() else MaterialTheme.motionScheme.fastEffectsSpec(),
+        // Dragged it follows the finger; otherwise (a quick length, −5 / +5, the countdown) it glides.
+        if (dragging || LocalPowerSave.current) androidx.compose.animation.core.snap() else MaterialTheme.motionScheme.slowEffectsSpec(),
         label = "dial")
     Box(Modifier.size(248.dp), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.Canvas(Modifier.fillMaxSize().semantics {

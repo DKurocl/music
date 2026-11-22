@@ -18,6 +18,15 @@ import androidx.compose.ui.unit.dp
 import ua.olex.music.playback.LastPlayedPreview
 import ua.olex.music.playback.PlayerState
 
+/** The player's last "Playing from" line, kept for the opening screen. */
+internal object LastOpening {
+    private fun prefs(c: android.content.Context) = c.getSharedPreferences("player_opening", android.content.Context.MODE_PRIVATE)
+    fun from(c: android.content.Context): String? = prefs(c).getString("from", null)
+    fun remember(c: android.content.Context, from: String?) {
+        if (from != null && from != from(c)) prefs(c).edit().putString("from", from).apply()
+    }
+}
+
 /** Use the real player geometry during restore so artwork and controls stay in place. */
 @Composable
 internal fun PlayerOpening(preview: LastPlayedPreview?, empty: Boolean, error: String?,
@@ -31,7 +40,8 @@ internal fun PlayerOpening(preview: LastPlayedPreview?, empty: Boolean, error: S
                 onClose = onClose, onToggle = onPlay, onNext = onNext, onPrevious = onPrevious, onSeek = {},
                 onShuffle = {}, onRepeat = {}, onFavourite = null, onMore = null,
                 onOutput = {}, onQueue = {}, onLyrics = {}, onAudioPath = {}, onTimer = {},
-                from = "Your queue", restoring = true)
+                // The last "Playing from" line the player showed, so nothing changes once it loads.
+                from = LastOpening.from(androidx.compose.ui.platform.LocalContext.current) ?: " ", restoring = true)
         }
     } else Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface, contentColor = MaterialTheme.colorScheme.onSurface) {
         Box(Modifier.fillMaxSize().safeDrawingPadding()) {

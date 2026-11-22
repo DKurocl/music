@@ -131,14 +131,22 @@ internal fun SettingsPage(
             val revision by ua.olex.music.playback.OutputDelay.revision.collectAsStateWithLifecycle()
             val route = remember(revision) { ua.olex.music.playback.OutputDelay.currentRoute(context) }
             val delay = remember(route, revision) { ua.olex.music.playback.OutputDelay.ms(context, route) }
+            val auto = remember(route, revision) { ua.olex.music.playback.OutputDelay.automatic(context, route) }
+            val trim = remember(route, revision) { ua.olex.music.playback.OutputDelay.trim(context, route) }
+            LaunchedEffect(route) { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ua.olex.music.playback.OutputDelay.ensureMeasured(context, route) } }
             val name = route?.name?.takeIf { it.isNotBlank() && route.kind != ua.olex.music.playback.OutputRoute.Kind.SPEAKER } ?: "phone speaker"
             val step = ua.olex.music.playback.OutputDelay.STEP_MS
-            Row(Glyph.HEADPHONES, "Sound delay · $name", if (delay == 0) "Lyrics and Feel the music follow the player as is"
-                else "Lyrics and Feel the music wait $delay ms for what you hear", last = true, trailing = {
+            val summary = when {
+                auto > 0 && trim == 0 -> "Set by itself: $auto ms, as these headphones don't report their delay"
+                auto > 0 -> "$delay ms: $auto set by itself, ${if (trim > 0) "+" else "−"}${kotlin.math.abs(trim)} by ear"
+                trim != 0 -> "Android reports this output's delay; ${if (trim > 0) "+" else "−"}${kotlin.math.abs(trim)} ms by ear"
+                else -> "Automatic: lyrics and Feel the music follow the delay this output reports"
+            }
+            Row(Glyph.HEADPHONES, "Sound delay · $name", summary, last = true, trailing = {
                 androidx.compose.foundation.layout.Row(verticalAlignment = Alignment.CenterVertically) {
-                    KickIconButton(onClick = { ua.olex.music.playback.OutputDelay.set(context, route, delay - step) },
+                    KickIconButton(onClick = { ua.olex.music.playback.OutputDelay.setTrim(context, route, trim - step) },
                         modifier = Modifier.semantics { contentDescription = "Less delay" }) { k -> Symbol(Glyph.MINUS, kick = k) }
-                    KickIconButton(onClick = { ua.olex.music.playback.OutputDelay.set(context, route, delay + step) },
+                    KickIconButton(onClick = { ua.olex.music.playback.OutputDelay.setTrim(context, route, trim + step) },
                         modifier = Modifier.semantics { contentDescription = "More delay" }) { k -> Symbol(Glyph.ADD, kick = k) }
                 }
             })
@@ -150,10 +158,14 @@ internal fun SettingsPage(
             var feel by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.enabled(context)) }
             var strength by remember { mutableStateOf(ua.olex.music.playback.MusicHaptics.strength(context)) }
             val haptics = rememberHaptics()
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Toggle(Glyph.VIBRATION, "Feel the music", "The phone taps with the beat and the bass, in time with what you hear. Pauses in Battery Saver",
                     feel, first = true, last = !feel) { feel = it; ua.olex.music.playback.MusicHaptics.set(context, it, strength) }
-                androidx.compose.animation.AnimatedVisibility(feel) {
+                // Grows down from the row above, full width from the first frame (the default also grew it
+                // sideways, which could leave the choices cut off at the left).
+                androidx.compose.animation.AnimatedVisibility(feel, Modifier.fillMaxWidth(),
+                    enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top),
+                    exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)) {
                     Surface(shape = RoundedCornerShape(4.dp, 4.dp, 24.dp, 24.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh, modifier = Modifier.fillMaxWidth()) {
                         androidx.compose.foundation.layout.Row(Modifier.padding(16.dp), horizontalArrangement = Arrangement.spacedBy(androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween)) {
                             val all = ua.olex.music.playback.MusicHaptics.Strength.entries

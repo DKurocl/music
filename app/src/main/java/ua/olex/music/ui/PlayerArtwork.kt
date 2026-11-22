@@ -119,8 +119,10 @@ internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope
         val end = if (open) 1f else 0f
         if (instant || fraction == end) { fraction = end; return }
         settling = scope.launch {
+            // A critically damped spring, as Material's container transform settles: it keeps the
+            // speed of a fling, slows into place and never bounces past the card or the page.
             androidx.compose.animation.core.animate(fraction, end,
-                animationSpec = tween((150 + 190 * kotlin.math.abs(end - fraction)).toInt(), easing = FastOutSlowInEasing)
+                animationSpec = androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 420f, visibilityThreshold = 0.001f)
             ) { value, _ -> fraction = value }
         }
     }
@@ -177,6 +179,9 @@ internal fun Modifier.playerCoverEndpoint(mini: Boolean): Modifier {
 internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
     val directOpen = LocalDirectPlayerOpen.current
     val surface = androidx.compose.material3.MaterialTheme.colorScheme.surface
+    // The container starts as the mini player's card and becomes the page: its colour moves with it,
+    // so neither end changes colour at once.
+    val card = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
     val density = LocalDensity.current
     val margin = with(density) { 12.dp.toPx() }
     val radius = with(density) { 28.dp.toPx() }
@@ -196,11 +201,14 @@ internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
     return drawBehind {
         if (travel.fraction < 1f) {
             val r = bounds(size.width, size.height)
-            drawRoundRect(surface, r.topLeft, r.size, androidx.compose.ui.geometry.CornerRadius(radius * (1f - eased(travel.fraction))))
+            drawRoundRect(androidx.compose.ui.graphics.lerp(card, surface, eased(travel.fraction)), r.topLeft, r.size,
+                androidx.compose.ui.geometry.CornerRadius(radius * (1f - eased(travel.fraction))))
         }
     }.graphicsLayer {
         val p = travel.fraction
-        alpha = ((p - 0.35f) / 0.5f).coerceIn(0f, 1f)
+        // The page appears once the container is mostly open and leaves early on the way back,
+        // so the two never show at once (Material's fade-through inside a container transform).
+        alpha = ((p - 0.3f) / 0.45f).coerceIn(0f, 1f)
         if (p < 1f) {
             val r = bounds(size.width, size.height)
             val corner = radius * (1f - eased(p))
