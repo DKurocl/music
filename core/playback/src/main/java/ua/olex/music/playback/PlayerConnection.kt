@@ -388,8 +388,14 @@ class PlayerConnection(context: Context) {
     fun dismissQueueError() { _state.value = _state.value.copy(queueError = null) }
 
     /** Sets a service-owned timer; zero cancels it. Activity recreation does not reset its deadline. */
-    /** Adds exactly [ms] to the running timer. */
+    /** Moves the running timer by exactly [ms] (negative: sooner), keeping its seconds. */
     fun extendSleepTimer(ms: Long) = sendSleep(Bundle().apply { putLong(SleepTimerCommand.EXTEND_MS, ms) })
+
+    /** Finish the song or fade out, for the timer already running. */
+    fun setSleepFinishTrack(finishTrack: Boolean) = sendSleep(Bundle().apply {
+        putBoolean(SleepTimerCommand.EXPIRY_ONLY, true)
+        putBoolean(SleepTimerCommand.FINISH_TRACK, finishTrack)
+    })
 
     fun setSleepTimer(minutes: Int, finishTrack: Boolean) = sendSleep(Bundle().apply {
         putInt(SleepTimerCommand.MINUTES, minutes)

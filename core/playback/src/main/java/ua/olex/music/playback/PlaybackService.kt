@@ -444,12 +444,22 @@ class PlaybackService : MediaLibraryService() {
         publishSleepTimer()
     }
 
-    /** "+10 min": the running deadline moves later by exactly [ms]; the fade is planned again. */
+    /** −5 / +5: the running deadline moves by exactly [ms], seconds kept; the fade is planned again. */
     private fun extendSleepTimer(ms: Long) {
         if (endOfTrack || sleepTimer.deadlineMs == null) return
         sleepJob?.cancel(); sleepJob = null
         fading?.cancelSleepFade()
-        sleepTimer.extend(ms, SystemClock.elapsedRealtime())
+        sleepTimer.shift(ms, SystemClock.elapsedRealtime())
+        publishSleepTimer()
+        scheduleSleep(((sleepTimer.deadlineMs ?: return) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+    }
+
+    /** The switch on a running timer: only how it ends changes, the countdown carries on. */
+    private fun setSleepExpiry(finishTrack: Boolean) {
+        if (endOfTrack || sleepTimer.deadlineMs == null) return
+        sleepJob?.cancel(); sleepJob = null
+        fading?.cancelSleepFade()
+        sleepTimer.setExpiry(if (finishTrack) SleepTimer.Expiry.FINISH_TRACK else SleepTimer.Expiry.PAUSE)
         publishSleepTimer()
         scheduleSleep(((sleepTimer.deadlineMs ?: return) - SystemClock.elapsedRealtime()).coerceAtLeast(0))
     }
@@ -739,7 +749,8 @@ class PlaybackService : MediaLibraryService() {
             val extend = args.getLong(SleepTimerCommand.EXTEND_MS, 0L)
             val code = when {
                 controller.uid != Process.myUid() -> SessionError.ERROR_PERMISSION_DENIED
-                extend > 0 -> { extendSleepTimer(extend); SessionResult.RESULT_SUCCESS }
+                extend != 0L -> { extendSleepTimer(extend); SessionResult.RESULT_SUCCESS }
+                args.getBoolean(SleepTimerCommand.EXPIRY_ONLY) -> { setSleepExpiry(args.getBoolean(SleepTimerCommand.FINISH_TRACK)); SessionResult.RESULT_SUCCESS }
                 minutes != SleepTimerCommand.END_OF_TRACK && minutes !in 0..SleepTimer.MAX_MINUTES -> SessionError.ERROR_BAD_VALUE
                 else -> { setSleepTimer(minutes, args.getBoolean(SleepTimerCommand.FINISH_TRACK)); SessionResult.RESULT_SUCCESS }
             }

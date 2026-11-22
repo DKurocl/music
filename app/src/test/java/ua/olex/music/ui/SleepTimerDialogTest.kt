@@ -4,6 +4,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performSemanticsAction
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -59,6 +61,31 @@ class SleepTimerDialogTest {
         compose.onNodeWithContentDescription("Add five minutes").performClick()
         compose.onNodeWithContentDescription("Subtract five minutes").performClick()
         compose.runOnIdle { assertEquals(listOf(25, 15), calls) }
+    }
+
+    @Test fun runningTimerMovesByExactlyFiveMinutesKeepingSeconds() {
+        val shifts = mutableListOf<Long>()
+        compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) {
+            SleepTimerDialog(true, {}, { _, _ -> error("closed") }, deadline = android.os.SystemClock.elapsedRealtime() + 20 * 60_000L + 37_000L,
+                onAdjust = { _, _ -> error("restarted") }, onShift = { shifts += it })
+        } } }
+        // Quick taps add up before the service answers; each moves by five minutes, never rounded.
+        compose.onNodeWithContentDescription("Add five minutes").performClick()
+        compose.onNodeWithContentDescription("Add five minutes").performClick()
+        compose.onNodeWithContentDescription("Subtract five minutes").performClick()
+        compose.runOnIdle { assertEquals(listOf(300_000L, 300_000L, -300_000L), shifts) }
+        compose.onNodeWithText("25:3", substring = true).assertExists()
+    }
+
+    @Test fun switchOnARunningTimerKeepsTheCountdown() {
+        val finishes = mutableListOf<Boolean>()
+        compose.setContent { AppTheme { androidx.compose.runtime.CompositionLocalProvider(LocalInlineSheets provides true) {
+            SleepTimerDialog(true, {}, { _, _ -> error("closed") }, deadline = android.os.SystemClock.elapsedRealtime() + 20 * 60_000L,
+                finishingTrack = true, onAdjust = { _, _ -> error("restarted") }, onFinishTrack = { finishes += it })
+        } } }
+        compose.onNodeWithText("Finish the song").performScrollTo()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick)
+        compose.runOnIdle { assertEquals(listOf(false), finishes) }
     }
 
     @Test fun dismissingTheDialogDoesNotChangeTheTimer() {

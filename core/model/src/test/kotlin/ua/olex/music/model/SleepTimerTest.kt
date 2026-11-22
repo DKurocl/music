@@ -40,4 +40,33 @@ class SleepTimerTest {
         assertThrows(ArithmeticException::class.java) { timer.set(5, Long.MAX_VALUE) }
         assertEquals(600_000L, timer.deadlineMs)
     }
+
+    @Test fun shiftMovesExactlyAndKeepsSecondsAndExpiry() {
+        val timer = SleepTimer()
+        timer.set(20, 0, SleepTimer.Expiry.FINISH_TRACK)
+        val now = 23_000L // 19:37 left
+        timer.shift(300_000L, now)
+        assertEquals(1_500_000L, timer.deadlineMs)
+        timer.shift(-300_000L, now)
+        assertEquals(1_200_000L, timer.deadlineMs)
+        assertEquals(SleepTimer.Expiry.FINISH_TRACK, timer.expiry)
+        assertEquals(0L, timer.startedAtMs)
+    }
+
+    @Test fun shiftStopsAtOneMinuteAndTwoHours() {
+        val timer = SleepTimer()
+        timer.set(3, 0)
+        timer.shift(-300_000L, 0)
+        assertEquals(SleepTimer.MIN_LEFT_MS, timer.deadlineMs)
+        timer.shift(SleepTimer.MAX_MINUTES * 60_000L, 0)
+        assertEquals(SleepTimer.MAX_MINUTES * 60_000L, timer.deadlineMs)
+    }
+
+    @Test fun expiryChangesWithoutRestarting() {
+        val timer = SleepTimer()
+        timer.set(20, 0, SleepTimer.Expiry.PAUSE)
+        timer.setExpiry(SleepTimer.Expiry.FINISH_TRACK)
+        assertEquals(1_200_000L, timer.deadlineMs)
+        assertEquals(SleepTimer.Expiry.FINISH_TRACK, timer.expiry)
+    }
 }

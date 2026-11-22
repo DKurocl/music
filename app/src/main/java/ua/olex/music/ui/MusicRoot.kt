@@ -676,7 +676,7 @@ fun MusicRoot(model: LibraryViewModel) {
             position = { model.positionMs }, onClose = { expanded = false },
             motionCover = motionCover?.takeIf { videoReady && it.owner == currentTrack?.let(::motionCoverOwner) }?.video,
             onToggle = model::toggle, onNext = model::next, onPrevious = model::previous, onSeek = model::seekTo,
-            onSleepTimer = model::setSleepTimer, onExtendSleep = model::extendSleepTimer,
+            onSleepTimer = model::setSleepTimer, onExtendSleep = model::extendSleepTimer, onSleepFinishTrack = model::setSleepFinishTrack,
             onClearNext = model::clearUpNext,
             // The queue as songs (files from the library, YouTube Music songs as streams), for the playlist picker.
             onSaveQueue = { playlistTracks = playing.queue.mapNotNull(queueTrack).takeIf { it.isNotEmpty() } },
@@ -860,6 +860,7 @@ private fun NowPlaying(
     state: PlayerState, format: String?, position: () -> Long, onClose: () -> Unit,
     onToggle: () -> Unit, onNext: () -> Unit, onPrevious: () -> Unit, onSeek: (Long) -> Unit,
     onSleepTimer: (Int, Boolean) -> Unit, from: String? = null, onExtendSleep: ((Long) -> Unit)? = null,
+    onSleepFinishTrack: ((Boolean) -> Unit)? = null,
     onSaveQueue: (() -> Unit)? = null, onClearNext: (() -> Unit)? = null, onMixFrom: ((String) -> Unit)? = null,
     onEqualizer: () -> Unit, onPlaybackParameters: (Float, Float) -> Unit,
     onShuffle: () -> Unit, onRepeat: () -> Unit,
@@ -941,6 +942,8 @@ private fun NowPlaying(
             onDismiss = { timerDialog = false },
             onSet = { minutes, finishTrack -> onSleepTimer(minutes, finishTrack); timerDialog = false },
             onAdjust = { minutes, finishTrack -> onSleepTimer(minutes, finishTrack) },
+            onShift = onExtendSleep,
+            onFinishTrack = onSleepFinishTrack,
         )
     }
 
@@ -975,8 +978,12 @@ internal fun SleepTimerDialog(
     @Suppress("UNUSED_PARAMETER") onExtend: ((Long) -> Unit)? = null,
     @Suppress("UNUSED_PARAMETER") durationMs: Long? = null,
     finishingTrack: Boolean = false,
-    /** Changes the running timer without closing the sheet (−5 / +5, the switch). */
+    /** Starts a new countdown without closing the sheet (a quick length while one runs). */
     onAdjust: (Int, Boolean) -> Unit = onSet,
+    /** −5 / +5 while it runs: moves the deadline by exactly this much, seconds kept. */
+    onShift: ((Long) -> Unit)? = null,
+    /** The switch while it runs: only how it ends changes. */
+    onFinishTrack: ((Boolean) -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val haptics = rememberHaptics()
@@ -985,17 +992,24 @@ internal fun SleepTimerDialog(
     val preferences = LocalContext.current.getSharedPreferences("sleep_timer", android.content.Context.MODE_PRIVATE)
     var minutes by rememberSaveable { androidx.compose.runtime.mutableIntStateOf(30) }
     var finishTrack by rememberSaveable { mutableStateOf(if (active && !runningEnd) finishingTrack else preferences.getBoolean("finish_track", true)) }
-    // A running timer counts down on the dial, once a second.
+    // −5 / +5 show at once, before the service answers with the moved deadline; quick taps add up.
+    // The shift counts only against the deadline it was made on, so the frame the moved deadline
+    // arrives never shows both.
+    var shift by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+    var shiftBase by remember { mutableStateOf<Long?>(null) }
+    val shownDeadline = deadline?.takeIf { active && !runningEnd }?.let { if (it == shiftBase) it + shift else it }
+    // A running timer counts down on the dial, ticking as each second of the countdown passes (so
+    // the seconds step evenly instead of drifting against the clock).
     var now by remember { mutableStateOf(android.os.SystemClock.elapsedRealtime()) }
-    LaunchedEffect(active, deadline) {
-        while (active && deadline != null && !runningEnd) {
+    LaunchedEffect(shownDeadline) {
+        while (shownDeadline != null) {
             now = android.os.SystemClock.elapsedRealtime()
-            kotlinx.coroutines.delay(1_000)
+            val toNextSecond = ((shownDeadline - now) % 1_000L).let { if (it <= 0) 1_000L else it }
+            kotlinx.coroutines.delay(toNextSecond + 5)
         }
     }
-    val leftMs = if (active && deadline != null && !runningEnd) (deadline - now).coerceAtLeast(0) else null
+    val leftMs = shownDeadline?.let { (it - now).coerceAtLeast(0) }
     val running = leftMs != null
-    // Whole minutes left, as −5 / +5 count from them.
     val leftMinutes = leftMs?.let { ((it + 59_999L) / 60_000L).toInt() } ?: 0
     fun select(value: Int) {
         val bounded = value.coerceIn(5, max)
@@ -1003,10 +1017,18 @@ internal fun SleepTimerDialog(
         minutes = bounded
     }
     fun adjust(delta: Int) {
-        val next = (leftMinutes + delta).coerceIn(1, max)
-        if (next == leftMinutes) return
+        val left = leftMs ?: return
+        // Exactly five minutes either way, seconds kept: a minute at least, two hours at most.
+        val next = (left + delta * 60_000L).coerceIn(minOf(left, 60_000L), maxOf(left, max * 60_000L))
+        if (next == left) return
         haptics.tick()
-        onAdjust(next, finishTrack)
+        val move = onShift
+        if (move != null) {
+            if (shiftBase != deadline) { shiftBase = deadline; shift = 0L }
+            shift += next - left
+            move(next - left)
+        }
+        else onAdjust(((next + 59_999L) / 60_000L).toInt(), finishTrack)
     }
     AppSheet(onDismiss) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 24.dp),
@@ -1045,9 +1067,9 @@ internal fun SleepTimerDialog(
                         }
                     }
                     if (!runningEnd) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { if (running) adjust(-5) else select(minutes - 5) }, enabled = if (running) leftMinutes > 1 else minutes > 5,
+                        TextButton(onClick = { if (running) adjust(-5) else select(minutes - 5) }, enabled = if (running) (leftMs ?: 0) > 60_000L else minutes > 5,
                             modifier = Modifier.semantics { contentDescription = "Subtract five minutes" }) { Text("−5 min") }
-                        TextButton(onClick = { if (running) adjust(5) else select(minutes + 5) }, enabled = if (running) leftMinutes < max else minutes < max,
+                        TextButton(onClick = { if (running) adjust(5) else select(minutes + 5) }, enabled = if (running) (leftMs ?: 0) < max * 60_000L - 1_000L else minutes < max,
                             modifier = Modifier.semantics { contentDescription = "Add five minutes" }) { Text("+5 min") }
                     }
                 }
@@ -1071,7 +1093,7 @@ internal fun SleepTimerDialog(
                         haptics.toggle(checked)
                         finishTrack = checked
                         preferences.edit().putBoolean("finish_track", checked).apply()
-                        if (running) onAdjust(leftMinutes, checked)
+                        if (running) onFinishTrack?.invoke(checked) ?: onAdjust(leftMinutes, checked)
                     }
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp))
                         .background(cs.surfaceContainerHigh)

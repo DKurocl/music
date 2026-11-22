@@ -29,6 +29,23 @@ class SleepTimer {
         deadlineMs = minOf(Math.addExact(from, ms), Math.addExact(nowMs, MAX_MINUTES * 60_000L))
     }
 
+    /**
+     * −5 / +5 on a running timer: moves the deadline by [ms] exactly, either way, keeping the seconds;
+     * never closer than a minute from now, never past the longest timer.
+     */
+    fun shift(ms: Long, nowMs: Long) {
+        require(nowMs >= 0)
+        val from = deadlineMs ?: return
+        val low = Math.addExact(nowMs, MIN_LEFT_MS)
+        val high = Math.addExact(nowMs, MAX_MINUTES * 60_000L)
+        deadlineMs = Math.addExact(from, ms).coerceIn(minOf(low, from), maxOf(high, from))
+    }
+
+    /** The Finish the song switch on a running timer: the countdown carries on unchanged. */
+    fun setExpiry(expiry: Expiry) {
+        if (deadlineMs != null) this.expiry = expiry
+    }
+
     /** A replaced or cancelled deadline must not let an old scheduled callback pause playback. */
     fun expire(nowMs: Long): Expiry? {
         val deadline = deadlineMs ?: return null
@@ -40,5 +57,7 @@ class SleepTimer {
 
     companion object {
         const val MAX_MINUTES = 120
+        /** −5 stops here: a timer about to end is turned off, not shortened to nothing. */
+        const val MIN_LEFT_MS = 60_000L
     }
 }

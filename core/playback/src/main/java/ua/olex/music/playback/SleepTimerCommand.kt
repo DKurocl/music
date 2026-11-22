@@ -10,8 +10,10 @@ object SleepTimerCommand {
     const val DURATION = "sleep_timer_duration_ms"
     const val DEADLINE = "sleep_deadline_elapsed_ms"
     const val FINISH_TRACK = "finish_track_after_timer"
-    /** Milliseconds to add to a running timer ("+10 min"), kept exact. */
+    /** Milliseconds to move a running timer by (−5 / +5 min), kept exact: negative brings it closer. */
     const val EXTEND_MS = "extend_ms"
+    /** With FINISH_TRACK: changes only how a running timer ends; its countdown carries on. */
+    const val EXPIRY_ONLY = "expiry_only"
     /** MINUTES value for "pause when this song ends". */
     const val END_OF_TRACK = -1
     /** The deadline the UI sees while "end of track" is set: never reached, but "on". */
