@@ -108,16 +108,6 @@ private fun ReportTitle(list: androidx.compose.foundation.lazy.LazyListState, on
     LaunchedEffect(list) { snapshotFlow { list.firstVisibleItemIndex > 0 }.collect { report(it) } }
 }
 
-/** Starts finding the stream of the first online song while the page is read, so Play sounds sooner. */
-@Composable
-private fun WarmFirst(songs: List<Track>) {
-    val graph = (androidx.compose.ui.platform.LocalContext.current.applicationContext as ua.olex.music.MusicApp).graph
-    val owned = LocalOwnedSources.current
-    val first = songs.firstOrNull()?.takeIf(YouTubeMusic::isOnline)?.takeUnless { it.uri in owned }?.id?.value?.removePrefix("yt:")
-    val network = LocalNetwork.current
-    LaunchedEffect(first, network) { if (network && first != null) runCatching { graph.youTube.warm(first) } }
-}
-
 /** A song row's place while the list loads: the same height as a row, so nothing jumps when it fills. */
 @Composable
 internal fun PlaceholderRow(cover: Boolean = true) {
@@ -186,7 +176,6 @@ internal fun OnlineArtistPage(target: OnlineTarget.Artist, library: LibraryIndex
     val cs = MaterialTheme.colorScheme
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
-    WarmFirst(onlineTracks)
     LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = PaddingValues(top = insets.calculateTopPadding(), bottom = insets.calculateBottomPadding() + 24.dp + LocalPlayerInset.current)) {
         item(key = "head") {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp)) {
@@ -321,7 +310,6 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     }
     val localFallback = loaded?.second.isNullOrEmpty() && localRelease != null
     val songs = loaded?.second.orEmpty().ifEmpty { localRelease?.tracks.orEmpty() }
-    WarmFirst(songs)
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     ReportTitle(list, onTitleShown)
     val album = loaded?.first

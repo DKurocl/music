@@ -14,6 +14,12 @@ have been authored and are awaiting the consolidated run. The published v1307 AP
 its asset digest matched, and its signature was checked against API 37 to pin the CI signer.
 A candidate or stable build has not been published from the implementation head here.
 
+Host consolidated results: 218 pure core tests, 43 provider fixtures, two policy tests built
+against pinned Media3, and the delayed-radio smoke case. Candidate run 45690620651 for
+`367ac20` ran 390 tests with no test failures before app compilation reported an obsolete
+prefetch caller and an inferred recursive result type. The follow-up fixes both. The APK,
+lint, final Android test results and the device gate require the follow-up candidate run.
+
 The initial Search request now retains its provider video through display projection. Exact
 provider durations feed the shared policy; unknown-duration single selections have a bounded
 metadata lookup when an indexed file is plausible. Song taps submit their seed to the service

@@ -568,7 +568,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
 
     /** Commit the seed first. The service fills its queue once playback starts. */
-    fun playSelectionMix(seed: Track) = prepareMix {
+    fun playSelectionMix(seed: Track): Unit = prepareMix {
         val label = "Mix from ${seed.title}"
         val seen = (excluded + Mix.songKey(seed)).toMutableSet()
         val run = PlaybackMix.Run(seed, null, seen,
