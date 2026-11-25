@@ -81,9 +81,13 @@ jobs:
           set -o pipefail
           "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 4 app-release.apk
           signer=$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs app-release.apk)
-          echo "$signer" | grep -E '^Signer #[0-9]+ certificate SHA-256 digest:' | tee -a "$GITHUB_STEP_SUMMARY"
-          expected='Signer #1 certificate SHA-256 digest: 5c2e57db99715e0fc65befdcf8febd1a00222a104a24d635f27f97d949abc107'
-          test "$(echo "$signer" | grep -E '^Signer #[0-9]+ certificate SHA-256 digest:')" = "$expected"
+          # Build-tools 37 labels its signer by scheme, while other versions use an ordinal.
+          digests=$(printf '%s\n' "$signer" |
+            sed -nE 's/^.*[Ss]igner.*certificate SHA-256 digest: ([[:xdigit:]]{64})[[:space:]]*$/\1/p' |
+            tr '[:upper:]' '[:lower:]' | sort -u)
+          expected='5c2e57db99715e0fc65befdcf8febd1a00222a104a24d635f27f97d949abc107'
+          test "$digests" = "$expected" || { echo '::error::Release APK owner certificate did not match'; exit 1; }
+          printf 'Owner certificate SHA-256: %s\n' "$digests" | tee -a "$GITHUB_STEP_SUMMARY"
           sha256sum app-release.apk | tee SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize test evidence
         if: always()

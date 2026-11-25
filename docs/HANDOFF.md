@@ -20,6 +20,11 @@ against pinned Media3, and the delayed-radio smoke case. Candidate run 456906206
 prefetch caller and an inferred recursive result type. The follow-up fixes both. The APK,
 lint, final Android test results and the device gate require the follow-up candidate run.
 
+Candidate `75dfb09` in run 45691462671 completed 579 tests, both lints and both APK builds. The
+workflow stopped when the new parser assumed an ordinal signer label. Build-tools 37 prints
+`V2 Signer:`, confirmed from the last stable build log. The retry keeps APK alignment and the
+exact public certificate fingerprint as hard gates and accepts both signer label formats.
+
 The initial Search request now retains its provider video through display projection. Exact
 provider durations feed the shared policy; unknown-duration single selections have a bounded
 metadata lookup when an indexed file is plausible. Song taps submit their seed to the service
