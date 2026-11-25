@@ -153,12 +153,33 @@ class LibraryRepositoryTest {
         assertEquals(setOf("local:kept", "local:new"), dao.rows.value.map { it.id }.toSet())
     }
 
+    @Test fun coldPlaybackReadsOnlyCachedKeysAndDoesNotScanOrHideOwnedFiles() = runTest {
+        val dao = MemoryTracks()
+        dao.rows.value = listOf(
+            entity("local:owned", 1).copy(path = "Hidden/song.flac", artist = "Lead", songKey = "lead|song"),
+            entity("local:unrelated", 1).copy(songKey = "other|song"),
+        )
+        val library = LibraryRepository(dao, { error("Cold lookup must not start a scan") },
+            StandardTestDispatcher(testScheduler), excluded = MutableStateFlow(setOf("Hidden/")))
+        val request = ua.olex.music.model.Track(ua.olex.music.model.TrackId("yt:exact"),
+            "ytm://exact", "Song", "Lead, Guest", durationMs = 1_000, artists = listOf("Lead", "Guest"))
+        val candidates = requireNotNull(library.cachedPlaybackCandidates(request))
+        assertEquals(listOf("local:owned"), candidates.songs.map { it.id.value })
+        assertEquals(setOf(request.key.value, "lead|song", "guest|song"), dao.lastCandidateKeys)
+        assertEquals(0, dao.replacements)
+    }
+
     private class MemoryTracks : TrackDao {
         val rows = MutableStateFlow(listOf(entity("local:old", 1)))
         var replacements = 0
+        var lastCandidateKeys: Set<String>? = null
         override fun observeAll() = rows
         override fun search(expression: String) = error("Search uses SQLite integration tests")
         override suspend fun byKey(key: String) = rows.value.filter { it.songKey == key }
+        override suspend fun byKeys(keys: Set<String>): List<TrackEntity> {
+            lastCandidateKeys = keys
+            return rows.value.filter { it.songKey in keys }
+        }
         override suspend fun count() = rows.value.size
         override suspend fun upsert(tracks: List<TrackEntity>) {
             val incoming = tracks.associateBy { it.id }

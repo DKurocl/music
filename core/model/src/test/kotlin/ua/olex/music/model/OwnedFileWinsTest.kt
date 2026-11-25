@@ -12,8 +12,13 @@ class OwnedFileWinsTest {
     private fun pick(request: Track, proposed: Track? = file, saved: List<SavedSong> = emptyList()) =
         PlaybackSources(LibraryIndex.build(listOf(file)), saved).select(request, allowDirect = true, proposedLocal = proposed).track.uri
 
-    @Test fun aFileWinsWhenTheOnlineLengthIsUnknown() = assertEquals(file.uri, pick(online(0)))
+    @Test fun anUnknownLengthNeedsMoreThanAProposedFile() = assertEquals(online(0).uri, pick(online(0)))
     @Test fun aFileWinsOverASeveralArtistCredit() = assertEquals(file.uri, pick(online(228_000, "Aphex Twin, Someone")))
-    @Test fun aFileWinsWhenTheSongWasPlayedOnlineBefore() =
-        assertEquals(file.uri, pick(online(0), saved = listOf(SavedSong.from(online(0)).copy(createdAt = 1L))))
+    @Test fun historyWithoutAFilesLinkOrDurationCannotConfirmAnUnknownTake() =
+        assertEquals(online(0).uri, pick(online(0), saved = listOf(SavedSong.from(online(0)).copy(createdAt = 1L))))
+
+    @Test fun aConfirmedLocalLinkWorksEvenWhenTheCurrentProviderLengthIsMissing() {
+        val known = SavedSong.from(SavedSong.from(online(227_000)).bind(file)).copy(id = "recording:linked")
+        assertEquals(file.uri, pick(online(0), saved = listOf(known)))
+    }
 }

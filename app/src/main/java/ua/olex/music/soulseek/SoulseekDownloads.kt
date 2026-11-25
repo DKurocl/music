@@ -253,7 +253,6 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                                 write(data, Job(id, key, title, "Saved to Music/Soulseek" + (lastKind?.let { " · $it" } ?: ""), 1f, done = true))
                             }
                         }
-                        onSaved()
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (failure: Exception) {
@@ -307,6 +306,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             edit.putStringSet("completed:$id", completed + finished)
         }
         edit.apply()
+        if (exists && finished != null) onSaved()
     }
 
     private fun peerFileKey(file: SoulseekClient.Result): String =
@@ -359,6 +359,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         check(written == file.size) { "The downloaded file size doesn't match the transfer" }
         check(resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null) == 1) { "Couldn't publish the download" }
         prefs.edit().putStringSet(checkpoint, completed + fileKey).remove("file:$id").remove("file-key:$id").remove("peer-file:$id").apply()
+        onSaved()
     }
 
     private val lastShown = java.util.concurrent.ConcurrentHashMap<Int, Long>()

@@ -89,7 +89,9 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         previous: Map<String, ImportedFavourite>,
         remoteVideoIds: Set<String>,
         pendingVideoIds: Set<String>,
+        shouldApply: () -> Boolean = { true },
     ): Map<String, ImportedFavourite> = database.withTransaction {
+        if (!shouldApply()) return@withTransaction previous
         val origins = previous.toMutableMap()
         val retainedRecordings = previous.filterKeys { it in remoteVideoIds || it in pendingVideoIds }
             .values.mapNotNull { dao.canonicalId(it.recordingId) }.toSet()
@@ -117,6 +119,7 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
                 if (existing != null && dao.latestFavourite(listOf(song.id)) == existing.addedAt) origins[video] = existing
             }
         }
+        if (!shouldApply()) throw kotlinx.coroutines.CancellationException("Favourite sync account changed")
         origins
     }
 
@@ -213,6 +216,11 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         if (from == to) return@withTransaction
         ids.add(to, ids.removeAt(from))
         replaceEntries(id, ids)
+    }
+
+    /** Persist a confirmed playback link independently of play history, likes and collection state. */
+    suspend fun rememberPlaybackLink(link: SavedSong) {
+        database.withTransaction { register(listOf(link), now()) }
     }
 
     suspend fun recordPlay(track: Track, observedAt: Long? = null) = database.withTransaction {

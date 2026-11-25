@@ -15,7 +15,11 @@ import kotlinx.coroutines.launch
  * EQ and ReplayGain are untouched, and seeking or skipping is never delayed.
  */
 @OptIn(UnstableApi::class)
-class FadingPlayer internal constructor(private val real: Player, private val scope: CoroutineScope, private val wanted: () -> Boolean = { true }) : ForwardingPlayer(real) {
+class FadingPlayer internal constructor(
+    private val real: Player,
+    private val scope: CoroutineScope,
+    private val wanted: () -> Boolean = { true },
+) : ForwardingPlayer(real) {
     private var fade: Job? = null
     private var timerFade: Job? = null
     private val enabled get() = wanted()
@@ -66,6 +70,14 @@ class FadingPlayer internal constructor(private val real: Player, private val sc
                 } finally { pausing = false }
             }
         } else { super.setPlayWhenReady(false); real.volume = 1f }
+    }
+
+    /** If a later pause won, a new timeline must start with its underlying audio already paused. */
+    internal fun settlePause() {
+        fade?.cancel()
+        pausing = false
+        super.setPlayWhenReady(false)
+        real.volume = 1f
     }
 
     /** The last half minute of a sleep timer: a slow fade to silence instead of a sudden stop. */

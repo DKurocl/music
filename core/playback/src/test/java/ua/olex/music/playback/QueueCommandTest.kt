@@ -76,6 +76,16 @@ class QueueCommandTest {
         assertFalse(player.shuffleModeEnabled)
     }
 
+    @Test fun aResolvedRadioSeedAndEmptyAppendCanBeInstalledPaused() {
+        assertTrue(QueueCommand.startRadio(player, listOf(item(20)), startPlayback = false))
+        assertEquals("local:20", player.currentMediaItem?.mediaId)
+        assertFalse(player.playWhenReady)
+        player.clearMediaItems()
+        QueueCommand.enqueue(player, listOf(item(21)), next = false, startWhenEmpty = false)
+        assertEquals("local:21", player.currentMediaItem?.mediaId)
+        assertFalse(player.playWhenReady)
+    }
+
     @Test fun stableKeyStillAddressesTheSameDuplicateAfterReorderAndRemoval() {
         val first = item(1)
         val duplicate = item(1)

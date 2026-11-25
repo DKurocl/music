@@ -57,7 +57,10 @@ class PlaybackSourceItemsTest {
         var calls = 0
         val owner = object : MediaCatalogOwner {
             override suspend fun browseTree() = BrowseTree(LibraryIndex.EMPTY)
-            override suspend fun playbackSources(tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean): List<PlaybackSourceChoice> {
+            override suspend fun playbackSources(
+                tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean, enrichSelection: Boolean,
+            ): List<PlaybackSourceChoice> {
+                assertFalse(enrichSelection)
                 calls++; assertEquals(2, tracks.size)
                 return tracks.map { PlaybackSourceChoice(online) }
             }

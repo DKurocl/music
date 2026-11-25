@@ -125,11 +125,14 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { emit(OnlineSearch(text, emptyList(), failed = true)) }
         }.combine(catalogue) { found, catalogue ->
-            if (found == null) return@combine null
-            val owned = YouTubeMusic.indexOf(catalogue ?: LibraryIndex.EMPTY)
-            found.copy(tracks = found.tracks.map { track ->
-                owned.copyOf(track)?.copy(requestedId = track.id.value) ?: track
-            }.distinctBy { it.id })
+            if (found == null || catalogue == null || found.tracks.isEmpty()) return@combine found
+            val choices = try { graph.selectSources(found.tracks, catalogue) }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { return@combine found }
+            found.project { index, request ->
+                val choice = choices[index]
+                if (choice.issue == null && !YouTubeMusic.isOnline(choice.track)) choice.track else request
+            }
         }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     fun retrySearch() { searchRetry.update { it + 1 } }
 
@@ -442,7 +445,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         watchingRequested = true
         if (watchJob?.isActive == true || !hasAccess()) return
         watchJob = viewModelScope.launch {
-            graph.library.changes.debounce(500)
+            graph.libraryChanges.debounce(500)
                 .catch { scanError = "Automatic library updates are unavailable. Use Rescan to refresh." }
                 .collect { refresh() }
         }
@@ -564,12 +567,23 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      */
     fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
 
-    /** A tap must still play its selected song if no recommendations are available. */
-    fun playSelectionMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}", allowSeedOnly = true) }
+    /** Commit the seed first. The service fills its queue once playback starts. */
+    fun playSelectionMix(seed: Track) = prepareMix {
+        val label = "Mix from ${seed.title}"
+        val seen = (excluded + Mix.songKey(seed)).toMutableSet()
+        val run = PlaybackMix.Run(seed, null, seen,
+            mutableSetOf(seed.id.value), startFrom = Mix.videoId(seed), initialSelection = true)
+        val origin = graph.mix.begin(run, label)
+        if (!player.startRadio(listOf(seed), origin)) {
+            if (mixRun === run) graph.mix.stop()
+            mixFailure = MixFailure("The player couldn't open ${seed.title}.") { playSelectionMix(seed) }
+        }
+    }
 
-    private suspend fun playMix(seed: Track, label: String, allowSeedOnly: Boolean = false) {
-        val retry: () -> Unit = { if (allowSeedOnly) playSelectionMix(seed) else startMix(seed) }
+    private suspend fun playMix(seed: Track, label: String) {
+        val retry: () -> Unit = { startMix(seed) }
         val atRequest = playing.value
+        val account = graph.youTubeAccount.cacheScope.value
         val seedOccurrence = atRequest.queue.getOrNull(atRequest.queueIndex)?.takeIf {
             it.mediaId == seed.id.value || seed.matchesPlayback(atRequest.track)
         }?.key
@@ -609,15 +623,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                     excluded = excludedSongs + used)
             }
         }
-        if (upcoming.isEmpty() && !allowSeedOnly) {
+        if (upcoming.isEmpty()) {
             mixFailure = MixFailure("No other playable songs were found for ${seed.title}.", retry)
             return
         }
+        if (graph.youTubeAccount.cacheScope.value != account) return
         seen += upcoming.map(Mix::songKey)
         val state = playing.value
         val current = state.queue.getOrNull(state.queueIndex)
-        if (seedOccurrence != null && seedOccurrence != current?.key) {
-            mixFailure = MixFailure("The song changed while the mix was getting ready.", retry)
+        if (seedOccurrence != null && (seedOccurrence != current?.key ||
+            state.queue.map { it.key } != atRequest.queue.map { it.key })) {
+            mixFailure = MixFailure("The queue changed while the mix was getting ready.", retry)
             return
         }
         val sameSeed = upcoming.isNotEmpty() && current != null && (state.mediaId == seed.id.value || seed.matchesPlayback(state.track))
@@ -638,11 +654,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
 
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, in the order returned by YouTube. */
     fun startPlaylistRadio(playlistId: String, label: String): Unit = prepareMix {
+        val account = graph.youTubeAccount.cacheScope.value
         val page = kotlinx.coroutines.withTimeoutOrNull(8_000) {
             try { graph.youTube.playlistRadio(playlistId) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
         }
+        if (graph.youTubeAccount.cacheScope.value != account) return@prepareMix
         val tracks = page?.tracks.orEmpty()
         if (tracks.isEmpty()) {
             mixFailure = MixFailure("YouTube Music didn't return songs for $label.") { startPlaylistRadio(playlistId, label) }
@@ -775,4 +793,10 @@ data class LibrarySearchResult(val query: String, val tracks: List<Track>, val f
 /** YouTube Music's answer to a search: songs not in the library. */
 internal data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false,
     val artists: List<YouTubeMusic.Card> = emptyList(), val albums: List<YouTubeMusic.Card> = emptyList(), val playlists: List<YouTubeMusic.Card> = emptyList(),
-    val top: YouTubeMusic.Card? = null)
+    val top: YouTubeMusic.Card? = null, private val requests: List<Track> = tracks) {
+    fun requestAt(index: Int): Track = requests[index]
+    fun requestedTracks(): List<Track> = requests
+
+    fun project(display: (Int, Track) -> Track): OnlineSearch =
+        copy(tracks = requests.mapIndexed(display))
+}

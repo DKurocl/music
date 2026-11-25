@@ -92,6 +92,9 @@ interface TrackDao {
     @Query("SELECT * FROM tracks WHERE songKey = :key")
     suspend fun byKey(key: String): List<TrackEntity>
 
+    @Query("SELECT * FROM tracks WHERE songKey IN (:keys)")
+    suspend fun byKeys(keys: Set<String>): List<TrackEntity>
+
     @Query("SELECT COUNT(*) FROM tracks")
     suspend fun count(): Int
 

@@ -152,6 +152,19 @@ class LibraryRepository internal constructor(
     }
 
     /**
+     * The cold playback path can read relevant cached rows while the full index builds.
+     * This query discovers candidates; the same service policy confirms identity and availability.
+     */
+    suspend fun cachedPlaybackCandidates(request: Track): LibraryIndex? {
+        val credits = request.artists.takeIf { it.joinToString(", ") == request.artist }.orEmpty()
+        val keys = (listOf(request.key.value) + credits.map { SongKey.of(it, request.title).value }).toSet()
+        if (keys.size > 8) return null
+        val revision = artworkRevision.first()
+        val tracks = dao.byKeys(keys).map { it.toTrack(artworkPackage, revision) }
+        return tracks.takeIf { it.isNotEmpty() }?.let { LibraryIndex.build(it) }
+    }
+
+    /**
      * The owned copy of a song from anywhere, if there is one: the best-sounding local file with
      * the same [SongKey] and a matching length. A mix plays this instead of a stream.
      */

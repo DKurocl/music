@@ -15,6 +15,8 @@ internal object PlaybackSourceItems {
     const val ISSUE = "ua.olex.music.source_issue"
     const val UNAVAILABLE = "unavailable"
 
+    fun unavailableUri(key: String): Uri = Uri.Builder().scheme(UNAVAILABLE).authority("source").appendPath(key).build()
+
     /** Bundle reference equality must not rebuild an unchanged timeline after each cache event. */
     fun same(a: MediaItem, b: MediaItem): Boolean {
         if (a === b) return true
@@ -28,10 +30,16 @@ internal object PlaybackSourceItems {
                 .all { key -> x.extras?.getString(key) == y.extras?.getString(key) }
     }
 
-    suspend fun resolve(owner: MediaCatalogOwner?, items: List<MediaItem>, rejected: Set<String> = emptySet(), allowDirect: Boolean = false): List<MediaItem> {
+    suspend fun resolve(
+        owner: MediaCatalogOwner?,
+        items: List<MediaItem>,
+        rejected: Set<String> = emptySet(),
+        allowDirect: Boolean = false,
+        enrichSelection: Boolean = false,
+    ): List<MediaItem> {
         if (items.isEmpty()) return emptyList()
         if (owner == null) return items.map { item -> item.requestMetadata.mediaUri?.let { item.buildUpon().setUri(it).build() } ?: item }
-        val choices = owner.playbackSources(items.map(PlayerConnection::track), rejected, allowDirect)
+        val choices = owner.playbackSources(items.map(PlayerConnection::track), rejected, allowDirect, enrichSelection)
         require(choices.size == items.size) { "Source selection must preserve every queue occurrence" }
         return items.zip(choices).map { (original, choice) -> convert(original, choice) }
     }
@@ -49,7 +57,7 @@ internal object PlaybackSourceItems {
             old?.getString(ReplayGainCodec.TAGS)?.let { extras.putString(ReplayGainCodec.TAGS, it) }
         choice.issue?.let { extras.putString(ISSUE, it.name) }
         return selected.buildUpon().setMediaMetadata(selected.mediaMetadata.buildUpon().setExtras(extras).build())
-            .apply { if (choice.issue != null) setUri(Uri.Builder().scheme(UNAVAILABLE).authority("source").appendPath(key).build()) }.build()
+            .apply { if (choice.issue != null) setUri(unavailableUri(key)) }.build()
     }
 
     fun error(item: MediaItem?): String? = when (item?.mediaMetadata?.extras?.getString(ISSUE)) {

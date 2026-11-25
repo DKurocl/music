@@ -5,6 +5,10 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import ua.olex.music.AppGraph
+import ua.olex.music.lyrics.Lyrics
+import ua.olex.music.model.RecordingSource
+import ua.olex.music.model.RecordingSourceKind
+import ua.olex.music.model.SavedSong
 import ua.olex.music.model.Track
 
 /** One source order for the app and the session: edited, sidecar, downloaded/embedded, online. */
@@ -15,26 +19,57 @@ internal suspend fun AppGraph.resolveLyrics(request: Track): LocalLyricsState = 
     downloadedLyrics.edited(track, aliases)?.let(ua.olex.music.lyrics.Lyrics::parse)?.takeIf { it.lines.isNotEmpty() }?.let {
         return@withContext LocalLyricsState(it, "Your timing", mediaId = track.id.value, edited = true)
     }
-    // A YouTube Music song has no file: its lyrics come from the internet, found by themselves
-    // and kept, so they show at once the next time.
+    val cached = downloadedLyrics.read(track, aliases)
+    val downloaded = cached?.let { (text, _) -> Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
     if (YouTubeMusic.isOnline(track)) {
-        val kept = downloadedLyrics.read(track, aliases)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
-        val found = kept ?: runCatching { downloadedLyrics.fetch(userLibrary.keepReference(track).bind(track))?.let { ua.olex.music.lyrics.Lyrics.parse(it.text) } }.getOrNull()
-        return@withContext if (found != null && found.lines.isNotEmpty()) LocalLyricsState(found, "Found online", mediaId = track.id.value)
-            else LocalLyricsState(ua.olex.music.lyrics.Lyrics.EMPTY, "No lyrics found online", mediaId = track.id.value)
+        if (downloaded != null) return@withContext LocalLyricsState(downloaded, "Found online", mediaId = track.id.value)
+        val linked = linkedLyricFile(recording, track)
+        if (linked != null) {
+            val embedded = linked.metadata?.lyrics?.let(Lyrics::parse) ?: Lyrics.EMPTY
+            val local = localLyrics(linked, LocalLyricsState(embedded, "Embedded lyrics", mediaId = track.id.value))
+            if (local.lyrics.lines.isNotEmpty()) return@withContext local
+        }
+        val found = if (cached == null) fetchedLyrics(track) else null
+        return@withContext if (found != null) LocalLyricsState(found, "Found online", mediaId = track.id.value)
+            else LocalLyricsState(Lyrics.EMPTY, "No lyrics found online", mediaId = track.id.value)
     }
-    val embedded = track.metadata?.lyrics?.let(ua.olex.music.lyrics.Lyrics::parse) ?: ua.olex.music.lyrics.Lyrics.EMPTY
-    val downloaded = downloadedLyrics.read(track, aliases)?.let { (text, _) -> ua.olex.music.lyrics.Lyrics.parse(text) }?.takeIf { it.lines.isNotEmpty() }
+    val embedded = track.metadata?.lyrics?.let(Lyrics::parse) ?: Lyrics.EMPTY
     val fallback = if (downloaded != null && (embedded.lines.isEmpty() || downloaded.sync.ordinal >= embedded.sync.ordinal))
         LocalLyricsState(downloaded, "Downloaded lyrics", mediaId = track.id.value)
         else LocalLyricsState(embedded, if (embedded.lines.isEmpty()) "No local lyrics" else "Embedded lyrics", mediaId = track.id.value)
     val local = localLyrics(track, fallback)
-    // A song with no lyrics of its own is looked up online by itself, once: what is found is kept,
-    // and a removed result leaves an empty marker (read() is then not null), so it is not asked again.
-    if (local.lyrics.lines.isNotEmpty() || downloadedLyrics.read(track, aliases) != null) return@withContext local
-    val found = runCatching { downloadedLyrics.fetch(userLibrary.keepReference(track).bind(track))?.let { ua.olex.music.lyrics.Lyrics.parse(it.text) } }
-        .getOrNull()?.takeIf { it.lines.isNotEmpty() }
+    // A removed result leaves a cached marker, so it is not fetched again.
+    if (local.lyrics.lines.isNotEmpty() || cached != null) return@withContext local
+    val found = fetchedLyrics(track)
     if (found != null) LocalLyricsState(found, "Found online", mediaId = track.id.value) else local
+}
+
+private suspend fun AppGraph.fetchedLyrics(track: Track): Lyrics? = try {
+    downloadedLyrics.fetch(userLibrary.keepReference(track).bind(track))?.let { Lyrics.parse(it.text) }
+        ?.takeIf { it.lines.isNotEmpty() }
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (_: Exception) {
+    null
+}
+
+private fun AppGraph.linkedLyricFile(recording: SavedSong?, request: Track): Track? {
+    val files = allFiles.value ?: return null
+    return linkedLyricFile(recording, request, files)
+}
+
+/** Timing from a file is eligible only for an exact linked video with a compatible timeline. */
+internal fun linkedLyricFile(recording: SavedSong?, request: Track, index: ua.olex.music.model.LibraryIndex): Track? {
+    val saved = recording ?: return null
+    val provider = saved.references.firstOrNull {
+        it.kind == RecordingSourceKind.YOUTUBE && it.uri == request.uri && it.durationMs > 0
+    } ?: return null
+    if (request.durationMs > 0 && kotlin.math.abs(request.durationMs - provider.durationMs) > 500) return null
+    val file = saved.resolve(index) ?: return null
+    val source = RecordingSource.from(file) ?: return null
+    return file.takeIf { source.kind == RecordingSourceKind.LOCAL && file.clipStartMs == null &&
+        file.durationMs > 0 && kotlin.math.abs(file.durationMs - provider.durationMs) <= 500 &&
+        saved.references.any { it.key == source.key } }
 }
 
 private suspend fun AppGraph.localLyrics(track: Track, fallback: LocalLyricsState): LocalLyricsState {

@@ -44,7 +44,7 @@ internal object QueueCommand {
         }
     }
 
-    fun enqueue(player: ExoPlayer, items: List<MediaItem>, next: Boolean) {
+    fun enqueue(player: ExoPlayer, items: List<MediaItem>, next: Boolean, startWhenEmpty: Boolean = true) {
         if (items.isEmpty()) return
         val empty = player.mediaItemCount == 0
         val insertion = if (next && !empty) player.currentMediaItemIndex + 1 else player.mediaItemCount
@@ -54,19 +54,22 @@ internal object QueueCommand {
         if (order != null) {
             player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(QueueOrder.insertNext(order, current, insertion, items.size).toIntArray(), System.nanoTime()))
         }
-        if (empty) { player.prepare(); player.play() }
+        if (empty) {
+            player.prepare()
+            if (startWhenEmpty) player.play()
+        }
     }
 
     /** Start at the requested song, or at the first playable recommendation if it is unavailable. */
-    fun startRadio(player: Player, items: List<MediaItem>): Boolean {
+    fun startRadio(player: Player, items: List<MediaItem>, startPlayback: Boolean = true): Boolean {
         if (items.isEmpty() || !player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
         player.setMediaItems(items, 0, C.TIME_UNSET)
-        playRadio(player)
+        playRadio(player, startPlayback)
         return true
     }
 
     /** Keep the live source and position while starting a new queue at the current song. */
-    fun startRadioFromCurrent(player: Player, seedKey: String, items: List<MediaItem>): Boolean {
+    fun startRadioFromCurrent(player: Player, seedKey: String, items: List<MediaItem>, startPlayback: Boolean = true): Boolean {
         if (!player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
         val item = player.currentMediaItem ?: return false
         if (item.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) != seedKey || items.isEmpty()) return false
@@ -77,15 +80,15 @@ internal object QueueCommand {
         player.replaceMediaItem(index, seed)
         player.replaceMediaItems(index + 1, player.mediaItemCount, items)
         if (index > 0) player.removeMediaItems(0, index)
-        playRadio(player)
+        playRadio(player, startPlayback)
         return true
     }
 
-    private fun playRadio(player: Player) {
+    private fun playRadio(player: Player, startPlayback: Boolean) {
         player.shuffleModeEnabled = false
         if (player.repeatMode == Player.REPEAT_MODE_ONE) player.repeatMode = Player.REPEAT_MODE_OFF
         if (player.playbackState == Player.STATE_IDLE || player.playbackState == Player.STATE_ENDED) player.prepare()
-        player.play()
+        if (startPlayback) player.play()
     }
 
     internal fun shuffleTraversal(player: Player): List<Int> {

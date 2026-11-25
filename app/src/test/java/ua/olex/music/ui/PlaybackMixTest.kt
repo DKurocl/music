@@ -38,6 +38,23 @@ class PlaybackMixTest {
         assertTrue(Mix.songKey(next) in before.seen)
     }
 
+    @Test fun aTwoPageProviderCycleStopsAfterEachTokenIsUsedOnce() = runBlocking {
+        val another = next.copy(id = TrackId("yt:third"), uri = "ytm://third", title = "Third")
+        val calls = mutableListOf<String>()
+        val mix = PlaybackMix(graph(), nextPage = { token ->
+            calls += token
+            if (token == "first") YouTubeMusic.RadioPage(listOf(next), "second")
+            else YouTubeMusic.RadioPage(listOf(another), "first")
+        })
+        val before = run().apply { token = "first" }
+        mix.run = before
+        assertTrue(requireNotNull(mix.extend(listOf(seed), 0)).commit())
+        assertTrue(requireNotNull(mix.extend(listOf(next), 0)).commit())
+        assertTrue(before.exhausted)
+        assertNull(mix.extend(listOf(another), 0))
+        assertEquals(listOf("first", "second"), calls)
+    }
+
     @Test fun aNewMixWinsOverAnOldContinuationInFlight() = runBlocking {
         val entered = CompletableDeferred<Unit>()
         val release = CompletableDeferred<Unit>()
@@ -51,6 +68,32 @@ class PlaybackMixTest {
         assertNull(loading.await())
         assertSame(replacement, mix.run)
         assertEquals("token", replacement.token)
+    }
+
+    @Test fun aSelectionRefillsOnlyTheAcceptedSeedAndIgnoresAnOldQueue() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val mix = PlaybackMix(graph(), firstPage = { id ->
+            assertEquals("seed", id)
+            entered.complete(Unit)
+            release.await()
+            YouTubeMusic.RadioPage(listOf(next), "after")
+        })
+        val before = PlaybackMix.Run(seed, null, mutableSetOf(Mix.songKey(seed)),
+            mutableSetOf(seed.id.value), initialSelection = true)
+        mix.run = before
+        assertNull(mix.extend(listOf(seed), 0, PlaybackOrigin("mix", "old", "Old").encode()))
+        assertFalse(entered.isCompleted)
+        val loading = async { mix.extend(listOf(seed), 0, mix.origin(before, "Mix")) }
+        entered.await()
+        assertTrue(before.initialSelection)
+        assertNull(before.token)
+        release.complete(Unit)
+        val extension = requireNotNull(loading.await())
+        assertEquals(listOf(next), extension.tracks.filter { it.uri.startsWith("ytm://") })
+        assertTrue(extension.commit())
+        assertFalse(before.initialSelection)
+        assertEquals("after", before.token)
     }
 
     @Test fun replacingTheQueueAfterLoadingRejectsTheCommit() = runBlocking {

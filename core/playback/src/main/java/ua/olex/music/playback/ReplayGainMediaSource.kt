@@ -30,7 +30,7 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
     private val app = context.applicationContext
     private val template = DefaultMediaSourceFactory(app)
     private var drm: DrmSessionManagerProvider? = null
-    private var errors: LoadErrorHandlingPolicy? = null
+    private var errors: LoadErrorHandlingPolicy = PlaybackLoadErrors()
     override fun getSupportedTypes() = template.supportedTypes
     override fun setDrmSessionManagerProvider(provider: DrmSessionManagerProvider): MediaSource.Factory {
         drm = provider; template.setDrmSessionManagerProvider(provider); return this
@@ -54,7 +54,8 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
         val tags = ReplayGainCodec.tags(mediaItem.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS))
         val guarded = androidx.media3.datasource.DataSource.Factory { SourceGuard(data.createDataSource()) }
         val factory = DefaultMediaSourceFactory(guarded, ReplayGainExtractorsFactory(WithDsd(DefaultExtractorsFactory()), tags))
-        drm?.let(factory::setDrmSessionManagerProvider); errors?.let(factory::setLoadErrorHandlingPolicy)
+        drm?.let(factory::setDrmSessionManagerProvider)
+        factory.setLoadErrorHandlingPolicy(errors)
         return factory.createMediaSource(mediaItem)
     }
 }

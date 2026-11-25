@@ -15,6 +15,15 @@ Milestones M1, M2 and M4 to M8 touch different modules and can run in parallel b
 Files many tasks touch (`AppGraph`, `settings.gradle.kts`, the version catalog) change in small
 separate commits to keep merges trivial.
 
+## Core Perfection program (2026-11-25)
+
+- [~] M0 audit and baseline (Codex, 2026-11-25).
+- [~] M1 first-tap source identity and local-first playback (Codex, 2026-11-25).
+- See [CORE_PERFECTION.md](CORE_PERFECTION.md) for the evidence ledger and gates. These IDs
+  refer to the Core Perfection assignment; the historical milestone numbering below still applies
+  to the original roadmap.
+
+
 ## YouTube Music recommendations and playback restoration
 
 - [x] Codex, 2026-11-20: retain provider shelves and mix order, keep system artwork across restarts, and polish Play while restoring (d983c5a).

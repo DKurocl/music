@@ -378,6 +378,23 @@ class UserRepositoryTest {
     }
 
 
+    @Test fun confirmedPlaybackLinksSurviveReopenBeforeAnyListeningEvent() = runBlocking {
+        val original = a.copy(id = TrackId("yt:exact"), uri = "ytm://exact", path = null)
+        val index = ua.olex.music.model.LibraryIndex.build(listOf(a))
+        val selected = repository.sourcePolicy(index).select(original).track.copy(requestedId = original.id.value)
+        val link = requireNotNull(SavedSong.fromPlaybackLink(selected))
+        repeat(2) { repository.rememberPlaybackLink(link) }
+        val id = repository.recordings.first().single().id
+        database.close()
+        reopen()
+        assertTrue(repository.history.first().isEmpty())
+        assertTrue(repository.catalogue.first().isEmpty())
+        assertEquals(id, repository.recordings.first().single().id)
+        val resumed = repository.sourcePolicy(index).select(original.copy(durationMs = 0))
+        assertEquals(a.uri, resumed.track.uri)
+        assertEquals(id, resumed.track.recordingId)
+    }
+
     @Test fun playbackPolicyUsesUncollectedEvidenceToRejectAnAmbiguousSubstitution() = runBlocking {
         val first = a.copy(id = TrackId("yt:a"), uri = "ytm://a", path = null, durationMs = 200_000)
         val second = first.copy(id = TrackId("yt:b"), uri = "ytm://b", durationMs = 205_000)

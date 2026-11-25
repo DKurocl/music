@@ -33,6 +33,94 @@ class YouTubeMusicTest {
         assertEquals(4, calls)
     }
 
+    @Test fun exactSearchCardEvidenceOpensAnOwnedFlacOnTheFirstSelection() {
+        val json = """{"contents":[
+            {"musicCardShelfRenderer":{"title":{"runs":[{"text":"Song title","navigationEndpoint":{"watchEndpoint":{"videoId":"original"}}}]},
+                "subtitle":{"simpleText":"Song • Artist name • 3:22"}}},
+            {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"original"},"flexColumns":[
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song title"}]}}},
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Artist name"}]}}}]}},
+            {"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"other"},"flexColumns":[
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Song title"}]}}},
+                {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Artist name"}]}}}]}}
+        ]}"""
+        val (first, other) = YouTubeMusic.searchSongs(json)
+        assertEquals(202_000L, first.durationMs)
+        assertEquals(0L, other.durationMs)
+        val flac = Track(TrackId("local:one"), "content://one", first.title, first.artist,
+            durationMs = 202_000, path = "Music/song.flac", format = ua.olex.music.model.AudioFormat("flac"))
+        val cold = ua.olex.music.model.PlaybackSources(LibraryIndex.EMPTY, emptyList())
+        val ready = ua.olex.music.model.PlaybackSources(LibraryIndex.build(listOf(flac)), emptyList())
+        assertEquals(first.uri, cold.select(first).track.uri)
+        assertEquals(flac.uri, ready.select(first).track.uri)
+        assertEquals(other.uri, ready.select(other).track.uri)
+        assertEquals(first.uri, ua.olex.music.model.SavedSong.from(ready.select(first).track).online()?.uri)
+    }
+
+    @Test fun watchMetadataCannotUseARecommendationToFillTheRequestedDuration() = kotlinx.coroutines.runBlocking {
+        val source = YouTubeMusic(transport = { endpoint, fields, _ ->
+            assertEquals("next", endpoint)
+            assertTrue(fields.contains("original"))
+            """{"playlistPanelRenderer":{"contents":[{"playlistPanelVideoRenderer":{"videoId":"other",
+                "title":{"simpleText":"Song title"},"longBylineText":{"simpleText":"Artist name"},
+                "lengthText":{"simpleText":"3:22"}}}]}}"""
+        })
+        assertNull(source.songEvidence("original"))
+    }
+
+    @Test fun exactWatchMetadataCanEnrichTheSeedButCannotCrossAnAccountChange() = kotlinx.coroutines.runBlocking {
+        val entered = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val release = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val scope = java.util.concurrent.atomic.AtomicReference("account-first")
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val source = YouTubeMusic(pageScope = scope::get, transport = { endpoint, _, _ ->
+            assertEquals("next", endpoint)
+            if (calls.incrementAndGet() == 1) {
+                entered.complete(Unit)
+                release.await()
+            }
+            """{"playlistPanelRenderer":{"contents":[
+                {"playlistPanelVideoRenderer":{"videoId":"other","title":{"simpleText":"Song title"},
+                    "longBylineText":{"simpleText":"Artist name"},"lengthText":{"simpleText":"3:19"}}},
+                {"playlistPanelVideoRenderer":{"videoId":"exact","title":{"simpleText":"Song title"},
+                    "longBylineText":{"simpleText":"Artist name"},"lengthText":{"simpleText":"3:22"}}}
+            ]}}"""
+        })
+        var old: Track? = null
+        val inFlight = launch { old = source.songEvidence("exact") }
+        entered.await()
+        scope.set("public")
+        release.complete(Unit)
+        inFlight.join()
+        assertNull(old)
+        assertEquals(202_000L, source.songEvidence("exact")?.durationMs)
+        assertEquals("yt:exact", source.songEvidence("exact")?.id?.value)
+        assertEquals(2, calls.get())
+    }
+
+    @Test fun alternatingSearchAndServiceSnapshotsReusesBothCreditIndexes() {
+        val track = Track(TrackId("local:visible"), "content://visible", "Song", "Artist")
+        val hidden = track.copy(id = TrackId("local:hidden"), uri = "content://hidden")
+        val visibleFiles = LibraryIndex.build(listOf(track))
+        val allFiles = LibraryIndex.build(listOf(track, hidden))
+        val visibleIndex = YouTubeMusic.indexOf(visibleFiles)
+        val serviceIndex = YouTubeMusic.indexOf(allFiles)
+        assertTrue(visibleIndex === YouTubeMusic.indexOf(visibleFiles))
+        assertTrue(serviceIndex === YouTubeMusic.indexOf(allFiles))
+    }
+
+    @Test fun explicitProviderCreditsDiscoverOneOwnedCopyButDoNotChooseBetweenDisagreeingCredits() {
+        val request = Track(TrackId("yt:credits"), "ytm://credits", "Song", "Lead, Guest", durationMs = 220_000,
+            artists = listOf("Lead", "Guest"))
+        val lead = Track(TrackId("local:lead"), "content://lead", "Song", "Lead", durationMs = 220_000)
+        val guest = lead.copy(id = TrackId("local:guest"), uri = "content://guest", artist = "Guest", artists = listOf("Guest"))
+        val library = LibraryIndex.build(listOf(lead))
+        val candidate = YouTubeMusic.indexOf(library).copyOf(request)
+        assertEquals(lead, candidate)
+        assertEquals(lead.uri, ua.olex.music.model.PlaybackSources(library, emptyList()).select(request, proposedLocal = candidate).track.uri)
+        assertNull(YouTubeMusic.indexOf(LibraryIndex.build(listOf(lead, guest))).copyOf(request))
+    }
+
     @Test fun savedOnlineSnapshotsAreNeverSubstitutedAsLocalFiles() {
         val online = Track(TrackId("yt:one"), "ytm://one", "Halo", "Beyoncé", durationMs = 260_000)
         val saved = LibraryIndex.build(listOf(online))

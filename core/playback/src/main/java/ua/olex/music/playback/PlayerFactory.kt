@@ -28,16 +28,14 @@ internal object PlayerFactory {
         }
             // Without this ExoPlayer cuts 24-bit and float PCM down to 16 bits before the mixer.
             // With it, high-resolution PCM retains its precision as 32-bit float; 16-bit audio is
-            // not affected. (Float output skips the speed/pitch processors: a music player has none.)
+            // not affected. Verify the effective speed/pitch path with high-resolution fixtures.
             .setEnableAudioFloatOutput(true)
             // Decoders the phone lacks (ALAC, APE, ...) are added as extension renderers later;
             // preferring them stays off so the platform's FLAC/MP3/AAC/Opus decoders are used.
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
         return ExoPlayer.Builder(context, renderers)
-            // Media3 keeps 50 s ahead and tops up in small pieces every few seconds, which never
-            // lets the radio sleep (each fetch keeps it awake about ten more seconds). Buffering up
-            // to ten minutes (24 MB) fetches an online song whole, as YouTube Music and Spotify do,
-            // and reads files in large runs; the radio and storage then rest until the next song.
+            // Preserve the existing buffer limits for baseline measurement. Neither the byte target
+            // nor the duration limits guarantee a complete fetch or a specific radio duty cycle.
             .setLoadControl(androidx.media3.exoplayer.DefaultLoadControl.Builder()
                 .setBufferDurationsMs(30_000, 600_000, 1_000, 2_000)
                 .setTargetBufferBytes(24 shl 20)

@@ -55,24 +55,24 @@ internal class YouTubeFavourites(context: Context, private val graph: AppGraph) 
     }
 
     suspend fun refresh(force: Boolean = false) = withContext(Dispatchers.IO) {
-        remote.withLock {
+        remote.withLock sync@{
             val scope = graph.youTubeAccount.cacheScope.value
             if (scope == "public" || !graph.youTubeOn.value) {
                 status.value = null
-                return@withLock
+                return@sync
             }
             if (!graph.network.value) {
                 status.value = "Offline. Changes sync when the connection returns."
-                return@withLock
+                return@sync
             }
             val prefix = "$scope/"
             val queued = prefs.all.filterKeys { it.startsWith(prefix) }
             val now = android.os.SystemClock.elapsedRealtime()
-            if (!force && queued.isEmpty() && lastScope == scope && now - lastPull < 300_000) return@withLock
+            if (!force && queued.isEmpty() && lastScope == scope && now - lastPull < 300_000) return@sync
             status.value = "Syncing likes…"
             try {
                 for ((key, operation) in queued) {
-                    if (graph.youTubeAccount.cacheScope.value != scope) return@withLock
+                    if (graph.youTubeAccount.cacheScope.value != scope) return@sync
                     val desired = when (operation) {
                         is Boolean -> operation
                         is String -> operation.startsWith("1:")
@@ -83,16 +83,19 @@ internal class YouTubeFavourites(context: Context, private val graph: AppGraph) 
                     }
                 }
                 val snapshot = graph.youTube.likedPlaylist(scope)
-                if (graph.youTubeAccount.cacheScope.value != scope) return@withLock
+                if (graph.youTubeAccount.cacheScope.value != scope) return@sync
                 local.withLock {
+                    fun current() = graph.youTubeAccount.cacheScope.value == scope && graph.youTubeOn.value
+                    if (!current()) return@sync
                     val pending = prefs.all.keys.filter { it.startsWith(prefix) }.mapTo(HashSet()) { it.removePrefix(prefix) }
                     // An empty or unexpected renderer must never clear imported favourites.
                     val knownLikes = snapshot.entries.mapTo(HashSet()) { it.videoId }
                     val origins = records(scope)
                     val complete = knownLikes.isNotEmpty() && snapshot.tracks.size == snapshot.entries.size
                     val next = graph.userLibrary.mergeImportedFavourites(
-                        snapshot.tracks, origins, if (complete) knownLikes else knownLikes + origins.keys, pending,
+                        snapshot.tracks, origins, if (complete) knownLikes else knownLikes + origins.keys, pending, ::current,
                     )
+                    if (!current()) return@sync
                     val stored = JSONObject()
                     next.forEach { (video, origin) ->
                         stored.put(video, JSONObject().put("id", origin.recordingId).put("at", origin.addedAt))

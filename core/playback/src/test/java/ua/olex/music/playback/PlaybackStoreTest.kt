@@ -38,6 +38,32 @@ class PlaybackStoreTest {
         assertTrue(restored.shuffle)
     }
 
+    @Test fun restoredUnavailableItemKeepsItsOriginalIntentAndCannotOpenBeforeResolution() = runBlocking {
+        val track = Track(TrackId("yt:offline"), "ytm://offline", "Song", "Artist")
+        val original = PlayerConnection.mediaItem(track)
+        val unavailable = PlaybackSourceItems.convert(original,
+            ua.olex.music.model.PlaybackSourceChoice(track, ua.olex.music.model.SourceIssue.OFFLINE))
+        PlaybackStore(directory).write(state().copy(items = listOf(unavailable)))
+        val restored = requireNotNull(PlaybackStore(directory).read()).items.single()
+        assertEquals(unavailable.localConfiguration?.uri, restored.localConfiguration?.uri)
+        assertEquals(track.uri, restored.requestMetadata.mediaUri.toString())
+        assertEquals("yt:offline", PlayerConnection.track(restored).requestedId)
+        assertNotNull(PlaybackSourceItems.error(restored))
+    }
+
+    @Test fun aReadBarrierSeesTheLatestStateFromAnEnqueuedWriteBurst() = runBlocking {
+        val journal = PlaybackJournal(PlaybackStore(directory))
+        try {
+            repeat(1_000) { journal.write(state().copy(positionMs = it.toLong())) }
+            assertEquals(999L, journal.read()?.positionMs)
+            journal.write(state("new").copy(positionMs = 5_000))
+            assertEquals("new", journal.read()?.generation)
+            assertEquals(5_000L, journal.read()?.positionMs)
+        } finally {
+            journal.close()
+        }
+    }
+
     @Test fun playingContextSurvivesRestartAndAnOlderCheckpointWithoutItStillLoads() = runBlocking {
         val item = PlayerConnection.mediaItem(Track(TrackId("yt:one"), "ytm://one", "Song", "Artist"), playbackContext = "Evening playlist")
         PlaybackStore(directory).write(state().copy(items = listOf(item)))

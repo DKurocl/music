@@ -1,3 +1,52 @@
+# Core Perfection first-tap candidate (2026-11-25)
+
+Local branch: `agent/core-perfection-first-tap`. The owner requested that all implementation
+stay local until the full scope is ready. Keep candidate verification separate from stable. Baseline main is `5655cb2` / music-v1307. See
+[CORE_PERFECTION.md](CORE_PERFECTION.md) for status, paths and the evidence ledger.
+
+Verification order: the owner asked to implement the full assignment locally before running the
+combined test suite, Android CI, APK assembly and phone acceptance. Add regression cases with each
+batch. No new tests or build were run for the latest cold-index batch.
+
+The implementation pass now reaches M9. See [CORE_ACCEPTANCE.md](CORE_ACCEPTANCE.md) for
+the command-order contract, signed candidate and physical verification matrix. The new tests
+have been authored and are awaiting the consolidated run. The published v1307 APK was downloaded,
+its asset digest matched, and its signature was checked against API 37 to pin the CI signer.
+A candidate or stable build has not been published from the implementation head here.
+
+The initial Search request now retains its provider video through display projection. Exact
+provider durations feed the shared policy; unknown-duration single selections have a bounded
+metadata lookup when an indexed file is plausible. Song taps submit their seed to the service
+before loading recommendations. Confirmed playback can refill an accepted queue without touching
+its seed. Explicit Start mix and curated play-all flows use their existing preparation paths.
+
+Verified: metadata, unrelated-file availability checks, index alternation and multi-credit
+discovery each reproduced in a host regression before the respective fix. All 211 pure JVM
+tests (including 144 model tests) and 43 host provider fixtures passed. The production mix
+coordinator passed a delayed-provider host smoke fixture using fake app state. Wrapper test, lint and
+assembly could not download Gradle in this shell. Automatic approval review rejected transferring
+modified source to the public GitHub repository without explicit publication approval. The
+implementation is local; the remote task branch remains at baseline. Android CI, an owner-signed
+candidate APK and Pixel audio/source results are outstanding.
+An installed local source can now persist its exact provider reserve before any listening event.
+The pure model regression passed; the new Room reopen regression is pending. Verified the
+Gradle 9.9.1 distribution SHA-256 and bypassed the wrapper download failure using that same
+binary. The direct test command now reaches initial configuration, where Java proxy access
+prevents resolving AGP 9.5.1. No SDK, dependency pin or signing changes.
+
+The all-files observer now refreshes after index publication. A healthy current stream can take
+one compatible pre-existing local source only while still buffering at position zero before its
+first READY. This is a conservative MediaStore timestamp and exact-video rule; a fresh download,
+clip, ambiguous timeline, resumed position or Cast is excluded. All 147 model tests passed
+after this change. Media3 transitions and audible effects remain physical validation items.
+[Phone-only first-tap baseline](PHONE_CHECK.md#core-perfection-phone-only-baseline) runs on the
+installed build and records subjective delay and source, with no PC or APK change.
+
+Next: exercise cold empty-cache, late evidence after READY and physical file access cases in M1, then
+the remaining M2 command matrix. Full Android verification and actual first-tap playback on the
+Pixel remain unverified. The initial code is in `5a7b5a9` and `b403ade`; subsequent local commits
+cover source shortlisting, credit discovery and the bounded credit-index cache.
+
 # Player controls motion review
 
 [код] The player draws the controls from Rounded Material SVGs. Skip has no plate, compresses

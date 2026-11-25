@@ -84,7 +84,8 @@ internal class YouTubeMusic(
         val fields = """"query":${quote(query)}"""
         val plain = searchResponse(fields)
         val cards = plain?.let(::searchCards).orEmpty()
-        val primary = Found(plain?.let { parseSearch(it, keepOrder = true) }.orEmpty().distinctBy { it.id },
+        val rows = plain?.let { parseSearch(it, keepOrder = true) }.orEmpty()
+        val primary = Found(plain?.let { searchSongs(it, rows) }.orEmpty(),
             cards.filter { it.kind == Card.Kind.ARTIST }.take(8),
             cards.filter { it.kind == Card.Kind.ALBUM }.take(10),
             cards.filter { it.kind == Card.Kind.PLAYLIST }.take(12), plain?.let(::topCard))
@@ -96,7 +97,7 @@ internal class YouTubeMusic(
         val moreArtists = if (primary.artists.none { TextFold.fold(it.title) == TextFold.fold(query) })
             async { filtered(ARTISTS_ONLY) } else null
         val moreAlbums = if (primary.albums.isEmpty()) async { filtered(ALBUMS_ONLY) } else null
-        val moreSongs = if (primary.songs.isEmpty()) async { filtered(SONGS_ONLY) } else null
+        val moreSongs = if (rows.isEmpty()) async { filtered(SONGS_ONLY) } else null
         val morePlaylists = if (primary.playlists.isEmpty()) async { filtered(PLAYLISTS_ONLY) } else null
         val artistAnswer = moreArtists?.await()
         val albumAnswer = moreAlbums?.await()
@@ -106,7 +107,13 @@ internal class YouTubeMusic(
             throw java.io.IOException("YouTube Music didn't answer")
         }
         primary.copy(
-            songs = primary.songs.ifEmpty { songAnswer?.let { parseSearch(it, keepOrder = true) }.orEmpty().distinctBy { it.id } },
+            songs = songAnswer?.let { answer ->
+                val filtered = searchSongs(answer)
+                val enriched = primary.songs.map { song ->
+                    filtered.firstOrNull { it.id == song.id && song.durationMs == 0L && it.durationMs > 0 } ?: song
+                }
+                (enriched + filtered).distinctBy { it.id }
+            } ?: primary.songs,
             artists = (primary.artists + artistAnswer?.let(::searchCards).orEmpty().filter { it.kind == Card.Kind.ARTIST }).distinctBy { it.id }.take(8),
             albums = primary.albums.ifEmpty { albumAnswer?.let(::searchCards).orEmpty().filter { it.kind == Card.Kind.ALBUM }.take(10) },
             playlists = primary.playlists.ifEmpty { playlistAnswer?.let(::searchCards).orEmpty().filter { it.kind == Card.Kind.PLAYLIST }.take(12) },
@@ -528,11 +535,13 @@ internal class YouTubeMusic(
      * Listen again, mixes and Home's recommendations learn from what plays here too.
      */
     suspend fun reportPlay(videoId: String): Boolean = withContext(ioDispatcher) {
+        val scope = pageScope()
         val headers = account() ?: return@withContext false
         // The player answers only with the current player script's signature time, as the web app sends it.
         val sts = runCatching { init(); org.schabi.newpipe.extractor.services.youtube.YoutubeJavaScriptPlayerManager.getSignatureTimestamp(videoId) }.getOrNull()
             ?: return@withContext false
         val fields = """"videoId":${quote(videoId)},"playbackContext":{"contentPlaybackContext":{"signatureTimestamp":$sts}}"""
+        if (pageScope() != scope) return@withContext false
         val json = catalogueRequest { post("player", fields, headers = headers) } ?: return@withContext false
         val base = Regex(""""videostatsPlaybackUrl"\s*:\s*\{\s*"baseUrl"\s*:\s*"([^"]+)"""").find(json)?.groupValues?.get(1)
             ?.replace("\\u0026", "&") ?: return@withContext false
@@ -542,7 +551,7 @@ internal class YouTubeMusic(
         val request = okhttp3.Request.Builder().url(url).header("User-Agent", USER_AGENT)
             .header("Origin", "https://music.youtube.com").header("Referer", "https://music.youtube.com/")
             .apply { headers.forEach { (k, v) -> header(k, v) } }.build()
-        catalogueRequest { execute(request, reportStatus = false) } != null
+        pageScope() == scope && catalogueRequest { execute(request, reportStatus = false) } != null
     }
 
     /**
@@ -739,9 +748,6 @@ internal class YouTubeMusic(
         moodsCache = null
     }
 
-    /** Resolves the stream of a song ahead of a tap (address only, no audio), so Play starts sooner. */
-    suspend fun warm(id: String) { withContext(ioDispatcher) { audio(id) } }
-
     /** A page of YouTube Music's radio for a song, and the token for the page after it. */
     data class RadioPage(val tracks: List<Track>, val continuation: String?)
 
@@ -756,6 +762,15 @@ internal class YouTubeMusic(
         if (primary?.tracks?.any { it.id.value != "yt:$videoId" } == true || primary?.continuation != null) return@withContext primary
         post("next", radio)?.let(::parseRadio)?.takeIf { it.tracks.any { song -> song.id.value != "yt:$videoId" } || it.continuation != null }
             ?: post("next", video)?.let(::parseRadio)
+    }
+
+    /** Metadata only. The watch panel may include recommendations; only the requested ID is evidence. */
+    internal suspend fun songEvidence(videoId: String): Track? {
+        val scope = pageScope()
+        return cached("$scope/song-evidence:$videoId") {
+            catalogueRequest { post("next", """"videoId":${quote(videoId)},"isAudioOnly":true""") }?.let(::parseRadio)
+                ?.tracks?.firstOrNull { it.id.value == "yt:$videoId" && it.durationMs > 0 && pageScope() == scope }
+        }?.takeIf { pageScope() == scope }
     }
 
     /** Accept both continuation forms used by the Music watch endpoint. */
@@ -842,7 +857,9 @@ internal class YouTubeMusic(
     /** A card on a shelf; a mix ([kind] MIX) plays as radio from its playlist id. */
     data class Card(val id: String, val title: String, val subtitle: String?, val cover: String?, val kind: Kind) {
         enum class Kind { ALBUM, PLAYLIST, ARTIST, MIX, SONG }
-        fun song() = Track(ua.olex.music.model.TrackId("yt:$id"), "ytm://$id", title, artistOf(subtitle), artworkUri = cover)
+        fun song() = Track(TrackId("yt:$id"), "ytm://$id", title, artistOf(subtitle),
+            durationMs = subtitle.orEmpty().split('•').firstNotNullOfOrNull { duration(it.trim()) } ?: 0,
+            artworkUri = cover)
     }
 
     /** YouTube Music's home: the owner's own when signed in (quick picks, mixes, listen again...). */
@@ -1113,6 +1130,26 @@ internal class YouTubeMusic(
         private const val ALBUMS_ONLY = "EgWKAQIYAWoMEA4QChADEAQQCRAF"
         private const val SONGS_ONLY = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
         private const val PLAYLISTS_ONLY = "EgWKAQIoAWoMEA4QChADEAQQCRAF"
+
+        /** Keep top-only songs reachable through the existing Songs rows and enrich by exact video ID. */
+        internal fun searchSongs(json: String, rows: List<Track> = parseSearch(json, keepOrder = true)): List<Track> {
+            val root = ua.olex.music.lyrics.Json.parse(json)
+            val top = collect(root, "musicCardShelfRenderer").firstNotNullOfOrNull { shelf ->
+                val title = text(shelf["title"])
+                val subtitle = text(shelf["subtitle"])
+                if (title.isBlank() || subtitle.substringBefore('•').trim() !in setOf("Song", "Video")) return@firstNotNullOfOrNull null
+                val watch = (collect(shelf["title"], "watchEndpoint") + collect(shelf["onTap"], "watchEndpoint"))
+                    .firstNotNullOfOrNull { it["videoId"] as? String } ?: return@firstNotNullOfOrNull null
+                Card(watch, title, subtitle, biggestImage(shelf["thumbnail"]), Card.Kind.SONG).song()
+            }
+            val durations = (rows + listOfNotNull(top)).filter { it.durationMs > 0 }.groupBy { it.id }
+                .mapValues { (_, versions) -> versions.map { it.durationMs }.distinct().singleOrNull() }
+            val combined = if (top != null && rows.none { it.id == top.id }) listOf(top) + rows else rows
+            return combined.distinctBy { it.id }.map { track ->
+                val length = durations[track.id]
+                if (track.durationMs == 0L && length != null) track.copy(durationMs = length) else track
+            }
+        }
 
         /** Artists, albums and playlists in a search answer (its rows and its top result card), in its order. */
         /** YouTube Music's "Top result" card, when it is an artist, album or playlist. */
@@ -1486,10 +1523,14 @@ internal class YouTubeMusic(
          * The artist in a card's subtitle, "Song \u2022 predayed", "Video \u2022 Batón \u2022 201K views":
          * the kind of item, view counts and years are left out, the first name that remains is it.
          */
+        private val durationPattern = Regex("""[0-9]{1,3}(?::[0-5][0-9]){1,2}""")
+        private fun duration(text: String): Long? = text.takeIf(durationPattern::matches)
+            ?.split(':')?.fold(0L) { total, field -> total * 60 + field.toLong() }?.times(1000)?.takeIf { it > 0 }
+
         fun artistOf(subtitle: String?): String {
             val kinds = setOf("song", "video", "single", "ep", "album", "playlist", "episode", "podcast", "artist", "profile")
             return subtitle.orEmpty().split('\u2022').map { it.trim() }.firstOrNull { part ->
-                part.isNotEmpty() && part.lowercase() !in kinds && !part.matches(Regex("""\d{4}""")) &&
+                part.isNotEmpty() && part.lowercase() !in kinds && !part.matches(Regex("""\d{4}""")) && duration(part) == null &&
                     !Regex("""(views|plays|likes|subscribers|songs)$""", RegexOption.IGNORE_CASE).containsMatchIn(part)
             }.orEmpty()
         }
@@ -1533,16 +1574,21 @@ internal class YouTubeMusic(
          */
         fun localCopy(online: Track, library: LibraryIndex): Track? = indexOf(library).copyOf(online)
 
-        // The index of the current library, built once per library (identity), shared by the pages,
-        // Search and the player.
-        @Volatile private var indexed: Pair<LibraryIndex, Index>? = null
+        // Search can use the visible catalogue while the service uses all files.
+        private val indexLock = Any()
+        @Volatile private var indexes = emptyList<Pair<LibraryIndex, Index>>()
 
-        /** The library's [Index], building it when the library changed. Call off the main thread when new. */
-        fun indexOf(library: LibraryIndex): Index = indexed?.takeIf { it.first === library }?.second
-            ?: Index(library.songs).also { indexed = library to it }
+        /** Build outside the cache lock so a Search refresh does not block the service's cache hit. */
+        fun indexOf(library: LibraryIndex): Index {
+            builtIndex(library)?.let { return it }
+            val built = Index(library.songs)
+            return synchronized(indexLock) {
+                builtIndex(library) ?: built.also { indexes = listOf(library to it) + indexes.take(1) }
+            }
+        }
 
         /** The library's [Index] only if it is already built: cheap enough for a composable. */
-        fun builtIndex(library: LibraryIndex): Index? = indexed?.takeIf { it.first === library }?.second
+        fun builtIndex(library: LibraryIndex): Index? = indexes.firstOrNull { it.first === library }?.second
 
         /** Keys under which a library song can be found by an online one (each of its artists). */
         fun keysOf(song: Track): List<String> = (song.artists + song.artist).map { clean(song.title) + "\u0000" + clean(it) }.distinct()
@@ -1556,13 +1602,32 @@ internal class YouTubeMusic(
          */
         class Index(songs: List<Track>) {
             private val byKey = HashMap<String, MutableList<Track>>().apply { songs.filterNot(::isOnline).forEach { s -> keysOf(s).forEach { getOrPut(it) { ArrayList(1) } += s } } }
-            // The best file of the same recording: lengths within three seconds when both are known (an
-            // unknown length needs an existing source link), the best quality first.
-            fun copyOf(online: Track): Track? = byKey[keyOf(online)]?.filter { song ->
-                sameTitle(online, song) && if (online.durationMs > 0 && song.durationMs > 0) kotlin.math.abs(song.durationMs - online.durationMs) <= 3_000
-                else song.sources.any { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE && it.uri == online.uri }
-            }?.maxByOrNull { it.format?.rank ?: 0 }
+            private fun candidates(online: Track): Sequence<Track> {
+                // The provider parsers render their structured credits as a comma-joined artist.
+                // A separately copied artist field can leave a stale credit list on the Track.
+                val keys = if (online.artists.joinToString(", ") == online.artist) keysOf(online) else listOf(keyOf(online))
+                return keys.asSequence().flatMap { byKey[it].orEmpty() }.distinctBy { it.id }
+                    .filter { sameTitle(online, it) }
+            }
 
+            fun hasPlausibleCopy(online: Track): Boolean = candidates(online).any()
+
+            fun copyOf(online: Track): Track? {
+                val candidates = candidates(online).toList()
+                val linked = candidates.filter { song ->
+                    song.sources.any { it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE && it.uri == online.uri }
+                }
+                val timed = candidates.filter { song ->
+                    online.durationMs > 0 && song.durationMs > 0 &&
+                        kotlin.math.abs(song.durationMs - online.durationMs) <= ua.olex.music.model.SongKey.LENGTH_TOLERANCE_MS
+                }
+                val eligible = linked.ifEmpty {
+                    // Separate artist credits may expose unrelated files with the same title and length.
+                    // Only propose a credit variant when the indexed candidates agree on their identity key.
+                    timed.takeIf { rows -> rows.map { it.key }.distinct().size == 1 }.orEmpty()
+                }
+                return eligible.maxByOrNull { it.format?.rank ?: 0 }
+            }
 
         }
 

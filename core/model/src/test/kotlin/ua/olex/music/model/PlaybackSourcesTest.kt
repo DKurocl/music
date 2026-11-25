@@ -19,6 +19,51 @@ class PlaybackSourcesTest {
         assertNull(result.track.clipStartMs)
     }
 
+    @Test fun rebuildingAnOnlineRequestNeverBorrowsTheFilesTimingOrCover() {
+        val remote = online("no-clock", 0).copy(artworkUri = null)
+        val local = file.copy(artworkUri = "content://embedded", clipStartMs = 4_000, clipEndMs = 206_000)
+        val projected = SavedSong.from(remote).bind(local).copy(requestedId = remote.id.value)
+        val request = PlaybackSources(LibraryIndex.EMPTY, emptyList()).requested(projected)
+        assertEquals(remote.id, request.id)
+        assertEquals(0L, request.durationMs)
+        assertNull(request.artworkUri)
+        assertNull(request.clipStartMs)
+        val withFiles = PlaybackSources(LibraryIndex.build(listOf(local)), emptyList())
+        assertEquals(remote.uri, withFiles.select(projected).track.uri)
+    }
+
+    @Test fun aRealFileWinsOnTheFirstSearchRequestWithoutHistoryAndFallsBackToTheExactVideo() {
+        val remote = online("new")
+        val policy = PlaybackSources(LibraryIndex.build(listOf(file)), emptyList())
+        val opened = mutableListOf<String>()
+        fun open(choice: PlaybackSourceChoice) { if (choice.issue == null) opened += choice.track.uri }
+        open(policy.select(remote))
+        open(policy.select(remote, rejected = setOf(RecordingSource.from(file)!!.key)))
+        assertEquals(listOf(file.uri, remote.uri), opened)
+    }
+
+    @Test fun onlyTheExactVerifiedVideoAndSelectedPhysicalFileAreRemembered() {
+        val request = online("requested")
+        val choice = PlaybackSources(LibraryIndex.build(listOf(file)), emptyList()).select(request)
+        val local = choice.track.copy(requestedId = request.id.value,
+            sources = choice.track.sources + RecordingSource.from(online("other-video"))!!)
+        val remembered = requireNotNull(SavedSong.fromPlaybackLink(local))
+        assertEquals(listOf(file.uri, request.uri), remembered.references.map { it.uri })
+        assertEquals(request.artworkUri, remembered.online()?.artworkUri)
+        assertNull(SavedSong.fromPlaybackLink(local.copy(requestedId = "yt:unlinked")))
+        assertNull(SavedSong.fromPlaybackLink(local.copy(durationMs = 10_000)))
+        assertNull(SavedSong.fromPlaybackLink(request.copy(requestedId = request.id.value)))
+    }
+
+    @Test fun differentOrUnlabelledMasteringsDoNotAutomaticallyReplaceAnExplicitEdition() {
+        val original = online("remaster").copy(title = "Song (2011 Remaster)")
+        val other = file.copy(title = "Song (2020 Remastered)")
+        val preferred = file.copy(title = "Song (Remastered 2011)")
+        assertEquals(original.uri, PlaybackSources(LibraryIndex.build(listOf(other)), emptyList()).select(original).track.uri)
+        assertEquals(original.uri, PlaybackSources(LibraryIndex.build(listOf(file)), emptyList()).select(original).track.uri)
+        assertEquals(preferred.uri, PlaybackSources(LibraryIndex.build(listOf(preferred)), emptyList()).select(original).track.uri)
+    }
+
     @Test fun knownRecordingSelectsTheFileAcrossAnOldAlias() {
         val original = saved("recording:new", online("reserve"))
         val policy = PlaybackSources(LibraryIndex.build(listOf(file)), listOf(original), mapOf("old" to original.id))
@@ -104,7 +149,22 @@ class PlaybackSourcesTest {
     }
 
 
-    @Test fun aBulkQueueFiltersTheLocalSnapshotOnceRatherThanOncePerSong() {
+    @Test fun singleSelectionChecksOnlyEligibleFilesAndFallsThroughToTheNextCopy() {
+        val best = file.copy(format = AudioFormat("flac", 96_000, 24))
+        val reserve = file.copy(id = TrackId("local:reserve"), uri = "content://reserve",
+            path = "Music/reserve.flac", format = AudioFormat("flac", 44_100, 16))
+        val unrelated = file.copy(id = TrackId("local:unrelated"), uri = "content://unrelated",
+            path = "Music/unrelated.flac", title = "Different song")
+        val requested = online("requested")
+        val policy = PlaybackSources(LibraryIndex.build(listOf(best, reserve, unrelated)), emptyList())
+        val checked = mutableListOf<String>()
+        val choice = policy.select(requested, available = { uri -> checked += uri; uri != best.uri })
+        assertEquals(reserve.id, choice.track.id)
+        assertEquals(listOf(best.uri, reserve.uri), checked)
+        assertEquals(requested.uri, SavedSong.from(choice.track).online()?.uri)
+    }
+
+    @Test fun aBulkQueueChecksEachSelectedFileOnce() {
         val files = (1..400).map { n -> file.copy(id = TrackId("local:$n"), uri = "content://$n", title = "Song $n", path = "Music/$n.flac") }
         val policy = PlaybackSources(LibraryIndex.build(files), emptyList())
         var checks = 0

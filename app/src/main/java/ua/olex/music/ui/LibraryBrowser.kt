@@ -485,11 +485,13 @@ internal fun LibraryBrowser(
                         // "All" shows the first songs, as YouTube Music does; the Songs chip shows every one.
                         val shown = if (all) webSongs.take(4) else webSongs
                         if (shown.isNotEmpty()) item(key = "web-heading", contentType = "title") { SearchHeading("Songs") }
-                        itemsIndexed(shown, key = { _, t -> "online-" + t.id.value }, contentType = { _, _ -> "song" }) { i, track ->
-                            TrackRow(track, current = track.id.value == currentId, onMore = { onTrackActions(track) },
-                                onPlayNext = { onEnqueue(listOf(track), true) }, onQueue = { onEnqueue(listOf(track), false) }) {
+                        itemsIndexed(shown, key = { i, track -> "online-" + (found?.requestAt(i) ?: track).id.value }, contentType = { _, _ -> "song" }) { i, track ->
+                            val request = found?.requestAt(i) ?: track
+                            TrackRow(track, current = track.id.value == currentId || request.id.value == currentId,
+                                onMore = { onTrackActions(track.copy(requestedId = request.id.value)) },
+                                onPlayNext = { onEnqueue(listOf(request), true) }, onQueue = { onEnqueue(listOf(request), false) }) {
                                 onSearchUsed(query)
-                                nav.playTrackMix?.invoke(track) ?: nav.play(webSongs, i, "Search")
+                                nav.playTrackMix?.invoke(request) ?: nav.play(found?.requestedTracks() ?: webSongs, i, "Search")
                             }
                         }
                         if (all && webSongs.size > shown.size) item(key = "songs-more", contentType = "more") {

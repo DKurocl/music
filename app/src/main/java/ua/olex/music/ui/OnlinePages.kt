@@ -2,6 +2,8 @@
 
 package ua.olex.music.ui
 
+import androidx.lifecycle.repeatOnLifecycle
+
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -747,9 +749,13 @@ internal fun PrefetchWhenSeen(card: YouTubeMusic.Card) {
     if (androidx.compose.ui.platform.LocalInspectionMode.current) return
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? ua.olex.music.MusicApp ?: return
     val network = LocalNetwork.current
-    LaunchedEffect(card.id, network) {
+    val account by app.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(card.id, network, account, lifecycle) {
         if (!network) return@LaunchedEffect
-        kotlinx.coroutines.delay(500)
-        app.graph.prefetch.page(card)
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            kotlinx.coroutines.delay(500)
+            app.graph.prefetch.page(card)
+        }
     }
 }

@@ -224,6 +224,10 @@ class SoulseekClient(
                         val buffer = ByteArray(64 * 1024)
                         var got = offset
                         while (got < size) {
+                            if (ua.olex.music.playback.AudioLoadPriority.isBuffering) {
+                                // Bound each yield so a slow audio connection cannot abandon an active peer transfer.
+                                withTimeoutOrNull(2_000) { ua.olex.music.playback.AudioLoadPriority.awaitAudioReady() }
+                            }
                             val n = input.read(buffer, 0, minOf(buffer.size.toLong(), size - got).toInt())
                             if (n < 0) break
                             target.write(buffer, 0, n)

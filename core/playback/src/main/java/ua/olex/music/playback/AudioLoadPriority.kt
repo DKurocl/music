@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.first
 object AudioLoadPriority {
     private val buffering = MutableStateFlow(false)
 
+    val isBuffering: Boolean get() = buffering.value
+
     internal fun update(waiting: Boolean) { buffering.value = waiting }
 
     suspend fun awaitAudioReady() {

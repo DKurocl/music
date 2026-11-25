@@ -74,10 +74,17 @@ jobs:
         run: |
           set -o pipefail
           gradle :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease --no-daemon 2>&1 | tee -a build.log
-      - name: Verify the signature
+      - name: Verify APK alignment and owner identity
         if: steps.key.outputs.owner == 'true'
+        working-directory: app/build/outputs/apk/release
         run: |
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk | grep -E 'SHA-256' | tee -a "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          "$ANDROID_HOME/build-tools/37.0.0/zipalign" -c -P 16 4 app-release.apk
+          signer=$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs app-release.apk)
+          echo "$signer" | grep -E '^Signer #[0-9]+ certificate SHA-256 digest:' | tee -a "$GITHUB_STEP_SUMMARY"
+          expected='Signer #1 certificate SHA-256 digest: 5c2e57db99715e0fc65befdcf8febd1a00222a104a24d635f27f97d949abc107'
+          test "$(echo "$signer" | grep -E '^Signer #[0-9]+ certificate SHA-256 digest:')" = "$expected"
+          sha256sum app-release.apk | tee SHA256SUMS >> "$GITHUB_STEP_SUMMARY"
       - name: Summarize test evidence
         if: always()
         run: |
@@ -119,7 +126,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Music-install
-          path: app/build/outputs/apk/release/*.apk
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/SHA256SUMS
   release:
     # Every main build signed with the owner key becomes a release that Obtainium installs.
     # A build signed with a throwaway key is never published: it could not update the installed app.

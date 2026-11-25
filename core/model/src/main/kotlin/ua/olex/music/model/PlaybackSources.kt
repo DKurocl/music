@@ -50,17 +50,6 @@ data class PlaybackSourceChoice(val track: Track, val issue: SourceIssue? = null
 class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<String, String> = emptyMap()) {
     private val recordings = RecordingLookup(saved, aliases)
     private val bound = local.copy(songs = SavedCatalog.bindLocal(local, saved))
-    private data class Projection(val rejected: Set<String>, val available: (String) -> Boolean, val index: LibraryIndex)
-    @Volatile private var projection: Projection? = null
-
-    private fun localSources(rejected: Set<String>, available: (String) -> Boolean): LibraryIndex {
-        projection?.takeIf { it.rejected == rejected && it.available === available }?.let { return it.index }
-        return bound.copy(songs = bound.songs.filter { track ->
-            val source = RecordingSource.from(track)
-            source != null && source.key !in rejected && available(track.uri)
-        }).also { projection = Projection(rejected.toSet(), available, it) }
-    }
-
     /** Restore the original video intent after a previous physical-source substitution. */
     fun requested(track: Track): Track {
         val id = track.requestedId
@@ -90,23 +79,30 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
         val credited = (request.artists + request.artist).flatMap { it.split(CREDIT_SPLIT) }.map { it.trim() }.filter { it.isNotEmpty() }
         val wantedCredits = (request.artists + request.artist + credited).map { SongKey.of(it, request.title).value.substringBefore('|') }.toSet() +
             listOfNotNull(primary?.songKey?.substringBefore('|'))
-        val proposed = proposedLocal?.takeIf { local ->
-            val source = RecordingSource.from(local)
-            // The file's artist whole (a band name like "Earth, Wind & Fire" is one artist) must be one
-            // of the online song's credits, which are split ("A, B" credits A and B).
-            owned.any { it.key == source?.key } || (local.artists + local.artist).any { SongKey.of(it, request.title).value.substringBefore('|') in wantedCredits }
-        }?.let(RecordingSource::from)
+        val proposed = proposedLocal?.let { local ->
+            val source = RecordingSource.from(local) ?: return@let null
+            // A discovery result is only a candidate. A file's whole band name is one credit.
+            val creditMatches = (local.artists + local.artist).any {
+                SongKey.of(it, request.title).value.substringBefore('|') in wantedCredits
+            }
+            source.takeIf {
+                owned.any { it.key == source.key } ||
+                    (primary != null && primary.durationMs > 0 && source.durationMs > 0 && creditMatches)
+            }
+        }
         val incoming = (listOfNotNull(primary, proposed) + snapshot.references).distinctBy { it.key }
         val retained = incoming.filter { source ->
-            source.key == primary?.key || owned.any { it.key == source.key } ||
-                RecordingMatcher.canCombine(owned + listOfNotNull(primary) + source,
-                    (listOfNotNull(primary) + source).flatMap(recordings::possible).distinctBy { it.id })
+            if (source.key == primary?.key || owned.any { it.key == source.key }) return@filter true
+            if (primary?.kind == RecordingSourceKind.YOUTUBE && source.kind != RecordingSourceKind.YOUTUBE &&
+                (primary.durationMs <= 0 || source.durationMs <= 0 ||
+                    (source.key != proposed?.key && source.songKey.substringBefore('|') !in wantedCredits))) return@filter false
+            RecordingMatcher.canCombine(owned + listOfNotNull(primary) + source,
+                (listOfNotNull(primary) + source).flatMap(recordings::possible).distinctBy { it.id })
         }
         val mayAttach = known != null && RecordingMatcher.group(listOfNotNull(primary),
             listOf(RecordingCandidate(known.id, known.createdAt, owned, known.songKey, known.durationMs))).isNotEmpty()
         val reference = if (mayAttach) known!!.copy(sources = (retained + owned).distinctBy { it.key })
             else known ?: snapshot.copy(sources = retained)
-        val usable = localSources(rejected, available)
         // An explicitly empty set must not fall back to a legacy path and resurrect a failed source.
         val remaining = reference.references.filter { it.key !in rejected }
         val filtered = remaining.takeIf { it.isNotEmpty() }?.let {
@@ -114,16 +110,29 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
             // Online intent picks the best owned file and keeps the exact requested video reserve.
             reference.copy(path = snapshot.path, sources = it)
         }
-        val selected = filtered?.resolve(usable)
-        if (selected != null && !selected.uri.startsWith(SavedSong.ONLINE_PREFIX)) {
-            val actual = RecordingSource.from(selected)!!
-            val original = RecordingSource.from(request)
-            val direct = actual.key == original?.key && (known?.references ?: reference.references).all {
+        val mastering = request.title.mastering()
+        var incompatible = false
+        val selected = filtered?.resolve(bound) { candidate ->
+            val actual = RecordingSource.from(candidate) ?: return@resolve false
+            if (actual.key in rejected) return@resolve false
+            val exactLinkedVideo = primary != null && primary.kind == RecordingSourceKind.YOUTUBE &&
+                owned.any { it.key == primary.key } && owned.any { it.key == actual.key }
+            // A release or mastering label can be absent from an online answer. Preserve the
+            // requested edition unless the pair is already linked or its actual tags agree.
+            if (primary?.kind == RecordingSourceKind.YOUTUBE && !exactLinkedVideo && candidate.title.mastering() != mastering) {
+                incompatible = true
+                return@resolve false
+            }
+            val direct = actual.key == primary?.key && (known?.references ?: reference.references).all {
                 it.kind == RecordingSourceKind.LOCAL && it.songKey == actual.songKey && it.durationMs == actual.durationMs
             }
             val permitted = direct || RecordingMatcher.canCombine(reference.references + actual, recordings.possible(actual))
-            if (permitted) return PlaybackSourceChoice(selected.copy(sources =
-                (listOf(actual) + reference.references).distinctBy { it.key }))
+            if (!permitted) incompatible = true
+            permitted && available(candidate.uri)
+        }
+        if (selected != null && !selected.uri.startsWith(SavedSong.ONLINE_PREFIX)) {
+            val actual = RecordingSource.from(selected)!!
+            return PlaybackSourceChoice(selected.copy(sources = (listOf(actual) + reference.references).distinctBy { it.key }))
         }
         val online = filtered?.online()
         if (online != null && available(online.uri)) return PlaybackSourceChoice(online.copy(
@@ -134,7 +143,7 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
             request.uri.isNotBlank() && available(request.uri)) return PlaybackSourceChoice(request)
         val issue = when {
             online != null -> SourceIssue.OFFLINE
-            selected != null -> SourceIssue.AMBIGUOUS
+            incompatible -> SourceIssue.AMBIGUOUS
             else -> SourceIssue.MISSING
         }
         return PlaybackSourceChoice(reference.copy(path = snapshot.path).displayTrack(), issue)
@@ -143,3 +152,13 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
 
 /** Separators between credited artists in one artist field ("A, B", "A & B", "A feat. B"). */
 private val CREDIT_SPLIT = Regex("""\s*(,|&|\bfeat\.?|\bft\.?|\bwith\b|\bx\b|;)\s*""", RegexOption.IGNORE_CASE)
+
+private val MASTERING_WORDS = Regex("""\b(remaster(?:ed)?|mastering|deluxe edition|anniversary edition)\b""")
+private val MASTERING_YEAR = Regex("""\b(?:19|20)[0-9]{2}\b""")
+
+private fun String.mastering(): Pair<String, Set<String>>? {
+    val folded = TextFold.fold(this)
+    val marker = MASTERING_WORDS.find(folded)?.value ?: return null
+    val kind = if (marker.startsWith("remaster")) "remaster" else marker
+    return kind to MASTERING_YEAR.findAll(folded).map { it.value }.toSet()
+}

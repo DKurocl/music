@@ -18,10 +18,10 @@ data class SavedSong(
     val persistent: Boolean get() = !id.startsWith(SNAPSHOT_PREFIX)
 
     /** Prefer a matching file; retain every source when projecting it into the current library. */
-    fun resolve(library: LibraryIndex): Track? {
+    fun resolve(library: LibraryIndex, eligible: (Track) -> Boolean = { true }): Track? {
         val refs = references
         val missing = refs.firstOrNull { it.kind == RecordingSourceKind.MISSING_LOCAL }
-        if (missing != null) library.playlistPaths.resolve(missing.path.orEmpty()).track?.let { return bind(it) }
+        if (missing != null) library.playlistPaths.resolve(missing.path.orEmpty()).track?.takeIf(eligible)?.let { return bind(it) }
         val possible = (refs.map { it.songKey } + songKey).distinct().flatMap { library.bySongKey[it].orEmpty() }.distinctBy { it.id }
         val matches = RecordingMatcher.group(refs, possible.mapNotNull { track ->
             val source = RecordingSource.from(track)?.takeIf { it.kind == RecordingSourceKind.LOCAL } ?: return@mapNotNull null
@@ -29,9 +29,11 @@ data class SavedSong(
         }).mapTo(HashSet()) { it.id }
         val candidates = possible.filter { it.id.value in matches }
         val paths = refs.mapNotNull { it.path }.toSet()
-        val file = candidates.firstOrNull { it.path.orEmpty() == path }
-            ?: candidates.filter { it.path in paths }.maxByOrNull { it.format?.rank ?: 0 }
-            ?: candidates.maxByOrNull { it.format?.rank ?: 0 }
+        val file = candidates.sortedWith(
+            compareByDescending<Track> { it.path.orEmpty() == path }
+                .thenByDescending { it.path in paths }
+                .thenByDescending { it.format?.rank ?: 0 },
+        ).firstOrNull(eligible)
         return file?.let(::bind) ?: online()
     }
 
@@ -43,8 +45,7 @@ data class SavedSong(
         val uri = online.uri ?: return null
         val videoId = uri.removePrefix(ONLINE_PREFIX).takeIf { it.isNotBlank() } ?: return null
         return Track(TrackId("yt:$videoId"), uri, title, artist, album = album,
-            durationMs = online.durationMs.takeIf { it > 0 } ?: durationMs,
-            artworkUri = online.artworkUri ?: artworkUri.takeIf { path.startsWith(ONLINE_PREFIX) }, recordingId = id.takeIf { persistent },
+            durationMs = online.durationMs, artworkUri = online.artworkUri, recordingId = id.takeIf { persistent },
             sources = refs.takeIf { persistent || it.size > 1 }.orEmpty(), addedAt = createdAt.takeIf { it > 0 })
     }
 
@@ -70,6 +71,18 @@ data class SavedSong(
         const val ONLINE_PREFIX = "ytm://"
         /** Lookup snapshots are not durable IDs; UserRepository assigns or finds the recording ID. */
         const val SNAPSHOT_PREFIX = "source:"
+
+        /** Narrow a service-verified local selection to its exact requested video and physical file. */
+        fun fromPlaybackLink(track: Track): SavedSong? {
+            val videoId = track.requestedId?.takeIf { it.startsWith("yt:") }?.removePrefix("yt:") ?: return null
+            val file = RecordingSource.from(track)?.takeIf { it.kind == RecordingSourceKind.LOCAL } ?: return null
+            val provider = track.sources.firstOrNull {
+                it.kind == RecordingSourceKind.YOUTUBE && it.uri == ONLINE_PREFIX + videoId
+            } ?: return null
+            if (file.durationMs <= 0 || provider.durationMs <= 0 ||
+                !RecordingMatcher.canCombine(listOf(file, provider), emptyList())) return null
+            return from(track.copy(sources = listOf(provider)))
+        }
 
         fun from(track: Track): SavedSong {
             val key = track.key.value

@@ -74,6 +74,7 @@ internal class PlaybackStore(directory: File) {
         put("track", meta.trackNumber); put("disc", meta.discNumber); put("path", meta.extras?.getString(PlayerConnection.PATH_KEY))
         put("context", meta.extras?.getString(PlayerConnection.CONTEXT_KEY))
         put("requested", meta.extras?.getString(PlayerConnection.REQUESTED_KEY))
+        put("sourceIssue", meta.extras?.getString(PlaybackSourceItems.ISSUE))
         put("recording", meta.extras?.getString(PlayerConnection.RECORDING_KEY))
         put("sources", meta.extras?.getString(PlayerConnection.SOURCES_KEY))
         item.clippingConfiguration.takeIf { it.startPositionMs > 0 || it.endPositionMs != androidx.media3.common.C.TIME_END_OF_SOURCE }?.let {
@@ -83,7 +84,12 @@ internal class PlaybackStore(directory: File) {
 
     private fun decode(row: JSONObject): MediaItem {
         val uri = Uri.parse(row.getString("uri"))
-        return MediaItem.Builder().setMediaId(row.getString("id")).setUri(uri)
+        val key = row.getString("key")
+        val issue = row.string("sourceIssue")?.let { raw ->
+            ua.olex.music.model.SourceIssue.entries.firstOrNull { it.name == raw } ?: ua.olex.music.model.SourceIssue.MISSING
+        }
+        return MediaItem.Builder().setMediaId(row.getString("id"))
+            .setUri(if (issue == null) uri else PlaybackSourceItems.unavailableUri(key))
             .apply {
                 if (row.has("clipStart")) setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(row.getLong("clipStart")).setEndPositionMs(row.getLong("clipEnd")).build())
@@ -95,7 +101,8 @@ internal class PlaybackStore(directory: File) {
                 .setDurationMs(row.string("duration")?.toLong()).setTrackNumber(row.string("track")?.toInt()).setDiscNumber(row.string("disc")?.toInt())
                 .setIsPlayable(true).setIsBrowsable(false).setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                 .setExtras(Bundle().apply {
-                    putString(PlayerConnection.QUEUE_KEY, row.getString("key")); putString(PlayerConnection.PATH_KEY, row.string("path"))
+                    putString(PlayerConnection.QUEUE_KEY, key); putString(PlayerConnection.PATH_KEY, row.string("path"))
+                    putString(PlaybackSourceItems.ISSUE, issue?.name)
                     putString(ReplayGainCodec.TAGS, row.string("replayGain")); putString(PlayerConnection.CONTEXT_KEY, row.string("context"))
                     putString(PlayerConnection.REQUESTED_KEY, row.string("requested"))
                     putString(PlayerConnection.RECORDING_KEY, row.string("recording")); putString(PlayerConnection.SOURCES_KEY, row.string("sources"))

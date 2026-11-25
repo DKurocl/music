@@ -116,6 +116,7 @@ import ua.olex.music.playback.PlayerState
 @Composable
 fun MusicRoot(model: LibraryViewModel) {
     val library by model.catalogue.collectAsStateWithLifecycle()
+    androidx.activity.compose.ReportDrawnWhen { library != null || !model.allowed || model.scanError != null }
     val tracks = library?.songs
     val query = model.searchText
     val personal by model.personal.collectAsStateWithLifecycle()
@@ -616,15 +617,16 @@ fun MusicRoot(model: LibraryViewModel) {
             }
         }
     }
-    // Look ahead while a song plays: the next two have their stream address and cover ready before
-    // they start, so a skip or the next song never waits (see Prefetch). After a short settle, so the
-    // song that just started gets the network first.
-    LaunchedEffect(playing.mediaId, playing.nextIndex, playing.shuffle, network) {
-        if (!network || !playing.hasTrack) return@LaunchedEffect
-        kotlinx.coroutines.delay(1_500)
-        val next = playing.queue.getOrNull(playing.nextIndex)
-        val after = if (playing.shuffle || next == null) null else playing.queue.getOrNull(playing.nextIndex + 1)
-        context.graph.prefetch.upcoming(listOfNotNull(next, after).map { it.mediaId to it.artworkUri })
+    // Only the visible player warms artwork; the media service owns audio preloading.
+    val prefetchLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val prefetchAccount by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val nextCover = playing.queue.getOrNull(playing.nextIndex)
+    LaunchedEffect(nextCover?.key, nextCover?.artworkUri, playing.isPlaying, network, prefetchAccount, prefetchLifecycle) {
+        if (!network || !playing.isPlaying || nextCover == null) return@LaunchedEffect
+        prefetchLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            kotlinx.coroutines.delay(1_500)
+            context.graph.prefetch.upcoming(nextCover.artworkUri)
+        }
     }
     val travelling by remember { androidx.compose.runtime.derivedStateOf { travel.fraction > 0f } }
     if (openPlayer || playing.hasTrack && travelling) {

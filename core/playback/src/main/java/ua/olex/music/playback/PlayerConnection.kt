@@ -109,6 +109,8 @@ class PlayerConnection(context: Context) {
     private var pendingPlay: Pair<List<Track>, Int>? = null
     private var pendingContext: String? = null
     private var pendingStart = true
+    private var preparingSelection: Boolean? = null
+    private var preparationGeneration = 0L
     private var uiVisible = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val queueMutex = Mutex()
@@ -238,20 +240,27 @@ class PlayerConnection(context: Context) {
             connect()
             return
         }
+        val request = ++preparationGeneration
+        preparingSelection = startPlayback
         scope.coroutineContext.cancelChildren()
         val snapshot = tracks.toList()
         scope.launch {
-            queueMutex.withLock {
-                // A large library can contain thousands of items; metadata construction must not
-                // block touch handling. Player commands themselves still belong on the main thread.
-                val items = withContext(Dispatchers.Default) {
-                    snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track, playbackContext = context) }
+            try {
+                queueMutex.withLock {
+                    // A large library can contain thousands of items; metadata construction must not
+                    // block touch handling. Player commands themselves still belong on the main thread.
+                    val items = withContext(Dispatchers.Default) {
+                        snapshot.map { track -> currentCoroutineContext().ensureActive(); mediaItem(track, playbackContext = context) }
+                    }
+                    if (controller !== player || request != preparationGeneration) return@withLock
+                    val playNow = preparingSelection ?: startPlayback
+                    if (!playNow) player.pause()
+                    player.setMediaItems(items, index, C.TIME_UNSET)
+                    if (shuffle != null && player.shuffleModeEnabled != shuffle) player.shuffleModeEnabled = shuffle
+                    if (playNow) { player.prepare(); player.play() }
                 }
-                if (controller !== player) return@withLock
-                if (!startPlayback) player.pause()
-                player.setMediaItems(items, index, C.TIME_UNSET)
-                if (shuffle != null && player.shuffleModeEnabled != shuffle) player.shuffleModeEnabled = shuffle
-                if (startPlayback) { player.prepare(); player.play() }
+            } finally {
+                if (request == preparationGeneration) preparingSelection = null
             }
         }
     }
@@ -262,7 +271,17 @@ class PlayerConnection(context: Context) {
         player.playbackParameters = androidx.media3.common.PlaybackParameters(speed, pitch)
     }
 
-    fun toggle() { controller?.togglePlayback() }
+    fun toggle() {
+        val preparing = preparingSelection
+        if (preparing != null) {
+            preparingSelection = !preparing
+            if (preparing) controller?.pause()
+        } else if (pendingPlay != null) {
+            pendingStart = !pendingStart
+        } else {
+            controller?.togglePlayback()
+        }
+    }
     fun next() { controller?.seekToNextMediaItem() }
     /** Back to the start of the track, or to the previous one when already near the start. */
     fun previous() { controller?.seekToPrevious() }
@@ -495,6 +514,7 @@ class PlayerConnection(context: Context) {
         internal const val REQUESTED_KEY = "ua.olex.music.requested_id"
         internal const val RECORDING_KEY = "ua.olex.music.recording_id"
         internal const val SOURCES_KEY = "ua.olex.music.sources"
+        internal const val LOCAL_ADDED_AT = "ua.olex.music.local_added_at"
 
         /** Decode source evidence identically for history, radio, lyrics and the visible player. */
         fun track(item: MediaItem): Track {
@@ -515,6 +535,7 @@ class PlayerConnection(context: Context) {
                 clipStartMs = if (clipped) clip.startPositionMs else primary?.clipStartMs,
                 clipEndMs = if (clipped) clip.endPositionMs.takeIf { it != C.TIME_END_OF_SOURCE } else primary?.clipEndMs,
                 recordingId = extras?.getString(RECORDING_KEY),
+                addedAt = extras?.getLong(LOCAL_ADDED_AT)?.takeIf { it > 0 },
                 sources = sources, requestedId = extras?.getString(REQUESTED_KEY))
         }
         /** A track as the session carries it: its id, where to open it, and what to show. */
@@ -539,6 +560,9 @@ class PlayerConnection(context: Context) {
                         .setExtras(Bundle().apply { putString(PATH_KEY, track.path); putString(QUEUE_KEY, queueKey ?: UUID.randomUUID().toString()); putString(CONTEXT_KEY, playbackContext)
                             putString(RECORDING_KEY, track.recordingId)
                             putString(REQUESTED_KEY, track.requestedId ?: track.id.value)
+                            if (uri != null && uri.scheme == "content" && uri.authority == "media") {
+                                track.addedAt?.let { putLong(LOCAL_ADDED_AT, it) }
+                            }
                             val sources = (listOfNotNull(ua.olex.music.model.RecordingSource.from(track)) + track.sources.sortedBy { if (it.kind == ua.olex.music.model.RecordingSourceKind.YOUTUBE) 0 else 1 }).distinctBy { it.key }
                             putString(SOURCES_KEY, ua.olex.music.model.RecordingSourcesCodec.encode(sources.take(ua.olex.music.model.RecordingSourcesCodec.MAX_SOURCES)))
                             track.metadata?.let { tags -> putString(ReplayGainCodec.TAGS, ReplayGainCodec.encodeTags(ua.olex.music.dsp.ReplayGainTags(

@@ -200,3 +200,51 @@ Not run on Pixel/Sony. These scenarios supplement, not replace, the tests above.
    back. Cancel a back gesture halfway. Check the cover reaches the same thumbnail each time.
    Repeat from inline lyrics and while a new video is preparing. Use two tracks with different
    covers, repeat the swipe in both directions and watch the centre when the title changes.
+
+## Core Perfection phone-only baseline
+
+Use the already installed build and record its Obtainium tag if visible. The same steps can be
+repeated on the candidate later. Use the same track, Wi-Fi, output route and audio settings.
+Choose one local FLAC with an identifiable original on YouTube Music. Start with Music paused
+and no active download. This test records source choice, visible behaviour and perceived delay.
+
+1. In Android Settings, open Music's app info and tap **Force stop**. Open Music normally.
+   In YouTube Music Search, tap the original recording once as soon as its row appears. Wait
+   for sound before considering a second tap. In Now Playing, record **FLAC**, **online**, or
+   **unclear** and the number of taps. Check whether recommendations appeared before or after
+   sound, if it was visible.
+2. Stop or pause the track, return to the same search, and choose the same recording again.
+   Record the same fields for this warm case. If a second tap was genuinely required to produce
+   sound, record whether the source changed on that second tap.
+3. Search for a clearly distinct live version or edit that is not in the library. Check that it
+   does not select the studio FLAC. With airplane mode and Bluetooth manually restored if needed,
+   play the FLAC through Library Search. Record whether either case selected an unexpected source.
+4. Optional late-file case: while a stream is playing, add or finish importing its local copy
+   through the normal phone workflow. Record whether the current audio restarts, switches or
+   continues, then replay and record the source. Use a second recording for the fresh first-tap
+   baseline if the first has already entered play history.
+
+Use the delay buckets **under 1 s**, **1 to 3 s**, **over 3 s**, or **no audio**. They are
+subjective estimates. One failure is useful evidence. One success is a single observation.
+A phone-only report cannot establish exact audio onset, frame timing or attributed energy.
+No track title, email, network name or file path is required in the shared report.
+
+## Core Perfection first tap
+
+Status: awaiting Pixel 10 Pro XL / Android 17 and WF-1000XM5. Record app version code, exact build
+fingerprint, Wi-Fi/cellular, signed-in/public mode and codec where available. Use the signed branch
+candidate after CI and owner certificate verification. Use a uniquely identifiable local FLAC and
+the matching original video. Start with a recording that has no existing play history.
+
+1. Cold-start Music. Open YouTube Music Search and tap the first matching row as soon as it appears.
+   Verify that the player indicates FLAC on the first tap, starts it at the intended position and
+   adds one history event. Repeat from warm Search, full Songs results and a Home card.
+2. Repeat with the same title and a distinct live/edit version. Verify the unlinked version never
+   plays the studio FLAC. With a title-only unknown item the stream can still play if its metadata
+   does not arrive within the budget.
+3. With slow Wi-Fi, tap an owned file. Listen for the seed before recommendations arrive. Pause,
+   skip, or replace the queue before the provider answers and confirm the old continuation cannot
+   resume or repopulate it. Repeat with healthy playback while importing a better eligible file.
+4. Record audible onset with a test tone and external capture if available. In a debuggable build,
+   `adb logcat -s MusicCore` provides redacted source-stage counts and an `isPlaying` event proxy.
+   Report capture type separately. Repeat on the owner-signed release build for physical acceptance.

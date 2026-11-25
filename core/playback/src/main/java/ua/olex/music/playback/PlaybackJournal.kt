@@ -12,31 +12,27 @@ internal class PlaybackJournal(private val store: PlaybackStore) {
         data class Read(val result: CompletableDeferred<PlaybackCheckpoint?>) : Request
     }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val requests = Channel<Request>(Channel.UNLIMITED)
+    private val pending = ArrayDeque<Request>()
+    private val wake = Channel<Unit>(Channel.CONFLATED)
+    private var closed = false
 
     init {
         scope.launch {
             try {
-                var pending: Request? = null
-                while (true) {
-                    val request = pending ?: requests.receiveCatching().getOrNull() ?: break
-                    pending = null
-                    when (request) {
-                        is Request.Write -> {
-                            var latest = request.state
-                            // Coalesce a burst of timeline/position events, stopping at the next read barrier.
-                            while (true) {
-                                val next = requests.tryReceive().getOrNull() ?: break
-                                if (next is Request.Write) latest = next.state else { pending = next; break }
-                            }
-                            try { store.write(latest) }
+                for (signal in wake) {
+                    while (true) {
+                        val request = synchronized(pending) { pending.removeFirstOrNull() } ?: break
+                        when (request) {
+                            is Request.Write -> try { store.write(request.state) }
                             catch (cancelled: CancellationException) { throw cancelled }
-                            catch (failure: Exception) { Log.w("MusicPlayback", "Could not save playback: ${failure.javaClass.simpleName}") }
-                        }
-                        is Request.Read -> {
-                            try { request.result.complete(store.read()) }
-                            catch (cancelled: CancellationException) { request.result.cancel(cancelled); throw cancelled }
-                            catch (failure: Exception) { request.result.completeExceptionally(failure) }
+                            catch (failure: Exception) {
+                                Log.w("MusicPlayback", "Could not save playback: ${failure.javaClass.simpleName}")
+                            }
+                            is Request.Read -> if (request.result.isActive) {
+                                try { request.result.complete(store.read()) }
+                                catch (cancelled: CancellationException) { request.result.cancel(cancelled); throw cancelled }
+                                catch (failure: Exception) { request.result.completeExceptionally(failure) }
+                            }
                         }
                     }
                 }
@@ -44,13 +40,30 @@ internal class PlaybackJournal(private val store: PlaybackStore) {
         }
     }
 
-    fun write(state: PlaybackCheckpoint) { requests.trySend(Request.Write(state)) }
+    private fun post(request: Request): Boolean = synchronized(pending) {
+        if (closed) return@synchronized false
+        // Coalesce before enqueueing so a stalled disk cannot accumulate whole queue snapshots.
+        // A Read remains a barrier and always sees the latest Write before it.
+        if (request is Request.Write && pending.lastOrNull() is Request.Write) pending.removeLast()
+        pending.addLast(request)
+        wake.trySend(Unit)
+        true
+    }
+
+    fun write(state: PlaybackCheckpoint) { post(Request.Write(state)) }
+
     suspend fun read(): PlaybackCheckpoint? {
         val result = CompletableDeferred<PlaybackCheckpoint?>()
-        requests.send(Request.Read(result))
-        return result.await()
+        check(post(Request.Read(result))) { "Playback journal is closed" }
+        return try { result.await() } finally { if (!result.isCompleted) result.cancel() }
     }
-    fun close() { requests.close() }
+
+    fun close() {
+        synchronized(pending) {
+            closed = true
+            wake.close()
+        }
+    }
 
     companion object {
         @Volatile private var instance: PlaybackJournal? = null
