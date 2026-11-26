@@ -102,9 +102,15 @@ internal fun HomePage(
         }.value
     }
     val cacheRevision = ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value
-    val cachedExtras = rememberOffMain(history, favourites, youTubeHome, cacheRevision, initial = emptyList<Track>()) {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    val cachedExtras = rememberOffMain(history, favourites, youTubeHome, cacheRevision, homeActive, initial = emptyList<Track>()) {
         val candidates = history + favourites + youTubeHome.flatMap { shelf ->
             shelf.songs + shelf.cards.filter { it.kind == YouTubeMusic.Card.Kind.SONG }.map { it.song() }
+        }
+        if (homeActive && candidates.any(YouTubeMusic::isOnline)) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                ua.olex.music.playback.CacheBudget.openExistingStreams(app)
+            }
         }
         candidates.filter { YouTubeMusic.isOnline(it) && ua.olex.music.playback.CacheBudget.isStreamCached(it.uri) }
             .distinctBy { it.recordingId ?: it.id.value }

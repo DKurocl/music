@@ -26,6 +26,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -43,6 +44,7 @@ import ua.olex.music.model.PlaybackHistoryGate
 import ua.olex.music.model.PlaybackIntent
 import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
+import kotlinx.coroutines.ensureActive
 
 /**
  * Playback lives here, apart from any screen: Android keeps it alive as a media foreground
@@ -58,6 +60,7 @@ class PlaybackService : MediaLibraryService() {
     private val sleepTimer = SleepTimer()
     private var sleepJob: Job? = null
     private val historyGate = PlaybackHistoryGate()
+    private val explicitNext = ExplicitNext()
     private var listening: PlaybackListening? = null
     private var listeningOccurrence: String? = null
     private var diagnostics = AudioDiagnostics()
@@ -65,6 +68,7 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var equalizer: EqualizerController
     private var equalizerRoute: OutputRouteMonitor? = null
     private var persistence: PlaybackPersistence? = null
+    private var sourceObserver: Job? = null
     private val usb by lazy { UsbBitPerfect(this) }
     private val routeCallback = object : android.media.AudioDeviceCallback() {
         override fun onAudioDevicesAdded(addedDevices: Array<out android.media.AudioDeviceInfo>?) {
@@ -76,7 +80,10 @@ class PlaybackService : MediaLibraryService() {
             if (addedDevices.orEmpty().any { it.isSink && HeadsetRules.isHeadset(it) && it.productName?.toString() in chosen } &&
                 !player.isPlaying && player.mediaItemCount > 0) player.play()
         }
-        override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) = usb.update(diagnostics.sampleRateHz)
+        override fun onAudioDevicesRemoved(removedDevices: Array<out android.media.AudioDeviceInfo>?) {
+            explicitNext.clear()
+            usb.update(diagnostics.sampleRateHz)
+        }
     }
     private val outputPrefs = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> usb.update(diagnostics.sampleRateHz); updateOffload() }
 
@@ -144,7 +151,7 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         }
-        Thread { NowPlaying.publishPreview(this) }.start()
+        scope.launch(Dispatchers.Default) { NowPlaying.publishPreview(this@PlaybackService) }
         equalizer = EqualizerController(this) { state -> session?.let { current ->
             current.setSessionExtras(Bundle(current.sessionExtras).apply { putBundle(EqualizerCommand.KEY, EqualizerCommand.bundle(state)) })
             scope.launch { updateOffload() }
@@ -158,14 +165,28 @@ class PlaybackService : MediaLibraryService() {
         val playbackPrefs = getSharedPreferences(FadingPlayer.PREFS, MODE_PRIVATE)
         val faded = FadingPlayer(player, scope) { playbackPrefs.getBoolean(FadingPlayer.KEY, true) }.also { fading = it }
         val castable: Player = runCatching {
-            com.google.android.gms.cast.framework.CastContext.getSharedInstance(this, java.util.concurrent.Executors.newSingleThreadExecutor())
+            com.google.android.gms.cast.framework.CastContext.getSharedInstance(this, Dispatchers.IO.asExecutor())
             androidx.media3.cast.CastPlayer.Builder(this).setLocalPlayer(faded)
                 .setRemotePlayer(androidx.media3.cast.RemoteCastPlayer.Builder(this).setMediaItemConverter(LanMediaItemConverter(lanServer)).build())
                 .build()
         }.getOrElse { faded }
         val shown = LyricLinePlayer(castable,
             explicitPlay = { sourceAttempts.reset(); recovery?.cancel() },
-            onTransport = playbackIntent::request)
+            onTransport = { playing ->
+                explicitNext.clear()
+                playbackIntent.request(playing)
+                if (!playing) cancelRefill()
+            },
+            onExplicitNext = {
+                explicitNext.clear()
+                if (castable.isPlaying && player.isPlaying && !usesRemotePlayback()) {
+                    val next = player.nextMediaItemIndex
+                    if (next in 0 until player.mediaItemCount) {
+                        explicitNext.remember(listeningOccurrence, occurrence(player.getMediaItemAt(next)),
+                            SystemClock.elapsedRealtime(), player.currentPosition, player.duration)
+                    }
+                }
+            })
         shown.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
@@ -180,10 +201,14 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlaybackParametersChanged(playbackParameters: androidx.media3.common.PlaybackParameters) {
                 updateOffload()
             }
+
+            override fun onDeviceInfoChanged(deviceInfo: androidx.media3.common.DeviceInfo) {
+                if (deviceInfo.playbackType == androidx.media3.common.DeviceInfo.PLAYBACK_TYPE_LOCAL) lanServer.stop()
+            }
         })
         lockLyrics = LockScreenLyrics(this, player, shown, scope)
         getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).registerOnSharedPreferenceChangeListener(lyricPrefs)
-        val builder = MediaLibrarySession.Builder(this, shown, Callback()).setBitmapLoader(SessionArtwork(this))
+        val builder = MediaLibrarySession.Builder(this, shown, Callback()).setBitmapLoader(SessionArtwork(this, scope))
         // Tapping the notification opens the app.
         packageManager.getLaunchIntentForPackage(packageName)?.apply { putExtra(OPEN_PLAYER, true); addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP) }?.let { launch ->
             builder.setSessionActivity(PendingIntent.getActivity(this, 0, launch, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
@@ -203,10 +228,7 @@ class PlaybackService : MediaLibraryService() {
                 current.setSessionExtras(Bundle(current.sessionExtras).apply { putBoolean(QUEUE_RESTORED, true) })
             }
             scope.launch { refreshQueueSources() }
-        }) { selectSources(it, allowDirect = true) }
-        (application as? MediaCatalogOwner)?.let { owner -> scope.launch {
-            owner.playbackSourceChanges.collectLatest { refreshQueueSources() }
-        } }
+        }, onPeriodicCheckpoint = { listening?.checkpoint() }) { selectSources(it, allowDirect = true) }
         updateOffload()
         player.addAnalyticsListener(object : AnalyticsListener {
             override fun onAudioDecoderInitialized(eventTime: AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
@@ -245,6 +267,7 @@ class PlaybackService : MediaLibraryService() {
         listening = (application as? PlaybackHistoryOwner)?.let(::PlaybackListening)
         player.addListener(object : Player.Listener {
             override fun onEvents(player: Player, events: Player.Events) {
+                if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_PLAY_WHEN_READY_CHANGED)) updateSourceObserver()
                 AudioLoadPriority.update(player.playWhenReady &&
                     (player.playbackState == Player.STATE_BUFFERING))
                 val current = player.currentMediaItem
@@ -255,20 +278,29 @@ class PlaybackService : MediaLibraryService() {
                 if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION)) {
                     rememberCurrentLink(current)
                 }
-                if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION, Player.EVENT_IS_PLAYING_CHANGED)) refillQueue()
+                val traversalChanged = events.containsAny(Player.EVENT_REPEAT_MODE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)
+                if (traversalChanged || (events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED) && !player.playWhenReady)) cancelRefill()
+                if (traversalChanged || events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_MEDIA_ITEM_TRANSITION,
+                        Player.EVENT_IS_PLAYING_CHANGED)) refillQueue()
             }
-            override fun onPlayerError(error: PlaybackException) = recoverSource(error)
+            override fun onPlayerError(error: PlaybackException) {
+                explicitNext.clear()
+                recoverSource(error)
+            }
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 lockLyrics?.update()
                 val key = mediaItem?.mediaMetadata?.extras?.getString(PlayerConnection.QUEUE_KEY) ?: mediaItem?.mediaId
+                if (key != listeningOccurrence) cancelRefill()
                 if (coreDiagnostics && key != null && key != listeningOccurrence) {
                     diagnosticOccurrence = key
                     diagnosticAudioOccurrence = key
                     diagnosticStartedAt = android.os.SystemClock.elapsedRealtime()
                 }
                 val replay = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT
-                if (replay || listeningOccurrence != key) listening?.finish()
+                val earlySkip = explicitNext.consume(listeningOccurrence, key,
+                    reason == Player.MEDIA_ITEM_TRANSITION_REASON_SEEK, SystemClock.elapsedRealtime())
+                if (replay || listeningOccurrence != key) listening?.finish(earlySkip)
                 listeningOccurrence = key
                 historyGate.transition(key, replay)
                 recordCurrentPlayback()
@@ -283,20 +315,22 @@ class PlaybackService : MediaLibraryService() {
                     recordCurrentPlayback()
                 } else {
                     listening?.pause()
-                    if (session?.player?.playWhenReady != true) {
-                        refill?.cancel()
-                        refill = null
-                    }
+                    if (session?.player?.playWhenReady != true) cancelRefill()
                 }
                 publishNowPlaying()
                 lockLyrics?.update()
             }
             override fun onMediaMetadataChanged(mediaMetadata: androidx.media3.common.MediaMetadata) = publishNowPlaying()
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady) explicitNext.clear()
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) finishEndOfTrackTimer()
+            }
+            override fun onPlaybackSuppressionReasonChanged(playbackSuppressionReason: Int) {
+                if (playbackSuppressionReason != Player.PLAYBACK_SUPPRESSION_REASON_NONE) explicitNext.clear()
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == Player.STATE_ENDED) {
+                    explicitNext.clear()
                     listening?.finish()
                     historyGate.transition()
                     if (endOfTrack && !usesRemotePlayback()) {
@@ -308,10 +342,27 @@ class PlaybackService : MediaLibraryService() {
         })
     }
 
+    private fun updateSourceObserver() {
+        val owner = application as? MediaCatalogOwner ?: return
+        val player = exoOrNull() ?: return
+        val follow = player.mediaItemCount > 0 && (player.playWhenReady || appScreens.isNotEmpty())
+        if (follow && sourceObserver?.isActive != true) {
+            sourceObserver = scope.launch { owner.playbackSourceChanges.collectLatest { refreshQueueSources() } }
+        } else if (!follow) {
+            sourceObserver?.cancel()
+            sourceObserver = null
+        }
+    }
+
+    private fun cancelRefill() {
+        refill?.cancel()
+        refill = null
+    }
+
     private fun refillQueue() {
         val owner = application as? PlaybackQueueOwner ?: return
         val player = exoOrNull() ?: return
-        if (!player.isPlaying || refill?.isActive == true || player.mediaItemCount == 0 || player.repeatMode == Player.REPEAT_MODE_ONE) return
+        if (refill?.isActive == true || session?.player?.playWhenReady != true || !canRefillQueue(player)) return
         val request = sourceRequest
         val current = player.currentMediaItemIndex
         val shuffle = player.shuffleModeEnabled
@@ -327,19 +378,59 @@ class PlaybackService : MediaLibraryService() {
         }
         if (remaining >= 4) return
         val from = (current - 100).coerceAtLeast(0)
-        val items = (from until player.mediaItemCount).map(player::getMediaItemAt)
         refill = scope.launch {
             try {
-                val tracks = withContext(Dispatchers.Default) { items.map(PlayerConnection::track) }
+                val (items, tracks) = withContext(Dispatchers.Default) {
+                    val snapshot = timelineItems(timeline, from)
+                    snapshot to snapshot.map(PlayerConnection::track)
+                }
                 val context = items.getOrNull(current - from)?.mediaMetadata?.extras?.getString(PlayerConnection.CONTEXT_KEY)
-                val extension = owner.extendPlaybackQueue(tracks, current - from, context, remaining) ?: return@launch
-                val selected = selectSources(extension.tracks.map { PlayerConnection.mediaItem(it, playbackContext = context) }, allowDirect = true)
-                if (request != sourceRequest || player.currentMediaItemIndex != current || player.shuffleModeEnabled != shuffle || player.repeatMode != repeat ||
-                    (from until player.mediaItemCount).map { occurrence(player.getMediaItemAt(it)) } != items.map(::occurrence)) return@launch
-                if (extension.commit() && selected.isNotEmpty()) QueueCommand.enqueue(player, selected, false)
+                owner.extendPlaybackQueue(tracks, current - from, context, remaining) { extension ->
+                    val selected = resolveRecommendations(extension.tracks, context)
+                    val latest = player.currentTimeline
+                    if (latest.windowCount != timeline.windowCount) return@extendPlaybackQueue
+                    val matches = latest === timeline || withContext(Dispatchers.Default) {
+                        val window = androidx.media3.common.Timeline.Window()
+                        items.indices.all { i -> occurrence(latest.getWindow(from + i, window).mediaItem) == occurrence(items[i]) }
+                    }
+                    if (!matches || session?.player?.playWhenReady != true || request != sourceRequest ||
+                        player.currentMediaItemIndex != current || player.shuffleModeEnabled != shuffle ||
+                        player.repeatMode != repeat || player.currentTimeline !== latest) return@extendPlaybackQueue
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val eligible = selected.filter { extension.isAllowed(it.requested) && extension.isAllowed(it.actual) }
+                        .map { it.item }
+                    if (extension.commit() && eligible.isNotEmpty()) QueueCommand.enqueue(player, eligible, false)
+                }
 
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { Log.w("MusicMix", "Could not extend queue: ${failure.javaClass.simpleName}") }
+        }
+    }
+
+    private fun timelineItems(timeline: androidx.media3.common.Timeline, start: Int = 0): List<MediaItem> {
+        val window = androidx.media3.common.Timeline.Window()
+        return List(timeline.windowCount - start) { timeline.getWindow(start + it, window).mediaItem }
+    }
+
+    private data class ResolvedRecommendation(val requested: Track, val actual: Track, val item: MediaItem)
+
+    private suspend fun resolveRecommendations(tracks: List<Track>, context: String?): List<ResolvedRecommendation> {
+        val resolved = selectSources(tracks.map { PlayerConnection.mediaItem(it, playbackContext = context) })
+        return withContext(Dispatchers.IO) {
+            tracks.zip(resolved).mapNotNull { (requested, item) ->
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val uri = item.localConfiguration?.uri ?: return@mapNotNull null
+                val playable = when (uri.scheme) {
+                    "ytm" -> requested.uri.startsWith(ua.olex.music.model.SavedSong.ONLINE_PREFIX)
+                    "file" -> uri.path?.let { java.io.File(it).canRead() } == true
+                    "content" -> try {
+                        contentResolver.openAssetFileDescriptor(uri, "r")?.use { true } == true
+                    } catch (_: java.io.IOException) { false }
+                    catch (_: SecurityException) { false }
+                    else -> false
+                }
+                if (playable) ResolvedRecommendation(requested, PlayerConnection.track(item), item) else null
+            }
         }
     }
 
@@ -356,8 +447,7 @@ class PlaybackService : MediaLibraryService() {
         // Timeline is immutable. Read its windows and diff source metadata off the player thread.
         val timeline = player.currentTimeline
         val selected = withContext(Dispatchers.Default) {
-            val window = androidx.media3.common.Timeline.Window()
-            val snapshot = List(timeline.windowCount) { timeline.getWindow(it, window).mediaItem }
+            val snapshot = timelineItems(timeline)
             val resolved = selectSources(snapshot, allowDirect = true)
             buildMap {
                 for (i in snapshot.indices) {
@@ -520,6 +610,7 @@ class PlaybackService : MediaLibraryService() {
         lockLyrics?.release()
         runCatching { getSystemService(android.media.AudioManager::class.java).unregisterAudioDeviceCallback(routeCallback) }
         getSharedPreferences(UsbBitPerfect.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(outputPrefs)
+        getSharedPreferences(LockScreenLyrics.PREFS, MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(lyricPrefs)
         usb.clear()
         lanServer.stop()
         equalizerRoute?.stop()
@@ -531,6 +622,12 @@ class PlaybackService : MediaLibraryService() {
         scope.cancel()
         session?.run { player.release(); release() }
         session = null
+        if (coreDiagnostics) {
+            val counts = StreamCacheMetrics.debugSession.take()
+            if (counts.cachedBytes > 0 || counts.cacheBypasses > 0) {
+                Log.d("MusicCore", "streamCacheBytes=${counts.cachedBytes} streamCacheBypasses=${counts.cacheBypasses}")
+            }
+        }
         super.onDestroy()
     }
 
@@ -679,20 +776,30 @@ class PlaybackService : MediaLibraryService() {
         if (items.isEmpty()) return emptyList()
         if (trusted && items.all { it.requestMetadata.mediaUri != null || it.localConfiguration != null }) return items
         val catalog = tree() ?: throw IllegalArgumentException("The library is unavailable")
-        return items.flatMap { item ->
-            if (trusted && (item.requestMetadata.mediaUri != null || item.localConfiguration != null || item.mediaId.startsWith("yt:"))) listOf(item)
-            else catalog.item(item.mediaId)?.track?.let { listOf(PlayerConnection.mediaItem(it)) }
-                ?: catalog.resolvePlay(item.mediaId)?.first?.map { PlayerConnection.mediaItem(it) }
-                ?: throw IllegalArgumentException("Unknown library item")
-        }.also { require(it.size <= ua.olex.music.model.TrackSelection.MAX_ITEMS) }
+        return withContext(Dispatchers.Default) {
+            buildList {
+                for (item in items) {
+                    kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                    val remaining = ua.olex.music.model.TrackSelection.MAX_ITEMS - size
+                    require(remaining > 0)
+                    if (trusted && (item.requestMetadata.mediaUri != null || item.localConfiguration != null || item.mediaId.startsWith("yt:"))) {
+                        add(item)
+                    } else {
+                        val track = catalog.item(item.mediaId)?.track
+                        val tracks = track?.let { listOf(it) } ?: catalog.resolvePlay(item.mediaId)?.first
+                            ?: throw IllegalArgumentException("Unknown library item")
+                        require(tracks.size <= remaining)
+                        tracks.forEach {
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            add(PlayerConnection.mediaItem(it))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun <T> future(block: suspend () -> T): ListenableFuture<T> = scope.future { block() }
-
-    private fun <T> page(items: List<T>, page: Int, size: Int): List<T> {
-        val from = (page.toLong() * size).coerceAtMost(items.size.toLong()).toInt()
-        return items.subList(from, (from + size).coerceAtMost(items.size))
-    }
 
     private inner class Callback : MediaLibrarySession.Callback {
         override fun onGetLibraryRoot(session: MediaLibrarySession, browser: MediaSession.ControllerInfo, params: LibraryParams?) =
@@ -703,7 +810,7 @@ class PlaybackService : MediaLibraryService() {
             withContext(Dispatchers.Default) {
                 val nodes = snapshot?.children(parentId)
                     ?: return@withContext LibraryResult.ofError<com.google.common.collect.ImmutableList<MediaItem>>(SessionError.ERROR_BAD_VALUE)
-                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(nodes, page, pageSize.coerceAtLeast(1)).map { it.toMediaItem() }), params)
+                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(browsePage(nodes, page, pageSize).map { it.toMediaItem() }), params)
             }
         }
 
@@ -722,7 +829,7 @@ class PlaybackService : MediaLibraryService() {
             val snapshot = tree()
             withContext(Dispatchers.Default) {
                 val found = snapshot?.search(query).orEmpty()
-                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(page(found, page, pageSize.coerceAtLeast(1)).map { PlayerConnection.mediaItem(it) }), params)
+                LibraryResult.ofItemList(com.google.common.collect.ImmutableList.copyOf(browsePage(found, page, pageSize).map { PlayerConnection.mediaItem(it) }), params)
             }
         }
 
@@ -748,18 +855,24 @@ class PlaybackService : MediaLibraryService() {
             initialStream = null
             persistence?.supersedeRestore()
             recovery?.cancel()
-            refill?.cancel()
-            refill = null
+            cancelRefill()
             return future {
                 val single = mediaItems.singleOrNull()
                 val unresolved = single != null && single.requestMetadata.mediaUri == null && single.localConfiguration == null
                 val resolved = if (unresolved) {
                     val catalog = tree()
                     val query = single.requestMetadata.searchQuery
-                    if (single.mediaId.isEmpty() && !query.isNullOrBlank()) catalog?.search(query)?.takeIf { it.isNotEmpty() }?.let { it to 0 }
-                    else catalog?.resolvePlay(single.mediaId)
+                    withContext(Dispatchers.Default) {
+                        if (single.mediaId.isEmpty() && !query.isNullOrBlank()) catalog?.search(query)?.takeIf { it.isNotEmpty() }?.let { it to 0 }
+                        else catalog?.resolvePlay(single.mediaId)
+                    }
                 } else null
-                val items = if (resolved != null) resolved.first.map { PlayerConnection.mediaItem(it) }
+                val items = if (resolved != null) withContext(Dispatchers.Default) {
+                    resolved.first.map {
+                        kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                        PlayerConnection.mediaItem(it)
+                    }
+                }
                     else expandSources(mediaItems, controller.uid == Process.myUid())
                 if (request != sourceRequest) throw CancellationException("Superseded playback selection")
                 if (items.isEmpty()) {
@@ -769,8 +882,8 @@ class PlaybackService : MediaLibraryService() {
                 val selected = selectSources(items, allowDirect = controller.uid == Process.myUid(), enrichSelection = true)
                 if (request != sourceRequest) throw CancellationException("Superseded playback selection")
                 val chosen = (resolved?.second ?: startIndex).coerceIn(0, selected.lastIndex.coerceAtLeast(0))
-                val available = selected.indices.filter { PlaybackSourceItems.error(selected[it]) == null }
-                val start = available.firstOrNull { it >= chosen } ?: available.firstOrNull() ?: chosen
+                val start = (chosen until selected.size).firstOrNull { PlaybackSourceItems.error(selected[it]) == null }
+                    ?: (0 until chosen).firstOrNull { PlaybackSourceItems.error(selected[it]) == null } ?: chosen
                 if (start == chosen && startPositionMs <= 0) observeInitialStream(selected.getOrNull(start), requestedAt)
                 MediaSession.MediaItemsWithStartPosition(selected, start,
                     if (start == chosen && startPositionMs > 0) startPositionMs else androidx.media3.common.C.TIME_UNSET)
@@ -783,7 +896,10 @@ class PlaybackService : MediaLibraryService() {
 
         private fun setScreenVisible(controller: MediaSession.ControllerInfo, visible: Boolean) {
             val changed = if (visible) appScreens.add(controller) else appScreens.remove(controller)
-            if (changed) lockLyrics?.appVisible = appScreens.isNotEmpty()
+            if (changed) {
+                lockLyrics?.appVisible = appScreens.isNotEmpty()
+                updateSourceObserver()
+            }
         }
 
         override fun onConnectAsync(
@@ -798,6 +914,7 @@ class PlaybackService : MediaLibraryService() {
                 result.setAvailableSessionCommands(
                     MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                         .add(SleepTimerCommand.command).add(QueueCommand.command).add(EqualizerCommand.command).add(ReplayGainCommand.command)
+                        .add(QueueCommand.editCommand)
                         .add(LockScreenLyrics.uiVisibilityCommand)
                         .build(),
                 )
@@ -836,6 +953,12 @@ class PlaybackService : MediaLibraryService() {
                 } catch (_: Exception) { false }
                 return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
             }
+            if (customCommand.customAction == QueueCommand.EDIT) {
+                if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
+                val accepted = QueueCommand.edit(session.player, args)
+                if (accepted) persistence?.supersedeRestore()
+                return Futures.immediateFuture(SessionResult(if (accepted) SessionResult.RESULT_SUCCESS else SessionError.ERROR_BAD_VALUE))
+            }
             if (customCommand.customAction == QueueCommand.ACTION) {
                 if (controller.uid != Process.myUid()) return Futures.immediateFuture(SessionResult(SessionError.ERROR_PERMISSION_DENIED))
                 persistence?.supersedeRestore()
@@ -846,8 +969,7 @@ class PlaybackService : MediaLibraryService() {
                     ++sourceRequest
                     initialStream = null
                     recovery?.cancel()
-                    refill?.cancel()
-                    refill = null
+                    cancelRefill()
                 }
                 val request = sourceRequest
                 val intent = playbackIntent.revision()
@@ -932,4 +1054,16 @@ class PlaybackService : MediaLibraryService() {
         /** In [UsbBitPerfect.PREFS]: the owner's battery-saver offload switch. */
         const val OFFLOAD_KEY = "offload"
     }
+}
+
+/** Explicit repeat owns traversal, so an automatic tail never changes what repeats. */
+internal fun canRefillQueue(player: Player): Boolean =
+    player.isPlaying && player.mediaItemCount > 0 && player.repeatMode == Player.REPEAT_MODE_OFF
+
+internal fun <T> browsePage(items: List<T>, page: Int, size: Int): List<T> {
+    if (page < 0 || size <= 0) return emptyList()
+    val from = page.toLong() * size
+    if (from >= items.size) return emptyList()
+    val end = minOf(from + size, items.size.toLong())
+    return items.subList(from.toInt(), end.toInt())
 }

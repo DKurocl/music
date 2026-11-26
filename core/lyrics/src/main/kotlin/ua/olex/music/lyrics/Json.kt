@@ -7,14 +7,17 @@ package ua.olex.music.lyrics
 object Json {
     fun parse(text: String): Any? = Reader(text).run { val v = value(); ws(); if (i != s.length) error("trailing data"); v }
 
+    private const val MAX_DEPTH = 128
+
     private class Reader(val s: String) {
         var i = 0
         fun ws() { while (i < s.length && s[i].isWhitespace()) i++ }
-        fun value(): Any? {
+        fun value(depth: Int = 0): Any? {
+            require(depth <= MAX_DEPTH) { "JSON nesting exceeds the parser limit" }
             ws()
             if (i >= s.length) error("end of input")
             return when (val c = s[i]) {
-                '{' -> obj(); '[' -> arr(); '"' -> str()
+                '{' -> obj(depth); '[' -> arr(depth); '"' -> str()
                 't' -> lit("true", true); 'f' -> lit("false", false); 'n' -> lit("null", null)
                 else -> if (c == '-' || c.isDigit()) num() else error("unexpected '$c' at $i")
             }
@@ -45,17 +48,17 @@ object Json {
             }
             error("unterminated string")
         }
-        fun arr(): List<Any?> {
+        fun arr(depth: Int): List<Any?> {
             i++; val out = ArrayList<Any?>(); ws()
             if (s[i] == ']') { i++; return out }
-            while (true) { out += value(); ws(); when (s[i++]) { ',' -> continue; ']' -> return out; else -> error("bad array at $i") } }
+            while (true) { out += value(depth + 1); ws(); when (s[i++]) { ',' -> continue; ']' -> return out; else -> error("bad array at $i") } }
         }
-        fun obj(): Map<String, Any?> {
+        fun obj(depth: Int): Map<String, Any?> {
             i++; val out = LinkedHashMap<String, Any?>(); ws()
             if (s[i] == '}') { i++; return out }
             while (true) {
                 ws(); val k = str(); ws(); if (s[i++] != ':') error("expected ':' at $i")
-                out[k] = value(); ws()
+                out[k] = value(depth + 1); ws()
                 when (s[i++]) { ',' -> continue; '}' -> return out; else -> error("bad object at $i") }
             }
         }

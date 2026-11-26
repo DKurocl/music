@@ -7,6 +7,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -35,6 +36,28 @@ class OnlinePageStoreTest {
         )
         assertEquals(album to listOf(track, track), reopen("account-a").album("PL_test", offline = true))
         assertNull(reopen("account-b").album("PL_test", offline = true))
+    }
+
+    @Test fun aPartialRefreshKeepsTheLastCompleteOfflinePlaylist() = runBlocking {
+        val store = OnlinePageStore(folder.newFolder())
+        val saved = YouTubeMusic.OnlineAlbum("PL_complete", "Saved", null, null)
+        val track = Track(TrackId("yt:saved"), "ytm://saved", "Saved song", "Artist")
+        store.write("public", "album:${saved.id}", JSONObject().put("album", OnlinePageJson.album(saved))
+            .put("songs", OnlinePageJson.tracks(listOf(track))))
+        val row = """{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"prefix"},"flexColumns":[
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Track"}]}}},
+            {"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Artist"}]}}}]}}"""
+        val source = YouTubeMusic(pageStore = store, transport = { _, fields, _ ->
+            if ("continuation" in fields) """{"contents":[$row]}"""
+            else """{"musicDetailHeaderRenderer":{"title":{"simpleText":"Fresh"}},"contents":[$row],
+                "continuations":[{"nextContinuationData":{"continuation":"remaining"}}]}"""
+        })
+        assertTrue(source.album(saved.id)?.first?.partial == true)
+        assertEquals(saved to listOf(track), source.album(saved.id, offline = true))
+        assertTrue(source.album("PL_partial")?.first?.partial == true)
+        assertTrue(source.album("PL_partial", offline = true)?.first?.partial == true)
+        val complete = source.albumMore("PL_partial")!!
+        assertEquals(complete, source.album("PL_partial", offline = true))
     }
 
     @Test fun deniedBrowseRecoversTheSignedInPlaylistFromItsPageAndContinuesWithTheSameSession() = runBlocking {

@@ -1,0 +1,43 @@
+owner	resource_class	trigger	stop_or_cancel	evidence	status
+AppGraph.index	Room read and index CPU	UI, browse, or explicit waiter	Last flow subscriber ends	LibraryIndexTest; cold launch on Pixel pending	implemented
+AppGraph.allFiles	Room read and index CPU	Playback source subscriber or bounded cold lookup	Last flow subscriber ends	PlaybackSourcePolicyTest; service lifecycle pending	implemented
+AppGraph.catalogueState	Room read/reconcile and CPU	Catalogue subscriber	Last flow subscriber ends	SavedCatalogTest; repeat writes audit pending	partial
+DefaultNetwork	Default network callback	First ongoing availability subscriber	Last subscriber unregisters; one-shot readers take a snapshot	DefaultNetworkTest; Android handover pending	partial
+OptionalResources	Power broadcasts and thermal listener	First policy subscriber	Last subscriber unregisters both Android listeners	ResourcePolicyTest and ResourceLeaseTest; Android callbacks pending	partial
+MusicApp.playReports	Optional provider network	Existing listened online occurrence plus policy	Eligibility loss or scope cancellation	ResourceLeaseTest; live request pending	partial
+MainActivity.splashWarm	Local index bootstrap	Activity create with media permission	First index or Activity scope destruction	Cold launch timing pending	partial
+LibraryViewModel.scan	MediaStore observer/read, file IO and Room write	Foreground allowed policy or explicit rescan	Stop on visibility/policy loss; explicit job ends at result	LibraryRepository tests; Android policy fixture pending	partial
+LibraryViewModel.likes	Optional account network and Room reconciliation	Visible allowed account state	Account, visibility or network flow change cancels	ResourceLeaseTest; account fixture pending	partial
+LibraryViewModel.search	Search debounce, local query and provider network	Search pane subscription; provider needs visibility and validated network	Query, account, visibility, network or subscriber loss; suggests under optional policy	OnlineSearchProjectionTest and LibrarySearchTest; physical navigation pending	partial
+MusicRoot.home	Optional network and cache reads	Foreground Home flow and account/provider state	Policy cancellation for network; lifecycle for cached read pending	ResourceLeaseTest	partial
+Prefetch	Bounded cover/page network and IO	Visible next occurrence or catalog card	Owner/policy cancellation; shared permit released in finally	AuxiliaryLoadsTest and ResourceLeaseTest	partial
+PlaybackMix	Queue refill and cursor write	PlaybackService near tail	Queue, account, playback or policy revocation; commit gate	PlaybackMixTest and OfflineTailTest	partial
+RadioTeacher	Bounded CPU and atomic private model write	Natural seeded radio response and foreground resource lease	Single flight ends on policy/account cancellation or finite commit	RadioTeacherGraphTest, RadioTeacherStoreTest, SavedCatalogTest	partial
+PlaybackService	Media session, audio focus and media FGS	Controller or system playback command	Service stop/release; ended/paused behavior device gate	CORE_ACCEPTANCE physical matrix	open
+PlaybackService.sources	Room and network observers, next source selection	Nonempty queue with an active playback request or visible app controller	Cancel on empty queue, hidden pause or service destruction	Queue source fixtures; device lifecycle gate pending	partial
+PlayerFactory	Media3 local wake mode	Media3 running playback	Wake management follows Media3 player release	Audio focus and wake duration trace pending	open
+PlayerConnection	Controller binding and playback publications	Activity start or explicit playback command	Visible publications detach on Activity stop; final release on ViewModel clear	PlaybackIntentTest; idle unbinding and Android resume matrix pending	partial
+PlaybackPersistence	Position timer and checkpoint writes	Active playback and durable transport changes	Position timer stops when paused; final journal on service close	PlaybackJournal tests; writes/hour trace pending	partial
+PlaybackJournal	IO writer and atomic store	Durable queue/transport state	Conflated writer drains, process scope persists	PlaybackJournal tests; abrupt kill probe pending	partial
+PlaybackListening	Audible clock and history writes	Media3 reports audible occurrence	First sample is finite; shares active checkpoint timer; flushes on pause/close	PlaybackHistoryGateTest, ExplicitNextTest, SessionTasteTest and PlaybackPersistenceTest; write budget pending	partial
+PlaybackService.sleepTimer	Coroutine timed suspend	Explicit sleep timer	Cancel or expire, checkpoint ownership retained	SleepDeadlineTest	partial
+LockScreenLyrics	Screen receiver, lyric fetch and ticker	Service and selected lock-screen lyric mode	Release unregisters and cancels ticker	Lock-screen energy and cache behavior pending	open
+LyricsSheet	Visible lyric read, layout and frame/position clock	Open lyric sheet	Composition leaves; screen-off frame evidence pending	LyricLineTest	partial
+MusicRoot.playerMotion	Artwork decode, progress and animation clocks	Visible player and enabled motion	Composition/visibility gates and screen-off trace pending	Screenshot and Perfetto gates	open
+CoilImageLoader	Image fetch, decode and disk cache	Artwork request; remote miss requires foreground lease	Policy revokes transport; two shared permits; player decode ends on Activity stop	ArtworkNetworkTest; frame and cache traces pending	partial
+LocalArtworkCache	Local extraction and disk cache	Requested artwork URI	Job returns/cancels; budget trim on events	Cache size/read amplification pending	open
+OnlineLyrics	Optional network and lyric cache	Lyric request, visible or lock-screen owner	Job completion; socket cancellation audit pending	OnlineLyricsTest	open
+YouTubeMusic	Shared client, audio and metadata network	Audio resolve, explicit action or admitted automatic caller	Metadata calls cancel OkHttp; audio error/deadline owner audit	Provider fixtures; device network counters pending	partial
+CacheBudget	Stream cache, asynchronous trim and revision	First stream, visible streamed candidates, offline reserve lookup, or explicit cache screen	No index open for local-only playback; trim follows a setting change	CacheBudgetTest; hardware IO trace pending	partial
+OutputRouteMonitor	Audio device and MediaRouter callbacks	Visible route consumer	Stop unregisters callbacks	Service and UI lifecycle review pending	partial
+PlaybackService.cast	Cast module and LAN proxy	Playback service initializes Cast; proxy is used during Cast	Module loading uses shared IO dispatcher; proxy stops on service exit	Cast route physical gate	partial
+MusicHaptics	Audio-timed haptics worker	Enabled haptics during playback	Worker interruption/release audit pending	Haptics timing and CPU trace	open
+NowPlayingWidget	Snapshot broadcast and widget render	Widget update, playback state or artwork snapshot	Finite render on existing IO; remote cache miss belongs to SessionArtwork	SessionArtworkTest; widget lifecycle budget pending	partial
+SoulseekDownloads	Transfer client, disk and notification	Explicit download or existing queued transfer resumed	Last task closes client; transfer cancel/completion removes ownership	Loopback and publication fixtures; Android and energy gates pending	partial
+SoulseekClient	Socket readers and transfer workers	One authenticated connection and peer/transfer traffic	Retirement closes server/peer sockets and releases reply waiters	SoulseekClientTest; Android lifecycle pending	partial
+DownloadService	Data-sync foreground service	Running explicit transfer	Stops when transfer ownership ends	SDK 37 background/restart gate pending	open
+DownloadedLyrics	Explicit cache and disk write	User saves lyrics	Finite request; owner cancellation audit pending	Lyrics offline acceptance pending	open
+TagEditing	Explicit file rewrite and republish	User confirms tag edit	Finite rewrite; no-progress and rollback audit pending	TagWriter tests; provider IO faults pending	open
+ArtistImages	Artist photos, biography and cache write	Visible cache miss with resource permit	Lease and OkHttp cancellation; write rechecks permit	ArtistImagesTest; Android rendering pending	partial
+AppleMotion	Video asset and cache write	Visible lookup and current Wi-Fi preference	Resource and owner cancellation; write rechecks permit	AppleMotionTest; physical decode/power pending	partial
+SessionTaste	Bounded process-local preference summary	Existing playback history events with a visible power permit	No scheduler; lose permit to stop updates and expire old samples	SessionTasteTest	partial

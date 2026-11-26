@@ -19,6 +19,8 @@ class YouTubeAccount(context: Context) {
     val signedIn: StateFlow<Boolean> = _signedIn
     private val _cacheScope = MutableStateFlow(scopeFor(cookies()))
     internal val cacheScope: StateFlow<String> = _cacheScope
+    private val _revision = MutableStateFlow(0L)
+    internal val revision: StateFlow<Long> = _revision
 
     private fun scopeFor(cookies: String?) = cookies?.let(OnlinePageStore::digest) ?: "public"
 
@@ -28,16 +30,22 @@ class YouTubeAccount(context: Context) {
     @Synchronized
     fun save(cookies: String, name: String?) {
         prefs.edit().putString("cookies", cookies).putString("name", name).apply()
-        _cacheScope.value = scopeFor(cookies.takeIf(::hasSession))
+        moveTo(scopeFor(cookies.takeIf(::hasSession)))
         _signedIn.value = hasSession(cookies)
     }
 
     @Synchronized
     fun signOut() {
         prefs.edit().clear().apply()
-        _cacheScope.value = "public"
+        moveTo("public")
         _signedIn.value = false
         runCatching { android.webkit.CookieManager.getInstance().removeAllCookies(null) }
+    }
+
+    private fun moveTo(scope: String) {
+        if (_cacheScope.value == scope) return
+        _revision.value += 1
+        _cacheScope.value = scope
     }
 
     /** Headers that make a request the owner's own; null when signed out. */

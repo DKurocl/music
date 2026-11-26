@@ -32,9 +32,6 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     private val prefs = context.getSharedPreferences("soulseek", Context.MODE_PRIVATE)
     val client = SoulseekClient(scope)
     private val one = Mutex()
-    // Signed in only while there is something to download: the server connection is closed two
-    // minutes after the last job, so an idle Soulseek never keeps the radio awake.
-    private var idle: kotlinx.coroutines.Job? = null
 
     /** One download as the app shows it. [key] names what is being fetched, so a button finds its own job. */
     data class Job(val id: Int, val key: String, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false, val cancelled: Boolean = false) {
@@ -266,17 +263,13 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                 }
             }
             active[id] = task
-            idle?.cancel()
             task.invokeOnCompletion {
                 synchronized(lock) {
                     active.remove(id, task)
                     if (retriesAfterCancellation.remove(id) && _jobs.value.any { it.id == id && it.running }) {
                         stored(id)?.optString("request")?.let { startStored(id, it) }
                     }
-                    if (active.isEmpty()) {
-                        idle?.cancel()
-                        idle = scope.launch { kotlinx.coroutines.delay(120_000); synchronized(lock) { if (active.isEmpty()) client.disconnect() } }
-                    }
+                    if (active.isEmpty()) client.disconnect()
                 }
             }
             task.start()
@@ -293,13 +286,14 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
         val raw = prefs.getString("file:$id", null) ?: return
         val uri = android.net.Uri.parse(raw)
         val resolver = context.contentResolver
-        val pending = resolver.query(uri, arrayOf(MediaStore.Audio.Media.IS_PENDING), null, null)?.use {
-            it.moveToFirst() && it.getInt(0) == 1
-        } ?: false
+        val state = resolver.query(uri, arrayOf(MediaStore.Audio.Media.IS_PENDING), null, null)?.use {
+            if (!it.moveToFirst()) -1 else if (it.isNull(0)) null else it.getInt(0).takeIf { state -> state in 0..1 }
+        } ?: throw java.io.IOException("Couldn't verify the staged download")
+        val pending = state == 1
         if (pending && !discard) return
-        if (pending) resolver.delete(uri, null, null)
+        if (pending) check(resolver.delete(uri, null, null) == 1) { "Couldn't remove the staged download" }
         val finished = prefs.getString("file-key:$id", null)
-        val exists = !pending && resolver.query(uri, arrayOf(MediaStore.Audio.Media._ID), null, null)?.use { it.moveToFirst() } == true
+        val exists = state == 0
         val edit = prefs.edit().remove("file:$id").remove("file-key:$id").remove("peer-file:$id")
         if (exists && finished != null) {
             val completed = prefs.getStringSet("completed:$id", emptySet()).orEmpty()
@@ -355,8 +349,17 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
             }
         }
         currentCoroutineContext().ensureActive()
-        val written = resolver.openFileDescriptor(uri, "r")?.use { it.statSize }
-        check(written == file.size) { "The downloaded file size doesn't match the transfer" }
+        val staged = resolver.openFileDescriptor(uri, "r") ?: error("Couldn't verify the download")
+        val valid = android.os.ParcelFileDescriptor.AutoCloseInputStream(staged).use { input ->
+            check(staged.statSize == file.size) { "The downloaded file size doesn't match the transfer" }
+            DownloadAudioHeader.matches(file.extension, ua.olex.music.tags.ChannelSource(input.channel))
+        }
+        currentCoroutineContext().ensureActive()
+        if (!valid) {
+            // Do not resume from a byte-complete but invalid peer file.
+            cleanInterruptedFile(id, discard = true)
+            error("The download doesn't contain the expected audio")
+        }
         check(resolver.update(uri, ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }, null, null) == 1) { "Couldn't publish the download" }
         prefs.edit().putStringSet(checkpoint, completed + fileKey).remove("file:$id").remove("file-key:$id").remove("peer-file:$id").apply()
         onSaved()
@@ -431,8 +434,8 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
 
         /** A lossy copy good enough to keep: MP3 (or AAC) at 256 kbps or more, by its tag or by size over length. */
         fun goodLossy(r: SoulseekClient.Result): Boolean {
-            if (r.extension !in setOf("mp3", "m4a", "aac", "ogg", "opus")) return false
-            val kbps = r.bitrate ?: r.seconds?.takeIf { it > 0 }?.let { (r.size * 8 / 1000 / it).toInt() } ?: return false
+            if (r.size <= 0 || r.extension !in setOf("mp3", "m4a", "aac", "ogg", "opus")) return false
+            val kbps = r.bitrate?.toLong() ?: r.seconds?.takeIf { it > 0 }?.let { r.size / 125 / it } ?: return false
             return kbps >= 256
         }
 

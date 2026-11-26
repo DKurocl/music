@@ -6,4 +6,5 @@ import ua.olex.music.model.Track
 interface PlaybackHistoryOwner {
     suspend fun recordPlayback(track: Track, observedAt: Long): Long
     suspend fun updateListening(eventId: Long, millis: Long)
+    suspend fun recordExplicitEarlySkip(eventId: Long, audibleMs: Long) = Unit
 }

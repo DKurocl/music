@@ -22,6 +22,7 @@ data class LibraryIndex(
     val artists: List<MusicCollection>,
     val genres: List<MusicCollection>,
     val folders: List<MusicCollection>,
+    val verifiedVideoCopies: Map<String, Track> = emptyMap(),
 ) {
     val byId: Map<TrackId, Track> = songs.associateBy { it.id }
     /** Folder views retain file copies that the shared catalogue projects to one recording. */

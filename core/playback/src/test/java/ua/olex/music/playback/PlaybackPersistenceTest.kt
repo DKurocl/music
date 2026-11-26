@@ -6,6 +6,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -60,6 +61,34 @@ class PlaybackPersistenceTest {
         assertFalse(player.playWhenReady)
         assertEquals(Player.STATE_IDLE, player.playbackState)
         persistence?.close(); journal.read()
+    }
+
+    @Test fun periodicListeningAndPositionTickStopsOnPauseAndClose() = runTest {
+        var ticks = 0
+        var audible = true
+        val state = object : androidx.media3.common.ForwardingPlayer(player) {
+            override fun isPlaying() = audible
+        }
+        val event = Player.Events(androidx.media3.common.FlagSet.Builder().add(Player.EVENT_IS_PLAYING_CHANGED).build())
+        val listener = PlaybackPersistence(player, journal, backgroundScope, onPeriodicCheckpoint = { ticks++ })
+        persistence = listener
+        listener.onEvents(state, event)
+        runCurrent()
+        advanceTimeBy(60_000)
+        runCurrent()
+        assertEquals(1, ticks)
+        audible = false
+        listener.onEvents(state, event)
+        advanceTimeBy(120_000)
+        runCurrent()
+        assertEquals(1, ticks)
+        audible = true
+        listener.onEvents(state, event)
+        runCurrent()
+        listener.close()
+        advanceTimeBy(120_000)
+        runCurrent()
+        assertEquals(1, ticks)
     }
 
     @Test fun sourcePreparationKeepsTheQueueGenerationButAReplacementChangesIt() = runTest {

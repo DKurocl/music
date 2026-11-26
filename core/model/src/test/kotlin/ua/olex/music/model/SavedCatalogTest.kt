@@ -37,6 +37,17 @@ class SavedCatalogTest {
         assertEquals(2, catalogue.folders.single().tracks.size)
     }
 
+    @Test fun teacherProjectionRequiresAnExactDurableLocalLinkAndTracksRemoval() {
+        val onlyVideo = SavedSong.from(online).copy(id = "recording:one")
+        val local = LibraryIndex.build(listOf(file))
+        assertTrue(SavedCatalog.merge(local, listOf(onlyVideo)).verifiedVideoCopies.isEmpty())
+        val linked = onlyVideo.copy(sources = onlyVideo.references + RecordingSource.from(file)!!)
+        assertEquals(file.id, SavedCatalog.merge(local, listOf(linked)).verifiedVideoCopies["one"]?.id)
+        assertTrue(SavedCatalog.merge(LibraryIndex.EMPTY, listOf(linked)).verifiedVideoCopies.isEmpty())
+        val otherMaster = file.copy(title = "Halo (Live)", path = "Music/Live.flac", id = TrackId("local:live"))
+        assertTrue(SavedCatalog.merge(LibraryIndex.build(listOf(otherMaster)), listOf(linked)).verifiedVideoCopies.isEmpty())
+    }
+
     @Test fun missingLocalSnapshotsNeverBecomePlayableAndOnlineSearchIsLiteral() {
         val catalogue = SavedCatalog.merge(LibraryIndex.EMPTY, listOf(SavedSong.from(file), SavedSong.from(online)))
         assertEquals(listOf(online), SavedCatalog.searchOnline(catalogue, "beyon hal"))

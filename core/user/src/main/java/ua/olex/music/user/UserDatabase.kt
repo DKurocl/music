@@ -156,7 +156,8 @@ data class RatingEntity(@PrimaryKey val songId: String, val stars: Int, val rate
 data class SmartPlaylistEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val definition: String, val createdAt: Long)
 
 /** Counts are attached to a durable recording, so alternate sources never multiply its totals. */
-data class RecordingStats(val songId: String, val songKey: String, val plays: Int, val lastPlayedAt: Long?, val rating: Int?)
+data class RecordingStats(val songId: String, val songKey: String, val plays: Int, val lastPlayedAt: Long?, val rating: Int?,
+    val favouriteSince: Long?)
 
 /** Room loads both relations under the same transaction; entry order is applied by the repository. */
 data class PlaylistRelations(
@@ -176,14 +177,32 @@ data class HistoryRow(val eventId: Long, val playedAt: Long, val listenedMs: Lon
 @Dao
 interface UserDao {
     @Query("""
-        SELECT s.id AS songId, s.songKey,
-            (SELECT COUNT(*) FROM play_history h WHERE h.songId = s.id) AS plays,
-            (SELECT MAX(h.playedAt) FROM play_history h WHERE h.songId = s.id) AS lastPlayedAt,
-            (SELECT stars FROM ratings r WHERE r.songId = s.id) AS rating
-        FROM saved_songs s
+        WITH history AS (
+            SELECT songId, COUNT(*) AS plays, MAX(playedAt) AS lastPlayedAt
+            FROM play_history GROUP BY songId
+        )
+        SELECT s.id AS songId, s.songKey, COALESCE(h.plays, 0) AS plays, h.lastPlayedAt,
+            r.stars AS rating, f.addedAt AS favouriteSince
+        FROM saved_songs s LEFT JOIN history h ON h.songId = s.id LEFT JOIN ratings r ON r.songId = s.id
+            LEFT JOIN favourites f ON f.songId = s.id
     """)
     fun recordingStats(): Flow<List<RecordingStats>>
-    @Transaction @Query("SELECT * FROM saved_songs ORDER BY createdAt, id")
+    @Query("""
+        WITH matches AS (
+            SELECT id FROM saved_songs WHERE id IN (:keys)
+            UNION SELECT id FROM saved_songs WHERE songKey IN (:keys)
+            UNION SELECT songId FROM recording_aliases WHERE aliasId IN (:keys)
+        )
+        SELECT s.id AS songId, s.songKey,
+            (SELECT COUNT(*) FROM play_history h WHERE h.songId = s.id) AS plays,
+            (SELECT MAX(playedAt) FROM play_history h WHERE h.songId = s.id) AS lastPlayedAt,
+            r.stars AS rating, f.addedAt AS favouriteSince
+        FROM matches m JOIN saved_songs s ON s.id = m.id
+            LEFT JOIN ratings r ON r.songId = s.id LEFT JOIN favourites f ON f.songId = s.id
+    """)
+    suspend fun recordingStatsFor(keys: List<String>): List<RecordingStats>
+    /** Matchers order the compatible candidates when choosing a recording ID. */
+    @Transaction @Query("SELECT * FROM saved_songs")
     suspend fun allRecordings(): List<RecordingRelations>
     @Transaction @Query("SELECT * FROM saved_songs ORDER BY createdAt, id") fun observeRecordings(): Flow<List<RecordingRelations>>
     @Transaction @Query("SELECT * FROM saved_songs WHERE id = :id") suspend fun recording(id: String): RecordingRelations?
@@ -208,6 +227,14 @@ interface UserDao {
 
     @Query("SELECT id FROM saved_songs WHERE id = :id UNION SELECT songId FROM recording_aliases WHERE aliasId = :id LIMIT 1")
     suspend fun canonicalId(id: String): String?
+    @Query("""
+        SELECT aliasId, MIN(songId) AS songId FROM (
+            SELECT id AS aliasId, id AS songId FROM saved_songs WHERE id IN (:ids)
+            UNION ALL
+            SELECT aliasId, songId FROM recording_aliases WHERE aliasId IN (:ids)
+        ) GROUP BY aliasId
+    """)
+    suspend fun canonicalIds(ids: List<String>): List<RecordingAliasEntity>
     @Query("SELECT aliasId FROM recording_aliases WHERE songId = :id ORDER BY aliasId")
     suspend fun aliases(id: String): List<String>
     @Query("SELECT * FROM recording_aliases") fun recordingAliases(): Flow<List<RecordingAliasEntity>>
@@ -250,8 +277,11 @@ interface UserDao {
 
     @Upsert suspend fun saveSongs(songs: List<UserSongEntity>)
     @Query("SELECT EXISTS(SELECT 1 FROM favourites WHERE songId = :songId)") suspend fun isFavourite(songId: String): Boolean
+    @Query("SELECT * FROM favourites WHERE songId IN (:ids)") suspend fun favouriteTimes(ids: List<String>): List<FavouriteEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun addFavourite(favourite: FavouriteEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun addFavourites(favourites: List<FavouriteEntity>)
     @Query("DELETE FROM favourites WHERE songId = :songId") suspend fun removeFavourite(songId: String)
+    @Query("DELETE FROM favourites WHERE songId IN (:ids)") suspend fun removeFavourites(ids: List<String>)
     @Insert suspend fun createPlaylist(playlist: PlaylistEntity): Long
     @Query("UPDATE playlists SET name = :name WHERE id = :id") suspend fun renamePlaylist(id: Long, name: String)
     @Query("DELETE FROM playlists WHERE id = :id") suspend fun deletePlaylist(id: Long)

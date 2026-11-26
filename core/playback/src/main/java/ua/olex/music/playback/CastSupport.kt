@@ -56,61 +56,113 @@ internal class LanMediaItemConverter(private val server: LanMediaServer) : Media
  * A tiny HTTP server on the phone's Wi-Fi address, started only when something is cast. It serves
  * only files published to it, each under an unguessable path, read-only, with byte ranges for seeking.
  */
-internal class LanMediaServer(private val context: Context) {
-    private val token = ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
-    private val files = ConcurrentHashMap<String, Uri>()
-    private var socket: ServerSocket? = null
+internal class LanMediaServer(private val context: Context, private val address: () -> InetAddress? = { wifiAddress(context) }) {
+    private class Session(val server: ServerSocket) {
+        val token = ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
+        val files = ConcurrentHashMap<String, Uri>()
+        val keys = HashMap<Uri, String>()
+        val clients = HashSet<Socket>()
+    }
+    private var session: Session? = null
 
     @Synchronized fun publish(uri: Uri): Uri? {
-        val address = wifiAddress() ?: return null
-        val server = socket ?: ServerSocket(0, 16, address).also { s -> socket = s; Thread({ accept(s) }, "cast-server").apply { isDaemon = true }.start() }
-        val id = Integer.toHexString(uri.toString().hashCode()) + Integer.toHexString(files.size)
-        val existing = files.entries.firstOrNull { it.value == uri }?.key
-        val key = existing ?: id.also { files[it] = uri }
-        return Uri.parse("http://${address.hostAddress}:${server.localPort}/$token/$key")
+        if (uri.scheme != "content" && uri.scheme != "file") return null
+        val active = session ?: open() ?: return null
+        val key = active.keys.getOrPut(uri) {
+            active.keys.size.toString(16).also { active.files[it] = uri }
+        }
+        return Uri.parse("http://${active.server.inetAddress.hostAddress}:${active.server.localPort}/${active.token}/$key")
     }
 
-    @Synchronized fun stop() { runCatching { socket?.close() }; socket = null; files.clear() }
-
-    private fun wifiAddress(): InetAddress? {
-        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
-        val props = cm.getLinkProperties(cm.activeNetwork) ?: return null
-        return props.linkAddresses.map { it.address }.firstOrNull { it is Inet4Address && it.isSiteLocalAddress }
-    }
-
-    private fun accept(server: ServerSocket) {
-        while (!server.isClosed) {
-            val client = runCatching { server.accept() }.getOrNull() ?: break
-            Thread({ runCatching { serve(client) }; runCatching { client.close() } }, "cast-client").apply { isDaemon = true }.start()
+    private fun open(): Session? {
+        val server = try { ServerSocket(0, MAX_CLIENTS, address() ?: return null) }
+        catch (_: java.io.IOException) { return null }
+        catch (_: SecurityException) { return null }
+        return Session(server).also { active ->
+            session = active
+            Thread({ accept(active) }, "cast-server").apply { isDaemon = true }.start()
         }
     }
 
-    private fun serve(client: Socket) {
-        client.soTimeout = 30_000
+    @Synchronized fun stop() {
+        val active = session ?: return
+        session = null
+        runCatching { active.server.close() }
+        active.clients.forEach { runCatching { it.close() } }
+        active.clients.clear()
+        active.files.clear()
+        active.keys.clear()
+    }
+
+    private fun accept(active: Session) {
+        while (!active.server.isClosed) {
+            val client = try { active.server.accept() } catch (_: java.io.IOException) { break }
+            val admitted = synchronized(this) {
+                session === active && active.clients.size < MAX_CLIENTS && active.clients.add(client)
+            }
+            if (!admitted) {
+                runCatching { client.close() }
+                continue
+            }
+            Thread({
+                try { client.use { serve(active, it) } }
+                catch (_: java.io.IOException) { }
+                catch (_: SecurityException) { }
+                finally { synchronized(this) { active.clients.remove(client) } }
+            }, "cast-client").apply { isDaemon = true }.start()
+        }
+    }
+
+    private fun serve(active: Session, client: Socket) {
+        client.soTimeout = HEADER_TIMEOUT_MS
         val input = BufferedInputStream(client.getInputStream())
-        val lines = generateSequence { readLine(input) }.takeWhile { it.isNotEmpty() }.toList()
-        val request = lines.firstOrNull()?.split(' ') ?: return
+        val deadline = System.nanoTime() + HEADER_TIMEOUT_MS * 1_000_000L
+        val request = readLine(input, deadline)?.split(' ', limit = 3) ?: return
         val method = request.getOrNull(0); val path = request.getOrNull(1).orEmpty()
         val out = client.getOutputStream()
         val parts = path.trimStart('/').split('/')
-        val uri = if (parts.size == 2 && parts[0] == token) files[parts[1]] else null
-        if (uri == null || (method != "GET" && method != "HEAD")) { out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()); return }
+        val uri = if (parts.size == 2 && parts[0] == active.token) active.files[parts[1]] else null
+        fun empty(status: String, extra: String = "") =
+            out.write("HTTP/1.1 $status\r\n${extra}Content-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+        if (uri == null || (method != "GET" && method != "HEAD")) {
+            empty("404 Not Found")
+            return
+        }
+        var total = 0
+        var range: String? = null
+        while (true) {
+            val line = readLine(input, deadline) ?: return
+            if (line.isEmpty()) break
+            total += line.length + 2
+            if (total > MAX_HEADER_CHARS) return
+            if (method == "GET" && line.substringBefore(':').equals("Range", ignoreCase = true)) {
+                if (range != null) { empty("400 Bad Request"); return }
+                range = line.substringAfter(':', "").trim()
+            }
+        }
         val resolver = context.contentResolver
         val mime = resolver.getType(uri) ?: "application/octet-stream"
-        resolver.openFileDescriptor(uri, "r")?.use { pfd ->
+        val handle = try { resolver.openFileDescriptor(uri, "r") } catch (_: java.io.FileNotFoundException) { null }
+        if (handle == null) { empty("404 Not Found"); return }
+        handle.use { pfd ->
             val size = pfd.statSize
-            val range = lines.firstOrNull { it.startsWith("Range:", true) }?.substringAfter('=')?.split('-')
-            val start = range?.getOrNull(0)?.toLongOrNull() ?: 0L
-            val end = (range?.getOrNull(1)?.toLongOrNull() ?: (size - 1)).coerceAtMost(size - 1)
-            val length = (end - start + 1).coerceAtLeast(0)
-            val status = if (range != null) "206 Partial Content" else "200 OK"
+            if (size < 0) { empty("404 Not Found"); return }
+            val requested = range?.let { castByteRange(it, size) }
+            if (range != null && requested == null) {
+                empty("416 Range Not Satisfiable", "Content-Range: bytes */$size\r\n")
+                return
+            }
+            val start = requested?.first ?: 0L
+            val end = requested?.last ?: (size - 1)
+            val length = end - start + 1
+            val status = if (requested != null) "206 Partial Content" else "200 OK"
             val head = buildString {
                 append("HTTP/1.1 $status\r\nContent-Type: $mime\r\nAccept-Ranges: bytes\r\nContent-Length: $length\r\n")
-                if (range != null) append("Content-Range: bytes $start-$end/$size\r\n")
+                if (requested != null) append("Content-Range: bytes $start-$end/$size\r\n")
                 append("Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n")
             }
             out.write(head.toByteArray())
-            if (method == "GET") java.io.FileInputStream(pfd.fileDescriptor).channel.use { ch ->
+            if (method == "GET" && length > 0) java.io.FileInputStream(pfd.fileDescriptor).channel.use { ch ->
                 var pos = start; val buf = java.nio.ByteBuffer.allocate(64 * 1024)
                 while (pos <= end) {
                     buf.clear(); buf.limit(minOf(buf.capacity().toLong(), end - pos + 1).toInt())
@@ -122,14 +174,47 @@ internal class LanMediaServer(private val context: Context) {
         }
     }
 
-    private fun readLine(input: InputStream): String? {
+    private fun readLine(input: InputStream, deadline: Long): String? {
         val sb = StringBuilder()
-        while (true) {
+        while (sb.length < MAX_LINE_CHARS && System.nanoTime() - deadline < 0L) {
             val c = input.read()
-            if (c < 0) return if (sb.isEmpty()) null else sb.toString()
+            if (c < 0) return null
             if (c == '\n'.code) return sb.toString().trimEnd('\r')
-            if (sb.length > 8192) return null
             sb.append(c.toChar())
         }
+        return null
     }
+
+    private companion object {
+        const val MAX_CLIENTS = 8
+        const val MAX_HEADER_CHARS = 16 * 1024
+        const val MAX_LINE_CHARS = 8 * 1024
+        const val HEADER_TIMEOUT_MS = 5_000
+
+        fun wifiAddress(context: Context): InetAddress? {
+            val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+            val network = cm.activeNetwork ?: return null
+            val capabilities = cm.getNetworkCapabilities(network) ?: return null
+            if (!capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) &&
+                !capabilities.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)) return null
+            val props = cm.getLinkProperties(network) ?: return null
+            return props.linkAddresses.firstOrNull { it.address is Inet4Address && it.address.isSiteLocalAddress }?.address
+        }
+    }
+}
+
+/** Single HTTP byte range, including open-ended and suffix seeks. */
+internal fun castByteRange(header: String, size: Long): LongRange? {
+    if (size <= 0 || !header.startsWith("bytes=", ignoreCase = true)) return null
+    val offsets = header.substringAfter('=').split('-', limit = 2)
+    if (offsets.size != 2) return null
+    fun offset(value: String) = value.takeIf { it.isNotEmpty() && it.all { digit -> digit in '0'..'9' } }?.toLongOrNull()
+    val (first, last) = offsets
+    if (first.isEmpty()) {
+        val suffix = offset(last)?.takeIf { it > 0 } ?: return null
+        return (size - suffix.coerceAtMost(size)) until size
+    }
+    val start = offset(first)?.takeIf { it < size } ?: return null
+    val end = if (last.isEmpty()) size - 1 else offset(last)?.coerceAtMost(size - 1) ?: return null
+    return (start..end).takeUnless { it.isEmpty() }
 }

@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -55,5 +56,14 @@ class PlayerConnectionTest {
         assertEquals(first.mediaId, second.mediaId)
         assertNotEquals(first.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY), second.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))
         assertEquals(song.path, first.mediaMetadata.extras?.getString(PlayerConnection.PATH_KEY))
+    }
+
+    @Test fun radioReceiptAcceptsTheExactOccurrenceAfterFastRefill() {
+        val seed = QueueItem("seed occurrence", "same track", "", "", null)
+        val tail = QueueItem("new occurrence", "same track", "", "", null)
+        val state = PlayerState(queue = listOf(seed, tail))
+        assertTrue(state.acknowledgesRadio(seed.key))
+        assertFalse(state.acknowledgesRadio(seed.mediaId))
+        assertFalse(state.copy(queue = listOf(tail)).acknowledgesRadio(seed.key))
     }
 }

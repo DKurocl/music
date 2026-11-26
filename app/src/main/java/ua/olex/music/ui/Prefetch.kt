@@ -1,76 +1,73 @@
 package ua.olex.music.ui
 
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
-import android.os.PowerManager
 import android.os.SystemClock
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.withContext
+import ua.olex.music.OptionalResources
+import ua.olex.music.model.OptionalWork
+import ua.olex.music.runWhileAllowed
 
-/** Optional page and cover requests belong to the visible caller; Media3 preloads the audio. */
+/** Optional page and cover requests belong to the visible caller. Audio stays with the player. */
 internal class Prefetch(
     private val context: Context,
     private val youTube: YouTubeMusic,
-    private val accountScope: () -> String,
+    private val resources: OptionalResources,
+    private val accountScope: StateFlow<String>,
+    private val accountRevision: StateFlow<Long>,
 ) {
-    private val gate = Semaphore(2)
     private val loading = HashSet<String>()
     private val completed = object : LinkedHashMap<String, Long>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?) = size > 400
     }
 
-    private fun roomy(): Boolean {
-        val power = context.getSystemService(PowerManager::class.java)
-        if (power != null && (power.isPowerSaveMode || power.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE)) return false
-        val cm = context.getSystemService(ConnectivityManager::class.java) ?: return false
-        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-    }
-
     private suspend fun fetch(key: String, load: suspend () -> Boolean) {
-        if (!roomy() || !gate.tryAcquire()) return
-        val account = accountScope()
-        val scoped = "$account/$key"
+        val account = accountScope.value
+        val revision = accountRevision.value
+        fun ownsRequest() = accountScope.value == account && accountRevision.value == revision
+        val scoped = "$account/$revision/$key"
+        val acquired = synchronized(completed) {
+            val recent = completed[scoped]?.let { SystemClock.elapsedRealtime() - it < 60_000 } == true
+            !recent && loading.add(scoped)
+        }
+        if (!acquired) return
         try {
-            val acquired = synchronized(completed) {
-                val recent = completed[scoped]?.let { SystemClock.elapsedRealtime() - it < 60_000 } == true
-                !recent && loading.add(scoped)
-            }
-            if (!acquired) return
-            try {
-                ua.olex.music.playback.AudioLoadPriority.awaitAudioReady()
-                if (accountScope() == account && roomy() && withContext(Dispatchers.IO) { load() } && accountScope() == account) {
-                    synchronized(completed) { completed[scoped] = SystemClock.elapsedRealtime() }
+            val ownership = combine(accountScope, accountRevision) { scope, version -> scope == account && version == revision }
+            val complete = ownership.runWhileAllowed {
+                resources.run(OptionalWork.PREFETCH) {
+                    withContext(Dispatchers.IO) { ownsRequest() && load() }
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // A later visible request may retry work that never completed.
-            } finally {
-                synchronized(completed) { loading.remove(scoped) }
             }
+            if (complete == true && ownsRequest()) {
+                synchronized(completed) { completed[scoped] = SystemClock.elapsedRealtime() }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // A later visible request may retry work that never completed.
         } finally {
-            gate.release()
+            synchronized(completed) { loading.remove(scoped) }
         }
     }
 
-    /** Artwork for the next actual occurrence. The audio URL is resolved by the existing Media3 preload. */
+    /** Artwork for the next actual occurrence. The playback source resolves its own audio URL. */
     suspend fun upcoming(artwork: String?) {
         if (artwork?.startsWith("https://") == true) fetch("cover:$artwork") { cover(artwork) }
     }
 
     suspend fun page(card: YouTubeMusic.Card) = fetch("page:${card.kind}:${card.id}") {
-        when (card.kind) {
-            YouTubeMusic.Card.Kind.ALBUM, YouTubeMusic.Card.Kind.PLAYLIST ->
-                youTube.albumPage(YouTubeMusic.OnlineAlbum(card.id, card.title, card.subtitle, card.cover), null, offline = false)
-                    ?.first?.partial == false
-            YouTubeMusic.Card.Kind.ARTIST -> youTube.artistPage(card.title, card.id, null, offline = false)?.partial == false
-            else -> false
-        }
+        AuxiliaryLoads.tryRun {
+            when (card.kind) {
+                YouTubeMusic.Card.Kind.ALBUM, YouTubeMusic.Card.Kind.PLAYLIST ->
+                    youTube.albumPage(YouTubeMusic.OnlineAlbum(card.id, card.title, card.subtitle, card.cover), null, offline = false)
+                        ?.first?.partial == false
+                YouTubeMusic.Card.Kind.ARTIST -> youTube.artistPage(card.title, card.id, null, offline = false)?.partial == false
+                else -> false
+            }
+        } == true
     }
 
     private suspend fun cover(uri: String): Boolean {

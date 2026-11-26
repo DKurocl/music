@@ -17,6 +17,9 @@ import ua.olex.music.model.QueueOrder
 @OptIn(UnstableApi::class)
 internal object QueueCommand {
     const val ACTION = "ua.olex.music.ENQUEUE"
+    const val EDIT = "ua.olex.music.EDIT_QUEUE"
+    private const val OCCURRENCE = "occurrence"
+    private const val DELTA = "delta"
     const val ITEMS = "items"
     const val ITEM_LIST = "item_list"
     const val NEXT = "next"
@@ -24,6 +27,28 @@ internal object QueueCommand {
     const val RADIO = "radio"
     const val RADIO_TAIL = "radio_tail"
     val command = SessionCommand(ACTION, Bundle.EMPTY)
+    val editCommand = SessionCommand(EDIT, Bundle.EMPTY)
+
+    fun editArguments(key: String, delta: Int? = null) = Bundle().apply {
+        putString(OCCURRENCE, key)
+        if (delta != null) putInt(DELTA, delta)
+    }
+
+    /** Resolve the identity on the service's current timeline in the same turn as mutation. */
+    fun edit(player: Player, args: Bundle): Boolean {
+        val key = args.getString(OCCURRENCE)?.takeIf(String::isNotBlank) ?: return false
+        if (!player.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
+        val from = player.indexOfQueueKey(key)
+        if (from < 0) return false
+        if (!args.containsKey(DELTA)) {
+            player.removeMediaItem(from)
+        } else {
+            val to = from.toLong() + args.getInt(DELTA)
+            if (to !in 0 until player.mediaItemCount.toLong() || to == from.toLong()) return false
+            player.moveMediaItem(from, to.toInt())
+        }
+        return true
+    }
 
     /** Uses Media3 pagination instead of putting a large playlist in one Binder transaction. */
     fun arguments(items: List<MediaItem>, next: Boolean, replaceAfter: String? = null, radio: Boolean = false): Bundle {

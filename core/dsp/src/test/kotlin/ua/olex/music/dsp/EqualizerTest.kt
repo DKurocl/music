@@ -5,6 +5,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EqualizerTest {
+    @Test fun coefficientReuseKeepsTheOriginalHeadroomCalculation() {
+        val bands = listOf(
+            EqualizerBand(31.0, 6.0, 1.1, FilterType.LOW_SHELF),
+            EqualizerBand(1_491.0, 4.0, 8.0),
+            EqualizerBand(21_000.0, 4.0, 0.9, FilterType.HIGH_SHELF),
+        )
+        val settings = EqualizerSettings(enabled = true, preampDb = 0.0, bands = bands)
+        for (rate in listOf(44_100, 48_000, 96_000, 192_000)) {
+            val top = rate * 0.499
+            val samplePoints = (0..2048).map { 10.0 * (top / 10.0).pow(it / 2048.0) } +
+                bands.map { min(it.frequencyHz, rate * 0.45) } + listOf(0.0, top)
+            val filters = bands.map { Biquad.of(it, rate) }
+            val peak = samplePoints.maxOf { hz -> filters.sumOf { 20 * log10(it.magnitudeAt(hz, rate).coerceAtLeast(1e-20)) } }
+            assertEquals(-peak - 0.5, settings.effectivePreampDb(rate), 1e-12)
+        }
+    }
+
     @Test fun disabledProcessingIsBitIdenticalIncludingSpecialFloatValues() {
         val engine = EqualizerEngine(EqualizerSettings(), 96_000, 2)
         for (value in listOf(0f, -0f, Float.MIN_VALUE, 0.25f, -0.8f, Float.NaN)) {

@@ -31,6 +31,7 @@ internal class LyricLinePlayer(
     private val real: Player,
     private val explicitPlay: () -> Unit = {},
     private val onTransport: (Boolean) -> Unit = {},
+    private val onExplicitNext: () -> Unit = {},
 ) : ForwardingPlayer(real) {
     private val listeners = ArrayList<Player.Listener>()
     var line: String? = null
@@ -51,6 +52,8 @@ internal class LyricLinePlayer(
 
     override fun pause() { onTransport(false); super.pause() }
     override fun stop() { onTransport(false); super.stop() }
+    override fun seekToNext() { onExplicitNext(); super.seekToNext() }
+    override fun seekToNextMediaItem() { onExplicitNext(); super.seekToNextMediaItem() }
     override fun setPlayWhenReady(playWhenReady: Boolean) {
         onTransport(playWhenReady)
         if (playWhenReady) {
@@ -98,8 +101,7 @@ class LockScreenLyrics internal constructor(private val context: Context, privat
     /** Call on song change, play/pause and setting change. */
     internal fun update() {
         ticker?.cancel()
-        if (!enabled || appVisible || !real.isPlaying) { shown.line = null; return }
-        if (power?.isInteractive == false) return
+        if (!enabled || appVisible || !real.isPlaying || power?.isInteractive != true) { shown.line = null; return }
         val item = real.currentMediaItem ?: run { shown.line = null; return }
         ticker = scope.launch {
             run {

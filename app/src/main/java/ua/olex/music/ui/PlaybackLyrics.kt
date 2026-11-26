@@ -7,14 +7,18 @@ import kotlinx.coroutines.withContext
 import ua.olex.music.AppGraph
 import ua.olex.music.lyrics.Lyrics
 import ua.olex.music.model.RecordingSource
+import ua.olex.music.model.OptionalWork
 import ua.olex.music.model.RecordingSourceKind
 import ua.olex.music.model.SavedSong
 import ua.olex.music.model.Track
 
 /** One source order for the app and the session: edited, sidecar, downloaded/embedded, online. */
-internal suspend fun AppGraph.resolveLyrics(request: Track): LocalLyricsState = withContext(Dispatchers.IO) {
+internal suspend fun AppGraph.resolveLyrics(request: Track, lockScreen: Boolean = false): LocalLyricsState = withContext(Dispatchers.IO) {
     val recording = userLibrary.reference(request).first()
     val track = recording?.bind(request) ?: request
+    suspend fun fetchAvailable(): Lyrics? = if (lockScreen)
+        resources.run(OptionalWork.LOCK_SCREEN_LYRICS) { kotlinx.coroutines.withTimeoutOrNull(5_000) { fetchedLyrics(track) } }
+    else fetchedLyrics(track)
     val aliases = recording?.let { userLibrary.aliases(it.id) }.orEmpty()
     downloadedLyrics.edited(track, aliases)?.let(ua.olex.music.lyrics.Lyrics::parse)?.takeIf { it.lines.isNotEmpty() }?.let {
         return@withContext LocalLyricsState(it, "Your timing", mediaId = track.id.value, edited = true)
@@ -29,7 +33,7 @@ internal suspend fun AppGraph.resolveLyrics(request: Track): LocalLyricsState = 
             val local = localLyrics(linked, LocalLyricsState(embedded, "Embedded lyrics", mediaId = track.id.value))
             if (local.lyrics.lines.isNotEmpty()) return@withContext local
         }
-        val found = if (cached == null) fetchedLyrics(track) else null
+        val found = if (cached == null) fetchAvailable() else null
         return@withContext if (found != null) LocalLyricsState(found, "Found online", mediaId = track.id.value)
             else LocalLyricsState(Lyrics.EMPTY, "No lyrics found online", mediaId = track.id.value)
     }
@@ -40,7 +44,7 @@ internal suspend fun AppGraph.resolveLyrics(request: Track): LocalLyricsState = 
     val local = localLyrics(track, fallback)
     // A removed result leaves a cached marker, so it is not fetched again.
     if (local.lyrics.lines.isNotEmpty() || cached != null) return@withContext local
-    val found = fetchedLyrics(track)
+    val found = fetchAvailable()
     if (found != null) LocalLyricsState(found, "Found online", mediaId = track.id.value) else local
 }
 

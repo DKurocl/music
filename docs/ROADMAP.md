@@ -23,6 +23,8 @@ separate commits to keep merges trivial.
   refer to the Core Perfection assignment; the historical milestone numbering below still applies
   to the original roadmap.
 
+- [~] Intelligence and efficiency IE-M10-IE-M140 (Codex, 2026-11-26). The
+  [execution ledger](INTELLIGENCE_EFFICIENCY.md) records code, evidence and open gates.
 
 ## YouTube Music recommendations and playback restoration
 

@@ -10,7 +10,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import ua.olex.music.model.Track
 
@@ -21,7 +20,8 @@ internal class PlaybackListening(private val owner: PlaybackHistoryOwner) {
     private var event: Deferred<Long?>? = null
     private var started: Long? = null
     private var elapsed = 0L
-    private var checkpoint: Job? = null
+    private var firstSample: Job? = null
+    private var firstSampleTaken = false
 
     fun begin(track: Track) {
         finish()
@@ -33,11 +33,10 @@ internal class PlaybackListening(private val owner: PlaybackHistoryOwner) {
     fun resume() {
         if (event == null || started != null) return
         started = SystemClock.elapsedRealtime()
-        checkpoint = scope.launch {
-            delay(5_000)
-            flush()
-            while (isActive) {
-                delay(60_000)
+        if (!firstSampleTaken) {
+            firstSample = scope.launch {
+                delay((5_000 - elapsed).coerceAtLeast(0))
+                firstSampleTaken = true
                 flush()
             }
         }
@@ -47,16 +46,27 @@ internal class PlaybackListening(private val owner: PlaybackHistoryOwner) {
         val since = started ?: return
         elapsed += (SystemClock.elapsedRealtime() - since).coerceAtLeast(0)
         started = null
-        checkpoint?.cancel()
-        checkpoint = null
+        firstSample?.cancel()
+        firstSample = null
         flush()
     }
 
-    fun finish() {
+    fun finish(explicitEarlySkip: Boolean = false) {
         pause()
+        if (explicitEarlySkip) {
+            val recorded = event
+            val total = elapsed
+            if (recorded != null && total > 0) {
+                scope.launch { recorded.await()?.let { id -> store { owner.recordExplicitEarlySkip(id, total) } } }
+            }
+        }
         event = null
         elapsed = 0
+        firstSampleTaken = false
     }
+
+    /** Share the active playback checkpoint tick with the queue journal. */
+    fun checkpoint() { if (started != null) flush() }
 
     fun close() {
         finish()
@@ -78,4 +88,24 @@ internal class PlaybackListening(private val owner: PlaybackHistoryOwner) {
         Log.w("MusicHistory", "Could not persist listening history: ${failure.javaClass.simpleName}")
         null
     }
+}
+
+/** A seek alone says nothing about intent. Match the exact occurrence pair of a recent Next command. */
+internal class ExplicitNext {
+    private data class Request(val from: String, val to: String, val atMs: Long)
+    private var pending: Request? = null
+
+    fun remember(from: String?, to: String?, atMs: Long, positionMs: Long, durationMs: Long) {
+        pending = if (from != null && to != null && from != to && durationMs > 0 &&
+            positionMs in 0 until minOf(30_000L, durationMs / 5)) Request(from, to, atMs) else null
+    }
+
+    fun consume(from: String?, to: String?, seek: Boolean, atMs: Long): Boolean {
+        val request = pending
+        clear()
+        return request != null && seek && from == request.from && to == request.to &&
+            atMs - request.atMs in 0..2_000L
+    }
+
+    fun clear() { pending = null }
 }

@@ -46,13 +46,10 @@ internal object PlayerFactory {
             // Output disconnected: pause before falling back to the speaker. Wear detection is
             // an earbud-generated media command and must be verified separately on the phone.
             .setHandleAudioBecomingNoisy(true)
-            // Keeps the CPU awake while playing with the screen off. Online songs too: they are fetched
-            // whole (the load control above), so no Wi-Fi lock is needed; a NETWORK wake mode would hold
-            // Wi-Fi at full performance for the whole song and drain the battery for nothing.
+            // Media3 owns the CPU wake lock during playback. The app does not request a Wi-Fi lock.
             .setWakeMode(C.WAKE_MODE_LOCAL)
-            .build().apply {
-                // Let Media3 prepare the next source once current playback is buffered.
-                preloadConfiguration = ExoPlayer.PreloadConfiguration(2_500_000L)
-            }
+            // Keep Media3's playback queue buffering. Its separate playlist preload pool can
+            // prepare multiple items and cannot be limited to the current resource lease.
+            .build()
     }
 }

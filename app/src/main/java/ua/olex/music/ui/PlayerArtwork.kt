@@ -5,6 +5,10 @@ package ua.olex.music.ui
 import android.content.Context
 import android.graphics.Matrix
 import android.view.TextureView
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -226,11 +230,12 @@ internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
 
 internal data class CoverImage(val frame: CoverFrame?, val loading: Boolean, val preview: CoverFrame? = null)
 
-@OptIn(ExperimentalCoilApi::class)
+@OptIn(ExperimentalCoilApi::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @Composable
 internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): CoverImage {
     val memory = LocalPlayerCovers.current ?: remember { PlayerCoverMemory() }
     val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val loader = SingletonImageLoader.get(context)
     val preview = if (LocalInspectionMode.current) LocalAsyncImagePreviewHandler.current else null
     var failed by remember(uri, targetSize) { mutableStateOf(false) }
@@ -241,18 +246,18 @@ internal fun rememberCoverImage(uri: String?, pixels: Int, targetSize: Int): Cov
     val previewFrame = remember(uri, frame) { retained?.takeIf { frame != null && it.pixels < frame.pixels } }
     androidx.compose.runtime.SideEffect { retained = frame }
     // Keep the request independent of draw visibility and of the shared element's animated size.
-    LaunchedEffect(uri, size, loader, preview, memory) {
+    LaunchedEffect(uri, size, loader, preview, memory, lifecycle) {
         if (uri == null || size <= 0 || (memory[uri]?.pixels ?: 0) >= size) return@LaunchedEffect
-        for (candidate in ArtworkUris.playerVariants(uri, context.packageName, pixels)) {
-            val request = ImageRequest.Builder(context).data(candidate).size(size).scale(Scale.FILL).crossfade(false).build()
-            val painter = if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
-                else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
-            if (painter != null) {
-                memory.put(uri, CoverFrame(painter, size))
-                return@LaunchedEffect
+        val painter = lifecycle.currentStateFlow.map { it.isAtLeast(Lifecycle.State.STARTED) }.distinctUntilChanged()
+            .transformLatest { visible ->
+                if (visible) emit(ArtworkUris.playerVariants(uri, context.packageName, pixels).firstNotNullOfOrNull { candidate ->
+                    val request = ImageRequest.Builder(context).data(candidate).size(size).scale(Scale.FILL).crossfade(false).build()
+                    if (preview != null) (preview.handle(loader, request) as? AsyncImagePainter.State.Success)?.painter
+                    else (loader.execute(request) as? SuccessResult)?.image?.asPainter(context)
+                })
             }
-        }
-        failed = true
+            .first()
+        if (painter == null) failed = true else memory.put(uri, CoverFrame(painter, size))
     }
     return CoverImage(frame, frame == null && uri != null && !failed, previewFrame)
 }

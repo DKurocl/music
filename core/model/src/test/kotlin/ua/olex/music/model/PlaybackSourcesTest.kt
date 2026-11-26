@@ -42,6 +42,33 @@ class PlaybackSourcesTest {
         assertEquals(listOf(file.uri, remote.uri), opened)
     }
 
+    @Test fun repeatedSourcePoliciesReuseAWarmIndexWithoutReadingEveryFile() {
+        val rows = listOf(file) + List(49_999) { i ->
+            file.copy(id = TrackId("local:other-$i"), uri = "content://other/$i", title = "Other $i", path = "Archive/$i.flac")
+        }
+        var reads = 0
+        val counted = object : AbstractList<Track>() {
+            override val size get() = rows.size
+            override fun get(index: Int): Track {
+                reads++
+                return rows[index]
+            }
+        }
+        val library = LibraryIndex(counted, emptyList(), emptyList(), emptyList(), emptyList())
+        assertEquals(rows.size, library.bySongKey.size)
+        val warm = reads
+        val video = online("retained")
+        val recording = saved("recording:retained", video)
+        repeat(4) {
+            val choice = PlaybackSources(library, listOf(recording)).select(video)
+            assertNull(choice.issue)
+            assertEquals(file.id, choice.track.id)
+            assertEquals(recording.id, choice.track.recordingId)
+            assertTrue(choice.track.sources.any { it.uri == video.uri })
+        }
+        assertEquals(warm, reads)
+    }
+
     @Test fun onlyTheExactVerifiedVideoAndSelectedPhysicalFileAreRemembered() {
         val request = online("requested")
         val choice = PlaybackSources(LibraryIndex.build(listOf(file)), emptyList()).select(request)
@@ -62,6 +89,15 @@ class PlaybackSourcesTest {
         assertEquals(original.uri, PlaybackSources(LibraryIndex.build(listOf(other)), emptyList()).select(original).track.uri)
         assertEquals(original.uri, PlaybackSources(LibraryIndex.build(listOf(file)), emptyList()).select(original).track.uri)
         assertEquals(preferred.uri, PlaybackSources(LibraryIndex.build(listOf(preferred)), emptyList()).select(original).track.uri)
+    }
+
+    @Test fun manualLocalUriWinsOverHigherFidelityAndAnOnlineIntentCanPreferTheEligibleLosslessCopy() {
+        val selected = file.copy(path = null, format = AudioFormat("mp3", bitrateKbps = 320))
+        val lossless = selected.copy(id = TrackId("local:flac"), uri = "content://lossless", format = AudioFormat("flac", 96_000, 24))
+        val policy = PlaybackSources(LibraryIndex.build(listOf(lossless, selected)), emptyList())
+        assertEquals(selected.uri, policy.select(selected).track.uri)
+        assertEquals(lossless.uri, policy.select(online("reserve")).track.uri)
+        assertEquals(selected.uri, policy.select(online("reserve"), available = { it != lossless.uri }).track.uri)
     }
 
     @Test fun knownRecordingSelectsTheFileAcrossAnOldAlias() {

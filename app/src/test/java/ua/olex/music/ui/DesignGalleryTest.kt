@@ -342,9 +342,17 @@ class DesignGalleryTest {
     }
 
     @Test fun artistPage() {
+        // The gallery exercises the cached biography state without starting a provider request.
+        val artist = "Radiohead"
+        val key = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(ua.olex.music.model.TextFold.fold(artist).toByteArray())
+            .take(12).joinToString("") { "%02x".format(it) }
+        File(app.filesDir, "artists").apply { mkdirs() }.resolve("$key.bio")
+            .writeText("Radiohead formed in Oxfordshire in 1985. The band has released rock and electronic music.")
         compose.setContent { Shell("Search", Place.SEARCH) { LibraryBrowser(library, it, "", null, {}, now.mediaId, { _, _ -> }, null, {}, mode = BrowserMode.SEARCH,
-            open = "ARTISTS" to library.artists.first { a -> a.name == "Radiohead" }.id) } }
+            open = "ARTISTS" to library.artists.first { a -> a.name == artist }.id) } }
         shot("34-artist")
+        compose.onNodeWithText("About").assertExists()
     }
 
     @Test fun homeFresh() {

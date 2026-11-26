@@ -47,9 +47,9 @@ enum class SourceIssue { MISSING, OFFLINE, AMBIGUOUS }
 data class PlaybackSourceChoice(val track: Track, val issue: SourceIssue? = null)
 
 /** One queue-source policy, independent of the initiating UI, browser, widget or recovery path. */
-class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<String, String> = emptyMap()) {
+class PlaybackSources(private val local: LibraryIndex, saved: List<SavedSong>, aliases: Map<String, String> = emptyMap()) {
     private val recordings = RecordingLookup(saved, aliases)
-    private val bound = local.copy(songs = SavedCatalog.bindLocal(local, saved))
+    private val localBindings by lazy { SavedCatalog.LocalBindings(local, saved) }
     /** Restore the original video intent after a previous physical-source substitution. */
     fun requested(track: Track): Track {
         val id = track.requestedId
@@ -112,7 +112,8 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
         }
         val mastering = request.title.mastering()
         var incompatible = false
-        val selected = filtered?.resolve(bound) { candidate ->
+        val preferredLocalKey = primary?.takeIf { it.kind == RecordingSourceKind.LOCAL }?.key
+        val selected = filtered?.resolve(local, preferredLocalKey) { candidate ->
             val actual = RecordingSource.from(candidate) ?: return@resolve false
             if (actual.key in rejected) return@resolve false
             val exactLinkedVideo = primary != null && primary.kind == RecordingSourceKind.YOUTUBE &&
@@ -131,8 +132,11 @@ class PlaybackSources(local: LibraryIndex, saved: List<SavedSong>, aliases: Map<
             permitted && available(candidate.uri)
         }
         if (selected != null && !selected.uri.startsWith(SavedSong.ONLINE_PREFIX)) {
-            val actual = RecordingSource.from(selected)!!
-            return PlaybackSourceChoice(selected.copy(sources = (listOf(actual) + reference.references).distinctBy { it.key }))
+            // A whole-library copy here rebuilt the same SongKey index on every source request.
+            val file = localBindings.bind(local.byId[selected.id] ?: selected)
+            val bound = requireNotNull(filtered).bind(file)
+            val actual = RecordingSource.from(bound)!!
+            return PlaybackSourceChoice(bound.copy(sources = (listOf(actual) + reference.references).distinctBy { it.key }))
         }
         val online = filtered?.online()
         if (online != null && available(online.uri)) return PlaybackSourceChoice(online.copy(

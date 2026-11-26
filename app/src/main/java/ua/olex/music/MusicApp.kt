@@ -3,24 +3,28 @@ package ua.olex.music
 import kotlinx.coroutines.launch
 import android.app.Application
 import android.content.Context
+import coil3.network.NetworkFetcher
+import coil3.network.okhttp.asNetworkClient
 import ua.olex.music.library.LibraryDatabase
 import ua.olex.music.library.LibraryRepository
 import ua.olex.music.playback.OutputRouteMonitor
 import ua.olex.music.playback.PlayerConnection
 import ua.olex.music.playback.PlaybackHistoryOwner
 import ua.olex.music.model.Track
+import ua.olex.music.model.OptionalWork
+import ua.olex.music.ui.ArtworkNetwork
+import ua.olex.music.ui.AuxiliaryLoads
 import ua.olex.music.ui.resolveLyrics
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import ua.olex.music.user.UserDatabase
@@ -32,7 +36,6 @@ import ua.olex.music.user.UserRepository
  */
 class AppGraph(context: Context) {
     private val app = context.applicationContext
-    val audioAccess = kotlinx.coroutines.flow.MutableStateFlow(app.checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED)
     val musicFiles by lazy { ua.olex.music.library.LocalMusicFiles(app) }
     val downloadedLyrics by lazy {
         ua.olex.music.ui.DownloadedLyrics(app, lastResort = { track ->
@@ -40,21 +43,30 @@ class AppGraph(context: Context) {
             video?.removePrefix("yt:")?.substringBefore('#')?.let { youTube.lyrics(it) }
         })
     }
-    val artistImages by lazy { ua.olex.music.ui.ArtistImages(app) }
+    val artistImages by lazy { ua.olex.music.ui.ArtistImages(app, resources) }
     val motionCovers by lazy { ua.olex.music.ui.MotionCovers(app) }
     internal val appleMotion by lazy { ua.olex.music.ui.AppleMotion(app) }
     val youTubeAccount by lazy { ua.olex.music.ui.YouTubeAccount(app) }
-    internal val prefetch by lazy { ua.olex.music.ui.Prefetch(app, youTube) { youTubeAccount.cacheScope.value } }
+    internal val radioTeacher by lazy {
+        RadioTeacher(app.noBackupFilesDir.resolve("radio-model-v1"), youTubeAccount.cacheScope,
+            youTubeAccount.revision, youTubeOn, resources, shared)
+    }
+    internal val prefetch by lazy {
+        ua.olex.music.ui.Prefetch(app, youTube, resources, youTubeAccount.cacheScope, youTubeAccount.revision)
+    }
     internal val youTube by lazy {
         ua.olex.music.ui.YouTubeMusic(
             pageStore = ua.olex.music.ui.OnlinePageStore(app.cacheDir.resolve("online-pages-v1")),
             pageScope = { youTubeAccount.cacheScope.value },
             account = { youTubeAccount.headers() },
+            pageRevision = { youTubeAccount.revision.value },
+            onRadio = { owner, revision, seed, tracks -> radioTeacher.observe(owner, revision, seed, tracks) },
         )
     }
     internal val youtubeFavourites by lazy { ua.olex.music.ui.YouTubeFavourites(app, this) }
     internal val mixPreferences by lazy { app.getSharedPreferences("mix-cursor-v1", Context.MODE_PRIVATE) }
     internal val mix by lazy { ua.olex.music.ui.PlaybackMix(this) }
+    internal val sessionTaste by lazy { ua.olex.music.model.SessionTaste() }
     internal fun excludedRecommendations(): Set<String> = app.getSharedPreferences("not_recommended", Context.MODE_PRIVATE).getStringSet("keys", emptySet()).orEmpty()
     /** Lossless downloads from Soulseek; saved files reach the library through Android's media store. */
     private val downloadPublications = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(
@@ -67,47 +79,31 @@ class AppGraph(context: Context) {
     /** YouTube Music in search and playback; the owner can turn it off in Settings. */
     val youTubeOn by lazy { kotlinx.coroutines.flow.MutableStateFlow(onlinePrefs.getBoolean("youtube", true)) }
     fun setYouTube(on: Boolean) { onlinePrefs.edit().putBoolean("youtube", on).apply(); youTubeOn.value = on }
-    /**
-     * Whether the phone has a working internet connection now. Without one, YouTube Music songs the
-     * stream cache does not keep are greyed out and skipped by Play; everything else works as before.
-     */
-    val network: kotlinx.coroutines.flow.StateFlow<Boolean> by lazy {
-        val flow = kotlinx.coroutines.flow.MutableStateFlow(true)
-        runCatching {
-            val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
-            fun ok(caps: android.net.NetworkCapabilities?) = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
-                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            fun refreshDefault() {
-                flow.value = ok(cm.getNetworkCapabilities(cm.activeNetwork))
-            }
-            refreshDefault()
-            cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {
-                override fun onCapabilitiesChanged(network: android.net.Network, caps: android.net.NetworkCapabilities) {
-                    if (network == cm.activeNetwork) flow.value = ok(caps) else refreshDefault()
-                }
+    private val defaultNetwork by lazy { DefaultNetwork(app, shared) }
+    internal val resources by lazy { OptionalResources(app, shared, defaultNetwork) }
+    internal fun networkAvailable() = defaultNetwork.current().validated
 
-                override fun onLost(network: android.net.Network) {
-                    val active = cm.activeNetwork
-                    flow.value = active != network && ok(cm.getNetworkCapabilities(active))
-                }
-            })
-        }
-        flow
+    /** Availability for visible surfaces and service queue refreshes. */
+    val network: kotlinx.coroutines.flow.StateFlow<Boolean> by lazy {
+        defaultNetwork.conditions.map { it.validated }.stateIn(
+            shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(), networkAvailable(),
+        )
     }
     val library by lazy { LibraryRepository(app, LibraryDatabase.open(app), musicFiles) }
 
     // One library index for the whole app, built once per change of the files and shared by every
     // screen, the catalogue, Search and the player (each used to read the database and build its own).
     private val shared = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
-    /** The library (hidden folders left out), or null until first read. Started with the process. */
+    /** The library (hidden folders left out). Its last snapshot survives when readers leave. */
     val index: kotlinx.coroutines.flow.StateFlow<ua.olex.music.model.LibraryIndex?> by lazy {
-        library.index.stateIn(shared, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+        library.index.catch { failure -> android.util.Log.w("MusicLibrary", "Could not observe visible index: ${failure.javaClass.simpleName}") }
+            .stateIn(shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(), null)
     }
     /** Every file, hidden folders included: playback can still use them as sources. */
     val allFiles: kotlinx.coroutines.flow.StateFlow<ua.olex.music.model.LibraryIndex?> by lazy {
         library.tracks.map { ua.olex.music.model.LibraryIndex.build(it) }.flowOn(Dispatchers.Default)
             .catch { failure -> android.util.Log.w("MusicLibrary", "Could not observe playback index: ${failure.javaClass.simpleName}") }
-            .stateIn(shared, kotlinx.coroutines.flow.SharingStarted.Eagerly, null)
+            .stateIn(shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(), null)
     }
     /** Reuse published files first; a cold or failed index must not leave the player waiting forever. */
     internal suspend fun playbackIndex(request: Track?): ua.olex.music.model.LibraryIndex? {
@@ -126,9 +122,28 @@ class AppGraph(context: Context) {
         }
     }
     suspend fun indexNow(): ua.olex.music.model.LibraryIndex = index.first { it != null }!!
+    internal suspend fun offlineRadioIndex(): ua.olex.music.model.LibraryIndex? {
+        if (app.checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) return null
+        return catalogueState.value ?: index.value ?: kotlinx.coroutines.withTimeoutOrNull(1_500) { indexNow() }
+    }
     /** The merged catalogue (files and saved YouTube Music songs), kept warm like [index]. */
     val catalogueState: kotlinx.coroutines.flow.StateFlow<ua.olex.music.model.LibraryIndex?> by lazy {
-        catalogue.stateIn(shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(60_000), null)
+        catalogue.stateIn(shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(), null)
+    }
+
+    /** Share view statistics and the offline ranker's last snapshot without another Room observer. */
+    internal val listeningStats: kotlinx.coroutines.flow.StateFlow<Map<String, ua.olex.music.model.SongStats>> by lazy {
+        val fileRatings = catalogueState.map { index ->
+            index?.songs?.mapNotNull { track -> track.metadata?.rating?.let { track.statsKey to it } }.orEmpty()
+        }.distinctUntilChanged()
+        combine(userLibrary.stats.catch { emit(emptyMap()) }, fileRatings) { owned, files ->
+            if (files.isEmpty()) owned else owned.toMutableMap().apply {
+                for ((key, stars) in files) {
+                    val stats = get(key) ?: ua.olex.music.model.SongStats.NONE
+                    if (!stats.ratingSet) put(key, stats.copy(rating = stars, ratingSet = true))
+                }
+            }
+        }.flowOn(Dispatchers.Default).stateIn(shared, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(), emptyMap())
     }
     /** Search display and service playback run the same policy over their visible file sets. */
     suspend fun selectSources(
@@ -152,7 +167,7 @@ class AppGraph(context: Context) {
             if (!enrichSelection || tracks.size != 1 || rejected.isNotEmpty() || original.durationMs > 0 ||
                 !ua.olex.music.ui.YouTubeMusic.isOnline(original) ||
                 !ua.olex.music.ui.YouTubeMusic.isOnline(initial.track) || !credits.hasPlausibleCopy(original) ||
-                !youTubeOn.value || !network.value) return@map initial
+                !youTubeOn.value || !networkAvailable()) return@map initial
             val videoId = original.uri.removePrefix(ua.olex.music.model.SavedSong.ONLINE_PREFIX)
             // Use a single metadata request for this tap. Audio must remain actionable if it times out.
             val evidence = kotlinx.coroutines.withTimeoutOrNull(400) { youTube.songEvidence(videoId) } ?: return@map initial
@@ -170,8 +185,9 @@ class AppGraph(context: Context) {
     /** Reconciliation is idempotent and never adds unrelated scanned files to the saved library. */
     val catalogue by lazy {
         combine(index.filterNotNull(), userLibrary.catalogue, userLibrary.recordings) { local, saved, evidence ->
-            userLibrary.reconcile(local, evidence)
-            ua.olex.music.model.SavedCatalog.merge(local, saved, evidence)
+            val bound = ua.olex.music.model.SavedCatalog.bindLocal(local, evidence)
+            userLibrary.reconcileBound(bound)
+            ua.olex.music.model.SavedCatalog.merge(local, saved, evidence, bound)
         }.flowOn(Dispatchers.Default)
     }
 }
@@ -192,13 +208,15 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             }
             previous?.uncaughtException(thread, failure)
         }
-        // The library starts loading with the process, while the splash shows, not when Home asks.
-        if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) graph.index
     }
     companion object { const val CRASH_FILE = "last_crash.txt" }
 
-    /** Covers and photos on disk within their share of the cache budget (see CacheBudget). */
+    private val artworkNetwork by lazy { ArtworkNetwork(okhttp3.OkHttpClient().asNetworkClient(), graph.resources) }
+
+    /** Covers and photos share a disk budget, with resource admission applied only on network misses. */
+    @OptIn(coil3.annotation.ExperimentalCoilApi::class)
     override fun newImageLoader(context: coil3.PlatformContext): coil3.ImageLoader = coil3.ImageLoader.Builder(context)
+        .components { add(NetworkFetcher.Factory(networkClient = { artworkNetwork })) }
         .diskCache { coil3.disk.DiskCache.Builder().directory(okio.Path.Companion.run { cacheDir.resolve("image_cache").absolutePath.toPath() })
             .maxSizeBytes(ua.olex.music.playback.CacheBudget.coilBytes(this)).build() }
         .build()
@@ -207,21 +225,14 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     override fun resolve(id: String): android.net.Uri? = graph.youTube.audio(id)
     override fun forget(id: String) = graph.youTube.forget(id)
     override fun available(uri: String): Boolean = !uri.startsWith("ytm://") ||
-        (graph.youTubeOn.value && graph.network.value) || ua.olex.music.playback.CacheBudget.isStreamCached(uri)
+        (graph.youTubeOn.value && graph.networkAvailable()) || ua.olex.music.playback.CacheBudget.isStreamCached(uri)
     override val localArtwork get() = graph.artwork
+    override suspend fun <T> loadRemoteArtwork(load: suspend () -> T?): T? =
+        graph.resources.run(OptionalWork.PREFETCH) { AuxiliaryLoads.run(load) }
     val graph by lazy { AppGraph(this) }
     override val playbackSourceChanges get() = merge(
         graph.allFiles.filterNotNull().map { Unit }, graph.userLibrary.recordings.map { Unit },
-        graph.network.map { Unit }, graph.youTubeOn.map { Unit },
-        ua.olex.music.playback.CacheBudget.revision.map { Unit },
-        graph.audioAccess.flatMapLatest { granted ->
-            if (!granted) kotlinx.coroutines.flow.emptyFlow() else graph.libraryChanges.debounce(500).onStart { emit(Unit) }.map {
-                try { graph.library.refresh() }
-                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-                catch (failure: Exception) { android.util.Log.w("MusicLibrary", "Could not refresh sources: ${failure.javaClass.simpleName}") }
-                Unit
-            }
-        },
+        streamAvailabilityChanges(graph.network, graph.youTubeOn, ua.olex.music.playback.CacheBudget.revision),
     ).debounce(300).flowOn(Dispatchers.Default)
     private val playReports = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
     override suspend fun rememberPlaybackLink(link: ua.olex.music.model.SavedSong) =
@@ -233,24 +244,45 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         val video = track.id.value.removePrefix("yt:").takeIf { track.id.value.startsWith("yt:") }
             ?: track.uri.removePrefix("ytm://").takeIf { track.uri.startsWith("ytm://") }
         if (video != null && graph.youTubeOn.value && graph.youTubeAccount.signedIn.value) {
-            val account = graph.youTubeAccount.cacheScope.value
+            val revision = graph.youTubeAccount.revision.value
             playReports.launch {
-                if (account != graph.youTubeAccount.cacheScope.value || !graph.youTubeOn.value) return@launch
-                try { graph.youTube.reportPlay(video) }
+                val allowed = combine(graph.youTubeOn, graph.youTubeAccount.revision) { enabled, current ->
+                    enabled && current == revision
+                }
+                try {
+                    allowed.runWhileAllowed {
+                        graph.resources.run(OptionalWork.PROVIDER) { graph.youTube.reportPlay(video, revision) }
+                    }
+                }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (failure: Exception) {
                     android.util.Log.w("MusicHistory", "Provider report failed: ${failure.javaClass.simpleName}")
                 }
             }
         }
-        return graph.userLibrary.recordPlay(track, observedAt)
+        val event = graph.userLibrary.recordPlay(track, observedAt)
+        if (graph.resources.currentPermit(OptionalWork.SESSION_TASTE) != null) {
+            graph.sessionTaste.begin(event, track, android.os.SystemClock.elapsedRealtime())
+        }
+        return event
     }
-    override suspend fun updateListening(eventId: Long, millis: Long) = graph.userLibrary.updateListening(eventId, millis)
+
+    override suspend fun updateListening(eventId: Long, millis: Long) {
+        graph.userLibrary.updateListening(eventId, millis)
+        if (graph.resources.currentPermit(OptionalWork.SESSION_TASTE) != null) {
+            graph.sessionTaste.heard(eventId, millis, android.os.SystemClock.elapsedRealtime())
+        }
+    }
+
+    override suspend fun recordExplicitEarlySkip(eventId: Long, audibleMs: Long) {
+        if (graph.resources.currentPermit(OptionalWork.SESSION_TASTE) != null) {
+            graph.sessionTaste.skipped(eventId, audibleMs, android.os.SystemClock.elapsedRealtime())
+        }
+    }
     override suspend fun playbackSources(
         tracks: List<Track>, rejected: Set<String>, allowDirect: Boolean, enrichSelection: Boolean,
-    ) = kotlinx.coroutines.withContext(Dispatchers.Default) {
+    ) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val permitted = checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        graph.audioAccess.value = permitted
         // Playback reads the current snapshot immediately. The service source observer refreshes
         // it independently; a long scan or its failure must not hold up an online/local Play.
         // Hidden library folders still remain legitimate playlist/playback sources.
@@ -260,7 +292,13 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
         val snapshotState = if (snapshot == null) "permissionDenied" else if (snapshot.value == null) "cold" else "ready"
         val local = snapshot?.value ?: if (permitted) graph.playbackIndex(tracks.singleOrNull()) else null
         val availableFiles = local ?: ua.olex.music.model.LibraryIndex.EMPTY
-        graph.selectSources(tracks, availableFiles, rejected, allowDirect, ::available, enrichSelection).also { choices ->
+        val streamIndex by lazy(LazyThreadSafetyMode.NONE) { ua.olex.music.playback.CacheBudget.openExistingStreams(this@MusicApp) }
+        fun playbackAvailable(uri: String): Boolean {
+            if (!uri.startsWith("ytm://") || (graph.youTubeOn.value && graph.networkAvailable())) return true
+            streamIndex
+            return ua.olex.music.playback.CacheBudget.isStreamCached(uri)
+        }
+        graph.selectSources(tracks, availableFiles, rejected, allowDirect, ::playbackAvailable, enrichSelection).also { choices ->
             if (debug) {
                 val from = tracks.count(ua.olex.music.ui.YouTubeMusic::isOnline)
                 val to = choices.count { it.issue == null && ua.olex.music.ui.YouTubeMusic.isOnline(it.track) }
@@ -270,12 +308,39 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
             }
         }
     }
-    override suspend fun extendPlaybackQueue(queue: List<Track>, current: Int, context: String?, remaining: Int) =
-        graph.mix.extend(queue, current, context, remaining)
+    override suspend fun extendPlaybackQueue(
+        queue: List<Track>, current: Int, context: String?, remaining: Int,
+        publish: suspend (ua.olex.music.playback.QueueExtension) -> Unit,
+    ) {
+        val active = queue.getOrNull(current) ?: return
+        val work = if (active.uri.startsWith(ua.olex.music.model.SavedSong.ONLINE_PREFIX))
+            OptionalWork.REMOTE_QUEUE_REFILL else OptionalWork.PROVIDER
+        val canRequest = graph.youTubeOn.value &&
+            (work == OptionalWork.REMOTE_QUEUE_REFILL || graph.resources.isVisible) && graph.networkAvailable()
+        if (canRequest) {
+            val revision = graph.youTubeAccount.revision.value
+            val provider = combine(graph.youTubeOn, graph.youTubeAccount.revision) { enabled, current -> enabled && revision == current }
+            val provided = provider.runWhileAllowed {
+                graph.resources.runWithPermit(work) { permit ->
+                    var permittedAtCommit = true
+                    graph.mix.extend(queue, current, context, remaining)?.let { extension ->
+                        publish(extension.copy(commit = {
+                            permittedAtCommit = graph.youTubeOn.value && revision == graph.youTubeAccount.revision.value &&
+                                graph.resources.permitsPublication(work, permit)
+                            permittedAtCommit && extension.commit()
+                        }))
+                    }
+                    permittedAtCommit
+                }
+            }
+            if (provided == true) return
+        }
+        graph.mix.extend(queue, current, context, remaining, allowProvider = false)?.let { publish(it) }
+    }
     override suspend fun playbackLyrics(track: Track): ua.olex.music.playback.PlaybackLyrics {
         val file = graph.indexNow().byId[track.id]?.takeIf { it.uri == track.uri }
         val known = file?.let { track.copy(metadata = it.metadata, path = it.path) } ?: track
-        val lyrics = graph.resolveLyrics(known).lyrics
+        val lyrics = graph.resolveLyrics(known, lockScreen = true).lyrics
         val offset = graph.userLibrary.lyricOffset(ua.olex.music.model.SavedSong.from(known)).first()
         return ua.olex.music.playback.PlaybackLyrics(ua.olex.music.lyrics.LyricsCleanup.clean(lyrics, known.title, known.artist), offset)
     }

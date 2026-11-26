@@ -6,7 +6,9 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
 import androidx.media3.datasource.cache.CacheWriter
+import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.ByteArrayDataSource
 import org.junit.Assert.assertEquals
@@ -69,6 +71,7 @@ class CacheBudgetTest {
 
     @Test fun onlyOnlineSongsGoThroughTheCache() {
         val opened = mutableListOf<String>()
+        var cacheSources = 0
         fun source(name: String) = object : DataSource {
             override fun addTransferListener(transferListener: TransferListener) = Unit
             override fun open(dataSpec: DataSpec): Long { opened += name; return 0 }
@@ -76,10 +79,108 @@ class CacheBudgetTest {
             override fun getUri(): Uri? = null
             override fun close() = Unit
         }
-        val routed = OnlineCachingDataSource(source("cache"), source("file"))
-        routed.open(DataSpec(Uri.parse("ytm://abc"))); routed.close()
+        val routed = OnlineCachingDataSource({ cacheSources++; source("cache") }, source("file"))
         routed.open(DataSpec(Uri.parse("content://media/external/audio/1"))); routed.close()
-        assertEquals(listOf("cache", "file"), opened)
-        assertFalse(opened.isEmpty())
+        assertEquals(0, cacheSources)
+        repeat(2) { routed.open(DataSpec(Uri.parse("ytm://abc"))); routed.close() }
+        assertEquals(1, cacheSources)
+        assertEquals(listOf("file", "cache", "cache"), opened)
+    }
+
+    @Test fun cacheMetricsCountRealConsumedBytesAndResetTogether() {
+        val directory = kotlin.io.path.createTempDirectory("cache-metrics").toFile()
+        val data = ByteArray(64)
+        val spec = DataSpec(Uri.parse("ytm://measured"))
+        val cache = SimpleCache(directory, BudgetEvictor { Long.MAX_VALUE }, StandaloneDatabaseProvider(context))
+        try {
+            val upstream = DataSource.Factory { ByteArrayDataSource(data) }
+            CacheWriter(CacheDataSource(cache, upstream.createDataSource()), spec, null, null).cache()
+            val metrics = StreamCacheMetrics()
+            val reader = CacheDataSource.Factory().setCache(cache).setEventListener(metrics).createDataSource()
+            try {
+                reader.open(spec)
+                assertEquals(16, reader.read(ByteArray(16), 0, 16))
+            } finally { reader.close() }
+            val bypassed = CacheDataSource.Factory().setCache(cache).setUpstreamDataSourceFactory(upstream)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_FOR_UNSET_LENGTH_REQUESTS)
+                .setEventListener(metrics).createDataSource()
+            try { bypassed.open(spec) } finally { bypassed.close() }
+            assertEquals(StreamCacheMetrics.Counts(16, 1), metrics.take())
+            assertEquals(StreamCacheMetrics.Counts(0, 0), metrics.take())
+        } finally { cache.release(); directory.deleteRecursively() }
+    }
+
+    @Test fun localFactoryLeavesTheStreamIndexColdAndAnOfflineReadRecoversWholePersistedAudio() {
+        val directory = context.cacheDir.resolve("streams")
+        val stored = ByteArray(256) { it.toByte() }
+        val spec = DataSpec(Uri.parse("ytm://saved"))
+        SimpleCache(directory, BudgetEvictor { Long.MAX_VALUE }, StandaloneDatabaseProvider(context)).let { previous ->
+            try { CacheWriter(CacheDataSource(previous, ByteArrayDataSource(stored)), spec, null, null).cache() }
+            finally { previous.release() }
+        }
+        var onlineOpens = 0
+        val source = OnlineCachingDataSource.Factory(context) {
+            object : DataSource by ByteArrayDataSource(stored) {
+                override fun open(dataSpec: DataSpec): Long {
+                    if (dataSpec.uri == spec.uri) {
+                        onlineOpens++
+                        throw java.io.IOException("Offline")
+                    }
+                    return stored.size.toLong()
+                }
+            }
+        }.createDataSource()
+        val before = CacheBudget.revision.value
+        source.open(DataSpec(Uri.parse("content://media/external/audio/1")))
+        source.close()
+        assertFalse(CacheBudget.isStreamCached(spec.uri.toString()))
+        assertEquals(before, CacheBudget.revision.value)
+
+        CacheBudget.openExistingStreams(context)
+        assertTrue(CacheBudget.isStreamCached(spec.uri.toString()))
+        assertEquals(before + 1, CacheBudget.revision.value)
+        val read = ByteArray(stored.size)
+        try {
+            assertEquals(stored.size.toLong(), source.open(spec))
+            assertEquals(stored.size, source.read(read, 0, read.size))
+            org.junit.Assert.assertArrayEquals(stored, read)
+        } finally { source.close() }
+        assertEquals(0, onlineOpens)
+    }
+
+    @Test(timeout = 5_000) fun evictionYieldsWhenDeletionCannotProgressAndKeepsAccounting() {
+        var limit = Long.MAX_VALUE
+        var mode = "failed"
+        var changes = 0
+        var removals = 0
+        val evictor = BudgetEvictor({ changes++ }) { limit }
+        val span = CacheSpan("test", 0, 3_000, System.currentTimeMillis(), java.io.File("unused"))
+        val cache = java.lang.reflect.Proxy.newProxyInstance(Cache::class.java.classLoader, arrayOf(Cache::class.java)) { _, method, _ ->
+            when (method.name) {
+                "removeSpan" -> {
+                    removals++
+                    if (mode == "failed") throw IllegalStateException("fixture")
+                    null
+                }
+                "getCachedSpans" -> java.util.TreeSet<CacheSpan>().apply { if (mode == "present") add(span) }
+                else -> error("Unexpected cache call: ${method.name}")
+            }
+        } as Cache
+        evictor.onSpanAdded(cache, span)
+        evictor.onSpanAdded(cache, span)
+        limit = 3_000
+        evictor.trim(cache)
+        assertEquals(0, removals)
+        limit = 0
+        evictor.trim(cache)
+        assertEquals(1, removals)
+        mode = "present"
+        evictor.trim(cache)
+        assertEquals(2, removals)
+        mode = "absent"
+        evictor.trim(cache)
+        evictor.trim(cache)
+        assertEquals(3, removals)
+        assertEquals(3, changes)
     }
 }

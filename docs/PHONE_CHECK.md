@@ -3,6 +3,23 @@
 Status: not run on a physical device. JVM, Robolectric and CI builds do not satisfy this checklist.
 Record the tested commit, APK versionCode, Pixel build, and WF-1000XM5 firmware in HANDOFF.md.
 
+## Final candidate phone-only report
+
+Run this single report after the implementation branch passes the Android gates. Use the signed
+final candidate and the M0-M9 candidate as the two builds for comparison.
+
+| Check | Record |
+| --- | --- |
+| Setup | APK version code, Pixel build, WF-1000XM5 firmware, selected codec and route, network type, volume and Battery Saver state. |
+| First tap and outage | Search for an owned track that appears on YouTube Music, tap its result and check the Audio path. Turn on airplane mode, keep Bluetooth on, and continue an automatic radio tail using owned files. Record source choice, gaps, duplicates, or unavailable entries. Turn off airplane mode and verify the current song and manual queue stay in place. |
+| Control and lifecycle | Confirm headset and notification Play/Pause/Next, route change, paused queue/position restore, and closing the app with and without active playback. Record any unexpected restart, stall or lost intent. |
+| Sound | Play the same local FLAC album in order and an online track under the same route. Record audible glitches, joins, and the Audio path display. Treat hearing and reported format as separate observations. |
+| Matched battery runs | Alternate baseline and candidate with the same file, route, volume, signal, screen state and starting charge/temperature conditions. Record start/end time and battery percentage for two-hour screen-off playback and a settled idle run when practical. Include repeat count and unexpected activity for each run. |
+
+Send one result with pass, fail or blocked for each row. Redact track names, file paths and account
+information. Phone percentage is total-device evidence. Perfetto, rail measurements, actual audio
+onset and underrun/decoder traces require separate instrumentation.
+
 ## Library and permissions
 
 1. Open Music without granting audio permission. The explanation stays usable; no crash.

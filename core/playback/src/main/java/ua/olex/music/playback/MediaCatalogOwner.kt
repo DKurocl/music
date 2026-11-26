@@ -12,6 +12,9 @@ interface MediaCatalogOwner {
     /** Source/availability changes are observed by the service without a bound app screen. */
     val playbackSourceChanges: kotlinx.coroutines.flow.Flow<Unit> get() = kotlinx.coroutines.flow.emptyFlow()
 
+    /** A cache miss for remote system artwork must fit the application's optional-work policy. */
+    suspend fun <T> loadRemoteArtwork(load: suspend () -> T?): T? = null
+
     /** An installed local occurrence has a confirmed video reserve, even if it never becomes audible. */
     suspend fun rememberPlaybackLink(link: ua.olex.music.model.SavedSong) {}
 

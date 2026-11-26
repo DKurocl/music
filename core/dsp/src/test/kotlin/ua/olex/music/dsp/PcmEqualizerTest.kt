@@ -41,6 +41,25 @@ class PcmEqualizerTest {
         assertTrue(output.isDirect)
         assertEquals(ByteOrder.nativeOrder(), output.order())
     }
+
+    @Test fun simultaneousGainAndChannelChangesBlendTheCompleteOutputPaths() {
+        var settings = EqualizerSettings()
+        val processor = PcmEqualizer(PcmEncoding.FLOAT32, 48_000, 2) { settings }
+        val input = ByteBuffer.allocateDirect(481 * 8).order(ByteOrder.nativeOrder()).apply {
+            repeat(481) { putFloat(1f); putFloat(0f) }
+            flip()
+        }
+        assertSame(input, processor.render(input))
+        settings = EqualizerSettings(enabled = true, preampDb = -6.0, channels = ChannelMix(swap = true))
+        val output = processor.render(input)
+        val gain = 0.5011872f
+        val halfway = 239 * 8
+        assertEquals(0.5f, output.getFloat(halfway), 1e-6f)
+        assertEquals(gain / 2, output.getFloat(halfway + 4), 1e-6f)
+        assertEquals(0f, output.getFloat(480 * 8), 0f)
+        assertEquals(gain, output.getFloat(480 * 8 + 4), 1e-6f)
+        assertEquals(0, input.position())
+    }
     @Test fun int16PreservesFrameSizeAndSettledAttenuation() {
         val input = ByteBuffer.allocateDirect(960 * 2).order(ByteOrder.nativeOrder()).apply { repeat(960) { putShort(16_384) }; flip() }
         val processor = PcmEqualizer(PcmEncoding.INT16, 48_000, 1) { EqualizerSettings(true, -6.0) }

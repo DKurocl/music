@@ -5,6 +5,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import ua.olex.music.ui.AppTheme
 import ua.olex.music.ui.LibraryViewModel
 import ua.olex.music.ui.MusicRoot
@@ -17,6 +20,9 @@ class MainActivity : ComponentActivity() {
         // The splash stays until Home has its library (or 0.7 s at most), then hands over.
         val graph = (application as MusicApp).graph
         SplashHandoff.install(this) { graph.index.value != null }
+        if (checkSelfPermission(android.Manifest.permission.READ_MEDIA_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            lifecycleScope.launch { graph.index.first { it != null } }
+        }
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         enableEdgeToEdge()
         if (savedInstanceState == null) { playFromSearch(intent); openPlayer(intent); openDownloads(intent); shortcut(intent) }
@@ -60,24 +66,19 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        (application as MusicApp).graph.resources.setVisible(true)
         model.setPlaybackScreenVisible(true)
         model.connectPlayer()
         model.startWatching()
-        // Files change behind the app's back (downloads, a cable, another app): look again on return, but
-        // only when Android's media store says something changed since the last look (its generation).
-        val generation = runCatching { android.provider.MediaStore.getGeneration(this, android.provider.MediaStore.VOLUME_EXTERNAL) }.getOrDefault(-1L)
-        if (generation < 0 || generation != lastGeneration) { lastGeneration = generation; model.refresh() }
     }
 
     override fun onPostResume() {
         super.onPostResume()
         (application as MusicApp).graph.soulseek.requestResume()
-        model.refreshYouTubeLikes()
     }
 
-    private var lastGeneration = Long.MIN_VALUE
-
     override fun onStop() {
+        (application as MusicApp).graph.resources.setVisible(false)
         model.stopWatching()
         model.setPlaybackScreenVisible(false)
         super.onStop()

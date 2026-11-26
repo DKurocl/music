@@ -7,7 +7,6 @@ import androidx.appfunctions.AppFunctionService
 import androidx.appfunctions.AppFunctionServiceEntryPoint
 import androidx.appfunctions.AppFunctionStringValueConstraint
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import ua.olex.music.model.BrowseTree
 
@@ -33,8 +32,8 @@ abstract class MusicFunctions : AppFunctionService() {
         val songs = withContext(Dispatchers.Default) { BrowseTree(graph.indexNow()).search(query, limit = 500) }
         if (songs.isEmpty()) return "Nothing in your library matches \"$query\"."
         val queue = if (shuffle) songs.shuffled() else songs
-        ua.olex.music.playback.QuickControl.play(this, queue)
-        return "Playing ${queue.first().title} by ${queue.first().artist}" + if (queue.size > 1) " and ${queue.size - 1} more." else "."
+        if (!ua.olex.music.playback.QuickControl.play(this, queue)) return "Music couldn't start playback."
+        return "Starting ${queue.first().title} by ${queue.first().artist}" + if (queue.size > 1) " and ${queue.size - 1} more." else "."
     }
 
     /**
@@ -49,7 +48,12 @@ abstract class MusicFunctions : AppFunctionService() {
     ): String {
         if (action !in setOf("pause", "resume", "next", "previous")) throw AppFunctionInvalidArgumentException("unknown action $action")
         val done = ua.olex.music.playback.QuickControl.control(this, action)
-        return when (action) { "pause" -> "Paused."; "resume" -> if (done) "Playing." else "Nothing to resume."; "next" -> "Next song."; else -> "Previous song." }
+        return when (action) {
+            "pause" -> if (done) "Paused." else "Nothing to pause."
+            "resume" -> if (done) "Resuming." else "Nothing to resume."
+            "next" -> if (done) "Skipping to the next song." else "There is no next song."
+            else -> if (done) "Going to the previous song." else "There is no previous song."
+        }
     }
 
     /**

@@ -2,6 +2,7 @@ package ua.olex.music.lyrics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 import java.io.ByteArrayOutputStream
 import java.util.Base64
@@ -30,6 +31,14 @@ class OnlineLyricsTest {
         assertEquals(2200, lyrics.lines[0].words[1].endMs)
         assertEquals("Привіт світ", lyrics.lines[0].translation)
         assertNull(KrcParser.decrypt("not a krc".toByteArray()))
+        val encoded = encrypt(krc)
+        assertNull(KrcParser.decrypt(encoded.copyOf(encoded.size - 2)))
+    }
+
+    @Test fun outOfRangeTimingDoesNotDiscardUsableLines() {
+        val parsed = KrcParser.parse("[9223372036854775800,20]<0,20,0>Invalid\n[200,900]<0,500,0>Valid")
+        assertEquals("Valid", parsed.lines.single().text)
+        assertEquals(700L, parsed.lines.single().words.single().endMs)
     }
 
     @Test fun jsonReadsNestedValuesAndEscapes() {
@@ -38,7 +47,14 @@ class OnlineLyricsTest {
         assertEquals("q\"A\n", v["s"])
     }
 
-    @Test fun kugouFirstWithinTheLengthTolerance() {
+    @Test fun malformedDeepJsonFailsBeforeExhaustingTheStack() {
+        val depth = 5_000
+        assertThrows(IllegalArgumentException::class.java) {
+            Json.parse("[".repeat(depth) + "0" + "]".repeat(depth))
+        }
+    }
+
+    @Test fun kugouFirstWithinTheLengthTolerance() = kotlinx.coroutines.runBlocking {
         val calls = ArrayList<String>()
         val online = OnlineLyrics { url ->
             calls += url
@@ -54,7 +70,7 @@ class OnlineLyricsTest {
         assertEquals(2, calls.size)
     }
 
-    @Test fun lrclibWhenKugouHasNothing() {
+    @Test fun lrclibWhenKugouHasNothing() = kotlinx.coroutines.runBlocking {
         val online = OnlineLyrics { url ->
             when {
                 "lrclib.net/api/get" in url -> """{"id":7,"syncedLyrics":"[00:01.00]Line one\n[00:02.00]Line two","plainLyrics":"Line one"}"""
@@ -67,7 +83,7 @@ class OnlineLyricsTest {
         assertEquals(Sync.LINE, found.lyrics.sync)
     }
 
-    @Test fun nothingWhenEveryCandidateIsTheWrongLength() {
+    @Test fun nothingWhenEveryCandidateIsTheWrongLength() = kotlinx.coroutines.runBlocking {
         val online = OnlineLyrics { url ->
             when {
                 "lrclib.net/api/search" in url -> """[{"id":1,"duration":240.0,"syncedLyrics":"[00:01.00]x"}]"""

@@ -28,7 +28,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 @Composable
-internal fun RemotePlaylistSheet(card: YouTubeMusic.Card, source: YouTubeMusic, account: String, onDismiss: () -> Unit) {
+internal fun RemotePlaylistSheet(card: YouTubeMusic.Card, source: YouTubeMusic, account: String, revision: Long, onDismiss: () -> Unit) {
     val scope = rememberCoroutineScope()
     var page by remember(card.id, account) { mutableStateOf<YouTubeMusic.PlaylistSnapshot?>(null) }
     var busy by remember(card.id, account) { mutableStateOf(false) }
@@ -44,8 +44,8 @@ internal fun RemotePlaylistSheet(card: YouTubeMusic.Card, source: YouTubeMusic, 
         error = null
         scope.launch {
             try {
-                page = if (change == null) source.remotePlaylist(card.id, account)
-                    else source.editRemotePlaylist(card.id, account, requireNotNull(expected), change)
+                page = if (change == null) source.remotePlaylist(card.id, account, revision)
+                    else source.editRemotePlaylist(card.id, account, revision, requireNotNull(expected), change)
                 if (change?.kind == YouTubeMusic.PlaylistChange.Kind.ADD) input = ""
             } catch (cancelled: CancellationException) {
                 throw cancelled

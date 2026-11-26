@@ -52,7 +52,7 @@ object TagWriter {
             when (type) {
                 4 -> r.bytes(at + 4, length).let { b -> vendor = vendorOf(b) ?: vendor; comments = rawComments(b) }
                 1 -> Unit // padding: rebuilt below
-                6 -> if (cover == null) kept += r.bytes(at, 4 + length)
+                6 -> if (cover == null || length < 4 || r.u32be(at + 4) != 3L) kept += r.bytes(at, 4 + length)
                 else -> kept += r.bytes(at, 4 + length)
             }
             at += 4 + length
@@ -122,9 +122,9 @@ object TagWriter {
             })?.codec?.startsWith("mp") != true) return null
         val edited = edits.keys.map { Fields.canonical(it) }.toSet()
         val replacedIds = edited.mapNotNull { FRAMES[it] }.toSet() + (if ("LYRICS" in edited) setOf("USLT") else emptySet()) +
-            (if ("RATING" in edited) setOf("POPM") else emptySet()) + (if (cover != null) setOf("APIC") else emptySet())
+            (if ("RATING" in edited) setOf("POPM") else emptySet())
         val frames = ByteArrayOutputStream()
-        if (oldSize > 0) keepOldFrames(r, oldSize, replacedIds, edited, frames)
+        if (oldSize > 0 && !keepOldFrames(r, oldSize, replacedIds, edited, cover != null, frames)) return null
         for ((name, values) in edits) {
             val canonical = Fields.canonical(name)
             val list = values.map { it.trim() }.filter { it.isNotEmpty() }
@@ -151,10 +151,11 @@ object TagWriter {
     }
 
     /** Copies frames of the old tag that are not being replaced, re-encoded as ID3v2.4 frames. */
-    private fun keepOldFrames(r: Reader, size: Long, replaced: Set<String>, edited: Set<String>, out: ByteArrayOutputStream) {
+    private fun keepOldFrames(r: Reader, size: Long, replaced: Set<String>, edited: Set<String>, replaceFront: Boolean,
+        out: ByteArrayOutputStream): Boolean {
         val h = r.bytes(0, 10)
         val major = h[3].toInt()
-        if (major < 3 || h[5].toInt() and 0x80 != 0) return // 2.2 or unsynchronised: only the new frames are written
+        if (major !in 3..4 || h[5].toInt() and 0x80 != 0) return false
         var pos = 10L
         if (h[5].toInt() and 0x40 != 0) pos += if (major == 4) syncsafeOf(r.bytes(pos, 4)) else r.u32be(pos) + 4
         val end = minOf(size, r.size)
@@ -165,12 +166,20 @@ object TagWriter {
             if (len <= 0 || pos + 10 + len > end) break
             val flags = r.u8(pos + 9)
             val special = if (major == 4) flags and 0x4F != 0 else flags and 0xE0 != 0
+            if (special && id !in replaced) return false
             val body = r.bytes(pos + 10, len.toInt())
-            val drop = id in replaced || special ||
+            val drop = id in replaced ||
+                (id == "APIC" && replaceFront && frontPicture(body)) ||
                 (id == "TXXX" && txxxName(body)?.let { Fields.canonical(it) in edited } == true)
             if (!drop) frame(out, id, body)
             pos += 10 + len
         }
+        return true
+    }
+
+    private fun frontPicture(body: ByteArray): Boolean {
+        for (i in 1 until body.lastIndex) if (body[i] == 0.toByte()) return body[i + 1] == 3.toByte()
+        return false
     }
 
     private fun txxxName(body: ByteArray): String? = runCatching {

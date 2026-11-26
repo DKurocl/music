@@ -5,7 +5,7 @@ import kotlin.random.Random
 /** What the owner's listening says about one song: how often, how recently, how it was rated. */
 data class SongStats(val plays: Int = 0, val lastPlayedAt: Long? = null, val rating: Int = 0,
     /** Explicit 0 suppresses an old embedded rating just as it suppresses an old merged rating. */
-    val ratingSet: Boolean = rating > 0) {
+    val ratingSet: Boolean = rating > 0, val favouriteSince: Long? = null) {
     companion object { val NONE = SongStats() }
 }
 

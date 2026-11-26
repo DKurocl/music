@@ -1,14 +1,20 @@
 package ua.olex.music.ui
 
 import android.content.Context
+import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ua.olex.music.lyrics.FoundLyrics
 import ua.olex.music.lyrics.OnlineLyrics
 import ua.olex.music.model.Track
 import java.io.File
+import java.io.IOException
 
 /**
  * Lyrics fetched from the internet (by themselves when a song has none, or when the owner asks), kept in the app's own storage per song
@@ -17,12 +23,15 @@ import java.io.File
  */
 class DownloadedLyrics(
     context: Context,
-    private val online: OnlineLyrics = OnlineLyrics(),
+    private val online: OnlineLyrics = OnlineLyrics { MetadataHttp.get(it, 1 shl 20)?.toString(Charsets.UTF_8) },
     /** Plain lyrics from YouTube Music, asked only when the timed services found nothing. */
     private val lastResort: suspend (Track) -> String? = { null },
 ) {
     private val dir = File(context.filesDir, "lyrics").apply { mkdirs() }
-    private val misses = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val misses = LruCache<String, Unit>(512)
+    private val lookup = Mutex()
+    private var activeLookup: String? = null
+    private var removedDuringLookup = false
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
@@ -44,25 +53,57 @@ class DownloadedLyrics(
         // A song the services don't know is asked once per session unless the owner asks again:
         // the player and the lock screen both resolve lyrics, and a miss shouldn't cost two lookups each play.
         val key = writeKey(track)
-        if (!force && key in misses) return@withContext null
-        val found = online.find(track.artists.firstOrNull() ?: track.artist, track.title, track.album, track.durationMs)
-            ?: runCatching { lastResort(track) }.getOrNull()?.takeIf { it.isNotBlank() }?.let { text ->
-                FoundLyrics(text, "YouTube Music", FoundLyrics.Format.PLAIN, ua.olex.music.lyrics.Lyrics.parse(text))
+        lookup.withLock {
+            if (!force) {
+                if (misses.get(key) != null) return@withLock null
+                read(track)?.first?.let { cached -> return@withLock cached.takeIf(String::isNotBlank)?.let { Fetched("Saved", it) } }
             }
-            ?: return@withContext null.also { misses += key }
-        val clean = ua.olex.music.lyrics.LyricsCleanup.clean(found.lyrics, track.title, track.artist)
-        val plain = clean.sync == ua.olex.music.lyrics.Sync.NONE
-        val text = if (plain) clean.lines.joinToString("\n") { it.text } else ua.olex.music.lyrics.LrcWriter.write(clean)
-        val format = if (plain) FoundLyrics.Format.PLAIN else FoundLyrics.Format.LRC
-        saveFetched(track, format, text)
-        Fetched(found.source, text)
+            synchronized(this@DownloadedLyrics) {
+                activeLookup = key
+                removedDuringLookup = false
+            }
+            try {
+                var incomplete = false
+                suspend fun <T> attempt(block: suspend () -> T?): T? = try { block() } catch (_: IOException) {
+                    incomplete = true
+                    null
+                }
+                val found = attempt { online.find(track.artists.firstOrNull() ?: track.artist, track.title, track.album, track.durationMs) }
+                    ?: attempt { lastResort(track) }?.takeIf(String::isNotBlank)?.let { text ->
+                        FoundLyrics(text, "YouTube Music", FoundLyrics.Format.PLAIN, ua.olex.music.lyrics.Lyrics.parse(text))
+                    }
+                currentCoroutineContext().ensureActive()
+                if (found == null) {
+                    if (!incomplete) misses.put(key, Unit)
+                    return@withLock null
+                }
+                val clean = ua.olex.music.lyrics.LyricsCleanup.clean(found.lyrics, track.title, track.artist)
+                if (clean.lines.isEmpty()) return@withLock null
+                val plain = clean.sync == ua.olex.music.lyrics.Sync.NONE
+                val text = if (plain) clean.lines.joinToString("\n") { it.text } else ua.olex.music.lyrics.LrcWriter.write(clean)
+                val format = if (plain) FoundLyrics.Format.PLAIN else FoundLyrics.Format.LRC
+                currentCoroutineContext().ensureActive()
+                if (saveFetched(track, format, text)) Fetched(found.source, text) else null
+            } finally {
+                synchronized(this@DownloadedLyrics) { activeLookup = null }
+            }
+        }
     }
 
     // UI and lock-screen loads share this store. AtomicFile itself does not serialize writers.
-    @Synchronized private fun saveFetched(track: Track, format: FoundLyrics.Format, text: String) {
-        FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
-        write(File(dir, name(writeKey(track), format)), text)
+    @Synchronized private fun saveFetched(track: Track, format: FoundLyrics.Format, text: String): Boolean {
+        if (removedDuringLookup) return false
+        val key = writeKey(track)
+        publish(key, format, text)
+        misses.remove(key)
         _revision.value++
+        return true
+    }
+
+    private fun publish(key: String, format: FoundLyrics.Format, text: String) {
+        val target = name(key, format)
+        write(File(dir, target), text)
+        FoundLyrics.Format.entries.map { name(key, it) }.filterNot { it == target }.distinct().forEach { File(dir, it).delete() }
     }
 
     /** Latest explicit edit wins across recording aliases; an empty reset marker blocks old edits. */
@@ -79,8 +120,9 @@ class DownloadedLyrics(
     private fun editedName(key: String) = name(key, FoundLyrics.Format.LRC).removeSuffix(".lrc") + ".edited.lrc"
 
     @Synchronized fun delete(track: Track) {
-        FoundLyrics.Format.entries.forEach { File(dir, name(writeKey(track), it)).delete() }
-        write(File(dir, name(writeKey(track), FoundLyrics.Format.PLAIN)), "")
+        val key = writeKey(track)
+        publish(key, FoundLyrics.Format.PLAIN, "")
+        if (activeLookup == key) removedDuringLookup = true
         _revision.value++
     }
 

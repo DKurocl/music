@@ -104,6 +104,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ua.olex.music.graph
 import ua.olex.music.model.Track
+import ua.olex.music.model.OptionalWork
 import ua.olex.music.model.TrackId
 import ua.olex.music.playback.OutputRoute
 import ua.olex.music.playback.PlayerState
@@ -181,6 +182,7 @@ fun MusicRoot(model: LibraryViewModel) {
     // Where Back goes after something opened from elsewhere (an artist from Home): there, not to Search's tiles.
     var returnTo by rememberSaveable { mutableStateOf<Place?>(null) }
     val onlinePageScope by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val onlinePageRevision by context.graph.youTubeAccount.revision.collectAsStateWithLifecycle()
     val tabHistory = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
         rememberSaveable(saver = OnlineTabHistory.saver) { OnlineTabHistory() }
     }
@@ -208,30 +210,44 @@ fun MusicRoot(model: LibraryViewModel) {
     // Both start from what was last seen (read off the main thread), so Home is whole at once and
     // only refreshes; the network answer replaces them quietly.
     val network by context.graph.network.collectAsStateWithLifecycle()
-    val moods = androidx.compose.runtime.key(onlinePageScope, youTubeOn) { androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, network) {
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val moods = androidx.compose.runtime.key(onlinePageScope, youTubeOn) { androidx.compose.runtime.produceState(YouTubeMusic.DEFAULT_MOODS, network, lifecycle) {
         if (!youTubeOn) return@produceState
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedMoods() }?.let { value = it }
-        if (network) context.graph.youTube.moods().takeIf { result -> result.any { it.params != null } }?.let { value = it }
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedMoods() }?.let { value = it }
+            if (network) context.graph.resources.run(OptionalWork.PROVIDER) { context.graph.youTube.moods() }
+                ?.takeIf { result -> result.any { it.params != null } }?.let { value = it }
+        }
     }.value }
     // The owner's YouTube Music home (their own once signed in); nothing while YouTube Music is off.
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
     // A different account (or none) never sees the last one's playlists, home or moods.
     androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
-    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), network) {
+    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), network, lifecycle) {
         if (!youTubeOn) { value = emptyList(); return@produceState }
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
-        if (network) runCatching { context.graph.youTube.home() }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { value = it }
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
+            if (network) {
+                try { context.graph.resources.run(OptionalWork.PROVIDER) { context.graph.youTube.home() }
+                    ?.takeIf { it.isNotEmpty() }?.let { value = it } }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { /* Keep the stored shelf. */ }
+            }
+        }
     }.value }
-    val homePlaylists = androidx.compose.runtime.key(onlinePageScope, youTubeOn) {
-        androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network, place == Place.HOME) {
+    val homePlaylists = androidx.compose.runtime.key(onlinePageScope, onlinePageRevision, youTubeOn) {
+        androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network, place == Place.HOME, lifecycle) {
             if (!youTubeOn || onlinePageScope == "public" || place != Place.HOME) return@produceState
-            try {
-                value = context.graph.youTube.accountPlaylists(offline = true)
-                if (network) value = context.graph.youTube.accountPlaylists()
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                // Keep the saved shelf on failure. The Playlists screen also offers a manual retry.
+            lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                try {
+                    value = context.graph.youTube.accountPlaylists(offline = true)
+                    if (network) context.graph.resources.run(OptionalWork.PROVIDER) { context.graph.youTube.accountPlaylists() }
+                        ?.let { value = it }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    // Keep the saved shelf on failure. The Playlists screen also offers a manual retry.
+                }
             }
         }.value
     }
@@ -286,7 +302,7 @@ fun MusicRoot(model: LibraryViewModel) {
     val moveToTrash: (List<Track>) -> Unit = { tracks ->
         val files = tracks.filter { '#' !in it.id.value && !YouTubeMusic.isOnline(it) && it.uri.startsWith("content://") }
         if (files.isNotEmpty()) {
-            if (files.any { it.id.value == playing.mediaId }) model.next()
+            if (files.any { it.id.value == playing.mediaId }) model.advanceBeforeRemoving()
             trashing = files
             val pending = android.provider.MediaStore.createTrashRequest(context.contentResolver, files.map { Uri.parse(it.uri) }, true)
             trashRequest.launch(androidx.activity.result.IntentSenderRequest.Builder(pending.intentSender).build())
@@ -550,12 +566,13 @@ fun MusicRoot(model: LibraryViewModel) {
             else -> baseStates.SaveableStateProvider(if (s.place == Place.SEARCH) "place-SEARCH-$searchVisit" else "place-${s.place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (s.place == Place.SEARCH) query else "",
-                search = model.search.collectAsStateWithLifecycle().value, onQueryChange = model::setQuery,
+                search = if (s.place == Place.SEARCH) model.search.collectAsStateWithLifecycle().value else null,
+                onQueryChange = model::setQuery,
                 mode = if (s.place == Place.SEARCH) BrowserMode.SEARCH else BrowserMode.LIBRARY,
                 open = openInLibrary, onOpened = { openInLibrary = null; openTile = null },
                 onLeave = returnTo?.let { back -> { returnTo = null; collectionTitle = null; place = back } },
-                online = model.online.collectAsStateWithLifecycle().value, onlineOn = youTubeOn,
-                suggestions = model.suggestions.collectAsStateWithLifecycle().value,
+                online = if (s.place == Place.SEARCH) model.online.collectAsStateWithLifecycle().value else null, onlineOn = youTubeOn,
+                suggestions = if (s.place == Place.SEARCH) model.suggestions.collectAsStateWithLifecycle().value else emptyList(),
                 onCollection = { collectionTitle = it }, closeCollection = closeCollection, onCollectionClosed = { closeCollection = 0 },
                 focusSearch = if (s.place == Place.SEARCH) focusSearch else 0, onSearchFocused = { focusSearch = 0 }, openTile = openTile.takeIf { s.place == Place.SEARCH },
                 recentSearches = model.recentSearches, onSearchUsed = model::addRecentSearch, onClearRecent = model::clearRecentSearches,
@@ -617,13 +634,12 @@ fun MusicRoot(model: LibraryViewModel) {
             }
         }
     }
-    // Only the visible player warms artwork; the media service owns audio preloading.
-    val prefetchLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    // Only the visible player warms artwork. The media service owns audio buffering.
     val prefetchAccount by context.graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
     val nextCover = playing.queue.getOrNull(playing.nextIndex)
-    LaunchedEffect(nextCover?.key, nextCover?.artworkUri, playing.isPlaying, network, prefetchAccount, prefetchLifecycle) {
+    LaunchedEffect(nextCover?.key, nextCover?.artworkUri, playing.isPlaying, network, prefetchAccount, lifecycle) {
         if (!network || !playing.isPlaying || nextCover == null) return@LaunchedEffect
-        prefetchLifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
             kotlinx.coroutines.delay(1_500)
             context.graph.prefetch.upcoming(nextCover.artworkUri)
         }

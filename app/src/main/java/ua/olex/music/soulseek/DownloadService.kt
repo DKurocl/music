@@ -22,10 +22,15 @@ class DownloadService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val downloads get() = (application as MusicApp).graph.soulseek
     private var observation: Job? = null
+    private var ownsTransfers = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent == null) {
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         val notification = Notification.Builder(this, downloads.channel())
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentTitle("Soulseek downloads")
@@ -34,6 +39,7 @@ class DownloadService : Service() {
             .setOnlyAlertOnce(true)
             .build()
         startForeground(FOREGROUND_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+        ownsTransfers = true
         downloads.resume()
         observation?.cancel()
         observation = scope.launch {
@@ -41,18 +47,24 @@ class DownloadService : Service() {
                 if (rows.none { it.running }) stopSelf(startId)
             }
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onTimeout(startId: Int, fgsType: Int) {
-        downloads.suspendTransfers()
+        relinquishTransfers()
         stopSelf()
     }
 
     override fun onDestroy() {
         scope.cancel()
-        downloads.suspendTransfers()
+        relinquishTransfers()
         super.onDestroy()
+    }
+
+    private fun relinquishTransfers() {
+        if (!ownsTransfers) return
+        ownsTransfers = false
+        downloads.suspendTransfers()
     }
 
     private companion object {

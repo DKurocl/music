@@ -33,6 +33,7 @@ internal class RecordingRegistrar private constructor(
         require(incoming.isNotEmpty()) { "This song has no source to save" }
         val ids = LinkedHashSet<String>()
         ids.add(snapshot.id)
+        named?.let { ids.add(it.id) }
         incoming.forEach { source -> ids.addAll(bySource[source.key].orEmpty()); ids.addAll(byKey[source.songKey].orEmpty()) }
         val candidates = ids.mapNotNull { records[it] }.map { row ->
             RecordingCandidate(row.id, row.song.createdAt, row.toSong().references, row.song.songKey, row.song.durationMs)
@@ -121,10 +122,22 @@ internal class RecordingRegistrar private constructor(
 
     companion object {
         suspend fun create(dao: UserDao, snapshots: List<SavedSong>, at: Long, newId: () -> String): RecordingRegistrar {
-            val rows = if (snapshots.size > 1 || snapshots.sumOf { it.references.size } > ua.olex.music.model.RecordingSourcesCodec.MAX_SOURCES) dao.allRecordings() else {
-                val refs = snapshots.flatMap { it.references }
-                dao.recordingCandidates(snapshots.map { it.id }, (refs.map { it.songKey } + snapshots.map { it.songKey }).distinct(), refs.map { it.key }.distinct())
+            val ids = LinkedHashSet<String>()
+            val keys = LinkedHashSet<String>()
+            val sources = LinkedHashSet<String>()
+            for (snapshot in snapshots) {
+                ids.add(snapshot.id)
+                keys.add(snapshot.songKey)
+                for (reference in snapshot.references) {
+                    keys.add(reference.songKey)
+                    sources.add(reference.key)
+                }
+                // IDs and song keys are each bound twice. Keep this query below SQLite's
+                // historical limit of 999 bind parameters on every supported driver.
+                if (2 * ids.size + 2 * keys.size + sources.size > 900)
+                    return RecordingRegistrar(dao, at, newId, dao.allRecordings())
             }
+            val rows = dao.recordingCandidates(ids.toList(), keys.toList(), sources.toList())
             return RecordingRegistrar(dao, at, newId, rows)
         }
     }

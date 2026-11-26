@@ -23,6 +23,7 @@ internal class YouTubeFavourites(context: Context, private val graph: AppGraph) 
     private val local = Mutex()
     private var lastPull = 0L
     private var lastScope: String? = null
+    private var lastRevision = -1L
     val status = MutableStateFlow<String?>(null)
 
     suspend fun toggle(track: Track, existingId: String? = null): Boolean {
@@ -56,44 +57,49 @@ internal class YouTubeFavourites(context: Context, private val graph: AppGraph) 
 
     suspend fun refresh(force: Boolean = false) = withContext(Dispatchers.IO) {
         remote.withLock sync@{
-            val scope = graph.youTubeAccount.cacheScope.value
+            val account = graph.youTubeAccount
+            val scope = account.cacheScope.value
+            val revision = account.revision.value
+            fun current() = account.cacheScope.value == scope && account.revision.value == revision && graph.youTubeOn.value
             if (scope == "public" || !graph.youTubeOn.value) {
                 status.value = null
                 return@sync
             }
-            if (!graph.network.value) {
+            if (!graph.networkAvailable()) {
                 status.value = "Offline. Changes sync when the connection returns."
                 return@sync
             }
             val prefix = "$scope/"
             val queued = prefs.all.filterKeys { it.startsWith(prefix) }
             val now = android.os.SystemClock.elapsedRealtime()
-            if (!force && queued.isEmpty() && lastScope == scope && now - lastPull < 300_000) return@sync
+            if (!force && queued.isEmpty() && lastScope == scope && lastRevision == revision && now - lastPull < 300_000) return@sync
             status.value = "Syncing likes…"
             try {
                 for ((key, operation) in queued) {
-                    if (graph.youTubeAccount.cacheScope.value != scope) return@sync
+                    if (!current()) return@sync
                     val desired = when (operation) {
                         is Boolean -> operation
                         is String -> operation.startsWith("1:")
                         else -> continue
                     }
-                    if (graph.youTube.like(key.removePrefix(prefix), desired, scope)) local.withLock {
-                        if (prefs.all[key] == operation) prefs.edit().remove(key).apply()
+                    if (graph.youTube.like(key.removePrefix(prefix), desired, scope, revision)) local.withLock {
+                        if (current() && prefs.all[key] == operation) prefs.edit().remove(key).apply()
                     }
                 }
-                val snapshot = graph.youTube.likedPlaylist(scope)
-                if (graph.youTubeAccount.cacheScope.value != scope) return@sync
+                if (!current()) return@sync
+                val snapshot = graph.youTube.likedPlaylist(scope, revision)
                 local.withLock {
-                    fun current() = graph.youTubeAccount.cacheScope.value == scope && graph.youTubeOn.value
                     if (!current()) return@sync
                     val pending = prefs.all.keys.filter { it.startsWith(prefix) }.mapTo(HashSet()) { it.removePrefix(prefix) }
                     // An empty or unexpected renderer must never clear imported favourites.
                     val knownLikes = snapshot.entries.mapTo(HashSet()) { it.videoId }
                     val origins = records(scope)
-                    val complete = knownLikes.isNotEmpty() && snapshot.tracks.size == snapshot.entries.size
+                    val complete = snapshot.confirmsAllLikes
+                    val confirmedTracks = if (complete) snapshot.tracks else snapshot.tracks.filter {
+                        it.id.value.startsWith("yt:") && it.id.value.removePrefix("yt:") in knownLikes
+                    }
                     val next = graph.userLibrary.mergeImportedFavourites(
-                        snapshot.tracks, origins, if (complete) knownLikes else knownLikes + origins.keys, pending, ::current,
+                        confirmedTracks, origins, if (complete) knownLikes else knownLikes + origins.keys, pending, ::current,
                     )
                     if (!current()) return@sync
                     val stored = JSONObject()
@@ -104,11 +110,14 @@ internal class YouTubeFavourites(context: Context, private val graph: AppGraph) 
                     status.value = if (pending.isEmpty()) "Likes synced" else "${pending.size} changes waiting to sync"
                 }
                 lastScope = scope
+                lastRevision = revision
                 lastPull = now
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                if (graph.youTubeAccount.cacheScope.value == scope) status.value = "Couldn't sync likes. Try again."
+                if (current()) status.value = "Couldn't sync likes. Try again."
+            } finally {
+                if (status.value == "Syncing likes…") status.value = null
             }
         }
     }

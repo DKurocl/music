@@ -10,4 +10,5 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
     testImplementation(libs.junit)
+    testImplementation(libs.coroutines.core)
 }

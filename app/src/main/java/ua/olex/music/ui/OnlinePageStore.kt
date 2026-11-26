@@ -96,7 +96,9 @@ internal object OnlinePageJson {
 
     fun album(value: YouTubeMusic.OnlineAlbum): JSONObject = JSONObject()
         .put("id", value.id).put("title", value.title).put("subtitle", value.subtitle).put("cover", value.cover)
-    fun album(value: JSONObject) = YouTubeMusic.OnlineAlbum(value.getString("id"), value.getString("title"), value.string("subtitle"), value.string("cover"))
+        .put("partial", value.partial)
+    fun album(value: JSONObject) = YouTubeMusic.OnlineAlbum(value.getString("id"), value.getString("title"),
+        value.string("subtitle"), value.string("cover"), partial = value.optBoolean("partial"))
 
     fun cards(items: List<YouTubeMusic.Card>) = array(items) {
         JSONObject().put("id", it.id).put("title", it.title).put("subtitle", it.subtitle).put("cover", it.cover).put("kind", it.kind.name)

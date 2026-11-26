@@ -125,12 +125,13 @@ internal fun PlaylistBrowser(
     // Signed in to YouTube Music: his playlists there too (Liked music first), loaded once a session.
     val graph = (context.applicationContext as ua.olex.music.MusicApp).graph
     val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
+    val accountRevision by graph.youTubeAccount.revision.collectAsStateWithLifecycle()
     val youTubeOn by graph.youTubeOn.collectAsStateWithLifecycle()
     val network = LocalNetwork.current
-    var remoteRetry by remember(accountScope) { androidx.compose.runtime.mutableIntStateOf(0) }
-    var remoteFailed by remember(accountScope, youTubeOn) { mutableStateOf(false) }
-    var remoteLoading by remember(accountScope, youTubeOn) { mutableStateOf(false) }
-    val youTubePlaylists = androidx.compose.runtime.key(accountScope, youTubeOn) {
+    var remoteRetry by remember(accountScope, accountRevision) { androidx.compose.runtime.mutableIntStateOf(0) }
+    var remoteFailed by remember(accountScope, accountRevision, youTubeOn) { mutableStateOf(false) }
+    var remoteLoading by remember(accountScope, accountRevision, youTubeOn) { mutableStateOf(false) }
+    val youTubePlaylists = androidx.compose.runtime.key(accountScope, accountRevision, youTubeOn) {
         val loaded by androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Card>(), network, remoteRetry) {
             if (accountScope != "public" && youTubeOn) {
                 remoteLoading = true
@@ -144,9 +145,9 @@ internal fun PlaylistBrowser(
         loaded
     }
 
-    var editingRemote by remember(accountScope) { mutableStateOf<YouTubeMusic.Card?>(null) }
+    var editingRemote by remember(accountScope, accountRevision) { mutableStateOf<YouTubeMusic.Card?>(null) }
     editingRemote?.let { card ->
-        RemotePlaylistSheet(card, graph.youTube, accountScope, onDismiss = { editingRemote = null })
+        RemotePlaylistSheet(card, graph.youTube, accountScope, accountRevision, onDismiss = { editingRemote = null })
     }
 
     if (create || namingId != null) {

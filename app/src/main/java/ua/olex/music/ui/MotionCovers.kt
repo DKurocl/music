@@ -3,6 +3,8 @@ package ua.olex.music.ui
 import android.content.Context
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -17,7 +19,7 @@ import java.security.MessageDigest
  * every copy and every rescan finds it). Up to [MAX_BYTES] each. Nothing is fetched from anywhere.
  */
 class MotionCovers(private val context: Context) {
-    private val dir = File(context.filesDir, "motion").apply { mkdirs() }
+    private val dir = File(context.filesDir, "motion")
     private val resolver = context.contentResolver
     private val writes = Any()
     private val _revision = MutableStateFlow(0)
@@ -42,46 +44,87 @@ class MotionCovers(private val context: Context) {
 
     private fun digest(s: String) = MessageDigest.getInstance("SHA-256").digest(TextFold.fold(s).toByteArray()).take(12).joinToString("") { "%02x".format(it) }
 
-    /** The album's moving cover, if one was attached. */
-    fun file(track: Track): File? = (listOfNotNull(key(track), oldKey(track)).distinct()).firstNotNullOfOrNull { k ->
-        File(dir, "$k.mp4").takeIf { it.isFile && it.length() > 0 }
+    /** Owner files carry their ownership in the name. Older marker-protected files still play. */
+    fun file(track: Track, touch: Boolean = true): File? {
+        val keys = keys(track)
+        for (key in keys) {
+            video(key, owned = true).takeIf(::usable)?.let { return it }
+            if (marker(key).exists()) video(key).takeIf(::usable)?.let { return it }
+        }
+        val cached = keys.firstNotNullOfOrNull { video(it).takeIf(::usable) } ?: return null
+        if (touch) {
+            val now = System.currentTimeMillis()
+            if (now - cached.lastModified() >= TOUCH_INTERVAL_MS) cached.setLastModified(now)
+        }
+        return cached
     }
-        // Shown now: the last to go when the budget runs over.
-        ?.also { it.setLastModified(System.currentTimeMillis()) }
+
+    private fun keys(track: Track) = listOfNotNull(key(track), oldKey(track)).distinct()
+    private fun video(key: String, owned: Boolean = false) = File(dir, if (owned) "$key.owned.mp4" else "$key.mp4")
+    private fun marker(key: String) = File(dir, "$key.own")
+    private fun usable(file: File) = file.isFile && file.length() > 0
+    private fun writableDirectory() = dir.isDirectory || dir.mkdirs() || dir.isDirectory
 
     /** Copies a video into the album's single file; false when it is not a video or is too large. */
     suspend fun attach(track: Track, video: Uri): Boolean = withContext(Dispatchers.IO) {
         val key = key(track) ?: return@withContext false
-        if (resolver.getType(video)?.startsWith("video/") != true) return@withContext false
-        val target = File(dir, "$key.mp4"); val tmp = File.createTempFile(key, ".tmp", dir)
-        val ok = runCatching {
-            resolver.openInputStream(video)?.use { input -> tmp.outputStream().use { out ->
-                val buffer = ByteArray(64 * 1024); var total = 0L
-                while (true) { val n = input.read(buffer); if (n < 0) break; total += n; require(total <= MAX_BYTES); out.write(buffer, 0, n) }
-            } } != null
-        }.getOrDefault(false)
-        // The owner's own video is theirs, not cache: marked so the budget never drops it.
+        if (resolver.getType(video)?.startsWith("video/") != true || !writableDirectory()) return@withContext false
+        val staged = File.createTempFile(key, ".tmp", dir)
         try {
+            val source = resolver.openInputStream(video) ?: return@withContext false
+            source.use { input ->
+                staged.outputStream().use { out ->
+                    val buffer = ByteArray(COPY_CHUNK)
+                    var total = 0L
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        val written = if (count > 0) count else {
+                            val byte = input.read()
+                            if (byte < 0) break
+                            buffer[0] = byte.toByte()
+                            1
+                        }
+                        total += written
+                        if (total > MAX_BYTES) return@withContext false
+                        out.write(buffer, 0, written)
+                    }
+                }
+            }
+            val job = currentCoroutineContext()
             synchronized(writes) {
-                if (!ok || tmp.length() == 0L || !tmp.renameTo(target)) return@synchronized false
-                File(dir, "$key.own").createNewFile()
+                job.ensureActive()
+                if (!usable(staged) || !staged.renameTo(video(key, owned = true))) return@synchronized false
+                // Only the successful rename replaces an owner's existing video.
+                val previous = video(key)
+                if (!previous.exists() || previous.delete()) marker(key).delete()
                 _revision.value++
                 true
             }
-        } finally { tmp.delete() }
+        } finally { staged.delete() }
     }
 
     /** Keeps a joined video (from Apple Music) as the album's single file. */
-    suspend fun attachBytes(track: Track, bytes: ByteArray): Boolean = withContext(Dispatchers.IO) {
+    internal suspend fun attachBytes(track: Track, bytes: ByteArray, revision: Int, allowed: () -> Boolean): Boolean = withContext(Dispatchers.IO) {
         val key = key(track) ?: return@withContext false
-        if (bytes.isEmpty() || bytes.size > MAX_BYTES) return@withContext false
-        val target = File(dir, "$key.mp4")
+        if (bytes.isEmpty() || bytes.size > MAX_BYTES || !allowed() || _revision.value != revision || !writableDirectory())
+            return@withContext false
+        val target = video(key)
         val tmp = File.createTempFile(key, ".tmp", dir)
         try {
-            tmp.writeBytes(bytes)
+            val job = currentCoroutineContext()
+            tmp.outputStream().use { destination ->
+                for (position in bytes.indices step COPY_CHUNK) {
+                    job.ensureActive()
+                    destination.write(bytes, position, minOf(COPY_CHUNK, bytes.size - position))
+                }
+            }
             synchronized(writes) {
-                // A manual attachment can finish while an automatic fetch is still downloading.
-                if (File(dir, "$key.own").exists() || !tmp.renameTo(target)) return@synchronized false
+                job.ensureActive()
+                if (!allowed() || _revision.value != revision ||
+                    keys(track).any { usable(video(it, owned = true)) || (marker(it).exists() && usable(video(it))) } ||
+                    !tmp.renameTo(target)) return@synchronized false
                 trim()
                 _revision.value++
                 target.exists()
@@ -89,12 +132,15 @@ class MotionCovers(private val context: Context) {
         } finally { tmp.delete() }
     }
 
-    fun remove(track: Track) = synchronized(writes) {
-        listOfNotNull(key(track), oldKey(track)).distinct().forEach {
-            File(dir, "$it.mp4").delete()
-            File(dir, "$it.own").delete()
+    suspend fun remove(track: Track): Unit = withContext(Dispatchers.IO) {
+        synchronized(writes) {
+            keys(track).forEach {
+                video(it, owned = true).delete()
+                val previous = video(it)
+                if (!previous.exists() || previous.delete()) marker(it).delete()
+            }
+            _revision.value++
         }
-        _revision.value++
     }
 
     /** Removes every fetched moving cover (Clear cache); the owner's own videos stay. */
@@ -108,14 +154,24 @@ class MotionCovers(private val context: Context) {
         val limit = ua.olex.music.playback.CacheBudget.motionBytes(context)
         val fetched = fetchedFiles().orEmpty().sortedBy { it.lastModified() }
         var total = fetched.sumOf { it.length() }
-        for (f in fetched) { if (total <= limit) break; total -= f.length(); f.delete() }
+        for (f in fetched) {
+            if (total <= limit) break
+            val size = f.length()
+            if (f.delete()) total -= size
+        }
     }
 
-    private fun fetchedFiles() = dir.listFiles { f -> f.name.endsWith(".mp4") && !File(dir, f.nameWithoutExtension + ".own").exists() }
+    private fun fetchedFiles() = dir.listFiles { f ->
+        f.name.endsWith(".mp4") && !f.name.endsWith(".owned.mp4") && !marker(f.nameWithoutExtension).exists()
+    }
 
     fun fetchedBytes(): Long = synchronized(writes) { fetchedFiles().orEmpty().sumOf { it.length() } }
 
-    companion object { const val MAX_BYTES = 40L * 1024 * 1024 }
+    companion object {
+        const val MAX_BYTES = 40L * 1024 * 1024
+        private const val COPY_CHUNK = 64 * 1024
+        private const val TOUCH_INTERVAL_MS = 60 * 60_000L
+    }
 
 }
 

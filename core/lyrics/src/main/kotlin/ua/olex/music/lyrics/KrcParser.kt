@@ -12,24 +12,28 @@ object KrcParser {
     private val KEY = intArrayOf(64, 71, 97, 119, 94, 50, 116, 71, 81, 54, 49, 45, 206, 210, 110, 105)
     private val LINE = Regex("""^\[(\d+),(\d+)](.*)$""")
     private val WORD = Regex("""<(\d+),(\d+),\d+>([^<]*)""")
+    private const val MAX_COMPRESSED_BYTES = 1 shl 20
+    private const val MAX_TEXT_BYTES = 4 shl 20
 
     /** The text of an encrypted .krc file, or null when it is not one. */
     fun decrypt(bytes: ByteArray): String? {
-        if (bytes.size < 5 || String(bytes, 0, 4, Charsets.ISO_8859_1) != "krc1") return null
+        if (bytes.size !in 5..MAX_COMPRESSED_BYTES || String(bytes, 0, 4, Charsets.ISO_8859_1) != "krc1") return null
         val body = ByteArray(bytes.size - 4) { i -> (bytes[i + 4].toInt() xor KEY[i % KEY.size]).toByte() }
         val inflater = Inflater()
         return try {
             inflater.setInput(body)
-            val out = java.io.ByteArrayOutputStream(body.size * 4)
+            val out = java.io.ByteArrayOutputStream(minOf(body.size, 64 * 1024))
             val buffer = ByteArray(16 * 1024)
             while (!inflater.finished()) {
+                val before = inflater.bytesRead
                 val n = inflater.inflate(buffer)
-                if (n == 0 && (inflater.needsInput() || inflater.needsDictionary())) break
+                if (n == 0 && !inflater.finished() &&
+                    (inflater.needsInput() || inflater.needsDictionary() || inflater.bytesRead == before)) return null
+                if (n > MAX_TEXT_BYTES - out.size()) return null
                 out.write(buffer, 0, n)
-                if (out.size() > 4 * 1024 * 1024) return null
             }
             String(out.toByteArray(), Charsets.UTF_8).trimStart('﻿')
-        } catch (_: Exception) { null } finally { inflater.end() }
+        } catch (_: java.util.zip.DataFormatException) { null } finally { inflater.end() }
     }
 
     fun parse(text: String): Lyrics {
@@ -37,11 +41,15 @@ object KrcParser {
         val lines = ArrayList<Line>()
         for (raw in text.lineSequence()) {
             val m = LINE.matchEntire(raw.trim()) ?: continue
-            val start = m.groupValues[1].toLong()
-            val length = m.groupValues[2].toLong()
+            val start = m.groupValues[1].toLongOrNull() ?: continue
+            val length = m.groupValues[2].toLongOrNull()?.takeIf { it <= Long.MAX_VALUE - start } ?: continue
             val words = WORD.findAll(m.groupValues[3]).mapNotNull { w ->
                 val text = w.groupValues[3]
-                if (text.isEmpty()) null else Word(start + w.groupValues[1].toLong(), start + w.groupValues[1].toLong() + w.groupValues[2].toLong(), text)
+                if (text.isEmpty()) return@mapNotNull null
+                val offset = w.groupValues[1].toLongOrNull()?.takeIf { it <= Long.MAX_VALUE - start } ?: return@mapNotNull null
+                val wordStart = start + offset
+                val wordLength = w.groupValues[2].toLongOrNull()?.takeIf { it <= Long.MAX_VALUE - wordStart } ?: return@mapNotNull null
+                Word(wordStart, wordStart + wordLength, text)
             }.toList()
             val lineText = words.joinToString("") { it.text }.trim()
             if (lineText.isEmpty()) continue

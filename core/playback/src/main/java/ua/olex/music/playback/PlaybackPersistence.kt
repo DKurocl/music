@@ -15,6 +15,7 @@ import java.util.UUID
 @OptIn(UnstableApi::class)
 internal class PlaybackPersistence(private val player: ExoPlayer, private val journal: PlaybackJournal, private val serviceScope: CoroutineScope,
     private val onRestoreComplete: () -> Unit = {},
+    private val onPeriodicCheckpoint: () -> Unit = {},
     private val resolveSources: suspend (List<MediaItem>) -> List<MediaItem> = { it },
 ) : Player.Listener {
     private var snapshot: PlaybackCheckpoint? = null
@@ -74,7 +75,13 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
         if (timelineChanged || events.containsAny(Player.EVENT_POSITION_DISCONTINUITY, Player.EVENT_PLAY_WHEN_READY_CHANGED, Player.EVENT_PLAYBACK_STATE_CHANGED)) checkpoint()
         if (events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
             clock?.cancel()
-            clock = if (player.isPlaying) serviceScope.launch { while (isActive) { delay(60_000); checkpoint() } } else null
+            clock = if (player.isPlaying) serviceScope.launch {
+                while (isActive) {
+                    delay(60_000)
+                    checkpoint()
+                    onPeriodicCheckpoint()
+                }
+            } else null
         }
     }
 

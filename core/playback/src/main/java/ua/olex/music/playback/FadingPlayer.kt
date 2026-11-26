@@ -34,6 +34,7 @@ class FadingPlayer internal constructor(
     // The fade's volume steps stay inside: without this, each 16 ms step sent the whole player
     // state to the app (and the old "playing" with it), which made pause and play feel slow.
     override fun addListener(listener: Player.Listener) {
+        if (listener in wrappers) return
         val wrapper = object : Player.Listener by listener {
             override fun onVolumeChanged(volume: Float) { if (fade?.isActive != true) listener.onVolumeChanged(volume) }
             override fun onEvents(player: Player, events: Player.Events) {

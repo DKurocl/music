@@ -348,5 +348,125 @@ app (repository `DKurocl/xm5`) and its `docs/DESIGN.md`; reuse it rather than in
     Unchanged in-process refreshes skip scanning; manual Rescan remains forced and unknown versions
     use a full scan. Capture the version before scanning so concurrent changes are not lost. This
     optimization does not replace the initial full reconciliation or prove phone timing targets.
-    The service observer performs refresh independently; Play uses the latest cached snapshot and
-    never waits for a full scan or fails merely because scanning failed.
+    The foreground library owner refreshes when resource policy allows it. The service reads
+    published snapshots and resolves a cold selection without waiting for a full scan.
+
+57. Automatic work uses the event-driven ResourcePolicy. Visibility, screen, battery, thermal and
+    network signals have demand-scoped Android listeners. A denied lease cancels its in-flight
+    coroutine. Explicit transport, active audio and durable writes retain their own owners.
+    Playback position and listening progress share one active checkpoint clock.
+
+58. Radio evidence comes from existing confirmed provider requests. Public evidence and one active
+    personal scope have separate bounded atomic snapshots. The offline ranker reads exact persistent
+    provider/file links in the catalogue and checks the selected files before appending automation.
+    The first audio selection never waits for learning or model IO.
+
+59. The default-network callback follows current subscribers. One-shot consumers can read the
+    current Android capabilities without registering. A hidden paused service stops observing future
+    sources. UI controller publications resume from a fresh snapshot when the Activity returns.
+
+60. A peer download stays in a pending MediaStore row until the final byte count and supported
+    audio headers are validated. Recovery uses the row's pending state before advancing its
+    completion checkpoint. Android documents the publication boundary in
+    [Access media files from shared storage](https://developer.android.com/training/data-storage/shared/media#toggle-pending).
+
+61. The default-network observer advances its permit when the network identity changes, even
+    with equal capabilities. Ordered callback arguments own the new state. An old callback
+    cannot remove current eligibility. See the Android [NetworkCallback reference](https://developer.android.com/reference/android/net/ConnectivityManager.NetworkCallback).
+
+62. A new automatic radio starts from a selected occurrence before its recommendations. The
+    receipt survives an immediate append. The service checks current exclusions against both
+    the requested identity and its resolved physical source immediately before insertion.
+
+63. New owner motion covers publish under a name that encodes ownership in the same rename.
+    A cache cleanup preserves both these and previously marker-protected attachments.
+
+64. Resized tag edits retain one verified stage keyed to a stable MediaStore row. The provider file
+    is changed only after the stage is synced. The next explicit edit may finish a pending write if
+    the provider file still matches its original content or an exact prefix of the staged result.
+    Successful read-back removes the stage. No startup or periodic tag recovery job is scheduled.
+
+65. Likes and personal playlists bind requests and cache reads to the account scope and revision.
+    A revision change invalidates pending continuation, edits and acknowledgments even when the same
+    scope returns. Partial or malformed liked playlists cannot delete local favourites.
+
+66. Coil memory and disk hits remain available to image callers. Automatic remote misses share
+    the two artwork permits under the existing foreground resource policy. The visible player's
+    large artwork job follows the Activity lifecycle. Unsupported thermal observation denies
+    optional work while leaving the resource-policy flow active.
+
+67. Creating a playback source or opening owned audio leaves the stream index cold. An online
+    loader opens it when needed. A visible Home shelf with streamed candidates or an offline
+    selection that considers a streamed reserve can reopen an existing index off main and read
+    complete cache entries from a previous process.
+
+68. A local Cast endpoint belongs to one route session. It serves local URIs on Wi-Fi or Ethernet
+    with a new opaque path namespace for each server, bounded concurrent clients and request
+    headers, and single byte-range seeking. Returning to local playback closes the listener and
+    active responses. The wire behavior follows [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110.html).
+
+69. A shared provider page belongs to its request coroutine. If that owner loses its permit, a
+    still-active waiter can take over. Normal failures remain shared. Generic album and playlist
+    continuations also bind to the account revision and visible Activity. At most 100 continuation
+    responses or 20,000 entries are retained. The last complete disk snapshot survives a partial
+    refresh, and persisted prefixes explicitly carry their incomplete state.
+
+70. Search collectors belong to the Search pane. The provider request follows the visible activity,
+    validated network, current query and account revision. Suggestions are optional provider work.
+    Explicit search results keep their original provider intent when displayed with a local copy.
+
+71. At the first eligible offline refill, a cold service can read the existing visible index under
+    a bounded deadline. It reuses a warm catalogue when available and checks media permission
+    before consulting it. Hidden folders remain excluded from generated radio.
+
+72. The resolver publishes a provider audio URL only if it is HTTPS with a host and no embedded
+    credentials. Media3's default same-protocol redirect rule stays enabled. Local requests and
+    the original stream byte range are preserved.
+
+73. Explicit repeat modes own queue traversal. A pause or traversal-mode change revokes a pending
+    automatic refill. The service checks the current transport intent again before committing it,
+    including while the local player is completing a pause fade.
+
+74. A new queue generation carries its first durable position in the queue file. Only a changed
+    position in the same generation needs a cursor write. Restore ignores an oversized, corrupt
+    or mismatched cursor and uses the queue position instead. A failed write can be retried.
+
+75. A manually requested local source keeps its exact recording source key, including a CUE
+    clip or a content URI without a filesystem path. Encoding rank breaks ties among compatible
+    eligible alternatives after honoring that intent. The rank describes encoding, not mastering.
+
+76. Offline radio scores at most 512 eligible candidates across its teacher, related and
+    sampled catalogue inputs. A full tail of eight or more previously played recordings can
+    reserve one place for a compatible, unfamiliar recording. The choice is replayable from
+    the seed, respects exclusions and artist spacing, and stays off when the tail already
+    contains unfamiliar recordings.
+
+77. Raw provider text has a session-wide retention budget of four million characters in
+    addition to the entry limit. Large valid responses can still serve the active request.
+    Text eviction does not evict typed playlist data used to continue the current page.
+
+78. Remote favourite reconciliation batches canonical ID and timestamp queries inside the
+    existing transaction. Removals require the exact imported timestamp and respect other
+    retained or pending videos for the same recording. Reconciliation refreshes aliases after
+    recording registration and rolls back if the account guard expires.
+
+79. A cold offline refill can load durable taste after choosing its bounded candidate set.
+    Indexed Room queries preserve canonical IDs, aliases and unambiguous legacy keys. If the
+    bounded lookup cannot finish, local metadata provides the fallback. A warm ranker uses the
+    existing statistics snapshot.
+
+80. Debug stream-cache diagnostics aggregate consumed cached bytes and cache bypass events
+    through Media3 callbacks. The service resets both counts on release. The values contain
+    no tracks, paths or account data.
+
+81. Artist shelves follow the account revision through browse, fallback and continuation
+    requests. Capped, cyclic or interrupted expansions preserve a playable prefix and mark
+    it incomplete. The prefix cannot overwrite a previously complete account snapshot.
+
+82. Speculative page and cover requests follow the account scope and revision as well as
+    the foreground resource lease. Revocation cancels the current load and invalidates its
+    completion throttle, including reauthentication into the same scope.
+
+83. Manual queue moves and removals are submitted by occurrence key to the same-UID service
+    command. The service resolves that occurrence on its live timeline and applies the edit
+    in the same turn. Expired keys and invalid destinations leave the queue intact.

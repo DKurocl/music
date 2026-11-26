@@ -784,7 +784,7 @@ private fun MotionCoverButton(track: Track) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val covers = (context.applicationContext as? ua.olex.music.MusicApp)?.graph?.motionCovers ?: return
     val revision by covers.revision.collectAsStateWithLifecycle()
-    val has = remember(track.id, revision) { covers.file(track) != null }
+    val has = remember(track.id, revision) { covers.file(track, touch = false) != null }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val snackbar = LocalSnackbar.current
     var asking by remember { mutableStateOf(false) }
@@ -803,7 +803,7 @@ private fun MotionCoverButton(track: Track) {
     if (asking) AppDialog(onDismissRequest = { asking = false }, title = { Text("Moving cover") },
         text = { Text("This album plays its own short video in place of the cover.") },
         confirmButton = { TextButton(onClick = { asking = false; choose() }) { Text("Replace") } },
-        dismissButton = { TextButton(onClick = { asking = false; covers.remove(track) }) { Text("Remove") } })
+        dismissButton = { TextButton(onClick = { asking = false; scope.launch { covers.remove(track) } }) { Text("Remove") } })
 }
 
 @Composable

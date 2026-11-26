@@ -8,6 +8,8 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import ua.olex.music.AppGraph
+import ua.olex.music.model.LibraryIndex
+import ua.olex.music.model.SavedSong
 import ua.olex.music.model.Track
 import ua.olex.music.playback.QueueExtension
 
@@ -16,6 +18,8 @@ internal class PlaybackMix(
     private val graph: AppGraph,
     private val nextPage: suspend (String) -> YouTubeMusic.RadioPage? = { graph.youTube.radioMore(it) },
     private val firstPage: suspend (String) -> YouTubeMusic.RadioPage? = { graph.youTube.radio(it) },
+    private val offlineIndex: suspend () -> LibraryIndex? = graph::offlineRadioIndex,
+    private val networkAvailable: () -> Boolean = graph::networkAvailable,
 ) {
     class Run(
         val seed: Track, var token: String?, val seen: MutableSet<String>, val ids: MutableSet<String>,
@@ -23,6 +27,7 @@ internal class PlaybackMix(
         val providerOrder: Boolean = false, var initialSelection: Boolean = false,
         var account: String? = null, val usedTokens: MutableSet<String> = LinkedHashSet(),
         var exhausted: Boolean = false,
+        var accountRevision: Long? = null,
     )
     var run: Run? = null
     var label by mutableStateOf<String?>(null)
@@ -32,7 +37,10 @@ internal class PlaybackMix(
     fun origin(mix: Run?, title: String): String = PlaybackOrigin("mix", mix?.id ?: "local", title).encode()
 
     fun begin(mix: Run?, title: String): String {
-        if (mix != null) mix.account = graph.youTubeAccount.cacheScope.value
+        if (mix != null) {
+            mix.account = graph.youTubeAccount.cacheScope.value
+            mix.accountRevision = graph.youTubeAccount.revision.value
+        }
         run = mix
         label = title
         if (mix != null) checkpoint(mix) else prefs.edit().remove("cursor").apply()
@@ -73,7 +81,7 @@ internal class PlaybackMix(
                 json.getString("artist"), album = field("album"), durationMs = json.optLong("duration"))
             Run(seed, field("token"), set("seen"), set("ids"), field("start"), origin.id,
                 json.optBoolean("providerOrder"), json.optBoolean("initialSelection"),
-                account, set("usedTokens"), json.optBoolean("exhausted"))
+                account, set("usedTokens"), json.optBoolean("exhausted"), graph.youTubeAccount.revision.value)
         }.getOrNull()
     }
 
@@ -82,42 +90,47 @@ internal class PlaybackMix(
         repeat((values.size - 500).coerceAtLeast(0)) { iterator.next(); iterator.remove() }
     }
 
-    suspend fun extend(queue: List<Track>, current: Int, context: String? = null, remaining: Int = queue.size - current - 1): QueueExtension? {
+    suspend fun extend(
+        queue: List<Track>, current: Int, context: String? = null, remaining: Int = queue.size - current - 1,
+        allowProvider: Boolean = true,
+    ): QueueExtension? {
         val seed = queue.getOrNull(current) ?: return null
         val account = graph.youTubeAccount.cacheScope.value
+        val revision = graph.youTubeAccount.revision.value
         val origin = PlaybackOrigin.decode(context)
         if (run == null) restore(origin)?.let { restored -> run = restored; label = origin?.title }
         val pending = run
         // An old queue can still emit callbacks while a new seed is being resolved.
         if (pending?.initialSelection == true && origin?.id != pending.id) return null
+        fun sameAccount(mix: Run) = (mix.account == null || mix.account == account) &&
+            (mix.accountRevision == null || mix.accountRevision == revision)
         val active = pending?.takeIf {
-            (it.account == null || it.account == account) && (origin?.id == it.id ||
-                seed.id.value in it.ids || seed.requestedId in it.ids)
+            sameAccount(it) && (origin?.id == it.id || seed.id.value in it.ids || seed.requestedId in it.ids)
         }
-        if (pending != null && active == null && pending.account != null && pending.account != account) {
+        if (pending != null && !sameAccount(pending)) {
             stop()
             return null
         }
         if (pending != null && active == null) { run = null; label = null }
         val expected = active
-        fun stillCurrent() = run === expected && graph.youTubeAccount.cacheScope.value == account
-        if (active?.exhausted == true) return null
+        fun stillCurrent() = run === expected && graph.youTubeAccount.cacheScope.value == account &&
+            graph.youTubeAccount.revision.value == revision
+        if (active?.exhausted == true && active.providerOrder) return null
         if (remaining > if (active == null) 0 else 3) return null
-        val source = graph.youTube
         val initial = active?.initialSelection == true
         suspend fun loadPage(): YouTubeMusic.RadioPage? {
-            if (!graph.youTubeOn.value || !graph.network.value) return null
+            if (!allowProvider || active?.exhausted == true || !graph.youTubeOn.value || !networkAvailable()) return null
+            val token = active?.token
+            if (token != null || active?.providerOrder == true) return token?.let { nextPage(it) }
             val start = active?.startFrom ?: active?.seed?.let(Mix::videoId) ?: Mix.videoId(seed)
-            if (active?.providerOrder == true) return active.token?.let { nextPage(it) }
-            return active?.token?.let { nextPage(it) }
-                ?: (start ?: source.find(seed)?.let(Mix::videoId))?.let { firstPage(it) }
+            return (start ?: graph.youTube.find(seed)?.let(Mix::videoId))?.let { firstPage(it) }
         }
-        var page = if (initial) {
-            try { kotlinx.coroutines.withTimeoutOrNull(6_000) { loadPage() } }
-            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (_: Exception) { null }
-        } else loadPage() ?: return null
+        var page = try { kotlinx.coroutines.withTimeoutOrNull(6_000) { loadPage() } }
+            catch (_: java.io.IOException) { null }
         if (!stillCurrent()) return null
+        if (active?.providerOrder == true && page == null) return null
+        // Ordinary queues still require their original auto-radio trigger and provider response.
+        if (active == null && page == null) return null
         val hidden = graph.excludedRecommendations()
         val history = if (initial) graph.userLibrary.history.catch { emit(emptyList()) }.firstOrNull()
             .orEmpty().take(50) else emptyList()
@@ -127,39 +140,66 @@ internal class PlaybackMix(
         val base = active?.seed ?: seed
         suspend fun orderedTracks(answer: YouTubeMusic.RadioPage) = withContext(Dispatchers.Default) {
             val provider = active?.takeIf { it.providerOrder }
-            if (provider == null) Mix.clean(answer.tracks, base, seen)
-            else answer.tracks.distinctBy { it.id }.filterNot { it.id.value in provider.ids }
+            val eligible = answer.tracks.filterNot { Mix.isExcluded(it, hidden) }
+            if (provider == null) Mix.clean(eligible, base, seen)
+            else eligible.distinctBy { it.id }.filterNot { it.id.value in provider.ids }
         }
         var more = page?.let { orderedTracks(it) }.orEmpty()
         val visited = LinkedHashSet(active?.usedTokens.orEmpty())
-        active?.token?.let(visited::add)
+        if (page != null) active?.token?.let(visited::add)
         // An empty cleaned page can still have a usable continuation.
-        repeat(2) {
-            val token = page?.continuation
-            if (more.isEmpty() && token != null && stillCurrent() && visited.add(token)) {
-                val next = if (initial) kotlinx.coroutines.withTimeoutOrNull(2_000) { nextPage(token) } else nextPage(token)
-                if (next == null) return@repeat
-                page = next
-                more = orderedTracks(next)
+        for (hop in 0 until 2) {
+            val token = page?.continuation ?: break
+            if (more.isNotEmpty() || !stillCurrent() || !visited.add(token)) break
+            val next = try { kotlinx.coroutines.withTimeoutOrNull(2_000) { nextPage(token) } }
+                catch (_: java.io.IOException) { null }
+            if (next == null) {
+                visited.remove(token)
+                break
             }
+            page = next
+            more = orderedTracks(next)
         }
-        if (initial && more.size < 8) {
-            val index = graph.catalogueState.value ?: graph.index.value
-            val files = index?.songs.orEmpty().filterNot(YouTubeMusic::isOnline)
-            val used = more.mapTo(HashSet(), Mix::songKey)
-            val stats = if (files.isEmpty()) emptyMap() else graph.userLibrary.stats.catch { emit(emptyMap()) }.firstOrNull().orEmpty()
-            more += withContext(Dispatchers.Default) {
-                Mix.local(base, files, stats, seen, size = if (more.isEmpty()) 50 else 8 - more.size,
-                    excluded = hidden + used)
+        if (active?.providerOrder != true && (more.isEmpty() || (initial && more.size < 8))) {
+            val index = offlineIndex()
+            val used = seen + more.map(Mix::songKey)
+            val recordings = (queue + more).mapNotNullTo(HashSet()) { it.recordingId }
+            if (index != null) {
+                val video = Mix.videoId(base)?.takeIf { id ->
+                    base.uri == SavedSong.ONLINE_PREFIX + id ||
+                        index.verifiedVideoCopies[id]?.let { it.id == base.id || it.recordingId == base.recordingId } == true
+                }
+                val edges = if (video != null && index.verifiedVideoCopies.isNotEmpty())
+                    kotlinx.coroutines.withTimeoutOrNull(150) { graph.radioTeacher.neighbours(account, video) }.orEmpty()
+                else emptyList()
+                more += withContext(Dispatchers.Default) {
+                    val now = System.currentTimeMillis()
+                    val learned = edges.mapNotNull { edge ->
+                        index.verifiedVideoCopies[edge.videoId]?.let { it to edge.confidence(now) }
+                    }
+                    val session = graph.sessionTaste.affinity(android.os.SystemClock.elapsedRealtime())
+                    Mix.offlineTail(base, seed, index.songs, used, recordings, 8 - more.size, Mix.related(index, base), learned,
+                        session, graph.listeningStats.value, now) { keys ->
+                        try { kotlinx.coroutines.withTimeoutOrNull(250) { graph.userLibrary.statsFor(keys) }.orEmpty() }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (failure: Exception) {
+                            android.util.Log.w("MusicMix", "Could not read offline ranking stats: ${failure.javaClass.simpleName}")
+                            emptyMap()
+                        }
+                    }
+                }
             }
         }
         if (!stillCurrent() || (more.isEmpty() && page == null)) return null
-        return QueueExtension(more) {
-            if (!stillCurrent()) false else {
+        return QueueExtension(more, isAllowed = { track -> !Mix.isExcluded(track, graph.excludedRecommendations()) }) {
+            if (!stillCurrent() || (page != null && !graph.youTubeOn.value)) false else {
                 val updated = active ?: Run(seed, null, seen, queue.flatMap { listOfNotNull(it.id.value, it.requestedId) }.toMutableSet())
                 updated.account = account
-                updated.token = page?.continuation?.takeUnless { it in visited }
-                updated.exhausted = page != null && updated.token == null
+                updated.accountRevision = revision
+                if (page != null) {
+                    updated.token = page?.continuation?.takeUnless { it in visited }
+                    updated.exhausted = updated.token == null
+                }
                 updated.usedTokens.clear()
                 updated.usedTokens.addAll(visited.toList().takeLast(64))
                 updated.initialSelection = false

@@ -1,6 +1,9 @@
 package ua.olex.music.ui
 
 import ua.olex.music.model.SongStats
+import ua.olex.music.model.LibraryIndex
+import ua.olex.music.model.LibraryOrder
+import ua.olex.music.model.SessionTaste
 import ua.olex.music.model.TextFold
 import ua.olex.music.model.Track
 
@@ -18,11 +21,20 @@ import ua.olex.music.model.Track
  * Without a connection the mix comes from the library alone, by artist, genre and years.
  */
 internal object Mix {
+    private val bracketedTitle = Regex("""\s*[(\[].*?[)\]]""")
+    private val titleSuffix = Regex("""\s+-\s+.*$""")
+
     /** One key per song, whatever the upload: folded title without extras, and the first artist. */
     fun songKey(t: Track): String {
-        val title = TextFold.fold(t.title).replace(Regex("""\s*[(\[].*?[)\]]"""), "").replace(Regex("""\s+-\s+.*$"""), "").trim()
+        val title = TextFold.fold(t.title).replace(bracketedTitle, "").replace(titleSuffix, "").trim()
         return title + "\u0000" + TextFold.fold(t.artist.substringBefore(",").substringBefore("&").substringBefore(" feat").trim())
     }
+
+    fun isExcluded(track: Track, keys: Set<String>, key: String? = null): Boolean = keys.isNotEmpty() && (
+        track.id.value in keys || track.requestedId in keys || (key ?: songKey(track)) in keys ||
+            track.sources.any { source ->
+                source.uri?.takeIf { it.startsWith("ytm://") }?.let { "yt:" + it.removePrefix("ytm://") in keys } == true
+            })
 
     /** Linked files keep their original YouTube match even after the player chooses a local source. */
     fun videoId(track: Track): String? =
@@ -62,8 +74,8 @@ internal object Mix {
     /** A radio page cleaned for the queue, in the radio's order. */
     fun clean(batch: List<Track>, seed: Track, seen: Set<String>): List<Track> {
         val allowed = marks(seed)
-        val shortest = if (seed.durationMs > 0) (seed.durationMs * 3 / 4).coerceIn(45_000L, 90_000L) else 90_000L
-        val longest = maxOf(8 * 60_000L, seed.durationMs + 3 * 60_000L)
+        val shortest = if (seed.durationMs > 0) (seed.durationMs.coerceAtMost(120_000) * 3 / 4).coerceIn(45_000L, 90_000L) else 90_000L
+        val longest = maxOf(8 * 60_000L, seed.durationMs.coerceAtMost(Long.MAX_VALUE - 3 * 60_000) + 3 * 60_000)
         val keys = HashSet(seen)
         val kept = batch.filter { t ->
             // The radio starts with the seed itself: never play it twice, whatever its artist line says.
@@ -93,41 +105,152 @@ internal object Mix {
      * favourites and often played a little ahead, at most two of one artist in ten.
      */
     fun local(seed: Track, songs: List<Track>, stats: Map<String, SongStats>, recent: Set<String>, size: Int = 50,
-        random: kotlin.random.Random = kotlin.random.Random.Default, excluded: Set<String> = emptySet()): List<Track> {
+        random: kotlin.random.Random = kotlin.random.Random.Default, excluded: Set<String> = emptySet(),
+        teacher: Map<String, Double> = emptyMap(), session: SessionTaste.Affinity = SessionTaste.Affinity.EMPTY,
+        at: Long = 0, boundedExploration: Boolean = false): List<Track> {
         fun fold(s: String?) = TextFold.fold(s.orEmpty().trim())
-        val seedArtists = seed.artists.map(::fold).toSet()
-        val seedGenres = seed.genres.map(::fold).toSet()
+        val seedArtists = seed.artists.map(::fold).filter(String::isNotEmpty).toSet()
+        val seedGenres = seed.genres.map(::fold).filter(String::isNotEmpty).toSet()
         val seedKey = songKey(seed)
         val scored = songs.asSequence()
-            .filter { it.id != seed.id && !it.matchesPlayback(seed) && it.id.value !in excluded && songKey(it) !in excluded && songKey(it) != seedKey }
-            .map { t ->
+            .filter { it.id != seed.id && !it.matchesPlayback(seed) }
+            .mapNotNull { t ->
+                val key = songKey(t)
+                if (key == seedKey || isExcluded(t, excluded, key)) return@mapNotNull null
                 val st = stats[t.statsKey] ?: SongStats.NONE
                 var score = 0.0
-                if (t.artists.any { fold(it) in seedArtists }) score += 3
-                if (t.genres.any { fold(it) in seedGenres }) score += 2
-                if (seed.year != null && t.year != null && kotlin.math.abs(seed.year!! - t.year!!) <= 5) score += 1
-                score += st.rating * 0.3 + kotlin.math.ln(1.0 + st.plays) * 0.3
-                score += random.nextDouble() * 1.5
-                t to score
+                val sameArtist = t.artists.any { fold(it) in seedArtists }
+                val sameGenre = t.genres.any { fold(it) in seedGenres }
+                val teacherScore = teacher[t.id.value]?.takeIf(Double::isFinite)?.coerceIn(0.0, 1.0) ?: 0.0
+                val compatible = sameArtist || sameGenre || teacherScore > 0
+                if (sameArtist) score += 3
+                if (sameGenre) score += 2
+                if (seed.year != null && t.year != null && kotlin.math.abs(seed.year!!.toLong() - t.year!!.toLong()) <= 5) score += 1
+                score += st.rating.coerceIn(0, 5) * 0.3 + kotlin.math.ln1p(st.plays.coerceAtLeast(0).toDouble()).coerceAtMost(8.0) * 0.3
+                score += 4 * teacherScore
+                if (compatible && key !in recent) {
+                    val favourite = st.favouriteSince
+                    if (favourite != null && favourite > 0) {
+                        val last = maxOf(favourite, st.lastPlayedAt ?: 0L)
+                        if (at > last) score += (((at - last) / 86_400_000L - 30).coerceIn(0, 150)) / 150.0
+                    }
+                }
+                val affinity = session.weight(t)
+                score += 1.5 * affinity
+                if (!boundedExploration) score += random.nextDouble() * 1.5
+                val unexplored = compatible && st.plays <= 0 && st.lastPlayedAt == null && affinity >= 0.0
+                LocalScore(t, key, score, unexplored)
             }
-            .sortedByDescending { it.second }
+            .sortedByDescending { it.score }
             .toList()
-        val fresh = scored.filter { (track, _) -> songKey(track) !in recent }
+        val fresh = scored.filter { it.song !in recent }
         val candidates = fresh.ifEmpty { scored }
-        val related = candidates.takeWhile { it.second >= 2.0 }
+        val related = candidates.takeWhile { it.score >= 2.0 }
         // Files without genre/year tags can still form a short mix from the owner's library.
         val ranked = if (related.size >= 8) related else candidates.take(16)
-        val unique = ranked.map { it.first }.distinctBy(::songKey)
+        val songsSeen = HashSet<String>()
+        val recordingsSeen = HashSet<String>()
+        val unique = ranked.filter { candidate ->
+            val recording = candidate.track.recordingId
+            if (candidate.song in songsSeen || (recording != null && !recordingsSeen.add(recording))) false
+            else songsSeen.add(candidate.song)
+        }
+        fun artist(track: Track) = fold(track.artist.substringBefore(","))
+        val onlyArtist = unique.firstOrNull()?.track?.let(::artist)
+        if (onlyArtist != null && unique.all { artist(it.track) == onlyArtist }) return unique.take(size.coerceAtLeast(0)).map { it.track }
         // At most two songs of one artist in any ten.
         val out = ArrayList<Track>()
         val pool = unique.toMutableList()
         while (out.size < size && pool.isNotEmpty()) {
-            val window = out.takeLast(9).map { fold(it.artist.substringBefore(",")) }
-            val i = pool.indexOfFirst { t -> window.count { it == fold(t.artist.substringBefore(",")) } < 2 }
+            val window = out.takeLast(9).map(::artist)
+            val i = pool.indexOfFirst { candidate -> window.count { it == artist(candidate.track) } < 2 }
             if (i < 0) break
-            out += pool.removeAt(i)
+            out += pool.removeAt(i).track
+        }
+        // One low-exposure compatible track can replace the last routine result of a full radio tail.
+        // A cold or sparse result, or a tail already offering unfamiliar tracks, needs no exploration.
+        if (boundedExploration && size >= 8 && out.size == size && out.all { (stats[it.statsKey]?.plays ?: 0) > 0 }) {
+            val previous = out.dropLast(1).takeLast(9).map(::artist)
+            val options = pool.asSequence().filter { candidate ->
+                val credit = artist(candidate.track)
+                candidate.unexplored && candidate.song !in recent &&
+                    previous.count { it == credit } < 2 && previous.lastOrNull() != credit
+            }.take(8).toList()
+            if (options.isNotEmpty()) out[out.lastIndex] = options[random.nextInt(options.size)].track
         }
         return spaceArtists(out, seed)
+    }
+
+    private data class LocalScore(val track: Track, val song: String, val score: Double, val unexplored: Boolean)
+
+    /** A bounded, deterministic fallback for an existing radio when provider pages are unavailable. */
+    suspend fun offlineTail(
+        seed: Track,
+        current: Track,
+        songs: List<Track>,
+        excluded: Set<String>,
+        recordings: Set<String>,
+        size: Int,
+        related: List<Track> = emptyList(),
+        learned: List<Pair<Track, Double>> = emptyList(),
+        session: SessionTaste.Affinity = SessionTaste.Affinity.EMPTY,
+        stats: Map<String, SongStats> = emptyMap(),
+        at: Long = 0,
+        loadStats: suspend (Set<String>) -> Map<String, SongStats> = { emptyMap() },
+    ): List<Track> {
+        if (songs.isEmpty() || size <= 0) return emptyList()
+        val offset = Math.floorMod(current.id.value.hashCode(), songs.size)
+        // Spread the sample across the alphabetically ordered catalogue.
+        val count = minOf(songs.size, 384)
+        val capacity = minOf(OFFLINE_CANDIDATES.toLong(), count.toLong() + related.size + learned.size).toInt()
+        val sample = ArrayList<Track>(capacity)
+        val unique = HashSet<String>()
+        fun add(track: Track) {
+            if (!track.uri.startsWith("content://") && !track.uri.startsWith("file://")) return
+            val key = songKey(track)
+            if (track.recordingId !in recordings && !isExcluded(track, excluded, key) &&
+                unique.add(track.recordingId ?: key)) sample += track
+        }
+        for ((track, _) in learned) {
+            if (sample.size == OFFLINE_CANDIDATES) break
+            add(track)
+        }
+        for (track in related) {
+            if (sample.size == OFFLINE_CANDIDATES) break
+            add(track)
+        }
+        for (slot in 0 until count) {
+            if (sample.size == OFFLINE_CANDIDATES) break
+            val index = ((offset + slot.toLong() * songs.size / count) % songs.size).toInt()
+            add(songs[index])
+        }
+        val weights = learned.groupingBy { (track, _) -> track.id.value }.fold(0.0) { best, (_, confidence) -> maxOf(best, confidence) }
+        val rankedStats = if (stats.isEmpty() && sample.isNotEmpty()) {
+            val stored = loadStats(sample.mapTo(HashSet()) { it.statsKey }).toMutableMap()
+            for (track in sample) {
+                val rating = track.metadata?.rating ?: continue
+                val key = track.statsKey
+                val previous = stored[key] ?: SongStats.NONE
+                if (!previous.ratingSet) stored[key] = previous.copy(rating = rating, ratingSet = true)
+            }
+            stored
+        } else stats
+        return local(seed, sample, rankedStats, emptySet(), size, kotlin.random.Random(current.id.value.hashCode()),
+            excluded, weights, session, at, boundedExploration = true)
+    }
+
+    private const val OFFLINE_CANDIDATES = 512
+
+    /** Use the catalogue's existing sorted collections to find nearby tracks without a new index. */
+    fun related(index: LibraryIndex, seed: Track): List<Track> = buildList {
+        fun lookup(groups: List<ua.olex.music.model.MusicCollection>, names: List<String>, limit: Int) {
+            for (name in names.filter(String::isNotBlank).distinct().take(4)) {
+                val match = groups.binarySearchBy(LibraryOrder.name(name)) { LibraryOrder.name(it.name) }
+                if (match >= 0) addAll(groups[match].tracks.take(limit))
+            }
+        }
+        lookup(index.artists, seed.artists + seed.artist, 16)
+        lookup(index.genres, seed.genres, 16)
     }
 
     /** The genres that suit each mood, for a mood mix from the library when YouTube Music can't help. */

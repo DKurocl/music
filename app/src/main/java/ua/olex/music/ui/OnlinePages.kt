@@ -3,6 +3,10 @@
 package ua.olex.music.ui
 
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformLatest
 
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.graphicsLayer
@@ -72,8 +76,18 @@ internal val LocalOnlineNav = staticCompositionLocalOf { OnlineNav() }
  * result, recomputed when a key changes. For anything that walks every song, album or artist.
  */
 @Composable
-internal fun <T> rememberOffMain(vararg keys: Any?, initial: T, compute: () -> T): T =
-    produceState(initial, *keys) { value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { compute() } }.value
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+internal fun <T> rememberOffMain(vararg keys: Any?, initial: T, compute: suspend () -> T): T {
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    return produceState(initial, *keys, lifecycle) {
+        value = lifecycle.currentStateFlow
+            .map { it.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED) }
+            .distinctUntilChanged()
+            .transformLatest { visible ->
+                if (visible) emit(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { compute() })
+            }.first()
+    }.value
+}
 
 @Composable
 internal fun rememberOnlineAlbumId(mediaId: String?, accountScope: String): String? {
@@ -276,29 +290,34 @@ internal fun OnlineAlbumPage(target: OnlineTarget.Album, library: LibraryIndex, 
     val nav = LocalOnlineNav.current
     var retry by remember { mutableIntStateOf(0) }
     val network = LocalNetwork.current
-    val accountScope by graph.youTubeAccount.cacheScope.collectAsStateWithLifecycle()
-    val state = rememberLoad(Triple(target, accountScope, network), retry, graph.youTube.peekAlbum(target.id)) {
+    val accountRevision by graph.youTubeAccount.revision.collectAsStateWithLifecycle()
+    val state = rememberLoad(Triple(target, accountRevision, network), retry, graph.youTube.peekAlbum(target.id)) {
         graph.youTube.albumPage(YouTubeMusic.OnlineAlbum(target.id, target.title, target.subtitle, target.cover), target.seed, offline = !network)
     }
     // A long playlist arrives in parts: the rest is fetched in the background and added under what is
     // on screen, so nothing moves while the owner reads or plays.
     var grown by remember(state) { mutableStateOf<Pair<YouTubeMusic.OnlineAlbum, List<Track>>?>(null) }
-    var pageRetry by remember(target, accountScope) { mutableIntStateOf(0) }
-    var moreFailed by remember(target, accountScope) { mutableStateOf(false) }
-    var loadingMore by remember(target, accountScope) { mutableStateOf(false) }
-    LaunchedEffect(target, accountScope, network, state, pageRetry) {
+    var pageRetry by remember(target, accountRevision) { mutableIntStateOf(0) }
+    var moreFailed by remember(target, accountRevision) { mutableStateOf(false) }
+    var loadingMore by remember(target, accountRevision) { mutableStateOf(false) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    LaunchedEffect(target, accountRevision, network, state, pageRetry, lifecycle) {
         loadingMore = false
         moreFailed = false
         if (!network || state !is Load.Done) return@LaunchedEffect
-        while (graph.youTube.hasAlbumContinuation(target.id)) {
-            loadingMore = true
-            val next = try { graph.youTube.albumMore(target.id) }
-            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (_: Exception) { null }
-            if (next == null) { moreFailed = graph.youTube.hasAlbumContinuation(target.id); break }
-            grown = next
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            moreFailed = false
+            try {
+                while (graph.youTube.hasAlbumContinuation(target.id)) {
+                    loadingMore = true
+                    val next = try { graph.youTube.albumMore(target.id) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { null }
+                    if (next == null) { moreFailed = graph.youTube.hasAlbumContinuation(target.id); break }
+                    grown = next
+                }
+            } finally { loadingMore = false }
         }
-        loadingMore = false
     }
     val loaded = grown ?: (state as? Load.Done)?.value
     val localRelease = rememberOffMain<MusicCollection?>(target, library, initial = null) {

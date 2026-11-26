@@ -38,9 +38,15 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
         val session = RecordingRegistrar.create(dao, songs, at) { "recording:${java.util.UUID.randomUUID()}" }
         val registered = songs.map { session.register(it) }
         // A later occurrence can confirm a merge with an older identity. Never append a stale FK.
-        val canonical = registered.map { it.id }.distinct().associateWith { dao.canonicalId(it) ?: it }
-        return registered.map { it.copy(id = canonical.getValue(it.id)) }
+        val canonical = canonicalIds(registered.map { it.id })
+        return registered.map { it.copy(id = canonical[it.id] ?: it.id) }
     }
+
+    private suspend fun canonicalIds(ids: Iterable<String>): Map<String, String> =
+        ids.distinct().chunked(400).flatMap { dao.canonicalIds(it) }.associate { it.aliasId to it.songId }
+
+    private suspend fun favouriteTimes(ids: Iterable<String>): Map<String, Long> =
+        ids.distinct().chunked(400).flatMap { dao.favouriteTimes(it) }.associate { it.songId to it.addedAt }
 
     /** Read a source's durable recording without creating data or guessing an ambiguous match. */
     fun reference(track: Track) = reference(SavedSong.from(track))
@@ -93,42 +99,71 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     ): Map<String, ImportedFavourite> = database.withTransaction {
         if (!shouldApply()) return@withTransaction previous
         val origins = previous.toMutableMap()
+        val canonical = canonicalIds(previous.values.map { it.recordingId })
         val retainedRecordings = previous.filterKeys { it in remoteVideoIds || it in pendingVideoIds }
-            .values.mapNotNull { dao.canonicalId(it.recordingId) }.toSet()
-        for ((video, origin) in previous) {
-            if (video in remoteVideoIds || video in pendingVideoIds) continue
-            val id = dao.canonicalId(origin.recordingId)
-            if (id != null && id !in retainedRecordings && dao.latestFavourite(listOf(id)) == origin.addedAt) {
-                dao.removeFavourite(id)
-            }
-            origins.remove(video)
+            .values.mapNotNull { canonical[it.recordingId] }.toSet()
+        val removed = previous.filterKeys { it !in remoteVideoIds && it !in pendingVideoIds }
+        val candidates = removed.values.mapNotNull { origin ->
+            canonical[origin.recordingId]?.takeUnless { it in retainedRecordings }?.let { it to origin.addedAt }
         }
+        val removedTimes = favouriteTimes(candidates.map { it.first })
+        candidates.filter { (id, addedAt) -> removedTimes[id] == addedAt }.map { it.first }.distinct()
+            .chunked(400).forEach { dao.removeFavourites(it) }
+        removed.keys.forEach(origins::remove)
+
         val fresh = tracks.distinctBy { it.id }.filter { track ->
             val video = track.id.value.removePrefix("yt:")
             video !in pendingVideoIds
         }
         val at = now()
         val saved = register(fresh.map(SavedSong::from), at)
+        val current = favouriteTimes(saved.map { it.id }).toMutableMap()
+        // Registering a late exact match can merge recordings, so use the post-registration aliases.
+        val remainingIds = if (saved.isEmpty()) emptyMap() else canonicalIds(origins.values.map { it.recordingId })
+        val importedByRecording = HashMap<String, ImportedFavourite>()
+        for (origin in origins.values) {
+            val id = remainingIds[origin.recordingId] ?: continue
+            if (current[id] == origin.addedAt) importedByRecording.putIfAbsent(id, origin)
+        }
+        val added = ArrayList<FavouriteEntity>()
         for ((track, song) in fresh.zip(saved)) {
             val video = track.id.value.removePrefix("yt:")
-            if (!dao.isFavourite(song.id)) {
-                dao.addFavourite(FavouriteEntity(song.id, at))
-                origins[video] = ImportedFavourite(song.id, at)
-            } else if (origins[video] == null) {
-                val existing = origins.values.firstOrNull { dao.canonicalId(it.recordingId) == song.id }
-                if (existing != null && dao.latestFavourite(listOf(song.id)) == existing.addedAt) origins[video] = existing
+            if (current.putIfAbsent(song.id, at) == null) {
+                added += FavouriteEntity(song.id, at)
+                val origin = ImportedFavourite(song.id, at)
+                importedByRecording[song.id] = origin
+                origins[video] = origin
+            } else if (video !in origins) {
+                importedByRecording[song.id]?.let { origins[video] = it }
             }
         }
+        if (added.isNotEmpty()) dao.addFavourites(added)
         if (!shouldApply()) throw kotlinx.coroutines.CancellationException("Favourite sync account changed")
         origins
     }
 
     /** Recording IDs own statistics. A unique old SongKey alias keeps unsaved/local callers readable. */
     val stats = kotlinx.coroutines.flow.combine(dao.recordingStats(), dao.recordingAliases()) { rows, aliases ->
-        val values = rows.associate { it.songId to ua.olex.music.model.SongStats(it.plays, it.lastPlayedAt, it.rating ?: 0, it.rating != null) }.toMutableMap()
+        val values = rows.associate { it.songId to ua.olex.music.model.SongStats(it.plays, it.lastPlayedAt, it.rating ?: 0,
+            it.rating != null, it.favouriteSince) }.toMutableMap()
         aliases.forEach { alias -> values[alias.songId]?.let { values[alias.aliasId] = it } }
         rows.groupBy { it.songKey }.forEach { (key, matches) -> if (matches.size == 1) values[key] = values.getValue(matches.single().songId) }
         values.toMap()
+    }
+
+    /** Indexed fallback for an active offline refill whose UI statistics have never loaded. */
+    suspend fun statsFor(keys: Set<String>): Map<String, ua.olex.music.model.SongStats> = database.withTransaction {
+        val rows = keys.chunked(300).flatMap { dao.recordingStatsFor(it) }.distinctBy { it.songId }
+        val values = rows.associate { row ->
+            row.songId to ua.olex.music.model.SongStats(row.plays, row.lastPlayedAt, row.rating ?: 0,
+                row.rating != null, row.favouriteSince)
+        }
+        val legacy = rows.groupBy { it.songKey }
+        val canonical = canonicalIds(keys)
+        keys.mapNotNull { key ->
+            val id = canonical[key] ?: legacy[key]?.singleOrNull()?.songId
+            id?.let(values::get)?.let { key to it }
+        }.toMap()
     }
 
     /** 0 clears this recording's rating, including every linked file and online source. */
@@ -245,14 +280,21 @@ class UserRepository(private val database: UserDatabase, private val now: () -> 
     suspend fun keepReference(track: Track): SavedSong = database.withTransaction { personalReference(track, now()) }
 
     /** Confirm only indexed matches to saved recordings; a scan never collects unrelated files. */
-    suspend fun reconcile(local: ua.olex.music.model.LibraryIndex, saved: List<SavedSong>) = database.withTransaction {
-        val bound = ua.olex.music.model.SavedCatalog.bindLocal(local, saved).filter { it.recordingId != null }
-        val snapshots = bound.groupBy { it.recordingId }.values.map { copies ->
-            val preferred = copies.maxBy { it.format?.rank ?: 0 }
-            SavedSong.from(preferred.copy(recordingId = null, sources = (copies.mapNotNull(ua.olex.music.model.RecordingSource::from) + preferred.sources).distinctBy { it.key }))
+    suspend fun reconcile(local: ua.olex.music.model.LibraryIndex, saved: List<SavedSong>) =
+        reconcileBound(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            ua.olex.music.model.SavedCatalog.bindLocal(local, saved)
+        })
+
+    /** Reuse the bindings already built for the visible catalogue, and validate writes in Room. */
+    suspend fun reconcileBound(bound: List<Track>) {
+        val snapshots = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            bound.filter { it.recordingId != null }.groupBy { it.recordingId }.values.map { copies ->
+                val preferred = copies.maxBy { it.format?.rank ?: 0 }
+                SavedSong.from(preferred.copy(recordingId = null, sources =
+                    (copies.mapNotNull(ua.olex.music.model.RecordingSource::from) + preferred.sources).distinctBy { it.key }))
+            }
         }
-        register(snapshots, now())
-        Unit
+        if (snapshots.isNotEmpty()) database.withTransaction { register(snapshots, now()) }
     }
 
     /** Superseded IDs remain lyric-file lookup aliases after a confirmed recording merge. */

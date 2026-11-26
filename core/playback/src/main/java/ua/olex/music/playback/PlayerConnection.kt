@@ -83,6 +83,8 @@ data class PlayerState(
     val hasTrack get() = mediaId != null
 }
 
+internal fun PlayerState.acknowledgesRadio(receipt: String) = queue.any { it.key == receipt }
+
 /** Stable per-occurrence identity keeps repeated songs distinct while reordering a queue. */
 data class QueueItem(val key: String, val mediaId: String, val title: String, val artist: String, val artworkUri: String?, private val item: MediaItem? = null) {
     /** Decode rich source metadata only for a background consumer, never for every visible row. */
@@ -144,7 +146,7 @@ class PlayerConnection(context: Context) {
             })
             .setListener(object : MediaController.Listener {
                 override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
-                    if (this@PlayerConnection.controller === controller) {
+                    if (uiVisible && this@PlayerConnection.controller === controller) {
                         _state.value = _state.value.copy(
                             queueRestored = extras.getBoolean(PlaybackService.QUEUE_RESTORED),
                             sleepDeadlineMs = extras.getLong(SleepTimerCommand.DEADLINE).takeIf { it > 0 },
@@ -174,9 +176,9 @@ class PlayerConnection(context: Context) {
             try {
                 val connected = Futures.getDone(future)
                 controller = connected
-                connected.addListener(listener)
+                if (uiVisible) connected.addListener(listener)
                 sendUiVisibility(connected)
-                publish(connected, updateQueue = true)
+                publish(connected, updateQueue = uiVisible)
                 pendingPlay?.let { (tracks, index) ->
                     pendingPlay = null
                     play(tracks, index, pendingContext, pendingStart, pendingShuffle)
@@ -193,7 +195,13 @@ class PlayerConnection(context: Context) {
     fun setUiVisible(visible: Boolean) {
         if (uiVisible == visible) return
         uiVisible = visible
-        controller?.let(::sendUiVisibility)
+        controller?.let { connected ->
+            sendUiVisibility(connected)
+            if (visible) {
+                connected.addListener(listener)
+                publish(connected, updateQueue = true)
+            } else connected.removeListener(listener)
+        }
     }
 
     private fun sendUiVisibility(player: MediaController) {
@@ -283,6 +291,11 @@ class PlayerConnection(context: Context) {
         }
     }
     fun next() { controller?.seekToNextMediaItem() }
+    fun advanceBeforeRemoving() {
+        val player = controller ?: return
+        val next = player.nextMediaItemIndex
+        if (next in 0 until player.mediaItemCount) player.seekToDefaultPosition(next)
+    }
     /** Back to the start of the track, or to the previous one when already near the start. */
     fun previous() { controller?.seekToPrevious() }
     fun seekTo(positionMs: Long) { controller?.seekTo(positionMs) }
@@ -315,14 +328,10 @@ class PlayerConnection(context: Context) {
         }
     }
     fun moveQueueItem(key: String, delta: Int) {
-        controller?.let {
-            val from = it.indexOfQueueKey(key)
-            val to = from.toLong() + delta
-            if (from >= 0 && to in 0 until it.mediaItemCount.toLong()) it.moveMediaItem(from, to.toInt())
-        }
+        controller?.sendCustomCommand(QueueCommand.editCommand, QueueCommand.editArguments(key, delta))
     }
     fun removeQueueItem(key: String) {
-        controller?.let { val index = it.indexOfQueueKey(key); if (index >= 0) it.removeMediaItem(index) }
+        controller?.sendCustomCommand(QueueCommand.editCommand, QueueCommand.editArguments(key))
     }
 
     /** Appends or inserts after the current item; queued additions keep their request order. */
@@ -351,7 +360,7 @@ class PlayerConnection(context: Context) {
         }
     }
 
-    /** A mix is ready once the service has accepted it and its last occurrence is visible. */
+    /** A mix is ready once the service has accepted it and the exact receipt is visible. */
     suspend fun startRadio(tracks: List<Track>, origin: String, replaceAfter: String? = null): Boolean =
         kotlinx.coroutines.withTimeoutOrNull(10_000) {
             if (controller == null) {
@@ -375,8 +384,10 @@ class PlayerConnection(context: Context) {
                 }
             } ?: return@withTimeoutOrNull false
             val last = player.mediaItemCount - 1
-            if (controller === player && last >= 0 && queueKey(player, last) == tail) publish(player, updateQueue = true)
-            _state.first { !it.connected || it.queue.lastOrNull()?.key == tail }.connected
+            if (controller === player && last >= 0 && !_state.value.acknowledgesRadio(tail) &&
+                (queueKey(player, last) == tail || queueKey(player, 0) == tail)) publish(player, updateQueue = true)
+            // The service may have already appended to a seed-only radio before its receipt arrives.
+            _state.first { !it.connected || it.acknowledgesRadio(tail) }.connected
         } ?: false
 
     fun setEqualizer(routeKey: String, settings: ua.olex.music.dsp.EqualizerSettings) {

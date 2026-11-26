@@ -7,8 +7,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
-import java.time.ZonedDateTime
-import java.time.format.DateTimeFormatter
+import ua.olex.music.model.RetryAfter
 
 /** Failures shared by other queue items should leave the current occurrence available to retry. */
 @OptIn(UnstableApi::class)
@@ -46,12 +45,7 @@ internal class PlaybackLoadErrors : DefaultLoadErrorHandlingPolicy() {
     companion object {
         internal fun retryAfterMs(header: String?, attempt: Int, now: Long): Long? {
             if (attempt != 1) return null
-            val value = header?.trim().orEmpty()
-            val seconds = value.toLongOrNull()
-            if (seconds != null) return seconds.takeIf { it in 1..30 }?.times(1000)
-            val deadline = runCatching { ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }
-                .getOrNull() ?: return null
-            return (deadline - now).takeIf { it in 1_000..30_000 }
+            return RetryAfter.milliseconds(header, now)?.takeIf { it in 1_000..30_000 }
         }
     }
 }

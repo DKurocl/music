@@ -69,24 +69,33 @@ object CacheBudget {
     }
 
     @Volatile private var streams: SimpleCache? = null
+    private fun streamDirectory(context: Context) = File(context.cacheDir, "streams")
+
+    /** An offline selection or a visible cache-backed list may discover bytes from a prior process. Call off main. */
+    fun openExistingStreams(context: Context) {
+        if (streams == null && streamDirectory(context).isDirectory) streams(context)
+    }
 
     /** The streamed-songs cache (one per process, as Media3 requires). */
     @OptIn(UnstableApi::class)
     internal fun streams(context: Context): SimpleCache = streams ?: synchronized(this) {
         streams ?: run {
-            val evictor = BudgetEvictor(::changed) { streamBytes(context.applicationContext) }
-            SimpleCache(File(context.cacheDir, "streams"), evictor, StandaloneDatabaseProvider(context.applicationContext)).also { cache ->
+            val evictor = BudgetEvictor({ if (streams != null) changed() }) { streamBytes(context.applicationContext) }
+            SimpleCache(streamDirectory(context), evictor, StandaloneDatabaseProvider(context.applicationContext)).also { cache ->
+                // Wait for the initial index before exposing it to callers that only inspect memory.
+                // If initialization failed, the cache data source still retains its upstream recovery.
+                try { cache.checkInitialization() } catch (_: Cache.CacheException) { }
+                onChange { synchronized(cache) { evictor.trim(cache) } }
                 streams = cache
                 changed()
-                onChange { synchronized(cache) { evictor.trim(cache) } }
             }
         }
     }
 
     /**
      * Whether a streamed song (its `ytm://` address, the cache key) is kept whole in the cache, so it
-     * plays without the network. False until playback has opened the cache: never opens it itself,
-     * so a list asking this does no disk work on the main thread.
+     * plays without the network. False before the index has loaded. A list can read it without
+     * opening the index or waiting for disk initialization on the main thread.
      */
     @OptIn(UnstableApi::class)
     fun isStreamCached(uri: String): Boolean = streams?.let { cache ->
@@ -123,17 +132,33 @@ internal class BudgetEvictor(private val changed: () -> Unit = {}, private val l
     override fun onStartFile(cache: Cache, key: String, position: Long, length: Long) {
         if (length != androidx.media3.common.C.LENGTH_UNSET.toLong()) evict(cache, length)
     }
-    override fun onSpanAdded(cache: Cache, span: CacheSpan) { spans += span; size += span.length; evict(cache, 0); changed() }
+    override fun onSpanAdded(cache: Cache, span: CacheSpan) {
+        if (spans.add(span)) size += span.length
+        evict(cache, 0)
+        changed()
+    }
     override fun onSpanRemoved(cache: Cache, span: CacheSpan) { if (spans.remove(span)) size -= span.length; changed() }
     override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) { spans.remove(oldSpan); spans.add(newSpan) }
 
     private fun evict(cache: Cache, incoming: Long) {
-        val max = limit()
+        val max = limit().coerceAtLeast(0)
+        val remaining = max - incoming.coerceAtLeast(0)
         // Least recently played first: over the budget, or not played for a month (a song he has
         // moved on from shouldn't sit in the cache only because the budget is large).
         val stale = System.currentTimeMillis() - MAX_IDLE_MS
-        while (spans.isNotEmpty() && (size + incoming > max || spans.first().lastTouchTimestamp < stale))
-            runCatching { cache.removeSpan(spans.first()) }.onFailure { spans.pollFirst() }
+        while (spans.isNotEmpty() && (size > remaining || spans.first().lastTouchTimestamp < stale)) {
+            val oldest = spans.first()
+            try {
+                cache.removeSpan(oldest)
+                if (oldest !in spans) continue
+                // A stale entry can already be absent without a removal callback. Keep a
+                // failed deletion accounted for and yield instead of spinning on the cache lock.
+                if (oldest in cache.getCachedSpans(oldest.key)) return
+                onSpanRemoved(cache, oldest)
+            } catch (_: RuntimeException) {
+                return
+            }
+        }
     }
 
     companion object {
@@ -149,18 +174,60 @@ internal class BudgetEvictor(private val changed: () -> Unit = {}, private val l
  * files are never copied into the cache.
  */
 @OptIn(UnstableApi::class)
-internal class OnlineCachingDataSource(private val online: DataSource, private val plain: DataSource) : DataSource {
+internal class OnlineCachingDataSource(online: () -> DataSource, private val plain: DataSource) : DataSource {
     private var current: DataSource? = null
-    override fun addTransferListener(transferListener: TransferListener) { online.addTransferListener(transferListener); plain.addTransferListener(transferListener) }
-    override fun open(dataSpec: DataSpec): Long = (if (dataSpec.uri.scheme == OnlineStreams.SCHEME) online else plain).also { current = it }.open(dataSpec)
+    private val pendingListeners = linkedSetOf<TransferListener>()
+    private val cachedSource = lazy(LazyThreadSafetyMode.NONE) {
+        online().also { source ->
+            pendingListeners.forEach(source::addTransferListener)
+            pendingListeners.clear()
+        }
+    }
+    override fun addTransferListener(transferListener: TransferListener) {
+        plain.addTransferListener(transferListener)
+        if (cachedSource.isInitialized()) cachedSource.value.addTransferListener(transferListener)
+        else pendingListeners.add(transferListener)
+    }
+    override fun open(dataSpec: DataSpec): Long =
+        (if (dataSpec.uri.scheme == OnlineStreams.SCHEME) cachedSource.value else plain).also { current = it }.open(dataSpec)
     override fun read(buffer: ByteArray, offset: Int, length: Int): Int = requireNotNull(current).read(buffer, offset, length)
     override fun getUri(): Uri? = current?.uri
     override fun getResponseHeaders(): Map<String, List<String>> = current?.responseHeaders ?: emptyMap()
     override fun close() { try { current?.close() } finally { current = null } }
 
     class Factory(private val context: Context, private val upstream: DataSource.Factory) : DataSource.Factory {
-        private val cached = CacheDataSource.Factory().setCache(CacheBudget.streams(context)).setUpstreamDataSourceFactory(upstream)
-            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
-        override fun createDataSource(): DataSource = OnlineCachingDataSource(cached.createDataSource(), upstream.createDataSource())
+        private val cached by lazy {
+            CacheDataSource.Factory().setCache(CacheBudget.streams(context)).setUpstreamDataSourceFactory(upstream)
+                .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                .apply {
+                    if (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                        setEventListener(StreamCacheMetrics.debugSession)
+                    }
+                }
+        }
+        override fun createDataSource(): DataSource = OnlineCachingDataSource({ cached.createDataSource() }, upstream.createDataSource())
+    }
+}
+
+/** Debug-only aggregate counts. Media3 reports consumed cached bytes once per source close. */
+@androidx.annotation.OptIn(UnstableApi::class)
+internal class StreamCacheMetrics : CacheDataSource.EventListener {
+    data class Counts(val cachedBytes: Long, val cacheBypasses: Long)
+    private var cachedBytes = 0L
+    private var cacheBypasses = 0L
+
+    @Synchronized override fun onCachedBytesRead(cacheSizeBytes: Long, cachedBytesRead: Long) {
+        cachedBytes += cachedBytesRead
+    }
+
+    @Synchronized override fun onCacheIgnored(reason: Int) { cacheBypasses++ }
+
+    @Synchronized fun take(): Counts = Counts(cachedBytes, cacheBypasses).also {
+        cachedBytes = 0
+        cacheBypasses = 0
+    }
+
+    companion object {
+        val debugSession = StreamCacheMetrics()
     }
 }

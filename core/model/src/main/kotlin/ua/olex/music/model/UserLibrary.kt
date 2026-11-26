@@ -18,7 +18,7 @@ data class SavedSong(
     val persistent: Boolean get() = !id.startsWith(SNAPSHOT_PREFIX)
 
     /** Prefer a matching file; retain every source when projecting it into the current library. */
-    fun resolve(library: LibraryIndex, eligible: (Track) -> Boolean = { true }): Track? {
+    fun resolve(library: LibraryIndex, preferredLocalKey: String? = null, eligible: (Track) -> Boolean = { true }): Track? {
         val refs = references
         val missing = refs.firstOrNull { it.kind == RecordingSourceKind.MISSING_LOCAL }
         if (missing != null) library.playlistPaths.resolve(missing.path.orEmpty()).track?.takeIf(eligible)?.let { return bind(it) }
@@ -30,7 +30,8 @@ data class SavedSong(
         val candidates = possible.filter { it.id.value in matches }
         val paths = refs.mapNotNull { it.path }.toSet()
         val file = candidates.sortedWith(
-            compareByDescending<Track> { it.path.orEmpty() == path }
+            compareByDescending<Track> { preferredLocalKey != null && RecordingSource.from(it)?.key == preferredLocalKey }
+                .thenByDescending { path.isNotBlank() && it.path == path }
                 .thenByDescending { it.path in paths }
                 .thenByDescending { it.format?.rank ?: 0 },
         ).firstOrNull(eligible)

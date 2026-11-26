@@ -12,6 +12,8 @@ import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
+import android.provider.MediaStore
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -20,23 +22,42 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ua.olex.music.model.Track
 import ua.olex.music.tags.ChannelSource
 import ua.olex.music.tags.TagWriter
 import ua.olex.music.tags.CoverArt
+import ua.olex.music.tags.FileCopy
+import ua.olex.music.tags.TagRewriteStage
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
+import java.io.IOException
+import java.io.InputStream
 import java.nio.ByteBuffer
+import java.security.MessageDigest
+
+private const val TAG_COVER_MAX_BYTES = 8 * 1024 * 1024
+private val TAG_COVER_TYPES = setOf("image/jpeg", "image/png")
+
+internal fun readTagCover(input: InputStream, mime: String): CoverArt? {
+    if (mime !in TAG_COVER_TYPES) return null
+    val bytes = input.readNBytes(TAG_COVER_MAX_BYTES + 1)
+    return bytes.takeIf { it.isNotEmpty() && it.size <= TAG_COVER_MAX_BYTES }?.let { CoverArt(it, mime) }
+}
 
 /**
  * Writes tags into the owner's files (FLAC, MP3, M4A, Ogg Vorbis and Opus). Android asks the owner once per batch
  * (MediaStore write request, launched by the screen); then each file is changed in place when the
- * new tags fit in its old header, otherwise rewritten through a temporary copy so a failure can
- * never leave half a file. The audio bytes are copied, never decoded.
+ * new tags fit in its old header. A resized file is built and verified before the provider write.
+ * The audio bytes are copied without decoding.
  */
 object TagEditing {
+    private val writer = Mutex()
     /** Edits for one file; names as in AudioTags. An empty list removes the tag. */
     data class Result(val written: Int, val unsupported: List<String>, val failed: List<String>, val renamed: Int = 0)
 
@@ -47,12 +68,17 @@ object TagEditing {
         val unsupported = ArrayList<String>()
         val failed = ArrayList<String>()
         for (track in tracks.distinctBy { it.uri }) {
+            currentCoroutineContext().ensureActive()
             try {
-                val e = edits(track)
-                val ok = if (e.isEmpty() && cover == null) true else writeOne(context, Uri.parse(track.uri), e, cover)
-                if (ok) { if (e.isNotEmpty() || cover != null) written++ } else unsupported += track.title
-                if ((nameTemplate != null || folderTemplate != null) && move(context, track, e, nameTemplate, folderTemplate)) renamed++
-            } catch (e: Exception) {
+                writer.withLock {
+                    val e = edits(track)
+                    val ok = if (e.isEmpty() && cover == null) true else writeOne(context, Uri.parse(track.uri), e, cover)
+                    if (ok) { if (e.isNotEmpty() || cover != null) written++ } else unsupported += track.title
+                    if ((nameTemplate != null || folderTemplate != null) && move(context, track, e, nameTemplate, folderTemplate)) renamed++
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
                 failed += track.title
             }
         }
@@ -72,42 +98,45 @@ object TagEditing {
         return context.contentResolver.update(Uri.parse(track.uri), values, null, null) > 0
     }
 
-    private fun writeOne(context: Context, uri: Uri, edits: Map<String, List<String>>, cover: CoverArt?): Boolean {
+    private suspend fun writeOne(context: Context, uri: Uri, edits: Map<String, List<String>>, cover: CoverArt?): Boolean {
         val resolver = context.contentResolver
-        val plan = resolver.openFileDescriptor(uri, "r")!!.use { pfd ->
-            FileInputStream(pfd.fileDescriptor).channel.use { TagWriter.plan(ChannelSource(it), edits, cover) }
-        } ?: return false
-        if (plan.inPlace) {
-            resolver.openFileDescriptor(uri, "rw")!!.use { pfd ->
-                FileOutputStream(pfd.fileDescriptor).channel.use { out -> out.write(ByteBuffer.wrap(plan.head), plan.start) }
+        val job = currentCoroutineContext()
+        val directory = File(context.noBackupFilesDir, "tag-rewrites-v1")
+        val previous = if (directory.isDirectory) rewriteStage(context, uri, directory) else null
+        val descriptor = resolver.openFileDescriptor(uri, "rw") ?: throw IOException("Cannot open media for tag editing")
+        ParcelFileDescriptor.AutoCloseInputStream(descriptor).use { input ->
+            ParcelFileDescriptor.AutoCloseOutputStream(descriptor.dup()).use { output ->
+                if (previous?.exists == true) previous.apply(input.channel, output.channel, job::ensureActive)
+                val plan = TagWriter.plan(ChannelSource(input.channel), edits, cover) ?: return false
+                job.ensureActive()
+                if (plan.inPlace) {
+                    FileCopy.writeFully(output.channel, ByteBuffer.wrap(plan.head), plan.start)
+                    output.channel.force(true)
+                } else {
+                    val stage = previous ?: rewriteStage(context, uri, directory)
+                        ?: throw IOException("Cannot identify the media row for recovery")
+                    stage.prepare(input.channel, plan, job::ensureActive)
+                    stage.apply(input.channel, output.channel, job::ensureActive)
+                }
             }
-            return true
         }
-        // New header size: build the whole new file aside, check it, then replace the original.
-        val tmp = File.createTempFile("tags", ".tmp", context.cacheDir)
-        try {
-            FileOutputStream(tmp).channel.use { out ->
-                resolver.openFileDescriptor(uri, "r")!!.use { pfd ->
-                    FileInputStream(pfd.fileDescriptor).channel.use { src ->
-                        var pos = 0L
-                        while (pos < plan.start) pos += src.transferTo(pos, plan.start - pos, out)
-                        out.write(ByteBuffer.wrap(plan.head))
-                        pos = plan.keepFrom
-                        val size = src.size()
-                        while (pos < size) pos += src.transferTo(pos, size - pos, out)
-                    }
-                }
-            }
-            val check = FileInputStream(tmp).channel.use { ua.olex.music.tags.TagReader.read(ChannelSource(it)) }
-                ?: throw IllegalStateException("rewritten file does not read back")
-            check.codec ?: throw IllegalStateException("rewritten file has no audio")
-            resolver.openFileDescriptor(uri, "wt")!!.use { pfd ->
-                FileOutputStream(pfd.fileDescriptor).channel.use { out ->
-                    FileInputStream(tmp).channel.use { src -> var pos = 0L; val size = src.size(); while (pos < size) pos += src.transferTo(pos, size - pos, out) }
-                }
-            }
-        } finally { tmp.delete() }
         return true
+    }
+
+    private fun rewriteStage(context: Context, uri: Uri, directory: File): TagRewriteStage? {
+        if (uri.authority != MediaStore.AUTHORITY) return null
+        val columns = arrayOf(MediaStore.MediaColumns.VOLUME_NAME, MediaStore.MediaColumns.GENERATION_ADDED, MediaStore.MediaColumns.DATE_ADDED)
+        val key = context.contentResolver.query(uri, columns, null, null, null)?.use { row ->
+            if (!row.moveToFirst() || (0..2).any(row::isNull)) return@use null
+            val volume = row.getString(0)
+            val generation = row.getLong(1)
+            val added = row.getLong(2)
+            val version = MediaStore.getVersion(context, volume)
+            if (version.isNullOrBlank() || generation < 0 || (generation == 0L && added <= 0)) return@use null
+            val identity = "${uri.normalizeScheme()}\n$volume\n$version\n$generation\n$added"
+            MessageDigest.getInstance("SHA-256").digest(identity.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        } ?: return null
+        return TagRewriteStage(File(directory, "$key.pending"))
     }
 }
 
@@ -120,13 +149,23 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
     val context = androidx.compose.ui.platform.LocalContext.current
     var cover by remember(tracks) { mutableStateOf<CoverArt?>(null) }
     var coverError by remember(tracks) { mutableStateOf<String?>(null) }
+    var coverUri by remember(tracks) { mutableStateOf<Uri?>(null) }
     val pickCover = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
-        if (uri != null) {
-            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
-            val bytes = runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull()
-            if (bytes == null || bytes.isEmpty() || bytes.size > (8 shl 20) || mime !in setOf("image/jpeg", "image/png")) coverError = "Choose a JPEG or PNG up to 8 MB."
-            else { cover = CoverArt(bytes, mime); coverError = null }
+        if (uri != null) coverUri = uri
+    }
+    LaunchedEffect(coverUri, tracks) {
+        val uri = coverUri ?: return@LaunchedEffect
+        val candidate = runInterruptible(Dispatchers.IO) {
+            try {
+                val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+                if (mime !in TAG_COVER_TYPES) null else context.contentResolver.openInputStream(uri)?.use { readTagCover(it, mime) }
+            } catch (_: IOException) { null }
+            catch (_: SecurityException) { null }
         }
+        if (coverUri != uri) return@LaunchedEffect
+        if (candidate == null) coverError = "Choose a JPEG or PNG up to 8 MB."
+        else { cover = candidate; coverError = null }
+        coverUri = null
     }
     var rename by remember(tracks) { mutableStateOf(false) }
     var nameTemplate by remember(tracks) { mutableStateOf(if (tracks.size == 1) "%artist% - %title%" else "%track% - %title%") }
@@ -205,7 +244,7 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     },
                     onApply = { chosen, newCover ->
                         chosen.forEach { (key, value) -> if (fields.any { it.first == key }) { values[key] = value; touched[key] = true } }
-                        newCover?.let { cover = CoverArt(it, "image/jpeg"); coverError = null }
+                        newCover?.let { coverUri = null; cover = CoverArt(it, "image/jpeg"); coverError = null }
                         lookup = null
                     }, onRetry = { findOnline() })
                 return@Column
@@ -233,7 +272,7 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     androidx.compose.material3.FilledTonalButton(onClick = { pickCover.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly)) }) {
                         Symbol(Glyph.PHOTO, size = 18.dp); Spacer(Modifier.width(8.dp)); Text(if (cover == null) "Choose cover" else "New cover · ${cover!!.bytes.size / 1024} KB")
                     }
-                    if (cover != null) TextButton(onClick = { cover = null }) { Text("Keep old") }
+                    if (cover != null) TextButton(onClick = { coverUri = null; cover = null }) { Text("Keep old") }
                 }
                 coverError?.let { Text(it, color = cs.error, style = MaterialTheme.typography.bodySmall) }
                 group("Files")
@@ -260,7 +299,7 @@ internal fun TagEditorDialog(tracks: List<Track>, onDismiss: () -> Unit, onSave:
                     // Only fields the owner changed (or, for one song, every field) are written.
                     val changed = fields.map { it.first }.filter { single || touched[it] == true }.associateWith { values[it].orEmpty() }
                     onSave(TagEditRequest(changed, cover, nameTemplate.takeIf { rename }, folderTemplate.takeIf { moveFiles }))
-                }, modifier = Modifier.height(48.dp)) { Text("Save") }
+                }, modifier = Modifier.height(48.dp), enabled = coverUri == null) { Text("Save") }
             }
         }
     }

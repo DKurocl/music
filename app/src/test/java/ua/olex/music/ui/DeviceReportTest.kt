@@ -59,7 +59,7 @@ class DeviceReportTest {
     }
 
     @Test fun lyricsTryCleanNamesAndTheFirstArtist() {
-        val v = ua.olex.music.lyrics.OnlineLyrics().variants("A, B & C", "Juicy (2005 Remaster) feat. X")
+        val v = ua.olex.music.lyrics.OnlineLyrics { null }.variants("A, B & C", "Juicy (2005 Remaster) feat. X")
         assertEquals("A, B & C" to "Juicy (2005 Remaster) feat. X", v.first())
         assertTrue(v.contains("A" to "Juicy"))
     }

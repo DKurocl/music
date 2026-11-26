@@ -25,12 +25,16 @@ internal data class PlaybackCheckpoint(
 
 /** Versioned local playback state, separate from user.db. All JSON and disk work runs on the caller's IO dispatcher. */
 internal class PlaybackStore(directory: File) {
+    private data class Position(val index: Int, val millis: Long)
+
     private val queue = AtomicFile(File(directory, "playback-queue.json"))
     private val cursor = AtomicFile(File(directory, "playback-position.json"))
     private val mutex = Mutex()
     private var writtenGeneration: String? = null
+    private var writtenPosition: Position? = null
 
     suspend fun write(state: PlaybackCheckpoint) = mutex.withLock {
+        val position = Position(state.index, state.positionMs)
         if (writtenGeneration != state.generation) {
             writeAtomic(queue, JSONObject().apply {
                 put("version", 1); put("generation", state.generation)
@@ -39,10 +43,14 @@ internal class PlaybackStore(directory: File) {
                 put("index", state.index); put("position", state.positionMs)
             })
             writtenGeneration = state.generation
+        } else {
+            if (position == writtenPosition) return@withLock
+            writeAtomic(cursor, JSONObject().apply {
+                put("generation", state.generation); put("index", position.index); put("position", position.millis)
+            })
         }
-        writeAtomic(cursor, JSONObject().apply {
-            put("generation", state.generation); put("index", state.index); put("position", state.positionMs)
-        })
+        // The durable queue already contains the first position for a new generation.
+        writtenPosition = position
     }
 
     suspend fun read(): PlaybackCheckpoint? = mutex.withLock {
@@ -54,9 +62,20 @@ internal class PlaybackStore(directory: File) {
         val items = (0 until rows.length()).map { decode(rows.getJSONObject(it)) }
         val keys = items.map { it.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY) }
         require(keys.none { it.isNullOrBlank() } && keys.distinct().size == items.size)
-        val order = data.getJSONArray("order").let { array -> (0 until array.length()).map(array::getInt) }
-        require(order.size == items.size && order.toSet() == items.indices.toSet())
-        val savedCursor = runCatching { JSONObject(String(cursor.readFully(), Charsets.UTF_8)) }.getOrNull()
+        val orderArray = data.getJSONArray("order")
+        require(orderArray.length() == items.size)
+        val used = BooleanArray(items.size)
+        val order = List(items.size) { index ->
+            orderArray.getInt(index).also {
+                require(it in items.indices && !used[it])
+                used[it] = true
+            }
+        }
+        val savedCursor = runCatching {
+            val bytes = cursor.openRead().use { it.readNBytes(MAX_CURSOR_BYTES + 1) }
+            require(bytes.size <= MAX_CURSOR_BYTES)
+            JSONObject(String(bytes, Charsets.UTF_8))
+        }.getOrNull()
             ?.takeIf { it.optString("generation") == generation && it.optInt("index", -1) in 0..items.lastIndex.coerceAtLeast(0) && it.optLong("position", -1) >= 0 } ?: data
         val repeat = data.getInt("repeat")
         require(repeat in 0..2)
@@ -116,5 +135,9 @@ internal class PlaybackStore(directory: File) {
         val stream = file.startWrite()
         try { stream.write(value.toString().toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
         catch (failure: Exception) { file.failWrite(stream); throw failure }
+    }
+
+    private companion object {
+        const val MAX_CURSOR_BYTES = 1_024
     }
 }

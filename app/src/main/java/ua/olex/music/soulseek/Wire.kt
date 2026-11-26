@@ -39,10 +39,21 @@ internal class Out {
 internal class In(private val buffer: ByteBuffer) {
     constructor(bytes: ByteArray) : this(ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN))
     val remaining get() = buffer.remaining()
-    fun u8(): Int = buffer.get().toInt() and 0xFF
+    fun u8(): Int {
+        require(remaining >= 1) { "Truncated byte" }
+        return buffer.get().toInt() and 0xFF
+    }
+
     fun bool(): Boolean = u8() != 0
-    fun u32(): Long = buffer.int.toLong() and 0xFFFFFFFFL
-    fun u64(): Long = buffer.long
+    fun u32(): Long {
+        require(remaining >= 4) { "Truncated integer" }
+        return buffer.int.toLong() and 0xFFFFFFFFL
+    }
+
+    fun u64(): Long {
+        require(remaining >= 8) { "Truncated integer" }
+        return buffer.long
+    }
     fun str(): String {
         val n = u32().toInt()
         require(n in 0..buffer.remaining()) { "Bad string length" }
@@ -56,15 +67,21 @@ internal class In(private val buffer: ByteBuffer) {
 internal fun InputStream.readFrame(init: Boolean = false): Pair<Int, ByteArray>? {
     val head = readExactly(4) ?: return null
     val length = In(head).u32().toInt()
-    require(length in (if (init) 1 else 4)..(64 shl 20)) { "Bad message length $length" }
+    require(length in (if (init) 1 else 4)..(8 shl 20)) { "Bad message length $length" }
     val body = readExactly(length) ?: return null
     return if (init) (body[0].toInt() and 0xFF) to body.copyOfRange(1, body.size)
     else In(body.copyOfRange(0, 4)).u32().toInt() to body.copyOfRange(4, body.size)
 }
 
 internal fun InputStream.readExactly(n: Int): ByteArray? {
-    val out = ByteArray(n); var at = 0
-    while (at < n) { val r = read(out, at, n - at); if (r < 0) return null; at += r }
+    val out = ByteArray(n)
+    var at = 0
+    while (at < n) {
+        val r = read(out, at, n - at)
+        if (r < 0) return null
+        if (r == 0) throw java.io.IOException("The connection stopped providing bytes")
+        at += r
+    }
     return out
 }
 

@@ -1,5 +1,9 @@
 package ua.olex.music.ui
 
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import java.io.File
 import org.junit.After
 import org.junit.Assert.*
@@ -10,6 +14,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import ua.olex.music.lyrics.LyricsStore
+import ua.olex.music.lyrics.OnlineLyrics
 import ua.olex.music.model.SavedSong
 import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
@@ -51,6 +56,36 @@ class DownloadedLyricsTest {
         assertEquals("[00:01.00]Kept", store.read(track)!!.first)
         store.delete(track)
         assertEquals("", store.read(track)!!.first)
+    }
+
+    @Test fun temporaryLookupFailureDoesNotPreventALaterRetry() = runBlocking {
+        var available = false
+        val store = DownloadedLyrics(context, OnlineLyrics { url ->
+            if (!available) throw java.io.IOException("fixture")
+            if ("lrclib.net/api/get" in url) """{"id":1,"syncedLyrics":"[00:01.00]Recovered"}""" else null
+        })
+        assertNull(store.fetch(file))
+        available = true
+        assertTrue(requireNotNull(store.fetch(file)).text.contains("Recovered"))
+    }
+
+    @Test fun removingLyricsDuringLookupKeepsTheRemovalMarker() = runBlocking {
+        withTimeout(3_000) {
+            val started = CompletableDeferred<Unit>()
+            val response = CompletableDeferred<String>()
+            val store = DownloadedLyrics(context, OnlineLyrics { url ->
+                if ("lrclib.net/api/get" !in url) null else {
+                    started.complete(Unit)
+                    response.await()
+                }
+            })
+            val lookup = async { store.fetch(file) }
+            started.await()
+            store.delete(file)
+            response.complete("""{"id":1,"syncedLyrics":"[00:01.00]Do not resurrect"}""")
+            assertNull(lookup.await())
+            assertEquals("", store.read(file)?.first)
+        }
     }
 
     @Test fun concurrentTimingWritesLeaveOneCompleteEdit() {

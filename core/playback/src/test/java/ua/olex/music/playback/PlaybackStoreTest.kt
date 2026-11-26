@@ -103,12 +103,57 @@ class PlaybackStoreTest {
 
     @Test fun interruptedTwoFileUpdateRejectsTheOldCursor() = runBlocking {
         val store = PlaybackStore(directory)
-        store.write(state())
+        val original = state()
+        store.write(original)
+        store.write(original.copy(positionMs = 83_000))
         val cursor = File(directory, "playback-position.json")
         val oldCursor = cursor.readBytes()
         store.write(state("replacement").copy(positionMs = 9_000))
-        cursor.writeBytes(oldCursor)
+        assertArrayEquals(oldCursor, cursor.readBytes())
         assertEquals(9_000L, PlaybackStore(directory).read()?.positionMs)
+    }
+
+    @Test fun firstPositionLivesInTheQueueAndUnchangedPositionsDoNotRewriteTheCursor() = runBlocking {
+        val store = PlaybackStore(directory)
+        val original = state()
+        val cursor = File(directory, "playback-position.json")
+        store.write(original)
+        store.write(original)
+        assertFalse(cursor.exists())
+        assertEquals(45_000L, PlaybackStore(directory).read()?.positionMs)
+
+        val progress = original.copy(positionMs = 46_000)
+        store.write(progress)
+        assertTrue(cursor.setLastModified(10_000))
+        val stamp = cursor.lastModified()
+        store.write(progress)
+        assertEquals(stamp, cursor.lastModified())
+        assertEquals(46_000L, PlaybackStore(directory).read()?.positionMs)
+        store.write(progress.copy(positionMs = 30_000))
+        assertEquals(30_000L, PlaybackStore(directory).read()?.positionMs)
+    }
+
+    @Test fun oversizedCursorCannotOverrideTheDurableQueuePosition() = runBlocking {
+        val store = PlaybackStore(directory)
+        store.write(state())
+        File(directory, "playback-position.json").writeText(
+            """{"generation":"one","index":0,"position":90000}""".padEnd(2_048, ' '),
+        )
+        assertEquals(45_000L, store.read()?.positionMs)
+    }
+
+    @Test fun aFailedCursorWriteCanRetryTheSamePosition() = runBlocking {
+        val store = PlaybackStore(directory)
+        val original = state()
+        store.write(original)
+        val progress = original.copy(positionMs = 90_000)
+        val blocked = File(directory, "playback-position.json.new")
+        assertTrue(blocked.mkdir())
+        assertThrows(java.io.IOException::class.java) { runBlocking { store.write(progress) } }
+        assertEquals(45_000L, store.read()?.positionMs)
+        blocked.delete()
+        store.write(progress)
+        assertEquals(90_000L, PlaybackStore(directory).read()?.positionMs)
     }
 
     @Test fun corruptCursorFallsBackToQueueCheckpoint() = runBlocking {

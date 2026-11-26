@@ -13,7 +13,7 @@ import java.net.URLEncoder
  * album artist and name. Candidates are ranked by how well they fit what the file already says:
  * the length first (a different length is a different recording), then album and artist.
  */
-internal class OnlineTags(private val http: (String) -> ByteArray? = { ArtistImages.get(it) }) {
+internal class OnlineTags(private val http: (String) -> ByteArray? = MetadataHttp::getBlocking) {
 
     /** One possible match, with the fields it would write and where its cover is. */
     data class Candidate(

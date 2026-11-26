@@ -20,13 +20,26 @@ data class EqualizerSettings(val enabled: Boolean = false, val preampDb: Double 
     init { require(preampDb.isFinite() && preampDb in -36.0..12.0); require(bands.size <= 20) }
     /** Whether any processing runs: the EQ itself or a channel change (balance, mono, swap). */
     val active: Boolean get() = enabled || !channels.neutral
-    fun effectivePreampDb(sampleRateHz: Int): Double {
-        val filters = bands.filter { it.gainDb != 0.0 }.map { Biquad.of(it, sampleRateHz) }
+    fun effectivePreampDb(sampleRateHz: Int) = effectivePreampDb(sampleRateHz, coefficients(sampleRateHz))
+
+    internal fun coefficients(sampleRateHz: Int) = bands.mapNotNull { band ->
+        band.takeIf { it.gainDb != 0.0 }?.let { Biquad.of(it, sampleRateHz) }
+    }
+
+    internal fun effectivePreampDb(sampleRateHz: Int, filters: List<Biquad>): Double {
         if (filters.isEmpty()) return min(preampDb, 0.0)
         val top = sampleRateHz * 0.499
-        val frequencies = (0..2048).map { 10.0 * (top / 10.0).pow(it / 2048.0) } +
-            bands.map { min(it.frequencyHz, sampleRateHz * 0.45) } + listOf(0.0, top)
-        val boost = frequencies.maxOf { frequency -> filters.sumOf { 20 * log10(it.magnitudeAt(frequency, sampleRateHz).coerceAtLeast(1e-20)) } }
+        fun response(frequencyHz: Double): Double {
+            val w = 2 * PI * frequencyHz / sampleRateHz
+            val c = cos(w)
+            val s = sin(w)
+            val c2 = cos(2 * w)
+            val s2 = sin(2 * w)
+            return filters.sumOf { filter -> 20 * log10(filter.magnitude(c, s, c2, s2).coerceAtLeast(1e-20)) }
+        }
+        var boost = maxOf(response(0.0), response(top))
+        for (i in 0..2048) boost = maxOf(boost, response(10.0 * (top / 10.0).pow(i / 2048.0)))
+        for (band in bands) boost = maxOf(boost, response(min(band.frequencyHz, sampleRateHz * 0.45)))
         return min(preampDb, if (boost > 0.001) -boost - 0.5 else 0.0)
     }
     companion object {
@@ -39,10 +52,14 @@ data class EqualizerSettings(val enabled: Boolean = false, val preampDb: Double 
 data class Biquad(val b0: Double, val b1: Double, val b2: Double, val a1: Double, val a2: Double) {
     fun magnitudeAt(frequencyHz: Double, sampleRateHz: Int): Double {
         val w = 2 * PI * frequencyHz / sampleRateHz
-        val nr = b0 + b1 * cos(w) + b2 * cos(2 * w)
-        val ni = -b1 * sin(w) - b2 * sin(2 * w)
-        val dr = 1 + a1 * cos(w) + a2 * cos(2 * w)
-        val di = -a1 * sin(w) - a2 * sin(2 * w)
+        return magnitude(cos(w), sin(w), cos(2 * w), sin(2 * w))
+    }
+
+    internal fun magnitude(cosW: Double, sinW: Double, cos2W: Double, sin2W: Double): Double {
+        val nr = b0 + b1 * cosW + b2 * cos2W
+        val ni = -b1 * sinW - b2 * sin2W
+        val dr = 1 + a1 * cosW + a2 * cos2W
+        val di = -a1 * sinW - a2 * sin2W
         return sqrt((nr * nr + ni * ni) / (dr * dr + di * di))
     }
 
@@ -68,10 +85,10 @@ data class Biquad(val b0: Double, val b1: Double, val b2: Double, val a1: Double
 
 /** One filter bank per output. State is independent per channel; no sample-rate conversion or allocations per sample. */
 class EqualizerEngine(val settings: EqualizerSettings, sampleRateHz: Int, private val channels: Int) {
-    private val filters = settings.bands.filter { it.gainDb != 0.0 }.map { Biquad.of(it, sampleRateHz) }
+    private val filters = if (settings.enabled) settings.coefficients(sampleRateHz) else emptyList()
     private val z1 = Array(channels) { DoubleArray(filters.size) }
     private val z2 = Array(channels) { DoubleArray(filters.size) }
-    private val gain = if (settings.enabled) 10.0.pow(settings.effectivePreampDb(sampleRateHz) / 20) else 1.0
+    private val gain = if (settings.enabled) 10.0.pow(settings.effectivePreampDb(sampleRateHz, filters) / 20) else 1.0
     init { require(channels in 1..32) }
 
     fun sample(input: Float, channel: Int): Float {

@@ -12,12 +12,15 @@ import androidx.lifecycle.SavedStateHandle
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.FlowCollector
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.catch
@@ -38,6 +41,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import ua.olex.music.graph
 import ua.olex.music.model.Track
+import ua.olex.music.model.OptionalWork
 import ua.olex.music.model.TrackId
 import ua.olex.music.model.LibraryIndex
 import ua.olex.music.model.TrackSortScope
@@ -87,35 +91,35 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             }.flowOn(Dispatchers.Default)
                 .catch { emit(LibrarySearchResult(text, emptyList(), failed = true)) }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
 
     fun setQuery(text: String) {
         searchText = text
         savedState["search"] = text
     }
 
-    /** Keep YouTube's result positions and use a matching local copy at each corresponding row. */
-    /** YouTube Music's suggestions for what is being typed, a moment after each keystroke. */
-    internal val suggestions: StateFlow<List<String>> = query
-        .debounce { if (it.isBlank()) 0 else 150 }
-        .combine(graph.youTubeOn) { text, on -> text to on }
-        .combine(graph.network) { (text, on), connected -> text to (on && connected) }
-        .mapLatest { (text, on) ->
-            if (!on || text.trim().length < 2) emptyList()
-            else runCatching { graph.youTube.suggestions(text.trim()) }.getOrDefault(emptyList())
-                .filterNot { it.equals(text.trim(), ignoreCase = true) }.take(8)
-        }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    private val remoteSearchOwner by lazy {
+        combine(graph.youTubeOn, graph.network, graph.resources.visible, graph.youTubeAccount.revision) { enabled, connected, visible, revision ->
+            revision.takeIf { enabled && connected && visible }
+        }.distinctUntilChanged()
+    }
 
-    internal val online: StateFlow<OnlineSearch?> = query
+    /** YouTube Music's suggestions for what is being typed, a moment after each keystroke. */
+    internal val suggestions: StateFlow<List<String>> by lazy { query
+        .debounce { if (it.isBlank()) 0 else 150 }
+        .searchWhileOwned(remoteSearchOwner, emptyList<String>()) { text ->
+            val results = try { graph.resources.run(OptionalWork.PROVIDER) { graph.youTube.suggestions(text) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            emit(results.orEmpty().filterNot { it.equals(text, ignoreCase = true) }.take(8))
+        }.flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), emptyList())
+    }
+
+    /** Keep YouTube's result positions and use a matching local copy at each corresponding row. */
+    internal val online: StateFlow<OnlineSearch?> by lazy { query
         .debounce { if (it.isBlank()) 0 else 450 }
-        .combine(graph.youTubeOn) { text, on -> text to on }
-        .combine(graph.network) { (text, on), connected -> text to (on && connected) }
-        .combine(searchRetry) { request, _ -> request }
-        .transformLatest { (text, on) ->
-            if (!on || text.trim().length < 2) {
-                emit(null)
-                return@transformLatest
-            }
+        .combine(searchRetry) { text, _ -> text }
+        .searchWhileOwned<OnlineSearch?>(remoteSearchOwner, null) { text ->
             fun result(found: YouTubeMusic.Found) =
                 OnlineSearch(text, found.songs, artists = found.artists, albums = found.albums, playlists = found.playlists, top = found.top)
             try {
@@ -124,16 +128,17 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
             }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { emit(OnlineSearch(text, emptyList(), failed = true)) }
-        }.combine(catalogue) { found, catalogue ->
-            if (found == null || catalogue == null || found.tracks.isEmpty()) return@combine found
+        }.combine(catalogue, ::Pair).mapLatest { (found, catalogue) ->
+            if (found == null || catalogue == null || found.tracks.isEmpty()) return@mapLatest found
             val choices = try { graph.selectSources(found.tracks, catalogue) }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { return@combine found }
+            catch (_: Exception) { return@mapLatest found }
             found.project { index, request ->
                 val choice = choices[index]
                 if (choice.issue == null && !YouTubeMusic.isOnline(choice.track)) choice.track else request
             }
-        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+        }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(replayExpirationMillis = 0), null)
+    }
     fun retrySearch() { searchRetry.update { it + 1 } }
 
     private val collections = combine(catalogue, graph.userLibrary.favourites.distinctUntilChanged(),
@@ -190,24 +195,27 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 sidecar != null -> MotionArtwork(sidecar, files)
                 else -> {
                     kotlinx.coroutines.delay(250)
-                    fetchAppleMotion(track)?.let { MotionArtwork(android.net.Uri.fromFile(it).toString(), graph.motionCovers.revision.value.toLong()) }
+                    fetchAppleMotion(track, covers)?.let { MotionArtwork(android.net.Uri.fromFile(it).toString(), graph.motionCovers.revision.value.toLong()) }
                 }
             }
             video?.let { PlaybackMotionCover(motionCoverOwner(track), it) }
         }
         .flowOn(Dispatchers.IO).stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
 
-    private suspend fun fetchAppleMotion(track: ua.olex.music.model.Track): java.io.File? {
+    private suspend fun fetchAppleMotion(track: ua.olex.music.model.Track, revision: Int): java.io.File? {
         val apple = graph.appleMotion
         if (!apple.enabled) return null
-        val net = getApplication<android.app.Application>().getSystemService(android.net.ConnectivityManager::class.java)
-        val caps = net?.getNetworkCapabilities(net.activeNetwork) ?: return null
-        if (apple.wifiOnly && !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)) return null
+        val wifiOnly = apple.wifiOnly
+        val work = if (wifiOnly) OptionalWork.PREFETCH else OptionalWork.METERED_MOTION_COVER
         return try {
-            val bytes = AuxiliaryLoads.run { apple.find(track) } ?: return null
-            kotlinx.coroutines.currentCoroutineContext().ensureActive()
-            graph.motionCovers.attachBytes(track, bytes)
-            graph.motionCovers.file(track)
+            graph.resources.runWithPermit(work) { permit ->
+                val bytes = AuxiliaryLoads.run { apple.find(track) } ?: return@runWithPermit null
+                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                val saved = graph.motionCovers.attachBytes(track, bytes, revision) {
+                    apple.enabled && wifiOnly == apple.wifiOnly && graph.resources.permitsPublication(work, permit)
+                }
+                if (saved) graph.motionCovers.file(track) else null
+            }
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (_: Exception) { null }
     }
@@ -314,16 +322,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         editUserData { setLyricOffset(track, offsetMs.coerceIn(-60_000, 60_000)) }
     }
 
-    /** Plays and ratings per recording, with unique legacy keys for unsaved files. */
-    /** Ratings in the files count when the app has none of its own, so they survive a reinstall. */
-    private val fileRatings = catalogue.map { index ->
-        index?.songs?.mapNotNull { t -> t.metadata?.rating?.let { t.statsKey to it } }.orEmpty()
-    }.distinctUntilChanged()
-    val stats: StateFlow<Map<String, ua.olex.music.model.SongStats>> = combine(graph.userLibrary.stats.catch { emit(emptyMap()) }, fileRatings) { own, fromFiles ->
-        if (fromFiles.isEmpty()) own else own.toMutableMap().apply {
-            for ((key, stars) in fromFiles) { val s = get(key) ?: ua.olex.music.model.SongStats.NONE; if (!s.ratingSet) put(key, s.copy(rating = stars, ratingSet = true)) }
-        }
-    }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+    /** Plays and ratings per recording, with file ratings as a fallback. */
+    val stats = graph.listeningStats
 
     /** Whether star ratings are also written into the files (FLAC RATING, MP3 POPM). */
     var ratingsToFiles by mutableStateOf(prefs.getBoolean("ratings_to_files", false)); private set
@@ -371,14 +371,15 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         }
     }
 
-    fun refreshYouTubeLikes() {
-        viewModelScope.launch { graph.youtubeFavourites.refresh() }
-    }
-
     init {
         viewModelScope.launch {
-            combine(graph.network, graph.youTubeAccount.cacheScope, graph.youTubeOn) { _, _, _ -> Unit }
-                .collectLatest { graph.youtubeFavourites.refresh() }
+            graph.resources.visible.flatMapLatest { visible ->
+                if (!visible) flowOf(false)
+                else combine(graph.network, graph.youTubeAccount.cacheScope, graph.youTubeAccount.revision, graph.youTubeOn,
+                    graph.resources.allowed(OptionalWork.PROVIDER)) { _, _, _, enabled, allowed -> enabled && allowed }
+            }.collectLatest { allowed ->
+                if (allowed) graph.resources.run(OptionalWork.PROVIDER) { graph.youtubeFavourites.refresh() }
+            }
         }
     }
     fun dismissUserError() { userError = null }
@@ -424,7 +425,8 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         if (watchingRequested) startWatching()
         scanJob = viewModelScope.launch {
             try {
-                if (forced) graph.library.rescan() else graph.library.refresh()
+                if (forced) graph.library.rescan()
+                else graph.resources.run(OptionalWork.LOCAL_SCAN) { graph.library.refresh() }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: SecurityException) {
@@ -443,9 +445,13 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Observe only while the activity is visible, and combine a file-copy burst into one scan. */
     fun startWatching() {
         watchingRequested = true
-        if (watchJob?.isActive == true || !hasAccess()) return
+        allowed = hasAccess()
+        if (watchJob?.isActive == true || !allowed) return
         watchJob = viewModelScope.launch {
-            graph.libraryChanges.debounce(500)
+            graph.resources.allowed(OptionalWork.LOCAL_SCAN).flatMapLatest { permitted ->
+                if (permitted) graph.libraryChanges.debounce(500).onStart { emit(Unit) }
+                else kotlinx.coroutines.flow.emptyFlow()
+            }
                 .catch { scanError = "Automatic library updates are unavailable. Use Rescan to refresh." }
                 .collect { refresh() }
         }
@@ -548,7 +554,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         notForMe.edit().putStringSet("keys", excluded).apply()
         val state = playing.value
         state.queue.drop(state.queueIndex + 1).filter { it.mediaId == track.id.value }.forEach { player.removeQueueItem(it.key) }
-        if (state.mediaId == track.id.value) player.next()
+        if (state.mediaId == track.id.value) player.advanceBeforeRemoving()
         mixRun?.seen?.addAll(listOf(track.id.value, Mix.songKey(track)))
     }
 
@@ -567,26 +573,32 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
      */
     fun startMix(seed: Track) = prepareMix { playMix(seed, "Mix from ${seed.title}") }
 
-    /** Commit the seed first. The service fills its queue once playback starts. */
     fun playSelectionMix(seed: Track): Unit = prepareMix {
-        val label = "Mix from ${seed.title}"
-        val seen = (excluded + Mix.songKey(seed)).toMutableSet()
-        val run = PlaybackMix.Run(seed, null, seen,
-            mutableSetOf(seed.id.value), startFrom = Mix.videoId(seed), initialSelection = true)
-        val origin = graph.mix.begin(run, label)
-        if (!player.startRadio(listOf(seed), origin)) {
-            if (mixRun === run) graph.mix.stop()
+        if (!startWithSeed(seed, "Mix from ${seed.title}")) {
             mixFailure = MixFailure("The player couldn't open ${seed.title}.") { playSelectionMix(seed) }
         }
+    }
+
+    /** The service opens the selected recording, then extends the accepted queue. */
+    private suspend fun startWithSeed(seed: Track, label: String): Boolean {
+        val seen = (excluded + Mix.songKey(seed)).toMutableSet()
+        val run = PlaybackMix.Run(seed, null, seen, mutableSetOf(seed.id.value),
+            startFrom = Mix.videoId(seed), initialSelection = true)
+        val origin = graph.mix.begin(run, label)
+        if (player.startRadio(listOf(seed), origin) || mixRun !== run) return true
+        graph.mix.stop()
+        return false
     }
 
     private suspend fun playMix(seed: Track, label: String) {
         val retry: () -> Unit = { startMix(seed) }
         val atRequest = playing.value
         val account = graph.youTubeAccount.cacheScope.value
+        val revision = graph.youTubeAccount.revision.value
         val seedOccurrence = atRequest.queue.getOrNull(atRequest.queueIndex)?.takeIf {
             it.mediaId == seed.id.value || seed.matchesPlayback(atRequest.track)
         }?.key
+        if (seedOccurrence == null && startWithSeed(seed, label)) return
         val recent = withContext(Dispatchers.Default) { recentPlayed() }
         val excludedSongs = excluded
         val yt = graph.youTube
@@ -594,7 +606,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
         val linked = indexed?.let { it.byId[seed.id] ?: it.localCopiesById[seed.id] }
         var video = Mix.videoId(seed) ?: linked?.let(Mix::videoId)
         var page: YouTubeMusic.RadioPage? = null
-        if (graph.youTubeOn.value && graph.network.value) {
+        if (graph.youTubeOn.value && graph.networkAvailable()) {
             kotlinx.coroutines.withTimeoutOrNull(6_000) {
                 try {
                     val id = video ?: yt.find(seed)?.let(Mix::videoId)
@@ -620,28 +632,26 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
                 val files = indexed?.songs.orEmpty().filterNot(YouTubeMusic::isOnline)
                 val used = radio.mapTo(HashSet(), Mix::songKey)
                 radio + Mix.local(seed, files, weights, recent, size = if (radio.isEmpty()) 50 else 8 - radio.size,
-                    excluded = excludedSongs + used)
+                    excluded = excludedSongs + used, at = System.currentTimeMillis())
             }
         }
         if (upcoming.isEmpty()) {
             mixFailure = MixFailure("No other playable songs were found for ${seed.title}.", retry)
             return
         }
-        if (graph.youTubeAccount.cacheScope.value != account) return
+        if (graph.youTubeAccount.cacheScope.value != account || graph.youTubeAccount.revision.value != revision) return
         seen += upcoming.map(Mix::songKey)
         val state = playing.value
         val current = state.queue.getOrNull(state.queueIndex)
-        if (seedOccurrence != null && (seedOccurrence != current?.key ||
-            state.queue.map { it.key } != atRequest.queue.map { it.key })) {
+        if (seedOccurrence != null && (seedOccurrence != current?.key || state.queue.map { it.key } != atRequest.queue.map { it.key })) {
             mixFailure = MixFailure("The queue changed while the mix was getting ready.", retry)
             return
         }
-        val sameSeed = upcoming.isNotEmpty() && current != null && (state.mediaId == seed.id.value || seed.matchesPlayback(state.track))
         val run = PlaybackMix.Run(seed, result?.continuation, seen,
-            (upcoming.map { it.id.value } + listOfNotNull(seed.id.value, state.mediaId.takeIf { sameSeed })).toMutableSet(),
+            (upcoming.map { it.id.value } + listOfNotNull(seed.id.value, state.mediaId.takeIf { seedOccurrence != null })).toMutableSet(),
             startFrom = video)
-        val queue = if (sameSeed) upcoming else listOf(seed) + upcoming
-        if (!applyRadio(run, label, queue, current?.key.takeIf { sameSeed })) {
+        val queue = if (seedOccurrence == null) listOf(seed) + upcoming else upcoming
+        if (!applyRadio(run, label, queue, seedOccurrence)) {
             mixFailure = MixFailure("The player couldn't confirm the new queue.", retry)
         }
     }
@@ -655,13 +665,16 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     /** Plays a YouTube Music mix ("My Mix 1", a supermix) by its playlist id, in the order returned by YouTube. */
     fun startPlaylistRadio(playlistId: String, label: String): Unit = prepareMix {
         val account = graph.youTubeAccount.cacheScope.value
+        val revision = graph.youTubeAccount.revision.value
         val page = kotlinx.coroutines.withTimeoutOrNull(8_000) {
             try { graph.youTube.playlistRadio(playlistId) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { null }
         }
-        if (graph.youTubeAccount.cacheScope.value != account) return@prepareMix
-        val tracks = page?.tracks.orEmpty()
+        if (graph.youTubeAccount.cacheScope.value != account || graph.youTubeAccount.revision.value != revision) return@prepareMix
+        val tracks = withContext(Dispatchers.Default) {
+            page?.tracks.orEmpty().filterNot { Mix.isExcluded(it, graph.excludedRecommendations()) }
+        }
         if (tracks.isEmpty()) {
             mixFailure = MixFailure("YouTube Music didn't return songs for $label.") { startPlaylistRadio(playlistId, label) }
             return@prepareMix
@@ -733,6 +746,7 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun setPlaybackParameters(speed: Float, pitch: Float) = player.setPlaybackParameters(speed, pitch)
     fun toggle() = player.toggle()
     fun next() = player.next()
+    fun advanceBeforeRemoving() = player.advanceBeforeRemoving()
     fun previous() = player.previous()
     fun seekTo(positionMs: Long) = player.seekTo(positionMs)
     fun setSleepTimer(minutes: Int, finishTrack: Boolean) = player.setSleepTimer(minutes, finishTrack)
@@ -780,15 +794,20 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     fun setReplayGain(settings: ua.olex.music.dsp.ReplayGainSettings) = player.setReplayGain(settings)
     fun dismissQueueError() = player.dismissQueueError()
 
-    private fun hasAccess(): Boolean {
-        val permitted = getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
-        graph.audioAccess.value = permitted
-        return permitted
-    }
+    private fun hasAccess(): Boolean =
+        getApplication<Application>().checkSelfPermission(Manifest.permission.READ_MEDIA_AUDIO) == PackageManager.PERMISSION_GRANTED
 }
 
 /** Results carry their query so the screen never labels old matches as a newer search. */
 data class LibrarySearchResult(val query: String, val tracks: List<Track>, val failed: Boolean = false)
+
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun <T> Flow<String>.searchWhileOwned(
+    owner: Flow<Long?>, inactive: T, search: suspend FlowCollector<T>.(String) -> Unit,
+): Flow<T> = combine(owner, ::Pair).transformLatest { (raw, revision) ->
+    val query = raw.trim()
+    if (revision == null || query.length < 2) emit(inactive) else search(query)
+}
 
 /** YouTube Music's answer to a search: songs not in the library. */
 internal data class OnlineSearch(val query: String, val tracks: List<Track>, val failed: Boolean = false,

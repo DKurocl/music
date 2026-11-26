@@ -2,8 +2,14 @@ package ua.olex.music.user
 
 import android.database.sqlite.SQLiteDatabase
 import androidx.room.Room
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -26,6 +32,7 @@ class UserRepositoryTest {
     private val a = track(1)
     private val b = track(2)
     private val c = track(3)
+    @Volatile private var recordingQueries: MutableList<String>? = null
 
     @Before fun open() {
         context.deleteDatabase("user-test.db")
@@ -33,7 +40,9 @@ class UserRepositoryTest {
     }
 
     private fun reopen() {
-        database = Room.databaseBuilder(context, UserDatabase::class.java, "user-test.db").build()
+        database = Room.databaseBuilder(context, UserDatabase::class.java, "user-test.db")
+            .setQueryCallback({ sql, _ -> recordingQueries?.add(sql.trim()) }, java.util.concurrent.Executor { it.run() })
+            .build()
         repository = UserRepository(database) { time++ }
     }
 
@@ -93,6 +102,27 @@ class UserRepositoryTest {
         repository.renamePlaylist(id, " Night ")
         assertEquals("Night", repository.playlists.first().single().name)
         assertEquals(listOf(0, 1, 2), database.userData().entries(id).map { it.position })
+    }
+
+    @Test fun smallBatchLoadsOnlyIndexedCandidatesAndPreservesAnExistingAlias() = runBlocking {
+        val online = a.copy(id = TrackId("yt:linked"), uri = "ytm://linked", path = null)
+        repository.recordPlay(a)
+        val existing = idOf(a)
+        val alias = "legacy:alias"
+        database.userData().saveAliases(listOf(RecordingAliasEntity(alias, existing)))
+        val retained = SavedSong.from(online).copy(id = alias)
+        val queries = java.util.Collections.synchronizedList(mutableListOf<String>())
+        recordingQueries = queries
+        try {
+            repository.importPlaylist("Small import", listOf(retained, SavedSong.from(b), retained))
+        } finally {
+            recordingQueries = null
+        }
+        val imported = repository.playlists.first().single().songs
+        assertEquals(listOf(existing, idOf(b), existing), imported.map { it.id })
+        assertTrue(imported.first().references.any { it.uri == online.uri })
+        assertFalse(queries.any { it == "SELECT * FROM saved_songs" })
+        assertEquals(1, queries.distinct().count { it.startsWith("SELECT * FROM saved_songs WHERE id IN") && "sourceKey" in it })
     }
 
     @Test fun metadataRefreshAndPlaylistDeletionCannotEraseFavouritesHistoryOrOffsets() = runBlocking {
@@ -200,6 +230,35 @@ class UserRepositoryTest {
         assertEquals(2, stats.getValue(a.key.value).plays)
     }
 
+    @Test fun statsStayLiveForNewHistoryAndPreserveAnExplicitRatingClear() = runBlocking {
+        withTimeout(5_000) {
+            val id = repository.keepReference(a).id
+            val observed = Channel<ua.olex.music.model.SongStats>(Channel.UNLIMITED)
+            val owner = launch {
+                repository.stats.map { it.getValue(id) }.distinctUntilChanged().collect { observed.send(it) }
+            }
+            try {
+                val unplayed = observed.receive()
+                assertEquals(0, unplayed.plays)
+                assertNull(unplayed.lastPlayedAt)
+                assertFalse(unplayed.ratingSet)
+                repository.recordPlay(a, observedAt = 25_000)
+                val played = observed.receive()
+                assertEquals(1, played.plays)
+                assertEquals(25_000L, played.lastPlayedAt)
+                repository.setRating(a, 0)
+                val cleared = observed.receive()
+                assertEquals(1, cleared.plays)
+                assertEquals(0, cleared.rating)
+                assertTrue(cleared.ratingSet)
+                assertTrue(repository.toggleFavourite(a))
+                assertNotNull(observed.receive().favouriteSince)
+                assertFalse(repository.toggleFavourite(a))
+                assertNull(observed.receive().favouriteSince)
+            } finally { owner.cancelAndJoin() }
+        }
+    }
+
     @Test fun recordingIdAndOnlineReserveSurviveLocalPreferenceAndReopen() = runBlocking {
         val online = a.copy(id = TrackId("yt:reserve"), uri = "ytm://reserve", path = null, artworkUri = "https://online/cover")
         repository.toggleFavourite(online)
@@ -221,6 +280,66 @@ class UserRepositoryTest {
         assertEquals(5, repository.stats.first().getValue(id).rating)
         assertEquals(1, repository.stats.first().getValue(id).plays)
         assertEquals(321L, repository.lyricOffset(SavedSong.from(fallback)).first())
+    }
+
+    @Test fun remoteLikesPreserveLocalEditsAndShareOwnershipAcrossExactRecordingCopies() = runBlocking {
+        fun video(track: Track, id: String) = track.copy(id = TrackId("yt:$id"), uri = "ytm://$id", path = null)
+        val first = video(a, "first")
+        val alternate = video(a, "alternate")
+        val owned = video(b, "already-owned")
+        val removed = video(c, "remote-only")
+        repository.toggleFavourite(b)
+        val imported = repository.mergeImportedFavourites(listOf(first, alternate, owned, removed), emptyMap(),
+            setOf("first", "alternate", "already-owned", "remote-only"), emptySet())
+        assertEquals(imported.getValue("first"), imported.getValue("alternate"))
+        assertFalse("already-owned" in imported)
+        val kept = repository.mergeImportedFavourites(emptyList(), imported, emptySet(), setOf("alternate"))
+        assertEquals(setOf("alternate"), kept.keys)
+        assertTrue(repository.isFavourite(first))
+        assertFalse(repository.isFavourite(removed))
+        assertTrue(repository.isFavourite(b))
+
+        assertFalse(repository.toggleFavourite(first))
+        assertTrue(repository.toggleFavourite(first))
+        assertTrue(repository.mergeImportedFavourites(emptyList(), kept, emptySet(), emptySet()).isEmpty())
+        assertTrue(repository.isFavourite(first))
+    }
+
+    @Test fun largeRemoteLikeRemovalsUseBoundedBatchesAndRejectAStaleTransaction() = runBlocking {
+        val data = database.userData()
+        val recorded = (1..430).map { n -> SavedSong.from(track(n)).copy(id = "recording:like-$n") }
+        data.saveSongs(recorded.map(UserSongEntity::from))
+        data.addFavourites(recorded.map { FavouriteEntity(it.id, 100L) })
+        val previous = recorded.associate { it.id to UserRepository.ImportedFavourite(it.id, 100L) }
+        var guard = 0
+        assertTrue(runCatching {
+            repository.mergeImportedFavourites(emptyList(), previous, emptySet(), emptySet()) { guard++ == 0 }
+        }.exceptionOrNull() is kotlinx.coroutines.CancellationException)
+        assertEquals(recorded.size, repository.favourites.first().size)
+
+        val sql = java.util.concurrent.CopyOnWriteArrayList<String>()
+        recordingQueries = sql
+        try {
+            assertTrue(repository.mergeImportedFavourites(emptyList(), previous, emptySet(), emptySet()).isEmpty())
+        } finally { recordingQueries = null }
+        assertEquals(emptyList<SavedSong>(), repository.favourites.first())
+        assertEquals(2, sql.count { it.startsWith("SELECT aliasId, MIN(songId)") })
+        assertEquals(2, sql.count { it.startsWith("SELECT * FROM favourites WHERE songId IN") })
+        assertEquals(2, sql.count { it.startsWith("DELETE FROM favourites WHERE songId IN") })
+    }
+
+    @Test fun scopedStatsMatchTheObservedSnapshotAndNeverGuessAnAmbiguousLegacyKey() = runBlocking {
+        val unknown = a.copy(id = TrackId("yt:unknown"), uri = "ytm://unknown", path = null, durationMs = 0)
+        repository.setRating(a, 4)
+        repository.setRating(unknown, 1)
+        repository.toggleFavourite(b)
+        repository.recordPlay(b)
+        val aId = idOf(a)
+        database.userData().saveAliases(listOf(RecordingAliasEntity("old-a", aId)))
+        val keys = setOf(aId, "old-a", a.key.value, b.key.value, c.key.value)
+        val expected = repository.stats.first().filterKeys { it in keys }
+        assertEquals(setOf(aId, "old-a", b.key.value), expected.keys)
+        assertEquals(expected, repository.statsFor(keys))
     }
 
     @Test fun unknownDurationsAndDifferentTakesKeepSeparateSettings() = runBlocking {

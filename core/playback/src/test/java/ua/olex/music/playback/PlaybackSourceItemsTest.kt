@@ -21,6 +21,30 @@ class PlaybackSourceItemsTest {
     private val online = file.copy(id = TrackId("yt:one"), uri = "ytm://one", path = null, metadata = null,
         clipStartMs = null, clipEndMs = null, artworkUri = "https://cover")
 
+    @Test fun streamResolutionKeepsByteRangesAndCannotRedirectLocalReadsOrAcceptPlaintextAudio() {
+        var resolutions = 0
+        var result = Uri.parse("https://stream.example/audio")
+        val provider = object : OnlineStreams {
+            override fun resolve(id: String): Uri {
+                assertEquals("one", id)
+                resolutions++
+                return result
+            }
+        }
+        val local = DataSpec(Uri.parse(file.uri))
+        assertSame(local, resolveMediaRequest(local, provider))
+        assertEquals(0, resolutions)
+        val request = DataSpec.Builder().setUri(online.uri).setPosition(400).setLength(200).build()
+        val resolved = resolveMediaRequest(request, provider)
+        assertEquals(result, resolved.uri)
+        assertEquals(400L, resolved.position)
+        assertEquals(200L, resolved.length)
+        for (unsafe in listOf("http://stream.example/audio", "content://private/track", "https://owner@stream.example/audio", "https:/audio")) {
+            result = Uri.parse(unsafe)
+            assertThrows(java.io.IOException::class.java) { resolveMediaRequest(request, provider) }
+        }
+    }
+
     @Test fun sourceReplacementPreservesOccurrencesAndClearsFileOnlyGainAndClipping() {
         val reference = SavedSong.from(online).copy(id = "recording:one")
         val original = PlayerConnection.mediaItem(reference.bind(file), "same-occurrence", "Evening mix")

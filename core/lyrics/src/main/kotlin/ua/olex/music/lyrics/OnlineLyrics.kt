@@ -1,7 +1,5 @@
 package ua.olex.music.lyrics
 
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLEncoder
 
 /** What a lyric service found: the text in its own format, where it came from, and how it is timed. */
@@ -19,14 +17,24 @@ data class FoundLyrics(val text: String, val source: String, val format: Format,
  * A candidate is accepted only when its length is within [LENGTH_TOLERANCE_MS] of the song, so a
  * live or extended version is not taken for the studio one.
  */
-class OnlineLyrics(private val http: (String) -> String? = ::get) {
+class OnlineLyrics(private val http: suspend (String) -> String?) {
     /**
      * The song's lyrics, trying names from exact to clean: services match titles literally, so
      * "Juicy (2005 Remaster)" or "Song - Remastered 2011" finds nothing until the extras go, and
      * "A, B & C" until only the first artist is asked. The last try is LRCLIB's free search.
      */
-    fun find(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? {
+    suspend fun find(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? {
         var best: FoundLyrics? = null
+        var incomplete = false
+        suspend fun attempt(lookup: suspend () -> FoundLyrics?): FoundLyrics? = try {
+            lookup()
+        } catch (_: java.io.IOException) {
+            incomplete = true
+            null
+        } catch (_: IllegalArgumentException) {
+            incomplete = true
+            null
+        }
         fun rank(f: FoundLyrics) = when (f.lyrics.sync) { Sync.WORD -> 3; Sync.LINE -> 2; Sync.NONE -> 1 }
         // True once word-timed lyrics are in hand: nothing better exists, so the search stops.
         fun keep(found: FoundLyrics?): Boolean {
@@ -34,17 +42,21 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
             if (best == null || rank(found) > rank(best!!)) best = found
             return found.lyrics.sync == Sync.WORD
         }
-        for ((a, t) in variants(artist, title)) {
-            if (keep(runCatching { kugou(a, t, durationMs) }.getOrNull())) return best
-            if (keep(runCatching { netease(a, t, durationMs) }.getOrNull())) return best
-            keep(runCatching { lrclib(a, t, album.takeIf { a == artist && t == title }, durationMs) }.getOrNull())
+        val variants = variants(artist, title)
+        for ((a, t) in variants) {
+            if (keep(attempt { kugou(a, t, durationMs) })) return best
+            if (keep(attempt { netease(a, t, durationMs) })) return best
+            keep(attempt { lrclib(a, t, album.takeIf { a == artist && t == title }, durationMs) })
         }
         best?.let { return it }
-        return runCatching { lrclibSearch("${variants(artist, title).last().first} ${variants(artist, title).last().second}", durationMs) }.getOrNull()
+        val (lastArtist, lastTitle) = variants.last()
+        val result = attempt { lrclibSearch("$lastArtist $lastTitle", durationMs) }
+        if (result == null && incomplete) throw java.io.IOException("Some lyric services were unavailable")
+        return result
     }
 
     /** NetEase Cloud Music: word-timed YRC when it has it (converted to KRC), else its LRC. */
-    internal fun netease(artist: String, title: String, durationMs: Long): FoundLyrics? {
+    internal suspend fun netease(artist: String, title: String, durationMs: Long): FoundLyrics? {
         val body = http("https://music.163.com/api/search/get/web?s=${enc("$artist $title")}&type=1&limit=8") ?: return null
         val songs = (((Json.parse(body) as? Map<*, *>)?.get("result") as? Map<*, *>)?.get("songs") as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
         val hit = songs.firstOrNull { s -> sameTitle(s["name"]?.toString(), title) && close((s["duration"] as? Double)?.toLong(), durationMs) } ?: return null
@@ -68,7 +80,7 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
         return listOf(artist to title, artist to cleanTitle, firstArtist to cleanTitle).distinct()
     }
 
-    internal fun lrclibSearch(query: String, durationMs: Long): FoundLyrics? {
+    internal suspend fun lrclibSearch(query: String, durationMs: Long): FoundLyrics? {
         val body = http("https://lrclib.net/api/search?q=${enc(query)}") ?: return null
         val hits = (Json.parse(body) as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
         val hit = hits.filter { close((it["duration"] as? Double)?.times(1000)?.toLong(), durationMs) }
@@ -79,7 +91,7 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
         return FoundLyrics(text, "LRCLIB", if (synced) FoundLyrics.Format.LRC else FoundLyrics.Format.PLAIN, Lyrics.parse(text))
     }
 
-    internal fun kugou(artist: String, title: String, durationMs: Long): FoundLyrics? {
+    internal suspend fun kugou(artist: String, title: String, durationMs: Long): FoundLyrics? {
         val search = http("https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${enc("$artist - $title")}&duration=$durationMs&hash=") ?: return null
         val candidates = ((Json.parse(search) as? Map<*, *>)?.get("candidates") as? List<*>).orEmpty().mapNotNull { it as? Map<*, *> }
         // The song itself, not just one of the same length: its title has to match.
@@ -93,7 +105,7 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
         return if (lyrics.lines.isEmpty()) null else FoundLyrics(text, "Kugou", FoundLyrics.Format.KRC, lyrics)
     }
 
-    internal fun lrclib(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? {
+    internal suspend fun lrclib(artist: String, title: String, album: String?, durationMs: Long): FoundLyrics? {
         val seconds = durationMs / 1000
         val exact = http("https://lrclib.net/api/get?artist_name=${enc(artist)}&track_name=${enc(title)}" +
             (album?.let { "&album_name=${enc(it)}" } ?: "") + "&duration=$seconds")
@@ -135,12 +147,5 @@ class OnlineLyrics(private val http: (String) -> String? = ::get) {
             if (words.isEmpty()) null else "[$start,${m.groupValues[2]}]$words"
         }.joinToString("\n")
 
-        /** A plain GET with short timeouts and an honest client name; null on any failure. */
-        fun get(url: String): String? = runCatching {
-            val c = URL(url).openConnection() as HttpURLConnection
-            c.connectTimeout = 6_000; c.readTimeout = 8_000
-            c.setRequestProperty("User-Agent", "Music for Android (personal player)")
-            try { if (c.responseCode in 200..299) c.inputStream.use { String(it.readBytes(), Charsets.UTF_8) } else null } finally { c.disconnect() }
-        }.getOrNull()
     }
 }

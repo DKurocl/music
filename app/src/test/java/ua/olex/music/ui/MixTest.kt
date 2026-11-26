@@ -78,6 +78,25 @@ class MixTest {
         assertEquals(listOf(copy), mix)
     }
 
+    @Test fun aForgottenFavouriteOnlyRisesWhenRelevantAndNeverOverridesAnExclusion() {
+        val day = 86_400_000L
+        val seed = t("Seed", "Owner", genre = "Indie")
+        val recent = t("Recent", "Artist A", genre = "Indie")
+        val forgotten = t("Forgotten", "Artist B", genre = "Indie")
+        val unrelated = t("Unrelated", "Artist C", genre = "Metal")
+        val stats = mapOf(
+            recent.statsKey to SongStats(favouriteSince = 195 * day),
+            forgotten.statsKey to SongStats(favouriteSince = day),
+            unrelated.statsKey to SongStats(favouriteSince = day),
+        )
+        val choices = listOf(recent, forgotten, unrelated)
+        val quietRandom = object : kotlin.random.Random() { override fun nextBits(bitCount: Int) = 0 }
+        assertEquals(listOf(forgotten, recent, unrelated),
+            Mix.local(seed, choices, stats, emptySet(), random = quietRandom, at = 200 * day))
+        assertEquals(recent, Mix.local(seed, choices, stats, emptySet(), size = 1, random = quietRandom,
+            excluded = setOf(forgotten.id.value), at = 200 * day).single())
+    }
+
     @Test fun localMixStaysNearTheSeedAndSpreadsArtists() {
         val seed = t("Teardrop", "Massive Attack", genre = "Trip Hop", year = 1998)
         val songs = (1..8).map { t("MA $it", "Massive Attack", genre = "Trip Hop", year = 1998) } +

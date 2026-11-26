@@ -1,4 +1,74 @@
-# Core Perfection first-tap candidate (2026-11-25)
+# Intelligence and efficiency checkpoint (2026-11-26)
+
+Active branch: `agent/intelligence-efficiency`. Use the [M10-M140 assignment](specs/MUSIC_INTELLIGENCE_EXTREME_EFFICIENCY_M10_M140.md)
+and the [execution ledger](INTELLIGENCE_EFFICIENCY.md). The branch is local at the owner's request.
+The [independent review handoff](INTELLIGENCE_REVIEW.md) lists all 131 groups and the
+remaining publication gates.
+The coverage count includes partial evidence. The owner skipped physical Pixel and soak runs
+for this handoff. Hosted release verification and owner-key signing remain open.
+
+Production source `07484e0` passed 705 local tests. Both APKs assembled with SDK 37 and
+the release variant completed R8. It has 16 KiB ZIP alignment and a local debug signer.
+The short follow-up passed the updated art-network and cached-artist gallery fixtures.
+Both production lint tasks passed after the explicit receiver flag fix.
+
+Cold offline radio now fetches bounded indexed taste data. Thirty-two Room repository cases and
+20 offline cases passed. Seven cache cases passed with the new debug stream cache counters.
+Artist revision and continuation safeguards passed 52 provider and eight pagination cases.
+Prefetch ownership passed three artwork/transport and four resource-lease cases, including
+same-scope reauthentication. The ledger records the individual remaining groups.
+Manual queue mutations now resolve occurrence keys at the service boundary. Six queue
+command fixtures passed. The owner opted out of physical Pixel and lengthy soak checks.
+
+## Previous verified slices
+
+Current intelligence branch: account-scoped playlists and favourites reject expired
+requests and acknowledgments. Visible artwork, thermal listener failure and stream index
+reopening have targeted regressions. The API 35 Android JVM run passed `YouTubeMusicTest`
+(47), `YouTubePaginationTest` (6), `ArtworkNetworkTest` (3), and `CacheBudgetTest` (6).
+The local Cast receiver adapter also passed three loopback/parser fixtures and one
+playback-error fixture. Neither run exercises an external Cast device.
+The later provider batch passed 48 provider, eight pagination and three disk-cache cases
+with `:app:testDebugUnitTest`. The first run failed on same-account reauthentication
+because an initial playlist with a continuation was marked complete. The corrected run
+verified it and the offline reopen after partial and complete refreshes.
+Search ownership passed two search-adapter, 11 Room search and 49 provider tests. The offline
+production SDK 37 Kotlin compile and release runtime dependency resolution also passed. Package
+and initializer observations refer to the signed core comparison APK, version code 1311.
+Cold offline refill and HTTPS stream resolution passed 11 mix, four ranking and five
+playback-source Android JVM cases. The fixture writes the same native Room database a
+new service reads. An initial fixture compile failed because the Room supertype is an
+implementation dependency of the library module. The fixed fixture keeps that boundary.
+Queue repeat, pause and fade-listener ownership passed four playback boundary and seven
+queue-command cases. The production SDK 37 compile also passed after that change.
+Durable cursor write suppression passed 15 store and 11 persistence cases on the Android
+JVM, including old cursor rejection and a failed-write retry. The working
+[design handoff](design/INTELLIGENCE_HANDOFF.md) maps current states and deferred controls.
+Manual source precedence passed 22 pure playback-source and nine saved-catalogue cases.
+The production SDK 37 compile passed at this checkpoint.
+Thirty-three focused pure cases also checked album order, CUE clips and recording identities.
+The existing crossfade exclusion remains a product decision. Physical gapless is open.
+The 512-candidate offline ranking and one-per-tail exploration passed six tail, eight mix and
+one replay fixture plus the SDK 37 Kotlin compile. Alternating host ranking times are in the
+ledger. The workload contains no owner ratings or physical samples.
+The seeded teacher replay and offline source-change fixture passed with 12 mix and two
+model-store cases. Its provider and capture publication are fixtures. Device evidence is open.
+The raw provider text retention budget passed 50 provider and eight pagination fixtures.
+Production SDK 37 compilation passed. Activity and native heap profiles are still open.
+The resumed bulk remote-like check passed all 31 Room repository cases, including the
+430-recording query budget and rollback after account revocation.
+The last cache batch also compiled the app's debug Kotlin with the test minSdk override.
+Production verification, paired Pixel measurements and release remain pending. See the
+[execution ledger](INTELLIGENCE_EFFICIENCY.md) for the exact next action.
+
+The `agent/intelligence-efficiency` branch continues from the reconciled core candidate
+without changing the stable baseline. Its current checkpoint, energy inventory, and
+distinct host, CI and physical evidence are in [INTELLIGENCE_EFFICIENCY.md](INTELLIGENCE_EFFICIENCY.md).
+The branch is local while the owner-requested implementation batch is open. Automatic
+publication and transfer leases follow their owners. Source selection reuses its immutable
+index. Lyric and metadata requests use cancellable transport. Production SDK 37 compilation
+and focused Android JVM fixtures passed. The checkpoint and exact next action are in the
+per-group execution ledger. The consolidated phone-only matrix is in [PHONE_CHECK.md](PHONE_CHECK.md).
 
 Local branch: `agent/core-perfection-first-tap`. The owner requested that all implementation
 stay local until the full scope is ready. Keep candidate verification separate from stable. Baseline main is `5655cb2` / music-v1307. See
@@ -24,6 +94,11 @@ Candidate `75dfb09` in run 45691462671 completed 579 tests, both lints and both 
 workflow stopped when the new parser assumed an ordinal signer label. Build-tools 37 prints
 `V2 Signer:`, confirmed from the last stable build log. The retry keeps APK alignment and the
 exact public certificate fingerprint as hard gates and accepts both signer label formats.
+
+The signed core candidate `43afa2b` passed 579 tests, both lints and both APK builds in
+run `45694261300`, attempt 2. Attempt 1 hit a Maven Central HTTP 429 for Robolectric API 35.
+The `Music-install` artifact is `15075198872`. Stable remains music-v1307 and the phone
+acceptance matrix is still pending.
 
 The initial Search request now retains its provider video through display projection. Exact
 provider durations feed the shared policy; unknown-duration single selections have a bounded

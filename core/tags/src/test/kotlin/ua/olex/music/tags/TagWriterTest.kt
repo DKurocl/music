@@ -23,12 +23,19 @@ class TagWriterTest {
 
     private val audio = ByteArray(4000) { (it * 31 % 251).toByte() }
 
-    private fun flac(comments: List<String>) = out {
+    private fun flac(comments: List<String>, pictures: List<Pair<Int, ByteArray>> = emptyList()) = out {
         text("fLaC")
         bytes(0x00); be(34, 3); be(4096, 2); be(4096, 2); be(0, 3); be(0, 3)
         be((44_100L shl 44) or (1L shl 41) or (15L shl 36) or 441_000, 8); zeros(16)
         val block = out { le(6, 4); text("vendor"); le(comments.size.toLong(), 4); comments.forEach { val b = it.toByteArray(); le(b.size.toLong(), 4); raw(b) } }
-        bytes(0x84); be(block.size.toLong(), 3); raw(block)
+        bytes(if (pictures.isEmpty()) 0x84 else 4); be(block.size.toLong(), 3); raw(block)
+        pictures.forEachIndexed { index, (kind, image) ->
+            val picture = out {
+                be(kind.toLong(), 4); be(9, 4); text("image/png"); zeros(20)
+                be(image.size.toLong(), 4); raw(image)
+            }
+            bytes(if (index == pictures.lastIndex) 0x86 else 6); be(picture.size.toLong(), 3); raw(picture)
+        }
         raw(audio)
     }
 
@@ -87,6 +94,22 @@ class TagWriterTest {
         assertNull(TagWriter.plan(ByteArraySource(out { zeros(4); text("ftypM4A "); zeros(200) }), mapOf("TITLE" to listOf("x"))))
         assertNull(TagWriter.plan(ByteArraySource(ByteArray(300)), mapOf("TITLE" to listOf("x"))))
     }
+
+    @Test fun changingFlacFrontCoverKeepsOnlyOneFrontAndRetainsOtherPictures() {
+        val oldFront = byteArrayOf(1, 2, 3)
+        val back = byteArrayOf(4, 5, 6)
+        val replacement = byteArrayOf(7, 8, 9)
+        val source = flac(listOf("TITLE=Track"), listOf(3 to oldFront, 4 to back))
+        val edited = (0..2).fold(source) { bytes, _ ->
+            apply(bytes, requireNotNull(TagWriter.plan(ByteArraySource(bytes), emptyMap(), CoverArt(replacement, "image/png"))))
+        }
+        val pictures = read(edited).pictures.associateBy { it.kind }
+        assertEquals(2, read(edited).pictures.size)
+        fun bytes(kind: Int) = pictures.getValue(kind).let { edited.copyOfRange(it.offset.toInt(), it.offset.toInt() + it.length) }
+        assertArrayEquals(replacement, bytes(3))
+        assertArrayEquals(back, bytes(4))
+        assertArrayEquals(audio, edited.takeLast(audio.size).toByteArray())
+    }
 }
 
 class TagWriterCoverAndRatingTest {
@@ -100,6 +123,31 @@ class TagWriterCoverAndRatingTest {
         assertEquals(4, tags.stars)
         val pic = tags.frontCover!!
         assertArrayEquals(jpeg, out.copyOfRange(pic.offset.toInt(), pic.offset.toInt() + pic.length))
+    }
+
+    @Test fun changingMp3FrontCoverPreservesTheBackCover() {
+        fun picture(kind: Int, image: ByteArray): ByteArray {
+            val body = byteArrayOf(0) + "image/jpeg".toByteArray() + byteArrayOf(0, kind.toByte(), 0) + image
+            return "APIC".toByteArray() + byteArrayOf(0, 0, 0, body.size.toByte(), 0, 0) + body
+        }
+        val back = byteArrayOf(13, 14, 15)
+        val frames = picture(4, back) + picture(3, byteArrayOf(9, 10, 11))
+        val source = "ID3".toByteArray() + byteArrayOf(4, 0, 0, 0, 0, 0, frames.size.toByte()) + frames + mp3()
+        val output = apply(source, requireNotNull(TagWriter.plan(ByteArraySource(source), emptyMap(), CoverArt(jpeg, "image/jpeg"))))
+        val pictures = TagReader.read(ByteArraySource(output))!!.pictures
+        fun bytes(kind: Int) = pictures.single { it.kind == kind }.let { output.copyOfRange(it.offset.toInt(), it.offset.toInt() + it.length) }
+        assertEquals(2, pictures.size)
+        assertArrayEquals(jpeg, bytes(3))
+        assertArrayEquals(back, bytes(4))
+    }
+
+    @Test fun unsupportedLegacyId3VariantsAreRefusedWithoutDroppingFrames() {
+        val audio = mp3()
+        for ((version, flags) in listOf(2 to 0, 3 to 0x80, 4 to 0x80)) {
+            val body = byteArrayOf(3, 2, 1)
+            val source = "ID3".toByteArray() + byteArrayOf(version.toByte(), 0, flags.toByte(), 0, 0, 0, 3) + body + audio
+            assertNull(TagWriter.plan(ByteArraySource(source), mapOf("TITLE" to listOf("New"))))
+        }
     }
 
     @Test fun vorbisRatingScales() {

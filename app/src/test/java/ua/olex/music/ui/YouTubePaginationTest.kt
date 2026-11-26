@@ -79,7 +79,7 @@ class YouTubePaginationTest {
             if (fields.contains("browseId")) { firstCalls++; cards("PL1", token = "next") }
             else if (failNext) { failNext = false; throw IOException("Offline") }
             else cards("PL1", "PL2")
-        }, account = { mapOf("Cookie" to "test-account") })
+        }, pageScope = { "test-owner" }, account = { mapOf("Cookie" to "test-account") })
         try { source.accountPlaylists(); fail("Expected network failure") } catch (_: IOException) { }
         assertEquals(listOf("PL1", "PL2"), source.accountPlaylists().map { it.id })
         assertEquals(2, firstCalls)
@@ -94,6 +94,45 @@ class YouTubePaginationTest {
         source.album("PL")
         try { source.albumMore("PL"); fail("Expected repeated page failure") } catch (_: IllegalStateException) { }
         assertEquals(1, source.peekAlbum("PL")!!.second.size)
+    }
+
+    @Test fun sameAccountReauthenticationRejectsTheOldContinuationAndLoadsTheNewPage() = runBlocking {
+        var revision = 0L
+        var continuations = 0
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision },
+            account = { mapOf("Cookie" to "fixture") }, transport = { _, fields, _ ->
+                if ("browseId" in fields) {
+                    if (revision == 0L) album("old", token = "old-cursor") else album("fresh", token = "fresh-cursor")
+                } else {
+                    continuations++
+                    if ("old-cursor" in fields) revision += 2
+                    page("last")
+                }
+            })
+        assertEquals("yt:old", source.album("PL")?.second?.single()?.id?.value)
+        assertNull(source.albumMore("PL"))
+        assertNull(source.peekAlbum("PL"))
+        assertFalse(source.hasAlbumContinuation("PL"))
+        assertNull(source.albumMore("PL"))
+        assertEquals(1, continuations)
+        assertEquals("yt:fresh", source.album("PL")?.second?.single()?.id?.value)
+        assertEquals(listOf("yt:fresh", "yt:last"), source.albumMore("PL")?.second?.map { it.id.value })
+        assertEquals(2, continuations)
+    }
+
+    @Test fun aHostilePlaylistCannotKeepAutomaticPaginationRunningPastTheBudget() = runBlocking {
+        var continuations = 0
+        val source = YouTubeMusic(transport = { _, fields, _ ->
+            if ("browseId" in fields) album("first", token = "page0")
+            else page("track", token = "page${++continuations}")
+        })
+        var result = source.album("PL")
+        repeat(100) { result = source.albumMore("PL") }
+        assertEquals(101, result?.second?.size)
+        assertTrue(result?.first?.partial == true)
+        assertFalse(source.hasAlbumContinuation("PL"))
+        assertNull(source.albumMore("PL"))
+        assertEquals(100, continuations)
     }
 
     private fun row(id: String) = """{"musicResponsiveListItemRenderer":{

@@ -19,10 +19,11 @@ import android.widget.RemoteViews
  * broadcasts to Media3's receiver, which starts the service if needed (playback resumption).
  */
 class NowPlayingWidget : AppWidgetProvider() {
-    // The cover may need the network (an online song's), which the main thread may not use.
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
         val pending = goAsync()
-        Thread { try { NowPlaying.render(context, ids) } finally { pending.finish() } }.start()
+        kotlinx.coroutines.Dispatchers.IO.dispatch(kotlin.coroutines.EmptyCoroutineContext, Runnable {
+            try { NowPlaying.render(context, ids) } finally { pending.finish() }
+        })
     }
 }
 
@@ -41,7 +42,7 @@ internal object NowPlaying {
         prefs.edit().putString("title", title).putString("artist", artist).putString("art", artworkUri).putBoolean("playing", playing).apply()
         val manager = AppWidgetManager.getInstance(context)
         val ids = manager.getAppWidgetIds(ComponentName(context, NowPlayingWidget::class.java))
-        if (ids.isNotEmpty()) Thread { render(context, ids) }.start()
+        if (ids.isNotEmpty()) render(context, ids)
         MusicTileService.refresh(context)
     }
 
@@ -53,6 +54,13 @@ internal object NowPlaying {
 
     fun playing(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("playing", false)
     fun title(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("title", null)
+
+    fun artworkAvailable(context: Context, key: String) {
+        if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("art", null) != key) return
+        val manager = AppWidgetManager.getInstance(context)
+        val ids = manager.getAppWidgetIds(ComponentName(context, NowPlayingWidget::class.java))
+        if (ids.isNotEmpty()) render(context, ids)
+    }
 
     fun render(context: Context, ids: IntArray) {
         val manager = AppWidgetManager.getInstance(context)
@@ -71,6 +79,7 @@ internal object NowPlaying {
             }
         }
         val known = lastArt?.takeIf { it.first == art }?.second ?: art?.let { ArtworkSnapshots.read(context, it) }
+        if (art != null && known != null) lastArt = art to known
         submit(known)
         if (known != null || art == null) return
         artwork(context, art)?.let(::submit)
@@ -133,23 +142,15 @@ internal object NowPlaying {
     @Volatile private var lastArt: Pair<String, Bitmap>? = null
 
     /**
-     * A small cover; widgets have a bitmap memory budget, so never the full picture. A file's cover
-     * is decoded from the device; an online song's is fetched at 256 px (its address asks for a
-     * size) and kept, so play, pause and skip do not fetch it again.
+     * A small cover from a local file or the media session's shared snapshot.
      */
     private fun artwork(context: Context, uri: String?): Bitmap? = uri?.let {
         lastArt?.takeIf { (key, _) -> key == it }?.let { (_, bitmap) -> return bitmap }
         ArtworkSnapshots.read(context, it)?.let { bitmap -> lastArt = it to bitmap; return bitmap }
+        val address = Uri.parse(it)
+        if (address.scheme == "http" || address.scheme == "https") return null
         runCatching {
-            if (it.startsWith("http")) {
-                val small = it.replace(Regex("""=w\d+-h\d+"""), "=w256-h256")
-                val connection = java.net.URL(small).openConnection().apply { connectTimeout = 5_000; readTimeout = 5_000 }
-                val bytes = connection.getInputStream().use { input -> input.readNBytes(2 shl 20) }
-                val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                val sample = generateSequence(1) { it * 2 }.first { s -> maxOf(bounds.outWidth, bounds.outHeight) / s <= 384 }
-                android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
-            } else ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, Uri.parse(it))) { decoder, info, _ ->
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, address)) { decoder, info, _ ->
                 val scale = 192f / maxOf(info.size.width, info.size.height).coerceAtLeast(1)
                 if (scale < 1f) decoder.setTargetSize((info.size.width * scale).toInt().coerceAtLeast(1), (info.size.height * scale).toInt().coerceAtLeast(1))
                 decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE

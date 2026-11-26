@@ -42,13 +42,8 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
     // song played before comes from the stream cache (see CacheBudget) without asking at all.
     private val data = OnlineCachingDataSource.Factory(app, RetryingOnline.Factory(app, androidx.media3.datasource.ResolvingDataSource.Factory(
         androidx.media3.datasource.DefaultDataSource.Factory(app, androidx.media3.datasource.DefaultHttpDataSource.Factory()
-            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").setAllowCrossProtocolRedirects(true)),
-    ) { spec ->
-        if (spec.uri.scheme != OnlineStreams.SCHEME) return@Factory spec
-        val id = spec.uri.host ?: spec.uri.schemeSpecificPart.trimStart('/')
-        val real = (app as? OnlineStreams)?.resolve(id) ?: throw java.io.IOException("This song is not available online right now")
-        spec.withUri(real)
-    }))
+            .setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0")),
+    ) { spec -> resolveMediaRequest(spec, app as? OnlineStreams) }))
 
     override fun createMediaSource(mediaItem: MediaItem): MediaSource {
         val tags = ReplayGainCodec.tags(mediaItem.mediaMetadata.extras?.getString(ReplayGainCodec.TAGS))
@@ -58,6 +53,16 @@ internal class ReplayGainMediaSourceFactory(context: Context) : MediaSource.Fact
         factory.setLoadErrorHandlingPolicy(errors)
         return factory.createMediaSource(mediaItem)
     }
+}
+
+/** The provider can supply an HTTPS audio URL. Local playback keeps its original data request. */
+@OptIn(UnstableApi::class)
+internal fun resolveMediaRequest(spec: androidx.media3.datasource.DataSpec, streams: OnlineStreams?): androidx.media3.datasource.DataSpec {
+    if (spec.uri.scheme != OnlineStreams.SCHEME) return spec
+    val id = spec.uri.host ?: spec.uri.schemeSpecificPart.trimStart('/')
+    val uri = streams?.resolve(id)?.takeIf { it.scheme == "https" && !it.host.isNullOrBlank() && it.userInfo == null }
+        ?: throw java.io.IOException("This song is not available online right now")
+    return spec.withUri(uri)
 }
 
 /** Every audio track format carries the same source's tags; sample and seek operations are untouched. */

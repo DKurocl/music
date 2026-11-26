@@ -9,31 +9,42 @@ import androidx.annotation.OptIn
 import androidx.media3.common.util.BitmapLoader
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSourceBitmapLoader
-import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.guava.await
+import kotlinx.coroutines.guava.future
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.security.MessageDigest
-import java.util.concurrent.Callable
 
 /** Keeps small copies of real covers available to Android's media controls across process restarts. */
 @OptIn(UnstableApi::class)
-internal class SessionArtwork(context: Context) : BitmapLoader {
+internal class SessionArtwork(
+    context: Context,
+    private val scope: CoroutineScope,
+    private val source: BitmapLoader = DataSourceBitmapLoader.Builder(context.applicationContext).setMaximumOutputDimension(384).build(),
+) : BitmapLoader {
     private val app = context.applicationContext
-    private val source = DataSourceBitmapLoader.Builder(app).setMaximumOutputDimension(384).build()
-    private val worker = DataSourceBitmapLoader.DEFAULT_EXECUTOR_SERVICE.get()
 
     override fun supportsMimeType(mimeType: String) = source.supportsMimeType(mimeType)
     override fun decodeBitmap(data: ByteArray): ListenableFuture<Bitmap> = source.decodeBitmap(data)
 
-    override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> {
+    override fun loadBitmap(uri: Uri): ListenableFuture<Bitmap> = scope.future {
         val key = uri.toString()
-        return Futures.transformAsync(worker.submit(Callable { ArtworkSnapshots.read(app, key) }), { cached ->
-            if (cached != null) Futures.immediateFuture(cached)
-            else Futures.transform(source.loadBitmap(uri), { bitmap ->
+        withContext(Dispatchers.IO) { ArtworkSnapshots.read(app, key) }?.let { return@future it }
+        val load: suspend () -> Bitmap = {
+            val bitmap = source.loadBitmap(uri).await()
+            withContext(Dispatchers.IO) {
                 ArtworkSnapshots.write(app, key, bitmap)
-                bitmap
-            }, worker)
-        }, worker)
+                NowPlaying.artworkAvailable(app, key)
+            }
+            bitmap
+        }
+        if (uri.scheme == "http" || uri.scheme == "https") {
+            (app as? MediaCatalogOwner)?.loadRemoteArtwork(load) ?: throw IOException("Remote artwork is unavailable")
+        } else load()
     }
 }
 

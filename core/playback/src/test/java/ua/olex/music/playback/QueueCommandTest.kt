@@ -25,6 +25,24 @@ class QueueCommandTest {
     @After fun release() { player.release() }
     private fun item(id: Int) = PlayerConnection.mediaItem(Track(TrackId("local:$id"), "content://$id", "Song $id", "Artist"))
 
+    @Test fun queueEditsFollowTheOccurrenceAfterEarlierChangesAndRejectAnExpiredKey() {
+        val first = item(1)
+        val duplicate = item(1)
+        val third = item(3)
+        val key = requireNotNull(duplicate.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))
+        val removal = QueueCommand.editArguments(key)
+        player.setMediaItems(listOf(first, duplicate, third))
+        player.moveMediaItem(1, 2)
+        assertTrue(QueueCommand.edit(player, removal))
+        assertEquals(listOf(first, third), (0 until player.mediaItemCount).map(player::getMediaItemAt))
+        assertFalse(QueueCommand.edit(player, removal))
+
+        val firstKey = requireNotNull(first.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))
+        assertFalse(QueueCommand.edit(player, QueueCommand.editArguments(firstKey, Int.MAX_VALUE)))
+        assertTrue(QueueCommand.edit(player, QueueCommand.editArguments(firstKey, 1)))
+        assertEquals(first, player.getMediaItemAt(1))
+    }
+
     @Test fun playNextUsesLiveCursorAndPreservesShuffleTraversal() {
         player.setMediaItems(listOf(item(1), item(2), item(3)), 0, 12_000)
         player.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(intArrayOf(2, 0, 1), 1))

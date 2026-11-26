@@ -1,6 +1,11 @@
 package ua.olex.music.ui
 
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
+import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.buffer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -11,6 +16,257 @@ import ua.olex.music.model.Track
 import ua.olex.music.model.TrackId
 
 class YouTubeMusicTest {
+    @Test fun theRawPageBudgetEvictsOlderTextWithoutDroppingPlayableTypedPages() {
+        val source = YouTubeMusic()
+        val album = YouTubeMusic.OnlineAlbum("album", "Title", null, null) to emptyList<Track>()
+        source.keep("public/album:album", album)
+        val first = "a".repeat(2_100_000)
+        val second = "b".repeat(2_100_000)
+        source.keep("public/search:first", first)
+        source.keep("public/search:second", second)
+        assertNull(source.peek<String>("public/search:first"))
+        assertEquals(second, source.peek<String>("public/search:second"))
+        assertEquals(album, source.peekAlbum("album"))
+        source.keep("public/search:large", "x".repeat(4 * 1024 * 1024 + 1))
+        assertNull(source.peek<String>("public/search:large"))
+        assertEquals(second, source.peek<String>("public/search:second"))
+    }
+
+    @Test fun aSearchFromThePreviousAccountRevisionDoesNotPublishOrStartFallbackRequests() = kotlinx.coroutines.runBlocking {
+        var revision = 0L
+        var calls = 0
+        var visible = false
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision },
+            account = { mapOf("Cookie" to "fixture") }, transport = { endpoint, _, _ ->
+                assertEquals("search", endpoint)
+                calls++
+                revision += 2
+                "{}"
+            })
+        assertTrue(runCatching { source.searchAll("Song") { visible = true } }.exceptionOrNull() is IllegalStateException)
+        assertEquals(1, calls)
+        assertFalse(visible)
+    }
+
+    @Test fun aVisibleWaiterReplacesACancelledSharedRequestWithoutCancellingItForAnotherWaiter() = kotlinx.coroutines.runBlocking {
+        var calls = 0
+        val source = YouTubeMusic(ioDispatcher = kotlinx.coroutines.Dispatchers.Unconfined, transport = { _, _, _ ->
+            if (++calls == 1) kotlinx.coroutines.awaitCancellation()
+            """{"playlistPanelRenderer":{"contents":[{"playlistPanelVideoRenderer":{"videoId":"song",
+                "title":{"simpleText":"Song"},"longBylineText":{"simpleText":"Artist"},
+                "lengthText":{"simpleText":"3:22"}}}]}}"""
+        })
+        val first = launch(start = CoroutineStart.UNDISPATCHED) { source.songEvidence("song") }
+        val stillVisible = async(start = CoroutineStart.UNDISPATCHED) { source.songEvidence("song") }
+        val left = launch(start = CoroutineStart.UNDISPATCHED) { source.songEvidence("song") }
+        left.cancelAndJoin()
+        assertEquals(1, calls)
+        first.cancelAndJoin()
+        assertEquals(202_000L, stillVisible.await()?.durationMs)
+        assertEquals(2, calls)
+        assertEquals("yt:song", source.songEvidence("song")?.id?.value)
+        assertEquals(2, calls)
+    }
+
+    @Test fun onlyMatchingPlaylistOccurrencesCanAuthorizeMissingLikeRemoval() {
+        val album = YouTubeMusic.OnlineAlbum("VLLM", "Liked music", null, null)
+        val track = Track(TrackId("yt:video"), "ytm://video", "Song", "Artist")
+        val entry = YouTubeMusic.PlaylistOccurrence("video", "entry", "Song")
+        assertTrue(YouTubeMusic.PlaylistSnapshot(album, listOf(track), listOf(entry)).confirmsAllLikes)
+        assertFalse(YouTubeMusic.PlaylistSnapshot(album, listOf(track), listOf(entry.copy(videoId = "other"))).confirmsAllLikes)
+        assertFalse(YouTubeMusic.PlaylistSnapshot(album, emptyList(), emptyList()).confirmsAllLikes)
+    }
+
+    @Test fun accountPlaylistDiscoveryStopsAtItsPageBudgetAndDoesNotCacheAPartialResult() = kotlinx.coroutines.runBlocking {
+        var calls = 0
+        var end = false
+        val source = YouTubeMusic(pageScope = { "owner" }, account = { mapOf("Cookie" to "fixture") },
+            transport = { _, _, _ ->
+                calls++
+                if (end) "{}" else """{"continuationCommand":{"token":"page$calls"}}"""
+            })
+        assertTrue(runCatching { source.accountPlaylists() }.exceptionOrNull() is java.io.IOException)
+        assertEquals(101, calls)
+        end = true
+        assertTrue(source.accountPlaylists().isEmpty())
+        assertEquals(102, calls)
+    }
+
+    @Test fun remotePlaylistMutationCannotUseAContinuationFromAnOlderAccountGeneration() = kotlinx.coroutines.runBlocking {
+        var revision = 0L
+        val calls = ArrayList<String>()
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision }, account = { mapOf("Cookie" to "fixture") },
+            transport = { endpoint, fields, _ ->
+                calls += endpoint
+                if (fields.contains("continuation")) {
+                    revision += 2
+                    "{}"
+                } else """
+                    {"musicDetailHeaderRenderer":{"title":{"simpleText":"Playlist"}},
+                    "musicPlaylistShelfRenderer":{"contents":[]},"continuationCommand":{"token":"next"}}
+                """.trimIndent()
+            })
+        val change = YouTubeMusic.PlaylistChange(YouTubeMusic.PlaylistChange.Kind.ADD, videoId = "song")
+        assertTrue(runCatching { source.editRemotePlaylist("VLPL123", "owner", 0, emptyList(), change) }
+            .exceptionOrNull() is IllegalStateException)
+        assertEquals(listOf("browse", "browse"), calls)
+        assertTrue(runCatching { source.remotePlaylist("VLPL123", "owner", 0) }.exceptionOrNull() is IllegalStateException)
+        assertEquals(2, calls.size)
+    }
+
+    @Test fun anOldLikeResponseIsNotAcknowledgedAfterTheSameAccountReturns() = kotlinx.coroutines.runBlocking {
+        var revision = 0L
+        var calls = 0
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision }, account = { mapOf("Cookie" to "fixture") },
+            transport = { endpoint, _, _ ->
+                assertEquals("like/like", endpoint)
+                if (++calls == 1) revision += 2
+                "{}"
+            })
+        assertFalse(source.like("video", true, "owner", 0))
+        assertFalse(source.like("video", true, "owner", 0))
+        assertTrue(source.like("video", true, "owner", 2))
+        assertEquals(2, calls)
+    }
+
+    @Test fun accountChangesDuringBootstrapPreventAnAuthenticatedLikeFromBeingSent() = kotlinx.coroutines.runBlocking {
+        val revision = java.util.concurrent.atomic.AtomicLong()
+        val paths = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            paths += request.url.encodedPath
+            revision.addAndGet(2)
+            okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+                .message("Fixture").code(200).body("".toResponseBody()).build()
+        }.build()
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = revision::get,
+            account = { mapOf("Cookie" to "fixture") }, http = http)
+        assertFalse(source.like("video", true, "owner", 0))
+        assertEquals(listOf("/"), paths)
+    }
+
+    private fun playerTracking(url: String) =
+        """{"playbackTracking":{"videostatsPlaybackUrl":{"baseUrl":"$url"}}}"""
+
+    private fun homePage(title: String, next: String) = """
+        {"musicCarouselShelfRenderer":{"header":{"musicCarouselShelfBasicHeaderRenderer":{"title":{"simpleText":"$title"}}},
+        "contents":[{"musicTwoRowItemRenderer":{"title":{"simpleText":"Song"},
+        "navigationEndpoint":{"watchEndpoint":{"videoId":"video"}}}}]},
+        "nextContinuationData":{"continuation":"$next"}}
+    """.trimIndent()
+
+    @Test fun homePreservesLoadedShelvesAndDoesNotRetryAFailedOrCyclicContinuation() = kotlinx.coroutines.runBlocking {
+        val calls = mutableListOf<String>()
+        var failed = true
+        val source = YouTubeMusic(transport = { _, fields, _ ->
+            calls += fields
+            when {
+                "FEmusic_home" in fields -> homePage("First", "token1")
+                failed -> throw java.io.IOException("fixture")
+                "token1" in fields -> homePage("Second", "token2")
+                else -> homePage("Third", "token1")
+            }
+        })
+        assertEquals(listOf("First"), source.home().map { it.title })
+        assertEquals(2, calls.size)
+        failed = false
+        assertEquals(listOf("First", "Second", "Third"), source.home().map { it.title })
+        assertEquals(4, calls.size)
+    }
+
+    @Test fun homeRejectsTheOldContinuationWhenTheSameAccountReturns() = kotlinx.coroutines.runBlocking {
+        var revision = 0L
+        var first = 0
+        var continued = 0
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision }, transport = { _, fields, _ ->
+            if ("FEmusic_home" in fields) {
+                first++
+                homePage("First $first", "continue")
+            } else {
+                continued++
+                if (continued == 1) revision += 2
+                homePage("Second", "continue")
+            }
+        })
+        assertTrue(source.home().isEmpty())
+        assertEquals(listOf("First 2", "Second"), source.home().map { it.title })
+        assertEquals(2, first)
+        assertEquals(2, continued)
+    }
+
+    @Test fun aMixSuppliesTeacherEvidenceOnlyWhenTheRequestedSeedIsConfirmed() = kotlinx.coroutines.runBlocking {
+        val seed = "seedvideo01"
+        val other = "othervideo1"
+        var playlist = "RDAMVM$seed"
+        var first = seed
+        val observed = mutableListOf<ua.olex.music.model.RadioTeacherPage>()
+        var calls = 0
+        val source = YouTubeMusic(transport = { _, _, _ ->
+            calls++
+            """{"playlistPanelRenderer":{"playlistId":"$playlist","contents":[
+              {"playlistPanelVideoRenderer":{"videoId":"$first","title":{"simpleText":"First"},"longBylineText":{"simpleText":"Artist"}}},
+              {"playlistPanelVideoRenderer":{"videoId":"$other","title":{"simpleText":"Other"},"longBylineText":{"simpleText":"Other artist"}}}
+            ]}}"""
+        }, onRadio = { _, _, id, tracks ->
+            ua.olex.music.model.RadioTeacherPage.verify(id, tracks)?.let(observed::add)
+        })
+        assertTrue(source.playlistRadio(playlist) != null)
+        assertEquals(listOf(other), observed.single().neighbours)
+        first = other
+        assertTrue(source.playlistRadio(playlist) != null)
+        playlist = "RDCLAKCURATED"
+        first = seed
+        assertTrue(source.playlistRadio(playlist) != null)
+        assertEquals(1, observed.size)
+        assertEquals(3, calls)
+    }
+
+    @Test fun playbackHistoryKeepsAuthenticatedRequestsOnTheExpectedEndpointAndVideo() = kotlinx.coroutines.runBlocking {
+        val requests = java.util.Collections.synchronizedList(mutableListOf<okhttp3.Request>())
+        val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            requests += request
+            okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+                .message("Fixture").code(204).body("".toResponseBody()).build()
+        }.build()
+        var endpoint = "https://s.youtube.com/api/stats/playback?docid=video&other=a%20b"
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { 3 }, account = { mapOf("Cookie" to "fixture") },
+            transport = { _, _, _ -> playerTracking(endpoint) }, http = http)
+        assertTrue(source.reportPlay("video", 3) { 123 })
+        assertEquals("fixture", requests.single().header("Cookie"))
+        assertEquals("a b", requests.single().url.queryParameter("other"))
+        assertEquals("WEB_REMIX", requests.single().url.queryParameter("c"))
+        for (invalid in listOf(
+            "https://s.youtube.com.example/api/stats/playback?docid=video",
+            "http://s.youtube.com/api/stats/playback?docid=video",
+            "https://s.youtube.com:444/api/stats/playback?docid=video",
+            "https://s.youtube.com/api/stats/watchtime?docid=video",
+            "https://s.youtube.com/api/stats/playback?docid=video&docid=other",
+        )) {
+            endpoint = invalid
+            assertFalse(source.reportPlay("video", 3) { 123 })
+        }
+        assertEquals(1, requests.size)
+    }
+
+    @Test fun playbackHistoryRejectsLateAccountWorkEvenReturningToTheSameOwner() = kotlinx.coroutines.runBlocking {
+        var revision = 0L
+        var requests = 0
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision },
+            account = { mapOf("Cookie" to "fixture") }, http = okhttp3.OkHttpClient.Builder().addInterceptor {
+                error("A stale playback report reached HTTP")
+            }.build(), transport = { _, _, _ ->
+                requests++
+                revision += 2
+                playerTracking("https://s.youtube.com/api/stats/playback?docid=video")
+            })
+        assertFalse(source.reportPlay("video", 0) { revision++; 123 })
+        assertEquals(0, requests)
+        assertFalse(source.reportPlay("video", 1) { 123 })
+        assertEquals(1, requests)
+        assertFalse(source.reportPlay("video", 1) { error("Stale report entered signature preparation") })
+    }
+
     @Test fun radioFollowsTheWatchPanelTokenAndRetriesOnTheQueryEndpoint() = kotlinx.coroutines.runBlocking {
         val radio = """{"playlistPanelRenderer":{"contents":[{"playlistPanelVideoRenderer":{"videoId":"next",
             "title":{"simpleText":"Next song"},"longBylineText":{"simpleText":"Artist"}}},
@@ -31,6 +287,112 @@ class YouTubeMusicTest {
         assertEquals("after", first?.continuation)
         assertEquals(first, source.radioMore("after"))
         assertEquals(4, calls)
+    }
+
+    @Test fun malformedProviderRadioAndImpossibleTrackLengthsNeverBecomePlaybackEvidence() {
+        assertNull(YouTubeMusic.parseRadio("""{"playlistPanelRenderer":"""))
+        assertTrue(YouTubeMusic.parseHome("[".repeat(5_000)).isEmpty())
+        fun length(clock: String): Long {
+            val response = """{"playlistPanelRenderer":{"contents":[{"playlistPanelVideoRenderer":{"videoId":"video",
+                "title":{"simpleText":"Song"},"longBylineText":{"simpleText":"Artist"},"lengthText":{"simpleText":"$clock"}}}]}}"""
+            return requireNotNull(YouTubeMusic.parseRadio(response)).tracks.single().durationMs
+        }
+        assertEquals(202_000L, length("3:22"))
+        assertEquals(8_000L, length("8"))
+        assertEquals(0L, length("3:65"))
+        assertEquals(0L, length("3::22"))
+        assertEquals(0L, length("9223372036854775807:21"))
+    }
+
+    @Test fun aNaturalRadioRequestProducesEvidenceOnlyForItsCurrentAccount() = kotlinx.coroutines.runBlocking {
+        val radio = javaClass.getResource("/ytm-radio.json")!!.readText()
+        val seed = requireNotNull(YouTubeMusic.parseRadio(radio)).tracks.first().id.value.removePrefix("yt:")
+        var scope = "owner-one"
+        var revision = 0L
+        var calls = 0
+        var switchAccount = false
+        var switchBack = false
+        val captured = ArrayList<String>()
+        val source = YouTubeMusic(pageScope = { scope }, pageRevision = { revision }, account = { mapOf("Cookie" to "fixture") },
+            transport = { _, _, _ ->
+                calls++
+                if (switchAccount) {
+                    scope = "owner-two"
+                    revision++
+                    if (switchBack) { scope = "owner-one"; revision++ }
+                }
+                radio
+            },
+            onRadio = { owner, _, video, _ -> captured += "$owner/$video" })
+        assertTrue(source.radio(seed) != null)
+        assertEquals(listOf("owner-one/$seed"), captured)
+        assertEquals(1, calls)
+        switchAccount = true
+        assertNull(source.radio(seed))
+        assertEquals(listOf("owner-one/$seed"), captured)
+        assertEquals(2, calls)
+        scope = "owner-one"
+        switchBack = true
+        assertNull(source.radio(seed))
+        assertEquals(listOf("owner-one/$seed"), captured)
+        assertEquals(3, calls)
+    }
+
+    @Test fun radioRateLimitSuppressesAlternateEndpointsAndNewRequestsUntilRetryAfter() = kotlinx.coroutines.runBlocking {
+        val now = java.util.concurrent.atomic.AtomicLong(1_000)
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val radio = javaClass.getResource("/ytm-radio.json")!!.readText()
+        val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val response = okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1).message("Fixture")
+            when {
+                request.url.encodedPath == "/" ->
+                    response.code(200).body("""{"INNERTUBE_CLIENT_VERSION":"1.20261119.01.00"}""".toResponseBody()).build()
+                requests.incrementAndGet() == 1 ->
+                    response.code(429).header("Retry-After", "10").body("{}".toResponseBody()).build()
+                else -> response.code(200).body(radio.toResponseBody()).build()
+            }
+        }.build()
+        val source = YouTubeMusic(http = http, monotonicMillis = now::get)
+        assertNull(source.radio("seed"))
+        assertEquals(1, requests.get())
+        now.set(10_999)
+        assertNull(source.radioMore("continuation"))
+        assertEquals(1, requests.get())
+        now.set(11_000)
+        assertTrue(source.radio("seed") != null)
+        assertEquals(2, requests.get())
+    }
+
+    @Test fun unknownLengthCatalogueBodyIsClosedAtTheReadBudget() = kotlinx.coroutines.runBlocking {
+        val bytesRead = java.util.concurrent.atomic.AtomicLong()
+        val closed = java.util.concurrent.atomic.AtomicBoolean()
+        val overlong = object : okhttp3.ResponseBody() {
+            private val input = object : okio.Source {
+                private val chunk = ByteArray(8_192)
+                override fun read(sink: okio.Buffer, byteCount: Long): Long {
+                    val size = minOf(byteCount, chunk.size.toLong())
+                    sink.write(chunk, 0, size.toInt())
+                    bytesRead.addAndGet(size)
+                    return size
+                }
+                override fun close() { closed.set(true) }
+                override fun timeout() = okio.Timeout.NONE
+            }.buffer()
+            override fun source() = input
+            override fun contentType(): okhttp3.MediaType? = null
+            override fun contentLength() = -1L
+        }
+        val http = okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+            val request = chain.request()
+            val body = if (request.url.encodedPath == "/") "{}".toResponseBody() else overlong
+            okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+                .message("Fixture").code(200).body(body).build()
+        }.build()
+        assertNull(YouTubeMusic(http = http).songEvidence("video"))
+        val cap = 8L * 1_024 * 1_024
+        assertTrue(bytesRead.get() in (cap + 1)..(cap + 8_192))
+        assertTrue(closed.get())
     }
 
     @Test fun exactSearchCardEvidenceOpensAnOwnedFlacOnTheFirstSelection() {
@@ -367,6 +729,37 @@ class YouTubeMusicTest {
         assertTrue(result.isActive)
         finish.complete(Unit)
         result.join()
+    }
+
+    @Test fun reauthenticatedArtistBrowseDoesNotPublishOrUseFallbackRequests() = kotlinx.coroutines.runBlocking {
+        var revision = 0L
+        var requests = 0
+        val source = YouTubeMusic(pageScope = { "owner" }, pageRevision = { revision },
+            account = { mapOf("Cookie" to "fixture") }, transport = { endpoint, _, _ ->
+                assertEquals("browse", endpoint)
+                requests++
+                revision += 2
+                "{}"
+            })
+        assertNull(source.artistPage("Artist", "UCfixture", null, false) { error("An old artist page was published") })
+        assertEquals(1, requests)
+        assertNull(source.peekArtist("UCfixture"))
+    }
+
+    @Test fun artistExpansionStopsAtThePageBudgetAndLeavesThePrefixPlayable() = kotlinx.coroutines.runBlocking {
+        val row = """{"musicResponsiveListItemRenderer":{"playlistItemData":{"videoId":"song"},
+            "flexColumns":[{"musicResponsiveListItemFlexColumnRenderer":{"text":{"runs":[{"text":"Track"}]}}}]}}"""
+        var pages = 0
+        val source = YouTubeMusic(transport = { _, fields, _ ->
+            if ("UCfixture" in fields) """{"musicImmersiveHeaderRenderer":{"title":{"simpleText":"Artist"}},
+                "musicShelfRenderer":{"title":{"runs":[{"text":"Songs","navigationEndpoint":{"browseEndpoint":{"browseId":"shelf"}}}]},
+                "contents":[$row]}}"""
+            else """{"contents":[$row],"nextContinuationData":{"continuation":"page${++pages}"}}"""
+        })
+        val artist = requireNotNull(source.artist("UCfixture", full = true))
+        assertTrue(artist.partial)
+        assertEquals(listOf("yt:song"), artist.songs.map { it.id.value })
+        assertEquals(100, pages)
     }
 
     @Test fun artistProfileCanRecoverThroughTheCreditedCatalogueChannel() = kotlinx.coroutines.runBlocking {
