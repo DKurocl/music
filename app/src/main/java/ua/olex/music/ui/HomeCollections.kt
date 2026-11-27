@@ -18,14 +18,31 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
-/** A stable strip: the filter stays under the finger when a different Home feed arrives. */
+/**
+ * A stable strip: the filter stays under the finger when a different Home feed arrives, and the
+ * chosen mood slides fully into view if it sat at the edge.
+ */
 @Composable
 internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect: (String?) -> Unit) {
-    LazyRow(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).selectableGroup().testTag("home-moods"), contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+    val state = androidx.compose.foundation.lazy.rememberLazyListState()
+    val still = LocalPowerSave.current
+    val index = if (selected == null) 0 else moods.indexOfFirst { it.label == selected } + 1
+    LaunchedEffect(index) {
+        val info = state.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+        val cut = item == null || item.offset < info.viewportStartOffset + 16 || item.offset + item.size > info.viewportEndOffset - 16
+        if (cut && index >= 0) {
+            val centre = (info.viewportEndOffset - info.viewportStartOffset) / 2 - (item?.size ?: 0) / 2
+            if (still) state.scrollToItem(index, -centre) else state.animateScrollToItem(index, -centre)
+        }
+    }
+    LazyRow(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).selectableGroup().testTag("home-moods"), state = state,
+        contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         item(key = "all") { MoodChip("For you", Glyph.SMART, selected == null) { onSelect(null) } }
         items(moods, key = { "mood-" + it.label }) { mood ->
             MoodChip(mood.label, moodGlyph(mood.label), selected == mood.label) {
@@ -35,29 +52,46 @@ internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect
     }
 }
 
+/**
+ * A mood, as Material 3 Expressive's toggle buttons behave: a pill at rest that squares its corners
+ * when chosen (the shape says "on" as much as the colour does), and squares a little more under the
+ * finger, so a press is seen before it is released. The chosen mood's symbol fills in with one
+ * springy pop. Shape, colour and fill all ride the theme's motion scheme.
+ */
 @Composable
 private fun MoodChip(label: String, glyph: Glyph, active: Boolean, onClick: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     val still = LocalPowerSave.current
     val haptics = rememberHaptics()
     val motion = MaterialTheme.motionScheme
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val corner by androidx.compose.animation.core.animateDpAsState(when {
+        pressed && active -> 8.dp
+        pressed -> 12.dp
+        active -> 14.dp
+        else -> 20.dp
+    }, if (still) snap() else motion.fastSpatialSpec(), label = "Mood corner")
     val paper by animateColorAsState(if (active) cs.primary else cs.surfaceContainerHigh,
         if (still) snap() else motion.fastEffectsSpec(), label = "Mood surface")
     val ink by animateColorAsState(if (active) cs.onPrimary else cs.onSurfaceVariant,
-        if (still) snap() else motion.fastEffectsSpec(), label = "Mood icon")
-    val phase = remember(glyph) { Animatable(1f) }
-    var taps by remember { mutableIntStateOf(0) }
-    LaunchedEffect(taps, still) {
-        if (still || taps == 0) phase.snapTo(1f) else {
-            if (!phase.isRunning && phase.value == 1f) phase.snapTo(0f)
-            phase.animateTo(1f, tween(moodDuration(glyph), easing = androidx.compose.animation.core.LinearEasing))
+        if (still) snap() else motion.fastEffectsSpec(), label = "Mood ink")
+    val pop = remember { Animatable(1f) }
+    var seen by remember { mutableStateOf(active) }
+    LaunchedEffect(active, still) {
+        if (active && !seen && !still) {
+            pop.snapTo(0.72f)
+            pop.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.42f, stiffness = 520f))
         }
+        seen = active
     }
-    Surface(selected = active, onClick = { if (!active) { taps++; haptics.tick(); onClick() } }, shape = CircleShape,
-        color = paper, contentColor = ink, modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 3.dp).squish(0.025f)) {
-        Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            MoodMark(glyph, ink, Modifier.size(21.dp)) { phase.value }
+    Surface(selected = active, onClick = { if (!active) { haptics.tick(); onClick() } }, shape = RoundedCornerShape(corner),
+        color = paper, contentColor = ink, interactionSource = interaction,
+        modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 4.dp)) {
+        Row(Modifier.padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Symbol(glyph, size = 20.dp, color = ink, filled = active, pressed = false,
+                modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value })
             Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }

@@ -19,12 +19,11 @@ import androidx.compose.ui.text.font.FontWeight
 import ua.olex.music.R
 
 /**
- * Google Sans Flex, bundled (SIL Open Font License, assets/licenses), as in the owner's Earbuds
- * app. One variable font: weight and optical size follow each Material style, and display and
- * headline text get the rounded cut (ROND 100) that Material 3 Expressive uses for large type;
- * smaller text stays crisp (ROND 0).
+ * Google Sans Flex, bundled (SIL Open Font License, assets/licenses), exactly as the owner's Earbuds
+ * and VPN set it: one variable font whose weight and optical size follow each Material style, in its
+ * standard roundedness everywhere (ROND 0), so the three apps read as one family.
  */
-private fun flex(style: TextStyle, round: Boolean): TextStyle {
+private fun flex(style: TextStyle, @Suppress("UNUSED_PARAMETER") round: Boolean): TextStyle {
     val weight = style.fontWeight ?: FontWeight.Normal
     val size = if (style.fontSize.isSp) style.fontSize.value else 14f
     val family = FontFamily(
@@ -33,7 +32,7 @@ private fun flex(style: TextStyle, round: Boolean): TextStyle {
             variationSettings = FontVariation.Settings(
                 FontVariation.weight(weight.weight),
                 FontVariation.Setting("opsz", size.coerceIn(6f, 144f)),
-                FontVariation.Setting("ROND", if (round) 100f else 0f),
+                FontVariation.Setting("ROND", 0f),
             ),
         ),
     )

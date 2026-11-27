@@ -183,7 +183,7 @@ class DesignGalleryTest {
     private fun Shell(title: String, place: Place?, current: PlayerState = now, statsTap: () -> Unit = {}, content: @Composable (PaddingValues) -> Unit) = AppTheme { Images {
         CompositionLocalProvider(LocalStartTab provides "ALBUMS", LocalInlineSheets provides true) {
             Scaffold(
-                topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineMediumEmphasized) },
+                topBar = { if (place != Place.SEARCH && title.isNotEmpty()) TopAppBar(title = { Text(title, style = MaterialTheme.typography.headlineSmall.copy(fontSize = androidx.compose.ui.unit.TextUnit(28f, androidx.compose.ui.unit.TextUnitType.Sp), lineHeight = androidx.compose.ui.unit.TextUnit(36f, androidx.compose.ui.unit.TextUnitType.Sp))) },
                     actions = { if (place == Place.HOME) HomeActions(statsTap, {}) }) },
                 bottomBar = { PlacesBar(place) {} },
             ) { pad ->
@@ -198,6 +198,40 @@ class DesignGalleryTest {
             }
         }
     } }
+
+    /** Frames of the bar and mood switches and of pressed rows, for checking motion by eye. */
+    @Test fun navigationAndMoodMotion() {
+        val place = androidx.compose.runtime.mutableStateOf(Place.HOME)
+        val mood = androidx.compose.runtime.mutableStateOf<String?>(null)
+        compose.setContent { AppTheme { CompositionLocalProvider(LocalInlineSheets provides true) {
+            Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)) {
+                MoodBar(YouTubeMusic.DEFAULT_MOODS, mood.value) { mood.value = it }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+                PlacesBar(place.value) { place.value = it }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(16.dp))
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp)) {
+                    FamilyRow(RowPlace(true, false), "Rescan music", "Reads every file again", modifier = Modifier.testTag("row")) {}
+                    SwitchRow(RowPlace(false, true), "Artist photos", "Looked up by name once", true) {}
+                }
+            }
+        } } }
+        val out = File("build/reports/ui-previews/motion").apply { mkdirs() }
+        compose.mainClock.autoAdvance = false
+        compose.waitForIdle()
+        fun frame(name: String) = compose.onRoot().captureToImage().asAndroidBitmap().let { b ->
+            out.resolve("$name.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) } }
+        frame("00-rest")
+        compose.runOnIdle { place.value = Place.SEARCH; mood.value = YouTubeMusic.DEFAULT_MOODS[1].label }
+        for (t in 0..15) { compose.mainClock.advanceTimeBy(32); frame("switch-%02d".format(t)) }
+        compose.onNodeWithTag("row").performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(250); frame("pressed-row")
+        compose.onNodeWithTag("row").performTouchInput { up() }
+        compose.onNodeWithText(YouTubeMusic.DEFAULT_MOODS[2].label).performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(250); frame("pressed-mood")
+        compose.onNodeWithText(YouTubeMusic.DEFAULT_MOODS[2].label).performTouchInput { up() }
+        compose.onNodeWithText("Home").performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(250); frame("pressed-nav")
+    }
 
     @Test fun settings() {
         compose.setContent { Shell("Settings", null) { SettingsPage(Modifier.fillMaxSize().padding(it), listOf("Music"), false, true, {}, {}, {}, {}, {}) } }

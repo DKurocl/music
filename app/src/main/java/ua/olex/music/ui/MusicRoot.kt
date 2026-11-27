@@ -94,6 +94,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -451,9 +452,9 @@ fun MusicRoot(model: LibraryViewModel) {
                         androidx.compose.animation.Crossfade(page == Page.STATS,
                             animationSpec = if (powerSave) androidx.compose.animation.core.snap() else MaterialTheme.motionScheme.fastEffectsSpec(),
                             label = "Listening title") { listening ->
-                            Text(if (listening) Page.STATS.title else Place.HOME.title, style = MaterialTheme.typography.headlineMediumEmphasized)
+                            Text(if (listening) Page.STATS.title else Place.HOME.title, style = MaterialTheme.typography.headlineSmall.copy(fontSize = 28.sp, lineHeight = 36.sp))
                         }
-                    } else Text(page?.title ?: place.title, style = MaterialTheme.typography.headlineMediumEmphasized)
+                    } else Text(page?.title ?: place.title, style = MaterialTheme.typography.headlineSmall.copy(fontSize = 28.sp, lineHeight = 36.sp))
                 }, scrollBehavior = scroll,
                 colors = if (onlineTop == null && place == Place.HOME && page == null) {
                     TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface,
@@ -1267,13 +1268,11 @@ internal fun PlacesBar(current: Place?, onGo: (Place) -> Unit) {
     androidx.compose.material3.ShortNavigationBar {
         Place.entries.forEach { p ->
             val selected = current == p
-            // Only a tap animates, and only the tapped icon (as Gboard does): each icon has its own small gesture.
-            var taps by remember { androidx.compose.runtime.mutableIntStateOf(0) }
             val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
             val pressed by interaction.collectIsPressedAsState()
             androidx.compose.material3.ShortNavigationBarItem(
-                interactionSource = interaction, selected = selected, onClick = { taps++; onGo(p) },
-                icon = { DestinationIcon(p, selected, taps, pressed) },
+                interactionSource = interaction, selected = selected, onClick = { onGo(p) },
+                icon = { DestinationIcon(p, selected, pressed) },
                 label = { Text(p.title) },
             )
         }
