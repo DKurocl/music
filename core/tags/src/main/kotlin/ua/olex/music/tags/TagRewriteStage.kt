@@ -81,7 +81,10 @@ class TagRewriteStage(private val pending: File) {
             if (!currentDigest.contentEquals(original)) {
                 val resultPrefix = actualBytes < stagedBytes &&
                     currentDigest.contentEquals(staged.digest(HEADER_SIZE, HEADER_SIZE + actualBytes, buffer, checkActive))
-                if (!resultPrefix) throw IOException("The source changed since the tag edit")
+                // The file changed some other way (another tagger, a replaced copy): the stage
+                // belongs to bytes that no longer exist, so drop it and let the new edit go on
+                // instead of refusing every later edit of this file.
+                if (!resultPrefix) { pending.delete(); return }
             }
             checkActive()
             // A killed or failed write still has its synced stage. The next explicit edit can

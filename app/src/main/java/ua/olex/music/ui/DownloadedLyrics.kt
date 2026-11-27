@@ -29,9 +29,11 @@ class DownloadedLyrics(
 ) {
     private val dir = File(context.filesDir, "lyrics").apply { mkdirs() }
     private val misses = LruCache<String, Unit>(512)
-    private val lookup = Mutex()
-    private var activeLookup: String? = null
-    private var removedDuringLookup = false
+    // One lookup per song at a time; songs never wait for each other (a slow miss for the previous
+    // song must not hold up the one now playing). Removal during a lookup is tracked per song.
+    private val lookups = HashMap<String, Mutex>()
+    private val removedDuring = HashMap<String, Boolean>()
+    @Synchronized private fun lockFor(key: String) = lookups.getOrPut(key) { Mutex() }
     private val _revision = MutableStateFlow(0)
     val revision: StateFlow<Int> = _revision
 
@@ -53,15 +55,12 @@ class DownloadedLyrics(
         // A song the services don't know is asked once per session unless the owner asks again:
         // the player and the lock screen both resolve lyrics, and a miss shouldn't cost two lookups each play.
         val key = writeKey(track)
-        lookup.withLock {
+        lockFor(key).withLock {
             if (!force) {
                 if (misses.get(key) != null) return@withLock null
                 read(track)?.first?.let { cached -> return@withLock cached.takeIf(String::isNotBlank)?.let { Fetched("Saved", it) } }
             }
-            synchronized(this@DownloadedLyrics) {
-                activeLookup = key
-                removedDuringLookup = false
-            }
+            synchronized(this@DownloadedLyrics) { removedDuring[key] = false }
             try {
                 var incomplete = false
                 suspend fun <T> attempt(block: suspend () -> T?): T? = try { block() } catch (_: IOException) {
@@ -85,15 +84,15 @@ class DownloadedLyrics(
                 currentCoroutineContext().ensureActive()
                 if (saveFetched(track, format, text)) Fetched(found.source, text) else null
             } finally {
-                synchronized(this@DownloadedLyrics) { activeLookup = null }
+                synchronized(this@DownloadedLyrics) { removedDuring.remove(key) }
             }
         }
     }
 
     // UI and lock-screen loads share this store. AtomicFile itself does not serialize writers.
     @Synchronized private fun saveFetched(track: Track, format: FoundLyrics.Format, text: String): Boolean {
-        if (removedDuringLookup) return false
         val key = writeKey(track)
+        if (removedDuring[key] == true) return false
         publish(key, format, text)
         misses.remove(key)
         _revision.value++
@@ -122,7 +121,7 @@ class DownloadedLyrics(
     @Synchronized fun delete(track: Track) {
         val key = writeKey(track)
         publish(key, FoundLyrics.Format.PLAIN, "")
-        if (activeLookup == key) removedDuringLookup = true
+        if (key in removedDuring) removedDuring[key] = true
         _revision.value++
     }
 

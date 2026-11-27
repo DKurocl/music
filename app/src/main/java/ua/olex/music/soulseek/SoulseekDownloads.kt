@@ -37,6 +37,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
     data class Job(val id: Int, val key: String, val title: String, val status: String, val progress: Float? = null, val done: Boolean = false, val failed: Boolean = false, val cancelled: Boolean = false) {
         val running get() = !done && !failed && !cancelled
     }
+    private var idle: kotlinx.coroutines.Job? = null
     private val active = HashMap<Int, kotlinx.coroutines.Job>()
     private val lock = Any()
     private var starting: Int? = null
@@ -262,6 +263,7 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                     }
                 }
             }
+            idle?.cancel()
             active[id] = task
             task.invokeOnCompletion {
                 synchronized(lock) {
@@ -269,7 +271,12 @@ class SoulseekDownloads(private val context: Context, private val onSaved: () ->
                     if (retriesAfterCancellation.remove(id) && _jobs.value.any { it.id == id && it.running }) {
                         stored(id)?.optString("request")?.let { startStored(id, it) }
                     }
-                    if (active.isEmpty()) client.disconnect()
+                    // A short grace keeps the sign-in for a download started right after, and
+                    // still lets an idle Soulseek go quickly so it never keeps the radio awake.
+                    if (active.isEmpty()) {
+                        idle?.cancel()
+                        idle = scope.launch { kotlinx.coroutines.delay(30_000); synchronized(lock) { if (active.isEmpty()) client.disconnect() } }
+                    }
                 }
             }
             task.start()

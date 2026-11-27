@@ -59,14 +59,14 @@ class TagRewriteStageTest {
         assertFalse(pending.exists())
     }
 
-    @Test fun aDifferentFileAtTheDestinationIsNeverOverwritten() {
+    @Test fun aDifferentFileAtTheDestinationIsNeverOverwrittenAndItsStaleStageIsDropped() {
         val original = directory.newFile()
         val pending = File(directory.root, "track.pending")
         stage(original, pending)
         val replacement = audio.copyOf().apply { this[lastIndex] = 4 }
         original.writeBytes(replacement)
-        assertThrows(IOException::class.java) { apply(original, pending) }
-        assertTrue(pending.isFile)
+        apply(original, pending)
+        assertFalse(pending.exists())
         assertArrayEquals(replacement, original.readBytes())
     }
 

@@ -165,10 +165,15 @@ object TagWriter {
             val len = if (major == 4) syncsafeOf(r.bytes(pos + 4, 4)) else r.u32be(pos + 4)
             if (len <= 0 || pos + 10 + len > end) break
             val flags = r.u8(pos + 9)
-            val special = if (major == 4) flags and 0x4F != 0 else flags and 0xE0 != 0
-            if (special && id !in replaced) return false
-            val body = r.bytes(pos + 10, len.toInt())
-            val drop = id in replaced ||
+            // A v2.4 frame flagged only with its data length carries that length (4 bytes) before
+            // its data: strip it and keep the frame. Frames that are compressed, encrypted, grouped
+            // or unsynchronised cannot be re-encoded here and are left out, as before, rather than
+            // refusing the whole edit.
+            val lengthOnly = major == 4 && flags and 0x4F == 0x01 && len > 4
+            val special = !lengthOnly && (if (major == 4) flags and 0x4F != 0 else flags and 0xE0 != 0)
+            val raw = r.bytes(pos + 10, len.toInt())
+            val body = if (lengthOnly) raw.copyOfRange(4, raw.size) else raw
+            val drop = id in replaced || special ||
                 (id == "APIC" && replaceFront && frontPicture(body)) ||
                 (id == "TXXX" && txxxName(body)?.let { Fields.canonical(it) in edited } == true)
             if (!drop) frame(out, id, body)

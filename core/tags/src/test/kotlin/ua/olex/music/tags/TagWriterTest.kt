@@ -150,6 +150,23 @@ class TagWriterCoverAndRatingTest {
         }
     }
 
+    @Test fun aFrameWithOnlyItsDataLengthFlagIsKeptAndOthersAreLeftOutInsteadOfRefusingTheEdit() {
+        val audio = mp3()
+        fun frame(id: String, flags: Int, body: ByteArray): ByteArray {
+            val n = body.size
+            return id.toByteArray() + byteArrayOf((n shr 21 and 0x7F).toByte(), (n shr 14 and 0x7F).toByte(), (n shr 7 and 0x7F).toByte(), (n and 0x7F).toByte(), 0, flags.toByte()) + body
+        }
+        val artist = byteArrayOf(3) + "Kept Artist".toByteArray()
+        val withLength = byteArrayOf(0, 0, 0, artist.size.toByte()) + artist
+        val frames = frame("TPE1", 0x01, withLength) + frame("TALB", 0x08, byteArrayOf(9, 9, 9, 9))
+        val n = frames.size
+        val tag = "ID3".toByteArray() + byteArrayOf(4, 0, 0, (n shr 21 and 0x7F).toByte(), (n shr 14 and 0x7F).toByte(), (n shr 7 and 0x7F).toByte(), (n and 0x7F).toByte()) + frames
+        val plan = TagWriter.plan(ByteArraySource(tag + audio), mapOf("TITLE" to listOf("New")))!!
+        val head = String(plan.head, Charsets.ISO_8859_1)
+        assertTrue(head.contains("TPE1") && head.contains("Kept Artist"))
+        assertFalse(head.contains("TALB"))
+    }
+
     @Test fun vorbisRatingScales() {
         fun stars(v: String) = AudioTags("flac", "flac", fields = mapOf("RATING" to listOf(v))).stars
         assertEquals(5, stars("100")); assertEquals(3, stars("60")); assertEquals(4, stars("4")); assertNull(stars("0"))

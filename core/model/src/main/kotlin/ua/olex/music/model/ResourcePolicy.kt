@@ -1,6 +1,9 @@
 package ua.olex.music.model
 
-/** Automatic work only. User commands, ongoing audio and durable writes are outside this policy. */
+/**
+ * Automatic work only. User commands, ongoing audio, what the owner is looking at (visible covers,
+ * lock-screen artwork) and durable records (play history) are outside this policy.
+ */
 enum class OptionalWork(val foregroundOnly: Boolean = false, val usesNetwork: Boolean = true) {
     PROVIDER(true), REMOTE_QUEUE_REFILL, LOCK_SCREEN_LYRICS, PREFETCH(true), METERED_MOTION_COVER(true),
     LOCAL_SCAN(true, false), SESSION_TASTE(true, false), LEARNING,
@@ -48,7 +51,10 @@ object ResourcePolicy {
         if (inputs.thermal == ThermalPressure.SEVERE) return ResourceDenial.THERMAL
         if (!work.usesNetwork) return null
         if (inputs.validated != true) return ResourceDenial.OFFLINE
-        if (work != OptionalWork.METERED_MOTION_COVER && inputs.unmetered != true) return ResourceDenial.METERED
+        // A radio continuation is a few kilobytes for a stream that is already playing over this
+        // network, so mobile data does not stop it (the owner chose that stream on this network).
+        if (work != OptionalWork.METERED_MOTION_COVER && work != OptionalWork.REMOTE_QUEUE_REFILL &&
+            inputs.unmetered != true) return ResourceDenial.METERED
         if (work == OptionalWork.PREFETCH || work == OptionalWork.METERED_MOTION_COVER) {
             if (inputs.thermal == ThermalPressure.MODERATE) return ResourceDenial.THERMAL
             if (inputs.charging != true && inputs.batteryBand == BatteryBand.LOW) return ResourceDenial.BLACKOUT

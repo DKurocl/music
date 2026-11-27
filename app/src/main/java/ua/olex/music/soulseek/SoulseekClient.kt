@@ -406,7 +406,9 @@ class SoulseekClient(
         fun parseResults(bytes: ByteArray): Pair<Long, List<Result>>? = runCatching {
             val m = In(bytes)
             val user = m.str(); val token = m.u32(); val count = m.u32().toInt()
-            require(count in 0..MAX_RESULTS) { "Too many search results" }
+            // A large library may list more files than we keep: read them all (each one consumes its
+            // bytes, so a lying count fails at the end of the message) and keep the first ones.
+            require(count >= 0) { "Invalid search result count" }
             data class Raw(val path: String, val size: Long, val attrs: Map<Int, Int>)
             fun file(): Raw {
                 m.u8(); val path = m.str(); val size = m.u64(); m.str()
@@ -416,7 +418,8 @@ class SoulseekClient(
                 repeat(attrCount) { attrs[m.u32().toInt()] = m.u32().toInt() }
                 return Raw(path, size, attrs)
             }
-            val raws = List(count) { file() }
+            val raws = ArrayList<Raw>(minOf(count, MAX_RESULTS))
+            repeat(count) { file().let { if (raws.size < MAX_RESULTS) raws += it } }
             val slot = m.bool(); val speed = m.u32(); val queue = m.u32()
             token to raws.filter { it.size > 0 }.map { r ->
                 Result(user, r.path, r.size, slot, speed, queue, r.attrs[0], r.attrs[1], r.attrs[4], r.attrs[5])

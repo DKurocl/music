@@ -227,8 +227,8 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
     override fun available(uri: String): Boolean = !uri.startsWith("ytm://") ||
         (graph.youTubeOn.value && graph.networkAvailable()) || ua.olex.music.playback.CacheBudget.isStreamCached(uri)
     override val localArtwork get() = graph.artwork
-    override suspend fun <T> loadRemoteArtwork(load: suspend () -> T?): T? =
-        graph.resources.run(OptionalWork.PREFETCH) { AuxiliaryLoads.run(load) }
+    // Notification and lock-screen artwork of the song playing: shown to the owner, so not optional.
+    override suspend fun <T> loadRemoteArtwork(load: suspend () -> T?): T? = AuxiliaryLoads.run(load)
     val graph by lazy { AppGraph(this) }
     override val playbackSourceChanges get() = merge(
         graph.allFiles.filterNotNull().map { Unit }, graph.userLibrary.recordings.map { Unit },
@@ -251,7 +251,9 @@ class MusicApp : Application(), PlaybackHistoryOwner, ua.olex.music.library.Loca
                 }
                 try {
                     allowed.runWhileAllowed {
-                        graph.resources.run(OptionalWork.PROVIDER) { graph.youTube.reportPlay(video, revision) }
+                        // A play is a durable record, not optional work: it is sent with the screen
+                        // off and on mobile data too, so the account's history matches real listening.
+                        graph.youTube.reportPlay(video, revision)
                     }
                 }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

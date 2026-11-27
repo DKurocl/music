@@ -46,7 +46,7 @@ class ResourcePolicyTest {
         for (work in OptionalWork.entries.filter { it.usesNetwork }) {
             assertEquals(ResourceDenial.OFFLINE, ResourcePolicy.denial(ready.copy(validated = false), work))
             assertEquals(ResourceDenial.OFFLINE, ResourcePolicy.denial(ready.copy(validated = null), work))
-            val metered = if (work == OptionalWork.METERED_MOTION_COVER) null else ResourceDenial.METERED
+            val metered = if (work == OptionalWork.METERED_MOTION_COVER || work == OptionalWork.REMOTE_QUEUE_REFILL) null else ResourceDenial.METERED
             assertEquals(metered, ResourcePolicy.denial(ready.copy(unmetered = false), work))
             assertEquals(metered, ResourcePolicy.denial(ready.copy(unmetered = null), work))
         }
@@ -90,7 +90,7 @@ class ResourcePolicyTest {
                             if (work.foregroundOnly) assertTrue(visible && interactive == true)
                             if (work == OptionalWork.LOCK_SCREEN_LYRICS) assertTrue(interactive == true)
                             if (work.usesNetwork) assertTrue(validated == true)
-                            if (work.usesNetwork && work != OptionalWork.METERED_MOTION_COVER) assertTrue(unmetered == true)
+                            if (work.usesNetwork && work != OptionalWork.METERED_MOTION_COVER && work != OptionalWork.REMOTE_QUEUE_REFILL) assertTrue(unmetered == true)
                             if (work == OptionalWork.LEARNING) assertTrue(consent && charging == true && thermal == ThermalPressure.NORMAL)
                         }
                     }

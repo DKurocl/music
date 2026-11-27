@@ -8,10 +8,11 @@ internal object DownloadAudioHeader {
     fun matches(extension: String, source: ByteSource): Boolean {
         val codecs = when (extension) {
             "flac" -> setOf("flac")
-            "wav" -> setOf("pcm")
+            "wav" -> setOf("pcm", "pcm_float")
             "alac" -> setOf("alac")
             "mp3" -> setOf("mp3")
-            "m4a" -> setOf("aac", "alac")
+            // Every codec the MP4 reader can name: AAC, ALAC, and FLAC or Opus in an MP4 box.
+            "m4a" -> setOf("aac", "alac", "flac", "opus")
             "aac" -> setOf("aac")
             "ogg" -> setOf("opus", "vorbis")
             "opus" -> setOf("opus")
