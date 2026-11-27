@@ -55,8 +55,8 @@ internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect
 /**
  * A mood, as Material 3 Expressive's toggle buttons behave: a pill at rest that squares its corners
  * when chosen (the shape says "on" as much as the colour does), and squares a little more under the
- * finger, so a press is seen before it is released. The chosen mood's symbol fills in with one
- * springy pop. Shape, colour and fill all ride the theme's motion scheme.
+ * finger, so a press is seen before it is released. The chosen mood's symbol plays its own
+ * gesture (MotionGlyph) as it fills: the bolt jolts, the face blinks and smiles, rain falls.
  */
 @Composable
 private fun MoodChip(label: String, glyph: Glyph, active: Boolean, onClick: () -> Unit) {
@@ -76,22 +76,14 @@ private fun MoodChip(label: String, glyph: Glyph, active: Boolean, onClick: () -
         if (still) snap() else motion.fastEffectsSpec(), label = "Mood surface")
     val ink by animateColorAsState(if (active) cs.onPrimary else cs.onSurfaceVariant,
         if (still) snap() else motion.fastEffectsSpec(), label = "Mood ink")
-    val pop = remember { Animatable(1f) }
-    var seen by remember { mutableStateOf(active) }
-    LaunchedEffect(active, still) {
-        if (active && !seen && !still) {
-            pop.snapTo(0.72f)
-            pop.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.42f, stiffness = 520f))
-        }
-        seen = active
-    }
     Surface(selected = active, onClick = { if (!active) { haptics.tick(); onClick() } }, shape = RoundedCornerShape(corner),
         color = paper, contentColor = ink, interactionSource = interaction,
         modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 4.dp)) {
         Row(Modifier.padding(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Symbol(glyph, size = 20.dp, color = ink, filled = active, pressed = false,
-                modifier = Modifier.graphicsLayer { scaleX = pop.value; scaleY = pop.value })
+            val moving = MotionGlyph.of(glyph)
+            if (moving != null) MotionSymbol(moving, active, size = 20.dp, color = ink, pressed = pressed)
+            else Symbol(glyph, size = 20.dp, color = ink, filled = active, pressed = pressed)
             Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1)
         }
     }

@@ -175,8 +175,11 @@ val LocalPlayerInset = staticCompositionLocalOf { 0.dp }
 fun Modifier.squish(amount: Float = 0.04f): Modifier = composed {
     if (LocalPowerSave.current) return@composed this
     var pressed by remember { androidx.compose.runtime.mutableStateOf(false) }
+    // In fast, out on a bouncy spring: the block settles back with one small overshoot, as Material 3
+    // Expressive's pressed surfaces do, instead of easing back flat.
     val scale by androidx.compose.animation.core.animateFloatAsState(if (pressed) 1f - amount else 1f,
-        MaterialTheme.motionScheme.fastSpatialSpec(), label = "squish")
+        if (pressed) androidx.compose.animation.core.spring(dampingRatio = 0.9f, stiffness = 1400f)
+        else androidx.compose.animation.core.spring(dampingRatio = 0.48f, stiffness = 520f), label = "squish")
     this.pointerInput(Unit) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)

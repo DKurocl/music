@@ -724,7 +724,12 @@ internal fun PlayerPage(
                 }
                 KickIconButton(enabled = onFavourite != null, onClick = { haptics.like(!favourite); onFavourite?.invoke() }, modifier = Modifier.semantics {
                     contentDescription = if (favourite) "Remove from favourites" else "Add to favourites"; selected = favourite
-                }) { kick -> Symbol(Glyph.FAVOURITE, size = 28.dp, filled = favourite, color = if (favourite) cs.primary else cs.onSurfaceVariant, kick = kick) }
+                }) { _ ->
+                    // The heart beats twice and fills from its centre when liked, as Google's own like buttons do.
+                    val ink by androidx.compose.animation.animateColorAsState(if (favourite) cs.primary else cs.onSurfaceVariant,
+                        MaterialTheme.motionScheme.fastEffectsSpec(), label = "Like ink")
+                    MotionSymbol(MotionGlyph.FAVOURITE, favourite, size = 28.dp, color = ink, pressed = LocalIconPressed.current)
+                }
             }
             Spacer(Modifier.height(20.dp))
             PlaybackProgress(state, position, onSeek, Modifier.widthIn(max = 420.dp), restoring)
