@@ -105,4 +105,18 @@ class PlaybackSourceItemsTest {
         assertNull(restored.clipEndMs)
         assertEquals(RecordingSource.from(cue)!!.key, RecordingSource.from(restored)!!.key)
     }
+
+    @Test fun anOnlineSongMarkedOfflineAtWakeUpKeepsItsAddressButARealIssueOrALocalFileDoesNot() {
+        val offline = PlaybackSourceItems.convert(PlayerConnection.mediaItem(online), PlaybackSourceChoice(online, SourceIssue.OFFLINE))
+        assertEquals(PlaybackSourceItems.UNAVAILABLE, offline.localConfiguration?.uri?.scheme)
+        val kept = PlaybackSourceItems.optimistic(offline)
+        assertEquals("ytm://one", kept.localConfiguration?.uri.toString())
+        assertNull(PlaybackSourceItems.error(kept))
+        assertEquals(offline.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY), kept.mediaMetadata.extras?.getString(PlayerConnection.QUEUE_KEY))
+
+        val missing = PlaybackSourceItems.convert(PlayerConnection.mediaItem(online), PlaybackSourceChoice(online, SourceIssue.MISSING))
+        assertSame(missing, PlaybackSourceItems.optimistic(missing))
+        val localOffline = PlaybackSourceItems.convert(PlayerConnection.mediaItem(file), PlaybackSourceChoice(file, SourceIssue.OFFLINE))
+        assertSame(localOffline, PlaybackSourceItems.optimistic(localOffline))
+    }
 }

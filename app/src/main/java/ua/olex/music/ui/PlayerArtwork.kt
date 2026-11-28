@@ -133,6 +133,11 @@ internal class PlayerTravel(private val scope: kotlinx.coroutines.CoroutineScope
 }
 
 internal val LocalPlayerTravel = staticCompositionLocalOf<PlayerTravel?> { null }
+
+/** One curve for everything that travels between the mini player and the player. */
+internal val travelEasing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private val arcOut = androidx.compose.animation.core.CubicBezierEasing(0.1f, 0.5f, 0.4f, 1f)
+private val arcIn = androidx.compose.animation.core.CubicBezierEasing(0.5f, 0f, 0.7f, 0.6f)
 private val LocalDirectPlayerOpen = staticCompositionLocalOf { false }
 
 @Composable
@@ -148,10 +153,16 @@ internal fun PlayerCoverLayout(travel: PlayerTravel, artwork: String? = null, di
             val large = travel.sleeve
             if (!directOpen && travel.coverInFlight) {
                 val density = LocalDensity.current
-                val x = small.left + (large.left - small.left) * p
-                val y = small.top + (large.top - small.top) * p
-                val width = small.width + (large.width - small.width) * p
-                val height = small.height + (large.height - small.height) * p
+                // The cover rides the same curve as the container around it, on an arc (Material's
+                // arc motion): it leaves the card sideways first and rises into the sleeve, instead
+                // of sliding along a straight line on a timing of its own.
+                val e = travelEasing.transform(p.coerceIn(0f, 1f))
+                val ex = arcOut.transform(e)
+                val ey = arcIn.transform(e)
+                val x = small.left + (large.left - small.left) * ex
+                val y = small.top + (large.top - small.top) * ey
+                val width = small.width + (large.width - small.width) * e
+                val height = small.height + (large.height - small.height) * e
                 val image = rememberCoverImage(artwork, ArtworkPlan.LARGE, large.width.toInt())
                 PlayerCoverFace(image, Modifier.offset { IntOffset(x.toInt(), y.toInt()) }
                     .size(with(density) { width.toDp() }, with(density) { height.toDp() }),
@@ -195,7 +206,7 @@ internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
         return if (thumb.width > 0f) androidx.compose.ui.geometry.Rect(thumb.left - margin, thumb.top - margin, width - (thumb.left - margin), thumb.bottom + margin)
             else androidx.compose.ui.geometry.Rect(margin, height - 6 * margin, width - margin, height - margin)
     }
-    fun eased(p: Float) = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f).transform(p.coerceIn(0f, 1f))
+    fun eased(p: Float) = travelEasing.transform(p.coerceIn(0f, 1f))
     fun bounds(width: Float, height: Float): androidx.compose.ui.geometry.Rect {
         val p = eased(travel.fraction)
         val from = card(width, height)
@@ -204,6 +215,8 @@ internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
     if (directOpen) return onGloballyPositioned { travel.page = it }
     return drawBehind {
         if (travel.fraction < 1f) {
+            // What stays behind dims a little as the player rises over it, for depth.
+            if (travel.fraction > 0f) drawRect(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.32f * eased(travel.fraction)))
             val r = bounds(size.width, size.height)
             drawRoundRect(androidx.compose.ui.graphics.lerp(card, surface, eased(travel.fraction)), r.topLeft, r.size,
                 androidx.compose.ui.geometry.CornerRadius(radius * (1f - eased(travel.fraction))))
@@ -212,10 +225,15 @@ internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
         val p = travel.fraction
         // The page appears once the container is mostly open and leaves early on the way back,
         // so the two never show at once (Material's fade-through inside a container transform).
-        alpha = ((p - 0.3f) / 0.45f).coerceIn(0f, 1f)
+        // The page arrives early enough that the empty container never reads as a blank card, and
+        // settles from 94 % about the top as it does, so the controls grow into place with it.
+        alpha = ((p - 0.14f) / 0.36f).coerceIn(0f, 1f)
         if (p < 1f) {
             val r = bounds(size.width, size.height)
             val corner = radius * (1f - eased(p))
+            val grow = 0.94f + 0.06f * eased(p)
+            scaleX = grow; scaleY = grow
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
             shape = object : androidx.compose.ui.graphics.Shape {
                 override fun createOutline(size: androidx.compose.ui.geometry.Size, layoutDirection: androidx.compose.ui.unit.LayoutDirection,
                     density: androidx.compose.ui.unit.Density) = androidx.compose.ui.graphics.Outline.Rounded(
@@ -224,7 +242,7 @@ internal fun Modifier.playerTransform(travel: PlayerTravel): Modifier {
             clip = true
             // The content rises the last stretch with the surface instead of sitting still under it.
             translationY = (1f - eased(p)) * r.top * 0.15f
-        } else clip = false
+        } else { clip = false; scaleX = 1f; scaleY = 1f }
     }.onGloballyPositioned { travel.page = it }
 }
 

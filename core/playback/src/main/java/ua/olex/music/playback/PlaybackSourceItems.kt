@@ -60,6 +60,22 @@ internal object PlaybackSourceItems {
             .apply { if (choice.issue != null) setUri(unavailableUri(key)) }.build()
     }
 
+    /**
+     * An online song marked offline only because no network was known at that moment keeps its
+     * address. After a long idle Android blocks a background process's network until playback makes
+     * the service foreground, so a queue restored from the widget would otherwise call the current
+     * song unplayable and skip to the next one. It is opened (and if need be retried) when played.
+     */
+    fun optimistic(item: MediaItem): MediaItem {
+        if (item.mediaMetadata.extras?.getString(ISSUE) != SourceIssue.OFFLINE.name) return item
+        val uri = item.requestMetadata.mediaUri ?: return item
+        if (uri.scheme != OnlineStreams.SCHEME) return item
+        val extras = Bundle(item.mediaMetadata.extras).apply { remove(ISSUE) }
+        return item.buildUpon().setUri(uri).setMediaMetadata(item.mediaMetadata.buildUpon().setExtras(extras).build()).build()
+    }
+
+    fun offline(item: MediaItem?): Boolean = item?.mediaMetadata?.extras?.getString(ISSUE) == SourceIssue.OFFLINE.name
+
     fun error(item: MediaItem?): String? = when (item?.mediaMetadata?.extras?.getString(ISSUE)) {
         SourceIssue.OFFLINE.name -> "This song needs online playback or a complete cached copy."
         SourceIssue.AMBIGUOUS.name -> "The available file may be a different version of this song."

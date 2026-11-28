@@ -548,14 +548,40 @@ class LibraryViewModel(app: Application, private val savedState: SavedStateHandl
     private val notForMe = getApplication<Application>().getSharedPreferences("not_recommended", android.content.Context.MODE_PRIVATE)
     var excluded by mutableStateOf(notForMe.getStringSet("keys", emptySet()).orEmpty()); private set
 
-    /** Never offers [track] again; out of the queue too, skipping it if it plays. */
+    /**
+     * "Not interested": never offers [track] again on Home, in mixes and autoplay; out of the queue
+     * too, skipping it if it plays. An online song is also disliked on the owner's YouTube Music
+     * account, as YouTube Music does, so its own recommendations drop it as well.
+     */
     fun dontRecommend(track: Track) {
         excluded = excluded + track.id.value + Mix.songKey(track)
         notForMe.edit().putStringSet("keys", excluded).apply()
+        rateOnAccount(track, disliked = true)
         val state = playing.value
         state.queue.drop(state.queueIndex + 1).filter { it.mediaId == track.id.value }.forEach { player.removeQueueItem(it.key) }
         if (state.mediaId == track.id.value) player.advanceBeforeRemoving()
         mixRun?.seen?.addAll(listOf(track.id.value, Mix.songKey(track)))
+    }
+
+    /** Undo for "Not interested": the song may be offered again, and the dislike is taken back. */
+    fun recommendAgain(track: Track) {
+        excluded = excluded - track.id.value - Mix.songKey(track)
+        notForMe.edit().putStringSet("keys", excluded).apply()
+        mixRun?.seen?.removeAll(setOf(track.id.value, Mix.songKey(track)))
+        rateOnAccount(track, disliked = false)
+    }
+
+    private fun rateOnAccount(track: Track, disliked: Boolean) {
+        val video = track.uri.takeIf { it.startsWith(ua.olex.music.model.SavedSong.ONLINE_PREFIX) }?.removePrefix(ua.olex.music.model.SavedSong.ONLINE_PREFIX) ?: return
+        val account = graph.youTubeAccount
+        val scope = account.cacheScope.value
+        val revision = account.revision.value
+        if (scope == "public" || !graph.youTubeOn.value) return
+        viewModelScope.launch {
+            try { graph.youTube.dislike(video, disliked, scope, revision) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { /* The song stays hidden here either way. */ }
+        }
     }
 
     /** Songs played lately, as mix keys, so a mix does not bring them straight back. */

@@ -59,6 +59,7 @@ internal fun HomePage(
     onOpenAlbum: (ua.olex.music.model.MusicCollection) -> Unit = {}, onShuffle: (List<Track>) -> Unit = {},
     onAllowFiles: (() -> Unit)? = null, scanError: String? = null, onScanRetry: () -> Unit = {},
     cache: HomeCache = remember { HomeCache() },
+    refreshTick: Int = 0, refreshing: Boolean = false, onRefresh: () -> Unit = {},
 ) {
     val playTrackMix = LocalOnlineNav.current.playTrackMix
     fun playPick(tracks: List<Track>, index: Int, title: String) {
@@ -72,15 +73,16 @@ internal fun HomePage(
     val online = onlineEnabled && network
     val revision = if (!online) ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value else 0L
     val day = java.time.LocalDate.now().toEpochDay()
-    val moodView = if (mood != null) key(cache, mood, online) { rememberMoodView(mood, online) } else null
+    val moodView = if (mood != null) key(cache, mood, online, refreshTick) { rememberMoodView(mood, online) } else null
     // A visible shelf is a listening session. Re-rank on entry or filter changes, and allow
     // initially empty history and stats to arrive after Room opens.
-    val seeds = remember(cache, day, mood, history.isEmpty()) { history }
-    val weights = remember(cache, day, mood, stats.isEmpty()) { stats }
+    val seeds = remember(cache, day, mood, history.isEmpty(), refreshTick) { history }
+    val weights = remember(cache, day, mood, stats.isEmpty(), refreshTick) { stats }
     val queue = key(cache, online, mood?.label) {
-        produceState(if (mood == null && cache.online == online && cache.day == day) cache.last else null,
-            library, seeds, weights, favourites, youTubeHome, excluded, day, revision, moodView?.page) {
-            val previous = cache.last.orEmpty().takeIf { mood == null && cache.online == online && cache.day == day }.orEmpty()
+        produceState(if (mood == null && cache.online == online && cache.day == day && cache.tick == refreshTick) cache.last else null,
+            library, seeds, weights, favourites, youTubeHome, excluded, day, revision, moodView?.page, refreshTick) {
+            // A refresh draws a new hand: nothing is kept from the last one.
+            val previous = cache.last.orEmpty().takeIf { mood == null && cache.online == online && cache.day == day && cache.tick == refreshTick }.orEmpty()
             val picks = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
                 val retained = (seeds + favourites).filter { YouTubeMusic.isOnline(it) }
                 val catalogue = library.songs + retained
@@ -92,13 +94,13 @@ internal fun HomePage(
                     ua.olex.music.playback.CacheBudget.isStreamCached(track.uri)
                 fun hidden(track: Track) = excluded.isNotEmpty() && (track.id.value in excluded || Mix.songKey(track) in excluded)
                 val ranked = ua.olex.music.model.HomePicks.select(candidates, suggested, seeds, favourites, weights,
-                    day + (mood?.label?.hashCode() ?: 0), ::playable, ::hidden)
+                    day + (mood?.label?.hashCode() ?: 0) + refreshTick * 7_919L, ::playable, ::hidden)
                 val byId = (suggested + catalogue).associateBy { it.id }
                 val kept = previous.mapNotNull { byId[it.id] }.filter { playable(it) && !hidden(it) }
                 (kept + ranked).distinctBy { it.recordingId ?: it.id.value }.take(24)
             }
             value = picks
-            if (mood == null) { cache.online = online; cache.day = day; cache.last = picks }
+            if (mood == null) { cache.online = online; cache.day = day; cache.last = picks; cache.tick = refreshTick }
         }.value
     }
     val cacheRevision = ua.olex.music.playback.CacheBudget.revision.collectAsStateWithLifecycle().value
@@ -181,6 +183,25 @@ internal fun HomePage(
     val spatial = MaterialTheme.motionScheme.fastSpatialSpec<androidx.compose.ui.unit.IntOffset>()
     Column(modifier.fillMaxSize()) {
         if (moods.isNotEmpty()) MoodBar(moods, mood?.label, onSelect = { label = it })
+        // Pull down to refresh, as YouTube Music: a new home from it, and every shelf reshuffled.
+        // The indicator stays at least a moment so a quick local reshuffle still reads as one.
+        var holding by remember { mutableStateOf(false) }
+        LaunchedEffect(refreshTick) { if (refreshTick > 0) { holding = true; kotlinx.coroutines.delay(650); holding = false } }
+        val pull = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+        val haptics = rememberHaptics()
+        androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+            isRefreshing = refreshing || holding,
+            onRefresh = {
+                haptics.tick()
+                mood?.let { (app as ua.olex.music.MusicApp).graph.youTube.forgetMood(it) }
+                onRefresh()
+            },
+            state = pull, modifier = Modifier.fillMaxSize(),
+            indicator = {
+                androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(state = pull, isRefreshing = refreshing || holding,
+                    modifier = Modifier.align(Alignment.TopCenter))
+            },
+        ) {
         AnimatedContent(targetState = target, modifier = Modifier.fillMaxSize(), contentKey = { it.key },
             transitionSpec = {
                 if (still) EnterTransition.None togetherWith ExitTransition.None else {
@@ -201,7 +222,8 @@ internal fun HomePage(
                 }
             stateHolder.SaveableStateProvider(frame.key) {
                 // Keep Home's scroll-to targets inside the touchable viewport above the floating player.
-                LazyColumn(Modifier.fillMaxSize().then(actionable).background(MaterialTheme.colorScheme.surface),
+                // Content passing under the mood strip fades out over a few dp instead of being cut.
+                LazyColumn(Modifier.fillMaxSize().then(actionable).background(MaterialTheme.colorScheme.surface).fadeTop(MaterialTheme.colorScheme.surface),
                     contentPadding = PaddingValues(bottom = 12.dp + LocalPlayerInset.current)) {
                     val contextName = shownMood?.label ?: "Quick picks"
                     if (shownMood == null && (albumPicks.isNotEmpty() || shuffleTracks.isNotEmpty() || favourites.isNotEmpty() || shownSongs.isNotEmpty())) item(key = "starts") {
@@ -214,6 +236,8 @@ internal fun HomePage(
                             val serverSongs = (shelf.songs + if (shelf.cards.all { it.kind == YouTubeMusic.Card.Kind.SONG })
                                 shelf.cards.map { it.song() } else emptyList())
                                 .distinctBy { it.id }.filter { it.id.value !in excluded && Mix.songKey(it) !in excluded }
+                                // After a pull to refresh every shelf deals its songs anew, as YouTube Music's does.
+                                .let { if (refreshTick > 0) it.shuffled(java.util.Random(refreshTick * 31L + index)) else it }
                             val cards = shelf.cards.filter { it.kind != YouTubeMusic.Card.Kind.SONG || it.song().let { song ->
                                 song.id.value !in excluded && Mix.songKey(song) !in excluded
                             } }
@@ -265,6 +289,7 @@ internal fun HomePage(
                 }
             }
         }
+        }
 
     }
     if (choosingLiked && homeActive) AppSheet(onDismiss = { choosingLiked = false }) {
@@ -285,6 +310,7 @@ internal fun HomePage(
 /** Retains the personal queue across tab changes within the same catalogue and account. */
 internal class HomeCache {
     var online = false
+    var tick = 0
     var day = Long.MIN_VALUE
     var last: List<Track>? = null
     var albums: List<ua.olex.music.model.MusicCollection>? = null
@@ -338,7 +364,7 @@ internal fun SectionTitle(text: String, onSeeAll: (() -> Unit)? = null) = Sectio
  */
 @Composable
 internal fun SectionHeader(text: String, onMore: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null) {
-    Row(Modifier.fillMaxWidth().padding(top = 20.dp).heightIn(min = 48.dp)
+    Row(Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 4.dp).heightIn(min = 44.dp)
         .then(if (onMore != null) Modifier.clickable(onClickLabel = "See all $text", onClick = onMore) else Modifier)
         .padding(start = 16.dp, end = if (onMore != null || trailing != null) 8.dp else 16.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text, style = MaterialTheme.typography.titleLargeEmphasized, maxLines = 1, overflow = TextOverflow.Ellipsis,

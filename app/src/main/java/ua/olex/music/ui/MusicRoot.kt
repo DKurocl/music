@@ -224,16 +224,25 @@ fun MusicRoot(model: LibraryViewModel) {
     val youTubeSignedIn by context.graph.youTubeAccount.signedIn.collectAsStateWithLifecycle()
     // A different account (or none) never sees the last one's playlists, home or moods.
     androidx.compose.runtime.LaunchedEffect(youTubeSignedIn) { context.graph.youTube.forgetAccount() }
-    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), network, lifecycle) {
-        if (!youTubeOn) { value = emptyList(); return@produceState }
+    // Pull to refresh on Home asks YouTube Music for a new home and reshuffles every shelf.
+    var homeRefresh by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    var homeRefreshing by remember { mutableStateOf(false) }
+    // Coming back to the app must not swap Home's shelves under the finger: it asks YouTube Music
+    // again only after half an hour, or when pulled.
+    val homeFetched = remember { longArrayOf(Long.MIN_VALUE / 2, -1L) }
+    val youTubeHome = androidx.compose.runtime.key(youTubeOn, onlinePageScope) { androidx.compose.runtime.produceState(emptyList<YouTubeMusic.Shelf>(), network, lifecycle, homeRefresh) {
+        if (!youTubeOn) { value = emptyList(); homeRefreshing = false; return@produceState }
         lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
-            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
-            if (network) {
+            if (value.isEmpty()) value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { context.graph.youTube.storedHome() }
+            val now = android.os.SystemClock.elapsedRealtime()
+            val due = value.isEmpty() || homeFetched[1] != homeRefresh.toLong() || now - homeFetched[0] > 30 * 60_000L
+            if (network && due) {
                 try { context.graph.resources.run(OptionalWork.PROVIDER) { context.graph.youTube.home() }
-                    ?.takeIf { it.isNotEmpty() }?.let { value = it } }
+                    ?.takeIf { it.isNotEmpty() }?.let { value = it; homeFetched[0] = now; homeFetched[1] = homeRefresh.toLong() } }
                 catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (_: Exception) { /* Keep the stored shelf. */ }
             }
+            homeRefreshing = false
         }
     }.value }
     val homePlaylists = androidx.compose.runtime.key(onlinePageScope, onlinePageRevision, youTubeOn) {
@@ -563,7 +572,9 @@ fun MusicRoot(model: LibraryViewModel) {
                     onOpenPlaylist = { id -> clearOnline(Place.LIBRARY); go(Place.LIBRARY); returnTo = Place.HOME; openPlaylist = id },
                     onAllPlaylists = { clearOnline(Place.LIBRARY); go(Place.LIBRARY) },
                     moods = moods, onAllowFiles = askForFiles.takeIf { withoutFiles }, scanError = model.scanError, onScanRetry = model::refresh,
-                    youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache) }
+                    youTubeHome = youTubeHome, excluded = excluded, onlineEnabled = youTubeOn, cache = homeCache,
+                    refreshTick = homeRefresh, refreshing = homeRefreshing,
+                    onRefresh = { homeRefreshing = true; homeRefresh++ }) }
             else -> baseStates.SaveableStateProvider(if (s.place == Place.SEARCH) "place-SEARCH-$searchVisit" else "place-${s.place.name}") { LibraryBrowser(
                 library = requireNotNull(library), insets = insets,
                 query = if (s.place == Place.SEARCH) query else "",
@@ -790,9 +801,14 @@ fun MusicRoot(model: LibraryViewModel) {
             TrackAction(Glyph.RADIO, "Start mix") { haptics.spin(); model.startMix(track) },
             if (isPlaying) null else TrackAction(Glyph.PLAY_NEXT, "Play next") { model.enqueue(listOf(track), true) },
             // Never offered again in mixes, autoplay and Home; out of the queue now.
-            if (online) TrackAction(Glyph.HIDDEN, "Don't recommend this song") {
-                model.dontRecommend(track); scope.launch { snackbar.showSnackbar("${track.title} won't be recommended again") }
-            } else null,
+            TrackAction(Glyph.HIDDEN, "Not interested") {
+                model.dontRecommend(track)
+                scope.launch {
+                    val result = snackbar.showSnackbar("${track.title} won't be suggested again", actionLabel = "Undo",
+                        duration = androidx.compose.material3.SnackbarDuration.Short)
+                    if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) model.recommendAgain(track)
+                }
+            },
             // An online song's album and artist open their pages (the owner's own artist page when he has them).
             if (online) onlineAlbumId?.let { id -> TrackAction(Glyph.ALBUM, "Go to album") { actionTrack = null; onlineNav.open(OnlineTarget.Album(id, track.album ?: track.title, cover = track.artworkUri, seed = track)) } }
                 else TrackAction(Glyph.ALBUM, "Go to album") { openOf(track, artist = false) },

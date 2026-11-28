@@ -273,14 +273,16 @@ internal fun QuickPicks(title: String, songs: List<Track>, currentId: String?, o
         Column(Modifier.fillMaxWidth().graphicsLayer {
             val behind = (pager.currentPage - c) + pager.currentPageOffsetFraction
             alpha = (1f - behind).coerceIn(0f, 1f)
-        }.padding(top = 4.dp).clip(RoundedCornerShape(22.dp)).background(cs.surfaceContainerLow)) {
+        }.padding(top = 4.dp)) {
             columns[c].forEachIndexed { row, track ->
                 val marked = track.id.value == currentId || track.matchesPlayback(LocalPlayingTrack.current)
                 val haptics = rememberHaptics()
-                Row(Modifier.fillMaxWidth().combinedClickable(onClickLabel = "Play ${track.title}", onLongClickLabel = "Song actions",
+                // Plain rows on the page, as YouTube Music lays its song shelves: the cover sits on the
+                // page's 16dp edge, the press highlight is a rounded block around the row.
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).combinedClickable(onClickLabel = "Play ${track.title}", onLongClickLabel = "Song actions",
                     onLongClick = { haptics.longPress(); onTrackActions(track) }) { onPlay(songs, c * 3 + row) }
-                    .padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(46.dp).clip(RoundedCornerShape(12.dp))) {
+                    .padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(52.dp).clip(RoundedCornerShape(12.dp))) {
                         Artwork(track.artworkUri, Modifier.fillMaxSize(), 0.dp)
                         NowPlayingOverlay(marked, Modifier.matchParentSize())
                     }

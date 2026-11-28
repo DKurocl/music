@@ -21,6 +21,7 @@ import androidx.media3.session.SessionResult
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.first
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -133,6 +134,8 @@ class PlaybackService : MediaLibraryService() {
 
     private val rememberedLinks = LinkedHashSet<Pair<String, String>>()
     private val sourceAttempts = ua.olex.music.model.SourceRecoveryBudget()
+    /** Songs that already had their one wait for the network in this play; reset on each explicit Play. */
+    private val networkWaits = HashSet<String>()
     private val lanServer by lazy { LanMediaServer(this) }
     private var fading: FadingPlayer? = null
     private val appScreens = HashSet<MediaSession.ControllerInfo>()
@@ -171,7 +174,7 @@ class PlaybackService : MediaLibraryService() {
                 .build()
         }.getOrElse { faded }
         val shown = LyricLinePlayer(castable,
-            explicitPlay = { sourceAttempts.reset(); recovery?.cancel() },
+            explicitPlay = { sourceAttempts.reset(); networkWaits.clear(); recovery?.cancel() },
             onTransport = { playing ->
                 explicitNext.clear()
                 playbackIntent.request(playing)
@@ -513,6 +516,21 @@ class PlaybackService : MediaLibraryService() {
                     val position = player.currentPosition.coerceAtLeast(0)
                     player.playWhenReady = false
                     player.replaceMediaItem(index, selected)
+                    player.seekTo(index, position)
+                    player.prepare()
+                    player.playWhenReady = true
+                } else if (PlaybackSourceItems.offline(selected) && networkWaits.add(key)) {
+                    // Offline right now is often only a process that has just woken up: wait briefly for
+                    // the network to come back, then open the same song again, instead of skipping it.
+                    val owner = application as? MediaCatalogOwner
+                    kotlinx.coroutines.withTimeoutOrNull(8_000L) { owner?.playbackSourceChanges?.let { changes -> changes.first() } }
+                    if (!stillCurrent()) return@launch
+                    val retried = PlaybackSourceItems.optimistic(selectSources(listOf(failed), allowDirect = true).single())
+                    if (!stillCurrent()) return@launch
+                    val index = player.currentMediaItemIndex
+                    val position = player.currentPosition.coerceAtLeast(0)
+                    player.playWhenReady = false
+                    player.replaceMediaItem(index, retried)
                     player.seekTo(index, position)
                     player.prepare()
                     player.playWhenReady = true

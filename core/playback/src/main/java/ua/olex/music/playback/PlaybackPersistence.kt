@@ -43,7 +43,7 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
             // saved sources after the paused timeline is visible.
             if (canRestore() && saved != null && saved.items.isNotEmpty()) {
                 val seed = saved.items[saved.index]
-                val current = try { resolveSources(listOf(seed)).single() }
+                val current = try { PlaybackSourceItems.optimistic(resolveSources(listOf(PlaybackSourceItems.optimistic(seed))).single()) }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (failure: Exception) {
                     Log.w("MusicPlayback", "Could not resolve restored track: ${failure.javaClass.simpleName}")
@@ -113,7 +113,12 @@ internal class PlaybackPersistence(private val player: ExoPlayer, private val jo
             captureQueue()
             snapshot?.copy(index = player.currentMediaItemIndex.coerceAtLeast(0), positionMs = player.currentPosition.coerceAtLeast(0))
         } else if (!changed && !restoreSuperseded) disk else null
-        val resolved = saved?.copy(items = resolveSources(saved.items))
+        // The song to resume is never judged by a network state a just-woken process cannot see yet.
+        val resolved = saved?.let { checkpoint ->
+            val items = resolveSources(checkpoint.items).toMutableList()
+            if (checkpoint.index in items.indices) items[checkpoint.index] = PlaybackSourceItems.optimistic(items[checkpoint.index])
+            checkpoint.copy(items = items)
+        }
         if (closed || generation != intentGeneration || player.currentTimeline !== timeline) return null
         pendingResumption = resolved
         return resolved

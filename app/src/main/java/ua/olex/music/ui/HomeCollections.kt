@@ -18,6 +18,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,13 +34,21 @@ internal fun MoodBar(moods: List<YouTubeMusic.Mood>, selected: String?, onSelect
     val state = androidx.compose.foundation.lazy.rememberLazyListState()
     val still = LocalPowerSave.current
     val index = if (selected == null) 0 else moods.indexOfFirst { it.label == selected } + 1
+    val edge = with(androidx.compose.ui.platform.LocalDensity.current) { 16.dp.roundToPx() }
     LaunchedEffect(index) {
+        if (index < 0) return@LaunchedEffect
         val info = state.layoutInfo
         val item = info.visibleItemsInfo.firstOrNull { it.index == index }
-        val cut = item == null || item.offset < info.viewportStartOffset + 16 || item.offset + item.size > info.viewportEndOffset - 16
-        if (cut && index >= 0) {
-            val centre = (info.viewportEndOffset - info.viewportStartOffset) / 2 - (item?.size ?: 0) / 2
-            if (still) state.scrollToItem(index, -centre) else state.animateScrollToItem(index, -centre)
+        // Only as far as it takes to show the whole chip, 16dp from the edge, as YouTube Music does.
+        val by = when {
+            item == null -> null
+            item.offset < info.viewportStartOffset + edge -> (item.offset - info.viewportStartOffset - edge).toFloat()
+            item.offset + item.size > info.viewportEndOffset - edge -> (item.offset + item.size - info.viewportEndOffset + edge).toFloat()
+            else -> 0f
+        }
+        when {
+            by == null -> if (still) state.scrollToItem(index) else state.animateScrollToItem(index)
+            by != 0f -> if (still) state.scrollBy(by) else state.animateScrollBy(by, androidx.compose.animation.core.spring(stiffness = 500f, dampingRatio = 1f))
         }
     }
     LazyRow(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).selectableGroup().testTag("home-moods"), state = state,

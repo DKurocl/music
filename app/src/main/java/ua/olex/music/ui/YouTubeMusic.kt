@@ -713,6 +713,24 @@ internal class YouTubeMusic(
         collect(root, "searchSuggestionRenderer").map { text(it["suggestion"]) }.filter { it.isNotBlank() }.distinct()
     }
 
+    /**
+     * "Not interested": a dislike on the owner's account, as YouTube Music's own thumbs-down, so its
+     * home, radio and mixes stop offering the song too; [disliked] false takes it back. Signed in only.
+     */
+    suspend fun dislike(videoId: String, disliked: Boolean, scope: String, revision: Long): Boolean = withContext(ioDispatcher) {
+        val owner = AccountVersion(scope, revision)
+        if (scope == "public" || !isCurrent(owner)) return@withContext false
+        val headers = account() ?: return@withContext false
+        try {
+            post(if (disliked) "like/dislike" else "like/removelike", """"target":{"videoId":${quote(videoId)}}""", headers = headers, owner = owner) != null &&
+                isCurrent(owner)
+        } catch (_: java.io.IOException) {
+            false
+        } catch (_: AccountChangedException) {
+            false
+        }
+    }
+
     suspend fun like(videoId: String, liked: Boolean, scope: String, revision: Long): Boolean = withContext(ioDispatcher) {
         val owner = AccountVersion(scope, revision)
         if (scope == "public" || !isCurrent(owner)) return@withContext false
@@ -1055,6 +1073,8 @@ internal class YouTubeMusic(
         }
     }
     fun peekMood(mood: Mood): MoodPage? = peek("${pageScope()}/mood:${mood.params}")
+    /** Pull to refresh: the next [mood] call asks YouTube Music again instead of reusing this session's page. */
+    fun forgetMood(mood: Mood) { synchronized(pages) { pages.remove("${pageScope()}/mood:${mood.params}") } }
 
     /** A home shelf: its title, and its songs or its cards. */
     data class Shelf(val title: String, val songs: List<Track>, val cards: List<Card>)

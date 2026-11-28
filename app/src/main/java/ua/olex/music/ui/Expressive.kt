@@ -150,3 +150,15 @@ internal fun Modifier.fadeEnd(width: androidx.compose.ui.unit.Dp = 32.dp): Modif
             drawRect(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(androidx.compose.ui.graphics.Color.Black, androidx.compose.ui.graphics.Color.Transparent),
                 startX = size.width - w, endX = size.width), blendMode = androidx.compose.ui.graphics.BlendMode.DstIn)
         }
+
+/**
+ * Fades what scrolls under a bar into the page over [height]: a gradient of the page colour drawn
+ * over the content's top edge (no offscreen layer, so scrolling costs nothing extra).
+ */
+internal fun Modifier.fadeTop(color: androidx.compose.ui.graphics.Color, height: androidx.compose.ui.unit.Dp = 14.dp): Modifier =
+    drawWithContent {
+        drawContent()
+        val h = height.toPx()
+        drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(color, color.copy(alpha = 0f)), startY = 0f, endY = h),
+            size = androidx.compose.ui.geometry.Size(size.width, h))
+    }

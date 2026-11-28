@@ -651,9 +651,17 @@ class DesignGalleryTest {
         compose.mainClock.autoAdvance = false
         try {
             compose.runOnUiThread { expanded.value = true }
-            advanceFrames(10)
+            val strip = ArrayList<Bitmap>()
+            fun sample() { strip += compose.onRoot().captureToImage().asAndroidBitmap() }
+            repeat(5) { advanceFrames(2); sample() }
             val opening = coverHeight("expanding")
-            advanceFrames(35)
+            repeat(5) { advanceFrames(3); sample() }
+            advanceFrames(20)
+            // A film strip of the opening, for review by eye.
+            val w = strip[0].width / 3; val h = strip[0].height / 3
+            val film = Bitmap.createBitmap(w * strip.size, h, Bitmap.Config.ARGB_8888)
+            Canvas(film).apply { strip.forEachIndexed { i, b -> drawBitmap(Bitmap.createScaledBitmap(b, w, h, true), (i * w).toFloat(), 0f, null) } }
+            File("build/reports/ui-previews/player-motion").resolve("opening-film.png").outputStream().use { film.compress(Bitmap.CompressFormat.PNG, 100, it) }
             val full = coverHeight("full")
             compose.runOnUiThread { expanded.value = false }
             advanceFrames(10)

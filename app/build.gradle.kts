@@ -16,7 +16,7 @@ android {
         targetSdk = 37
         // CI run numbers only grow, so every CI build installs over the previous one.
         versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull?.toIntOrNull()?.plus(1000) ?: 1
-        versionName = "2.2.0"
+        versionName = "2.3.0"
         // One phone, one ABI: no 32-bit or x86 code in the APK the owner installs.
         ndk { abiFilters += "arm64-v8a" }
     }
